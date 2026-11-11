@@ -79,7 +79,6 @@ logger = get_logger(__name__)
 # holds each against the rules a draft save and a publish apply; a section
 # names one as ${name}.
 CONFIGURATION_EXAMPLES: dict[str, Any] = {
-    "runtime_input": {"enabled": True, "input_format": "document"},
     "long_material": {"mode": "digest"},
     "word_bindings": {"datum": "{{ flow_input.datum }}"},
     "http_request": {
@@ -100,14 +99,6 @@ CONFIGURATION_EXAMPLES: dict[str, Any] = {
     "auth_api_key": {"mode": "api_key", "header_name": "X-API-Key"},
     "auth_basic": {"mode": "basic_auth", "username": "eneo-tjanst"},
     "secret_header": {"name": "X-Api-Token", "secret": True},
-    "review_edit": {"mode": "edit"},
-    "speaker_mapping": {
-        "speaker_mapping": {
-            "participants_field": "deltagare",
-            "speaker_count_field": None,
-            "infer_names": False,
-        }
-    },
     "form_field": {
         "name": "deltagare",
         "type": "list",
@@ -145,10 +136,13 @@ shows both as pills that open the step, and the person's messages use the same
 forms. Never mention revisions, tool names, internal field keys (input_source,
 output_mode, metadata_json, output_contract and the like), the "core", the
 "kärnan" or other machinery in an answer. In Swedish a flow that is not
-published is "utkastet" or "ett utkast", never "draft". When a tool call failed
-or a change was refused, the first sentence of your answer says that nothing
-was changed and what stands in the way, in plain words; then offer the next
-step, for example: "Fältet diarienummer används fortfarande av steg 2, så det
+published is "utkastet" or "ett utkast", never "draft". A refused call saved
+nothing, and a call whose result says saved is saved. When a round had several
+calls, say which changes were saved, which were refused and why, and what is
+uncertain (a call without a result may or may not be saved: read the flow
+again before you say). When no change was saved, the first sentence of your
+answer says that nothing was changed and what stands in the way, in plain
+words; then offer the next step, for example: "Fältet diarienummer används fortfarande av steg 2, så det
 kan inte tas bort än. Ska jag ändra steg 2 först?" Quote a refusal's text only
 when it helps the person.
 When the tools that change the flow are absent, or a change is refused because
@@ -174,14 +168,15 @@ one sentence that the run is started and stop there; do not read the run and
 do not repeat its result unless the user asks about it.
 
 How a flow works: steps run in order and each step has its own assistant. Only
-the first step may read the run (input_source flow_input); a step can also read
-previous_step, all_previous_steps, an http_get request or a tool. A first step
-that takes uploads (input_type document, audio or file) sets
-input_config.runtime_input with its input_type as input_format, for example
-${runtime_input}.
-A first step whose flow cannot run without its upload sets runtime_input
-"required": true. When the person may type the material instead of uploading
-it, also add a text field to the run form and leave the upload optional. An AI
+the first step reads the run; the others read earlier steps, an http_get
+request or a tool. add_step sets what a new step reads for its place: a step
+put first takes the run over from the step that was first, which then reads
+the new step. read_step_kinds says which kinds may stand at a place and why
+the others may not. A first step that takes an upload says so with upload;
+an audio upload is a transcribe step. When the flow cannot run without the
+upload it is required. When the person may type the material instead of
+uploading it, also add a text field to the run form and make the upload not
+required. An AI
 step whose input may exceed its model's window can set
 input_config.long_material to ${long_material}: such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
@@ -497,13 +492,14 @@ an MCP tool) shows its connection in read_flow: the address, the auth mode and
 whether the credential is stored, never the value. An http_get step keeps its
 request in input_config and an http_post step in output_config, flat, for
 example ${http_request}, where response_format is "text" or "json" and auth is
-one of the modes below. An http_post may add "body": ${body_auto} (the step's
+one of the modes below; a new HTTP step gets its url and the rest of that
+request as add_step's url and http. An http_post may add "body": ${body_auto} (the step's
 result), ${body_template} (a json_template takes its JSON as such a string) or
 ${body_none}. The step decides the method, so there is no method key. The url and a body template
 may read {{ flow_input.<field> }} and earlier steps. An HTTP step is added
 through the tools like any other step; it does not depend on read_tool_options.
-An http_post delivery step posts its own answer, so give it input_source
-previous_step, the body ${body_auto} and an instruction
+An http_post delivery step (send_http) posts its own answer, so give it
+the body ${body_auto} and an instruction
 that only hands on what it reads, unchanged; the work belongs in the steps
 before it.
 Build everything but the secret: the address, the body, the headers and the
@@ -556,10 +552,9 @@ metadata_json.wizard is not false. The labels say that different people speak,
 never who they are. A step with output_mode speaker_mapping, "Granska
 transkript" in the editor, names them: it proposes who each label is, and the
 run then waits for a person to confirm the names and correct the transcript
-before the flow goes on. It stands directly after the transcribing step, with
-input_source previous_step, input_type text, output_type json and review_policy
-${review_edit}, and takes no instruction and no output_contract. Its settings
-are output_config, for example ${speaker_mapping}. participants_field ("Fält med
+before the flow goes on. It is the kind speakers, added directly after the
+transcribing step; the kind gives it its read and its review, and it takes no
+instruction. Its values: participants_field ("Fält med
 deltagare") names a run form field of type list, multiselect or text where the
 person who runs the flow says who took part, or is null. infer_names ("Låt
 AI:n föreslå namn och roller") true lets the step also propose names and
@@ -596,8 +591,8 @@ and "utifrån innehållet" or "utifrån samtalet" for infer_names true. Then bui
 it without asking and say in a sentence what you chose. A recording of one
 voice, or a flow that needs only what was said, gets no speaker step and no
 question.
-To build it, add the step at the place after the transcribing step with
-every setting above. When the names come from the person and the run form has
+To build it, add a speakers step at the place after the transcribing step with
+the values above. When the names come from the person and the run form has
 no field that fits, the same add_step call gives the form its field in
 settings (as the editor does: ${form_field}, in the whole form_schema), and
 participants_field names it, so the step is never saved without the field it

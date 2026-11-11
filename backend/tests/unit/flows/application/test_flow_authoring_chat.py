@@ -151,6 +151,14 @@ def test_the_instructions_name_the_switch_to_redigera_in_the_uis_words() -> None
     assert "the first sentence of your answer says that nothing was changed" in (
         instructions
     )
+    # A round where one change was saved and another refused is told as it
+    # was, never as if nothing changed.
+    assert "When no change was saved, the first sentence" in instructions
+    assert (
+        "say which changes were saved, which were refused and why, and what is "
+        "uncertain" in instructions
+    )
+    assert "read the flow again before you say" in instructions
     # HTTP or a named receiver already answers where the result goes.
     assert "the person has named no HTTP, address or receiving system" in (instructions)
 
@@ -184,7 +192,12 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     assert "It cannot read a list, a multiselect, an object" in instructions
     assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
-    assert 'runtime_input "required": true' in instructions
+    # An upload is chosen by its value, never by raw fields.
+    assert "A first step that takes an upload says so with upload" in instructions
+    assert "When the flow cannot run without the upload it is required" in (
+        instructions
+    )
+    assert "runtime_input" not in instructions
 
 
 def test_a_new_chat_builds_an_empty_draft_and_only_reads_any_other_flow() -> None:
@@ -661,3 +674,15 @@ async def test_a_chat_in_view_mode_is_not_measured(
 
     measured.assert_not_awaited()
     container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+def test_the_instructions_add_steps_by_kind_and_never_teach_raw_fields() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "add_step adds a step by its kind" in instructions
+    assert "read_step_kinds says which kinds may stand at a place" in instructions
+    assert "a step put first takes the run over" in instructions
+    assert "Never invent step kinds" not in instructions
+    assert "input_source flow_input" not in instructions
+    assert "give it input_source" not in instructions
+    assert "review_policy {" not in instructions

@@ -2149,7 +2149,7 @@ def _configured_flows(examples):
             1,
             input_type="document",
             input_config={
-                "runtime_input": examples["runtime_input"],
+                "runtime_input": {"enabled": True, "input_format": "document"},
                 "long_material": examples["long_material"],
             },
         ),
@@ -2162,23 +2162,6 @@ def _configured_flows(examples):
                 "placeholders": ["datum"],
                 "bindings": examples["word_bindings"],
             },
-        ),
-    ]
-    speakers = [
-        _step(
-            1,
-            input_type="audio",
-            output_mode="transcribe_only",
-            input_config={
-                "runtime_input": {**examples["runtime_input"], "input_format": "audio"}
-            },
-        ),
-        _step(
-            2,
-            output_type="json",
-            output_mode="speaker_mapping",
-            review_policy=examples["review_edit"],
-            output_config=examples["speaker_mapping"],
         ),
     ]
     request = examples["http_request"]
@@ -2202,16 +2185,6 @@ def _configured_flows(examples):
     ]
     return [
         (upload, {"form_schema": form}),
-        (
-            speakers,
-            {
-                "form_schema": form,
-                "wizard": {
-                    "transcription_enabled": True,
-                    "transcription_model": {"id": str(uuid4())},
-                },
-            },
-        ),
         *((steps, {"form_schema": form}) for steps in deliveries),
     ]
 
@@ -2265,12 +2238,9 @@ def test_each_configuration_example_is_saved_and_published():
 @pytest.mark.parametrize(
     ("name", "broken"),
     [
-        ("runtime_input", {"enabled": True, "input_format": "pdf"}),
         ("long_material", {"mode": "summary"}),
         ("word_bindings", {"datum": "{{ flow_input.datum }} och mer"}),
         ("http_request", {"url": "...", "auth": {"mode": "none"}}),
-        ("review_edit", {"mode": "redigera"}),
-        ("speaker_mapping", {"speaker_mapping": {"participants_field": "saknas"}}),
         ("form_field", {"name": "deltagare", "type": "lista", "label": "Deltagare"}),
     ],
 )
