@@ -1397,6 +1397,25 @@ async def test_the_blockers_section_lists_every_publish_blocker(monkeypatch):
     assert content["publish_blocker_count"] == 12
 
 
+async def test_more_blockers_than_a_page_holds_are_read_in_full_page_by_page(
+    monkeypatch,
+):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: 2000)
+    messages = [f"Refusal {n}. " + "x" * 200 for n in range(40)]
+    _reading_chat(monkeypatch, blockers=[BadRequestException(m) for m in messages])
+
+    text, offset, pages = "", 0, 0
+    while offset is not None:
+        result = await flows.read_flow(MagicMock(), section="blockers", offset=offset)
+        page = json.loads(result.content[0].text)
+        text, offset, pages = text + page["content"], page["next_offset"], pages + 1
+
+    assert pages > 1
+    content = json.loads(text)
+    assert [blocker["message"] for blocker in content["publish_blockers"]] == messages
+    assert content["publish_blocker_count"] == 40
+
+
 async def test_a_step_number_the_flow_lacks_is_refused(monkeypatch):
     _reading_chat(monkeypatch)
 
