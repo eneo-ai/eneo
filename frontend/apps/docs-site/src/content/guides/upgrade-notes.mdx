@@ -141,7 +141,7 @@ flowchart TB
 | [Migration `202611091200` rewrites every conversation row](#sessions-migration) | Operators | Plan downtime |
 | [Names and feedback text follow the retention period](#names-and-feedback-follow-retention) | Administrators, API consumers | Tell users |
 | Failed jobs carry `failure_code` instead of error text | API consumers of failed jobs | Read `failure_code` |
-| A failed job is logged without its error message | Log alerts on a failed job's error text | Match on `failure_code` and `error_type`. Other worker and cron error and summary lines, such as the audit log purge, keep their message, so keep those alerts |
+| A failed job is logged without its error message | Log alerts on a failed job's error text | Match on `error_type` and, where the line carries it, `failure_code`. Other worker and cron error and summary lines, such as the audit log purge, keep their message, so keep those alerts |
 | [A new step after restoring a backup](#readback-after-restore) | Operators, at every restore | Run the readback |
 
 ### Models, tools and integrations [#integrations]

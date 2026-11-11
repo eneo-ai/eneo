@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@f47d5c4547e4
+translationSource: guides/upgrade-notes.mdx@99e6ed62e29c
 ---
 
 import { Callout } from "nextra/components";
@@ -146,7 +146,7 @@ flowchart TB
 | [Migreringen `202611091200` skriver om varje konversationsrad](#sessions-migration) | Driftansvariga | Planera driftstopp |
 | [Namn och feedbacktext följer gallringstiden](#names-and-feedback-follow-retention) | Administratörer, API-konsumenter | Informera användarna |
 | Misslyckade jobb har `failure_code` i stället för feltext | API-konsumenter av misslyckade jobb | Läs `failure_code` |
-| Ett misslyckat jobb loggas utan sitt felmeddelande | Logglarm på ett misslyckat jobbs feltext | Matcha på `failure_code` och `error_type`. Andra fel- och sammanfattningsrader från worker och cron, till exempel rensningen av granskningsloggen, har kvar sitt meddelande, så behåll de larmen |
+| Ett misslyckat jobb loggas utan sitt felmeddelande | Logglarm på ett misslyckat jobbs feltext | Matcha på `error_type` och, där raden har det, `failure_code`. Andra fel- och sammanfattningsrader från worker och cron, till exempel rensningen av granskningsloggen, har kvar sitt meddelande, så behåll de larmen |
 | [Ett nytt steg efter att en säkerhetskopia återställts](#readback-after-restore) | Driftansvariga, vid varje återställning | Kör kontrolläsningen |
 
 ### Modeller, verktyg och integrationer [#integrations]
