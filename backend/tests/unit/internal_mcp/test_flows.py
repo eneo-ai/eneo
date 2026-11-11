@@ -142,6 +142,19 @@ def _transaction_container(order: list[str]) -> MagicMock:
     container.audit_service.return_value.log_async = AsyncMock(
         side_effect=lambda **_: order.append("audit")
     )
+    # The flow has no Word templates unless a test gives it some.
+    container.flow_template_asset_service.return_value.list_assets = AsyncMock(
+        return_value=[]
+    )
+    return container
+
+
+def _flow_with_templates(*templates: tuple[str, str]) -> MagicMock:
+    """A container whose flow has ``templates``, each an id and a file name."""
+    container = _transaction_container([])
+    container.flow_template_asset_service.return_value.list_assets.return_value = [
+        SimpleNamespace(id=template_id, name=name) for template_id, name in templates
+    ]
     return container
 
 
@@ -642,13 +655,14 @@ def _changing_chat(
     fail: bool = False,
     dismissed: dict | None = None,
     blockers: list[BadRequestException] | Exception | None = None,
+    templates=(),
 ):
     """A chat in edit mode whose update_step saves the draft from ``before``
     to ``after`` (the step 2 prompt); ``fail`` breaks the analysis,
     ``dismissed`` are the flow's dismissals by fingerprint, and ``blockers``
     is what publish would refuse the saved draft for (an exception when that
-    cannot be read)."""
-    container = _transaction_container([])
+    cannot be read). The flow has ``templates``."""
+    container = _flow_with_templates(*templates)
     container.flow_suggestion_dismissal_repo.return_value.list_for_flow = AsyncMock(
         return_value=dismissed or {}
     )
@@ -967,13 +981,16 @@ _PARTICIPANTS_FORM = {
 }
 
 
-def _adding_chat(monkeypatch, steps, *, metadata_json=None):
+def _adding_chat(monkeypatch, steps, *, metadata_json=None, templates=()):
     """A chat in edit mode on a draft of ``steps`` whose save is recorded;
-    the saved draft has the steps in the order the update gives them."""
+    the saved draft has the steps in the order the update gives them. The
+    flow has ``templates`` (each an id and a file name)."""
     from eneo.flows.api import flow_definition_access
     from tests.unit.flows.application.test_flow_step_kinds import _flow
 
-    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    save = _changing_chat(
+        monkeypatch, before="Sammanfatta.", after="Sammanfatta.", templates=templates
+    )
     flow = _flow(steps, metadata_json=metadata_json)
     monkeypatch.setattr(
         flow_definition_access,
@@ -1767,10 +1784,11 @@ async def test_the_chat_has_no_tool_to_unpublish_a_flow():
 _STEP_2_PROMPT = "Sammanfatta {{ step_1.output.text }}."
 
 
-def _reading_chat(monkeypatch, blockers=()):
+def _reading_chat(monkeypatch, blockers=(), *, templates=(), editing=False):
     """A view-mode chat over the example flow: step 2 reads step 1 as its
     input and again in its prompt; publish would refuse it for
-    ``blockers``."""
+    ``blockers``. The flow has ``templates`` (each an id and a file name),
+    and ``editing`` puts the chat in edit mode."""
     from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
     from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
     from tests.unit.flows.application.test_flow_suggestion_service import (
@@ -1799,12 +1817,14 @@ def _reading_chat(monkeypatch, blockers=()):
             text=_STEP_2_PROMPT, description=None
         )
     }
-    container = _transaction_container([])
-    chat = SimpleNamespace(flow_id=public.id, space_id=uuid4(), editing=False)
+    container = _flow_with_templates(*templates)
+    chat = SimpleNamespace(flow_id=public.id, space_id=uuid4(), editing=editing)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
     )
+    if editing:
+        monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
     service = container.flow_service.return_value
     service.get_flow = AsyncMock(return_value=saved)
     service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
@@ -2199,35 +2219,45 @@ _WORD_STEP = {
 _TEMPLATE_ID = _WORD_STEP["output_config"]["template_asset_id"]
 
 
+_OTHER_TEMPLATE_ID = "0f7c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f"
+
+
 @pytest.mark.parametrize(
     "output_config",
     [
         {"bindings": {"namn": "{{ flow_input.namn }}"}},
+        # An empty id inside the object names no template; only null removes.
         {"template_asset_id": None, "bindings": {}},
         {"template_asset_id": " ", "bindings": {}},
-        {"template_asset_id": "0f7c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f", "bindings": {}},
     ],
 )
-def test_an_object_without_the_word_steps_template_is_refused(output_config):
-    with pytest.raises(BadRequestException) as refused:
-        flows.require_kept_template({"output_config": output_config}, _WORD_STEP)
+async def test_an_object_that_names_no_template_keeps_the_word_steps_template(
+    output_config,
+):
+    container = _flow_with_templates()
 
-    # It says how to keep the template and how to remove it on purpose.
-    assert _TEMPLATE_ID in str(refused.value)
-    assert "null" in str(refused.value)
+    changes = await flows.with_word_template(
+        container, uuid4(), {"output_config": output_config}, _WORD_STEP
+    )
+
+    assert changes == {
+        "output_config": {**output_config, "template_asset_id": _TEMPLATE_ID}
+    }
+    # The step's own template needs no look at the flow's.
+    container.flow_template_asset_service.return_value.list_assets.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
     "changes",
     [
-        # The id alone keeps the template: the save refills its field names
-        # and publish reads its name and checksum itself.
         {
             "output_config": {
                 "template_asset_id": _TEMPLATE_ID,
                 "bindings": {"namn": ""},
             }
         },
+        # Another template the flow has replaces the step's.
+        {"output_config": {"template_asset_id": _OTHER_TEMPLATE_ID, "bindings": {}}},
         # null removes the template on purpose.
         {"output_config": None},
         # A step that stops filling a template takes its template with it.
@@ -2235,8 +2265,171 @@ def test_an_object_without_the_word_steps_template_is_refused(output_config):
         {"user_description": "Beslut"},
     ],
 )
-def test_a_change_that_keeps_or_removes_the_template_on_purpose_is_saved(changes):
-    flows.require_kept_template(changes, _WORD_STEP)
+async def test_a_change_that_names_its_template_or_removes_it_is_saved_as_sent(
+    changes,
+):
+    container = _flow_with_templates((_OTHER_TEMPLATE_ID, "Avslag.docx"))
+
+    assert (
+        await flows.with_word_template(container, uuid4(), changes, _WORD_STEP)
+        == changes
+    )
+
+
+async def test_a_template_the_flow_does_not_have_is_refused_with_those_it_has():
+    container = _flow_with_templates((_TEMPLATE_ID, "Beslut.docx"))
+    sent = {"template_asset_id": "MARKOR-6", "bindings": {}}
+
+    with pytest.raises(BadRequestException) as refused:
+        await flows.with_word_template(
+            container, uuid4(), {"output_config": sent}, _WORD_STEP
+        )
+
+    result = flows._error_result(refused.value)
+    refusal = json.loads(result.content[0].text)
+    assert refusal["code"] == "flow_template_not_accessible"
+    assert refusal["templates"] == [{"id": _TEMPLATE_ID, "name": "Beslut.docx"}]
+    # It says how to keep the step's template, and never what was sent.
+    assert "leave template_asset_id out" in refusal["message"]
+    assert "MARKOR-6" not in result.content[0].text
+
+
+async def test_a_word_step_without_a_template_takes_the_change_as_sent():
+    waiting = {"output_mode": "template_fill", "output_config": {"bindings": {}}}
+    changes = {"output_config": {"bindings": {"namn": "{{ flow_input.namn }}"}}}
+
+    assert (
+        await flows.with_word_template(
+            _flow_with_templates(), uuid4(), changes, waiting
+        )
+        == changes
+    )
+
+
+# --- A Word step's template in the overview and in an addition ---------------
+
+
+def _many_templates(count: int) -> list[tuple[str, str]]:
+    return [(str(uuid4()), f"Mall {number} " + "x" * 300) for number in range(count)]
+
+
+async def test_the_overview_lists_the_flows_templates_within_its_page(monkeypatch):
+    _reading_chat(monkeypatch, templates=_many_templates(30), editing=True)
+
+    _page, content = await _read()
+
+    # The first ten, each name cut short, and how many there are; _read holds
+    # the overview to one page.
+    assert len(content["word_templates"]) == 10
+    assert all(len(template["name"]) <= 81 for template in content["word_templates"])
+    assert content["word_template_count"] == 30
+    assert len(json.dumps(content["word_templates"], ensure_ascii=False)) <= 1600
+
+
+async def test_the_overview_of_a_flow_without_templates_does_not_mention_them(
+    monkeypatch,
+):
+    _reading_chat(monkeypatch, editing=True)
+
+    _page, content = await _read()
+
+    assert "word_templates" not in content
+    assert "word_template_count" not in content
+
+
+async def test_a_chat_that_only_reads_is_not_shown_the_flows_templates(monkeypatch):
+    # The editor lists a flow's templates for those who may edit it.
+    _reading_chat(monkeypatch, templates=_many_templates(2))
+
+    _page, content = await _read()
+
+    assert "word_templates" not in content
+
+
+async def _add_word_step(monkeypatch, templates, **values):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)], templates=templates)
+    result, page = await _add(name="Beslut", kind="template", values=values)
+    return save, result, page
+
+
+async def test_a_new_word_step_takes_the_flows_only_template(monkeypatch):
+    save, result, page = await _add_word_step(
+        monkeypatch,
+        [(_TEMPLATE_ID, "Beslut.docx")],
+        bindings={"namn": "{{ step_1.output.text }}"},
+    )
+
+    assert result.isError is not True, page
+    (step,) = save.await_args.args[2].new_steps
+    assert step.configuration.output_config == {
+        "template_asset_id": _TEMPLATE_ID,
+        "bindings": {"namn": "{{ step_1.output.text }}"},
+    }
+    # The answer says which template the step got.
+    assert json.loads(page["content"])["step"]["word_template"] == {
+        "id": _TEMPLATE_ID,
+        "name": "Beslut.docx",
+    }
+
+
+async def test_a_new_word_step_in_a_flow_with_several_templates_must_say_which(
+    monkeypatch,
+):
+    templates = _many_templates(12)
+
+    save, result, page = await _add_word_step(monkeypatch, templates)
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert "template_asset_id" in page["message"] and "12" in page["message"]
+    # Each by id and file name, the first ten, the names cut short.
+    assert [template["id"] for template in page["templates"]] == [
+        template_id for template_id, _name in templates[:10]
+    ]
+    assert all(len(template["name"]) <= 81 for template in page["templates"])
+    save.assert_not_awaited()
+
+
+async def test_a_new_word_step_in_a_flow_without_templates_waits_for_one(monkeypatch):
+    save, result, page = await _add_word_step(monkeypatch, [])
+
+    assert result.isError is not True, page
+    (step,) = save.await_args.args[2].new_steps
+    # An object, so what blocks publishing is the missing template itself.
+    assert step.configuration.output_config == {"bindings": {}}
+    assert json.loads(page["content"])["step"]["word_template"] is None
+
+
+async def test_a_new_word_step_keeps_the_template_it_names(monkeypatch):
+    save, result, page = await _add_word_step(
+        monkeypatch, _many_templates(3), template_asset_id=_TEMPLATE_ID
+    )
+
+    assert result.isError is not True, page
+    (step,) = save.await_args.args[2].new_steps
+    assert step.configuration.output_config == {
+        "template_asset_id": _TEMPLATE_ID,
+        "bindings": {},
+    }
+
+
+async def test_the_tools_say_that_a_word_step_keeps_its_template():
+    descriptions = await _descriptions()
+
+    assert (
+        "a Word step keeps its template when output_config leaves "
+        "template_asset_id out: only output_config null removes it"
+    ) in descriptions["update_step"]
+    assert "word_template: its id, null while" in descriptions["read_flow"]
+    assert "word_templates: id and file name" in descriptions["read_flow"]
+    (add,) = [tool for tool in await flows.mcp.list_tools() if tool.name == "add_step"]
+    (values, _null) = add.inputSchema["properties"]["values"]["anyOf"]
+    assert (
+        "the flow's only template is used"
+        in (values["properties"]["template_asset_id"]["description"])
+    )
 
 
 # --- What a step reads ---------------------------------------------------------

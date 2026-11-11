@@ -333,8 +333,8 @@ class _Refused(BadRequestException):
         self.fields = fields
 
 
-# The most rejected fields or templates one refusal lists.
-MAX_REFUSAL_ITEMS = 10
+# The most rejected fields, or templates of the flow, one answer lists.
+MAX_LISTED = 10
 
 
 def _error_result(
@@ -748,9 +748,52 @@ async def _saved_reads(container, flow_id: UUID) -> tuple[dict[int, Any], Any]:
     return step_reads_summary(saved, prompts), prompts
 
 
-def _step_reads(step: Any, reads: dict[int, Any]) -> dict[str, Any]:
+def _cut(text: str | None, limit: int = 80) -> str | None:
+    """Display text in an answer that must stay small; read_flow gives it whole."""
+    return text if text is None or len(text) <= limit else text[:limit] + "…"
+
+
+def _template_id(output_config: Any) -> str:
+    """The template a Word step's output_config names; "" when it names none."""
+    if not isinstance(output_config, dict):
+        return ""
+    return str(output_config.get("template_asset_id") or "").strip()
+
+
+async def _flow_templates(container, flow_id: UUID) -> dict[str, str]:
+    """The Word templates the flow has, the last changed first: each id with
+    its file name cut short."""
+    assets = await container.flow_template_asset_service().list_assets(flow_id=flow_id)
+    return {str(asset.id): cast(str, _cut(asset.name)) for asset in assets}
+
+
+async def _readable_templates(container, chat: Any) -> dict[str, str]:
+    """The flow's templates for a read: none unless the chat is in edit mode,
+    since the editor lists a flow's templates for those who may edit it."""
+    from eneo.flows.application.flow_authoring_chat import require_authoring_edit
+
+    try:
+        await require_authoring_edit(container, chat)
+    except (BadRequestException, UnauthorizedException):
+        return {}
+    return await _flow_templates(container, chat.flow_id)
+
+
+def _listed_templates(templates: dict[str, str]) -> list[dict[str, str]]:
+    """The first of ``templates``, each by its id and file name."""
+    return [
+        {"id": template_id, "name": name}
+        for template_id, name in list(templates.items())[:MAX_LISTED]
+    ]
+
+
+def _step_reads(
+    step: Any, reads: dict[int, Any], templates: dict[str, str]
+) -> dict[str, Any]:
     """What ``step`` reads and talks to, as the overview gives it: its
-    connections, a Word step's fields, and its reads (see ``_saved_reads``)."""
+    connections, a Word step's template (its id, and its file name when it is
+    among ``templates``; None while the step waits for one) and fields, and
+    its reads (see ``_saved_reads``)."""
     from eneo.flows.application.flow_authoring_reads import (
         step_connections,
         word_fields,
@@ -761,6 +804,12 @@ def _step_reads(step: Any, reads: dict[int, Any]) -> dict[str, Any]:
         "connections": step_connections(step.model_dump(mode="json"))
     }
     if step.output_mode == "template_fill":
+        template_id = _template_id(step.output_config)
+        item["word_template"] = (
+            {"id": template_id, "name": templates.get(template_id)}
+            if template_id
+            else None
+        )
         item["word_fields"] = word_fields(step.output_config)
     item.update(reads.get(step.step_order, {}))
     return item
@@ -780,8 +829,11 @@ async def read_flow(
     (reads: each earlier result as the reference the flow resolves and
     where the read is written), which later steps read its result (readers,
     the same way), the run form fields it reads and, for a Word step, its
-    template's fields (word_fields: each field and what it reads, null when
-    nothing does, and bindings_without_field). Section "steps" gives
+    template (word_template: its id, null while the step waits for one) and
+    the template's fields (word_fields: each field and what it reads, null
+    when nothing does, and bindings_without_field). In edit mode it also
+    gives each template's file name and lists the flow's Word templates
+    (word_templates: id and file name). Section "steps" gives
     the steps in full with their assistants' prompts and the same reads;
     section "settings" the flow without its steps (description,
     metadata_json with the run form, retention, permissions); section "all"
@@ -826,6 +878,7 @@ async def read_flow(
                 step for step in flow.steps if steps is None or step.step_order in steps
             ]
             reads, prompts = await _saved_reads(container, chat.flow_id)
+            templates = await _readable_templates(container, chat)
             items: list[dict[str, Any]] = []
             for step in chosen:
                 if section == "overview":
@@ -834,7 +887,7 @@ async def read_flow(
                     item = step.model_dump(mode="json")
                     prompt = prompts.get(step.assistant_id)
                     item["prompt"] = prompt.text if prompt is not None else None
-                item.update(_step_reads(step, reads))
+                item.update(_step_reads(step, reads, templates))
                 items.append(item)
             value = {
                 "name": flow.name,
@@ -844,6 +897,10 @@ async def read_flow(
             if section == "overview":
                 value["description"] = flow.description
                 value["run_form_fields"] = run_form_fields(flow.metadata_json)
+                if templates:
+                    value["word_templates"] = _listed_templates(templates)
+                if len(templates) > MAX_LISTED:
+                    value["word_template_count"] = len(templates)
                 offer = await _transcription_offer(container, chat.space_id)
                 if offer is not None:
                     value["transcription_offer"] = offer
@@ -1052,7 +1109,9 @@ async def update_step(
 ) -> CallToolResult:
     """Patch one saved step and optionally its assistant in one revision. Use the flow's own
     field names; input_config and output_config are each replaced whole (long material:
-    input_config.long_material). Renaming the step (user_description) rewrites
+    input_config.long_material), except that a Word step keeps its template when
+    output_config leaves template_asset_id out: only output_config null removes
+    it. Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
     keep theirs; the result names the step's assistant_id. assistant_changes
@@ -1072,7 +1131,9 @@ async def update_step(
         before = await _assistant_before(
             container, request, chat.flow_id, step, assistant_changes
         )
-        edit = _step_edit(step, changes, assistant_changes, before)
+        edit = await _step_edit(
+            container, chat.flow_id, step, changes, assistant_changes, before
+        )
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -1178,29 +1239,44 @@ class _StepEdit:
         self.card_fields = card_fields
 
 
-def require_kept_template(changes: dict[str, Any], saved: dict[str, Any]) -> None:
-    """Refuse an output_config object that would drop a Word step's template.
-    A change replaces output_config whole and only the person uploads a
-    template, so an object must carry the saved template_asset_id; the save
-    refills the template's field names from it and publish reads the rest.
-    null removes the template on purpose, and so does another output_mode."""
+async def with_word_template(
+    container, flow_id: UUID, changes: dict[str, Any], saved: dict[str, Any]
+) -> dict[str, Any]:
+    """``changes`` as they are saved on a Word step that has a template. A
+    change replaces output_config whole and only the person uploads a
+    template, so an output_config object that names no template (the
+    bindings alone, say) keeps the saved one: the save refills the template's
+    field names from its id and publish reads the rest. null removes the
+    template on purpose, and so does another output_mode. Another template
+    replaces the step's when the flow has it, and is refused otherwise."""
+    from eneo.flows.flow_api_error_code import FlowApiErrorCode
+
     if (changes.get("output_mode") or saved.get("output_mode")) != "template_fill":
-        return
+        return changes
     sent = changes.get("output_config")
-    kept = (saved.get("output_config") or {}).get("template_asset_id")
+    kept = _template_id(saved.get("output_config"))
     if not isinstance(sent, dict) or not kept:
-        return
-    if str(sent.get("template_asset_id") or "").strip() == str(kept):
-        return
-    raise BadRequestException(
-        "output_config is replaced whole, and this one does not carry the Word"
-        f' step\'s template. To keep the template, send "template_asset_id":'
-        f' "{kept}" with it; to remove the template on purpose, send'
-        " output_config null."
-    )
+        return changes
+    named = _template_id(sent)
+    if not named:
+        return {**changes, "output_config": {**sent, "template_asset_id": kept}}
+    if named != kept:
+        templates = await _flow_templates(container, flow_id)
+        if named not in templates:
+            raise _Refused(
+                "output_config names a Word template the flow does not have. To"
+                " keep the step's template, leave template_asset_id out; to use"
+                " another, name one of the flow's (templates); output_config"
+                " null removes the template.",
+                code=FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value,
+                templates=_listed_templates(templates),
+            )
+    return changes
 
 
-def _step_edit(
+async def _step_edit(
+    container,
+    flow_id: UUID,
     step: Any,
     changes: dict[str, Any] | None,
     assistant_changes: dict[str, Any] | None,
@@ -1221,7 +1297,7 @@ def _step_edit(
         mode="json", include=set(FlowStepUpdateRequest.model_fields)
     )
     require_safe_model_configuration(changes, saved)
-    require_kept_template(changes, saved)
+    changes = await with_word_template(container, flow_id, changes, saved)
     return _StepEdit(
         step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
         fields=step_changes(saved, changes, assistant_before, assistant_changes),
@@ -1339,8 +1415,13 @@ async def update_steps(
             before = await _assistant_before(
                 container, request, chat.flow_id, step, edit.get("assistant_changes")
             )
-            part = _step_edit(
-                step, edit.get("changes"), edit.get("assistant_changes"), before
+            part = await _step_edit(
+                container,
+                chat.flow_id,
+                step,
+                edit.get("changes"),
+                edit.get("assistant_changes"),
+                before,
             )
             step_edits.extend(part.step_edits)
             assistants.extend(part.assistants)
@@ -1431,7 +1512,9 @@ async def contract_from_example(
         except ExampleProblemError as error:
             raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
         flow = await get_flow(chat.flow_id, request, container)
-        edit = _step_edit(
+        edit = await _step_edit(
+            container,
+            chat.flow_id,
             _saved_step(flow, step_id),
             {"output_type": "json", "output_contract": reading.contract},
             None,
@@ -1550,9 +1633,13 @@ async def add_step(
             raise _Refused(
                 f"{invalid_message(errors)} {step_kind_takes(step_kind)}",
                 code="flow_step_kind_values_invalid",
-                errors=errors[:MAX_REFUSAL_ITEMS],
+                errors=errors[:MAX_LISTED],
             ) from None
         check_step_kind_values(step_kind, chosen)
+        templates: dict[str, str] = {}
+        if step_kind is FlowStepKind.TEMPLATE:
+            templates = await _flow_templates(container, chat.flow_id)
+            chosen = _word_step_values(chosen, templates)
         flow = (
             await require_flow_current_definition_access(
                 request, container, flow_id=chat.flow_id
@@ -1593,7 +1680,7 @@ async def add_step(
         return page_result(
             _addition_receipt(
                 added,
-                _step_overview(added) | _step_reads(added, reads),
+                _step_overview(added) | _step_reads(added, reads, templates),
                 [
                     {
                         "step_id": str(step_id),
@@ -1611,7 +1698,31 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-# What the answer to an addition says of the step when its details do not fit.
+def _word_step_values(
+    values: StepKindValues, templates: dict[str, str]
+) -> StepKindValues:
+    """A new Word step's values with its template settled, in a flow that has
+    ``templates``: the template the step names, else the flow's only one.
+    With several the step must say which; with none it is saved and waits for
+    the person's upload. Its bindings are an object either way, so what then
+    blocks publishing is the missing template itself."""
+    template_id = values.template_asset_id
+    if template_id is None and len(templates) > 1:
+        raise _Refused(
+            f"The flow has {len(templates)} Word templates: say which one the"
+            " step fills with template_asset_id (templates).",
+            code="flow_step_kind_values_invalid",
+            templates=_listed_templates(templates),
+        )
+    if template_id is None and templates:
+        template_id = UUID(next(iter(templates)))
+    return values.model_copy(
+        update={"template_asset_id": template_id, "bindings": values.bindings or {}}
+    )
+
+
+# What the answer to an addition says of the step when its details do not fit:
+# each of fixed size, a Word step's template with its file name cut short.
 _RECEIPT_STEP_FIELDS = (
     "step_order",
     "input_source",
@@ -1619,12 +1730,8 @@ _RECEIPT_STEP_FIELDS = (
     "output_mode",
     "output_type",
     "review",
+    "word_template",
 )
-
-
-def _cut(text: str | None, limit: int = 80) -> str | None:
-    """Display text in an answer that must stay small; read_flow gives it whole."""
-    return text if text is None or len(text) <= limit else text[:limit] + "…"
 
 
 def _addition_receipt(
@@ -1646,7 +1753,7 @@ def _addition_receipt(
         return receipt
     return {
         **receipt,
-        "step": {key: details[key] for key in _RECEIPT_STEP_FIELDS},
+        "step": {key: details[key] for key in _RECEIPT_STEP_FIELDS if key in details},
         "in_full": f"read_flow steps=[{added.step_order}] gives the step in full.",
     }
 

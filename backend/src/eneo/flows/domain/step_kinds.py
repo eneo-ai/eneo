@@ -138,8 +138,9 @@ class StepKindValues(BaseModel):
     template_asset_id: UUID | None = Field(
         default=None,
         description=(
-            "A Word template the flow already has (read_flow shows a Word "
-            "step's template); left out, the person uploads one in the step."
+            "A Word template the flow has (word_templates in read_flow); left "
+            "out, the flow's only template is used, and when it has none the "
+            "person uploads one in the step."
         ),
     )
     bindings: dict[str, str] | None = Field(

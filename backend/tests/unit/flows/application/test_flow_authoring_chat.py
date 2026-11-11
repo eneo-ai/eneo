@@ -190,6 +190,10 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     for field_type in _SCALAR_FORM_FIELD_TYPES:
         assert field_type in sentence, field_type
     assert "It cannot read a list, a multiselect, an object" in instructions
+    # A change of bindings keeps the template; its id is never sent again.
+    assert "The step keeps its template when you change its bindings" in instructions
+    assert "leave the template out" in instructions
+    assert "A new Word step takes the flow's only template" in instructions
     assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
     # An upload is chosen by its value, never by raw fields.

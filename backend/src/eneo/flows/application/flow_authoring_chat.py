@@ -222,7 +222,12 @@ uploaded the step has no fields to bind. output_config.bindings (in add_step,
 the value bindings) gives each
 field exactly one reference, or "" only when the person asks for that field
 to stay empty, for example
-${word_bindings}. A field can read a run form field of type
+${word_bindings}. The step keeps its template when you change its bindings:
+send output_config with all the bindings and leave the template out; only
+output_config null removes the template, which you never do unless the person
+asks. A new Word step takes the flow's only template (word_templates in
+read_flow) by itself; with several, give add_step the one to fill as
+template_asset_id. A field can read a run form field of type
 text, number, date or select, the text of a step ({{ step_N.output.text }}),
 or a field of a json step that is required and of one type: string, number,
 integer or boolean. It cannot read a list, a multiselect, an object or a json

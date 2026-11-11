@@ -1644,27 +1644,33 @@ async def test_a_read_the_step_rules_refuse_comes_back_with_their_shape(
 # --- A Word step through the chat's tools --------------------------------------
 
 
-async def _word_flow(client, enabled_flow, db_container, admin_user):
-    """A flow whose step 2 fills an uploaded template with one field,
-    case_id, that nothing reads yet; the chat's context in edit mode."""
+async def _upload_template(client, base, headers, name: str, field: str) -> str:
+    """The id of a Word template with one field, uploaded to the flow."""
     from tests.integration.flows.test_flow_template_attachment_persistence import (
         DOCX_MIME,
         _template_bytes,
     )
 
-    flow, headers = enabled_flow
-    base = f"/api/v1/flows/{flow['id']}"
     upload = await client.post(
         base + "/template-files/",
-        files={"upload_file": ("mall.docx", _template_bytes("case_id"), DOCX_MIME)},
+        files={"upload_file": (name, _template_bytes(field), DOCX_MIME)},
         headers=headers,
     )
     assert upload.status_code == 201, upload.text
+    return upload.json()["id"]
+
+
+async def _word_flow(client, enabled_flow, db_container, admin_user):
+    """A flow whose step 2 fills an uploaded template, mall.docx, with one
+    field, case_id, that nothing reads yet; the chat's context in edit mode."""
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    template_id = await _upload_template(client, base, headers, "mall.docx", "case_id")
     word = _new_step("Beslut", "", input_source="previous_step")
     word["configuration"].update(
         output_mode="template_fill",
         output_type="docx",
-        output_config={"template_asset_id": upload.json()["id"], "bindings": {}},
+        output_config={"template_asset_id": template_id, "bindings": {}},
     )
     created = await client.patch(
         base + "/editor/",
@@ -1691,10 +1697,19 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
         client, enabled_flow, db_container, admin_user
     )
     saved_config = word["output_config"]
+    template_id = saved_config["template_asset_id"]
+    template = {"id": template_id, "name": "mall.docx"}
 
-    overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
-    (step,) = overview["steps"]
+    async def saved_word_config():
+        steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+        return steps[1]["output_config"]
+
+    overview = json.loads(_page(await flows.read_flow(ctx))["content"])
+    step = overview["steps"][1]
     assert step["word_fields"] == {"fields": [{"name": "case_id", "reads": None}]}
+    # The template is named beside its fields and among the flow's templates.
+    assert step["word_template"] == template
+    assert overview["word_templates"] == [template]
     # The unbound field blocks publishing, named with its step.
     listed = json.loads(
         _page(await flows.read_flow(ctx, section="blockers"))["content"]
@@ -1704,59 +1719,85 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
         (2, True)
     ]
 
-    # Only the bindings: the template the person uploaded would be lost.
-    refused = await flows.update_step(
+    # Only the bindings: the template the person uploaded stays, with its
+    # fields, and the bindings are the new ones.
+    bound = await flows.update_step(
         ctx,
         revision,
         UUID(word["id"]),
         {"output_config": {"bindings": {"case_id": "{{ step_1.output.text }}"}}},
     )
-    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
-    assert refused.isError, after["output_config"]
-    assert "template_asset_id" in _page(refused)["message"]
-    assert after["output_config"] == saved_config
-
-    # The id alone keeps the template: the save refills its field names.
-    template_id = saved_config["template_asset_id"]
-    bound = await flows.update_step(
-        ctx,
-        revision,
-        UUID(word["id"]),
-        {
-            "output_config": {
-                "template_asset_id": template_id,
-                "bindings": {"case_id": "{{ step_1.output.text }}"},
-            }
-        },
-    )
     assert not bound.isError, bound.content[0].text
     assert "template_unbound" not in {
         b["code"] for b in _page(bound)["publish_blockers"]
     }
-    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
-    assert after["output_config"]["placeholders"] == saved_config["placeholders"]
+    after = await saved_word_config()
+    assert after["template_asset_id"] == template_id
+    assert after["placeholders"] == saved_config["placeholders"]
+    assert after["bindings"] == {"case_id": "{{ step_1.output.text }}"}
     overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
+    assert overview["steps"][0]["word_template"] == template
     assert overview["steps"][0]["word_fields"] == {
         "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
     }
     revision = _page(bound)["draft_revision"]
 
-    # An id of null inside the object is not a removal.
+    # A change of several steps keeps it the same way, and an empty id inside
+    # the object names no template: it is not a removal.
+    emptied = await flows.update_steps(
+        ctx,
+        revision,
+        [
+            {
+                "step_id": word["id"],
+                "changes": {
+                    "output_config": {
+                        "template_asset_id": None,
+                        "bindings": {"case_id": ""},
+                    }
+                },
+            }
+        ],
+    )
+    assert not emptied.isError, emptied.content[0].text
+    after = await saved_word_config()
+    assert after["template_asset_id"] == template_id
+    assert after["placeholders"] == saved_config["placeholders"]
+    assert after["bindings"] == {"case_id": ""}
+    revision = _page(emptied)["draft_revision"]
+
+    # A template the flow does not have is refused, with those it has.
     refused = await flows.update_step(
         ctx,
         revision,
         UUID(word["id"]),
-        {"output_config": {"template_asset_id": None, "bindings": {}}},
+        {"output_config": {"template_asset_id": str(uuid4()), "bindings": {}}},
     )
     assert refused.isError
+    assert _page(refused)["code"] == "flow_template_not_accessible"
+    assert _page(refused)["templates"] == [template]
+    assert await saved_word_config() == after
+
+    # Another template of the flow replaces the step's.
+    other_id = await _upload_template(client, base, headers, "avslag.docx", "skal")
+    replaced = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"template_asset_id": other_id, "bindings": {}}},
+    )
+    assert not replaced.isError, replaced.content[0].text
+    after = await saved_word_config()
+    assert after["template_asset_id"] == other_id
+    assert after["placeholders"] == ["skal"]
+    revision = _page(replaced)["draft_revision"]
 
     # null removes the template on purpose.
     detached = await flows.update_step(
         ctx, revision, UUID(word["id"]), {"output_config": None}
     )
     assert not detached.isError, detached.content[0].text
-    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
-    assert not (after["output_config"] or {}).get("template_asset_id")
+    assert not (await saved_word_config() or {}).get("template_asset_id")
 
 
 async def test_a_word_step_turned_into_another_kind_leaves_its_template(
@@ -1963,18 +2004,16 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
         assert not added.isError, added.content[0].text
         revision += 1
     page = _page(added)
-    # A Word step without its template is saved and waits for it: publish
-    # names that step's missing template configuration.
+    # A Word step in a flow without templates is saved and waits for one:
+    # publish names that step's missing template.
     (waiting,) = [
         blocker
         for blocker in page["publish_blockers"]
         if blocker.get("step", {}).get("step_order") == 3
     ]
     assert waiting["code"] == "flow_step_invalid"
-    assert (
-        "output_config must be an object for output_mode 'template_fill'"
-        in (waiting["message"])
-    )
+    assert "output_config.template_asset_id" in waiting["message"]
+    assert json.loads(page["content"])["step"]["word_template"] is None
 
     steps = (await client.get(base + "/", headers=headers)).json()["steps"]
     facts, text, word = steps
@@ -2060,6 +2099,91 @@ async def test_a_word_step_is_added_with_a_template_the_flow_has(
     assert new["output_config"]["template_asset_id"] == template_id
     assert new["output_config"]["placeholders"] == ["case_id"]
     assert new["output_config"]["bindings"] == {"case_id": "{{ step_1.output.text }}"}
+
+
+async def test_a_word_step_added_without_a_template_takes_the_flows_only_one(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    template_id = word["output_config"]["template_asset_id"]
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={"bindings": {"case_id": "{{ step_1.output.text }}"}},
+    )
+
+    assert not added.isError, added.content[0].text
+    # The answer says which template the step got, with its fields.
+    step = json.loads(_page(added)["content"])["step"]
+    assert step["word_template"] == {"id": template_id, "name": "mall.docx"}
+    assert step["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    assert steps[2]["output_config"]["template_asset_id"] == template_id
+    assert steps[2]["output_config"]["placeholders"] == ["case_id"]
+    revision = _page(added)["draft_revision"]
+
+    # With a second template the flow has several: the step must say which.
+    other_id = await _upload_template(client, base, headers, "avslag.docx", "skal")
+    refused = await flows.add_step(ctx, revision, "Avslag", FlowStepKind.TEMPLATE)
+
+    assert refused.isError
+    page = _page(refused)
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert {item["id"]: item["name"] for item in page["templates"]} == {
+        template_id: "mall.docx",
+        other_id: "avslag.docx",
+    }
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert len(current["steps"]) == 3
+
+
+async def test_a_step_added_before_a_step_with_a_long_name_answers_whole(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    first = await flows.add_step(
+        ctx, revision, "Sammanfatta", FlowStepKind.AI, values={"instruction": "Läs."}
+    )
+    assert not first.isError, first.content[0].text
+    step_id = json.loads(_page(first)["content"])["step_id"]
+    long_name = "Sammanfatta mötet " * 300
+    renamed = await flows.update_step(
+        ctx, revision + 1, UUID(step_id), {"user_description": long_name}
+    )
+    assert not renamed.isError, renamed.content[0].text
+
+    added = await flows.add_step(
+        ctx,
+        revision + 2,
+        "Läs underlaget",
+        FlowStepKind.AI,
+        values={"instruction": "Läs underlaget."},
+        position=1,
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    # One whole page: a change cannot be read on from an offset.
+    assert page["next_offset"] is None
+    assert page["draft_revision"] == revision + 3
+    content = json.loads(page["content"])
+    assert content["saved"] is True
+    (handed,) = content["hand_over"]
+    assert (handed["step_id"], handed["step_order"]) == (step_id, 2)
+    assert handed["changes"]["input_source"] == "previous_step"
+    assert len(handed["name"]) <= 81
+    assert long_name.startswith(handed["name"].removesuffix("…"))
 
 
 def _overview_step(page: dict, order: int) -> dict:
