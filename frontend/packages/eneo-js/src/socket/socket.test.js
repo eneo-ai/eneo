@@ -196,3 +196,39 @@ test("reconnecting keeps one heartbeat, and its pong is still heard", (t) => {
   assert.deepEqual(current.sent, [{ type: "ping" }, { type: "ping" }, { type: "ping" }]);
   assert.equal(FakeWebSocket.opened.length, opened);
 });
+
+test("a pong reaches the handlers registered for it, once", (t) => {
+  const { client, socket } = connected(t);
+  let pongs = 0;
+  client.registerHandler("pong", () => pongs++);
+
+  mock.timers.tick(PING_INTERVAL);
+  socket.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+  mock.timers.tick(PONG_TIMEOUT);
+
+  // The pong also ended the wait for it: no reconnect.
+  assert.equal(pongs, 1);
+  assert.equal(FakeWebSocket.opened.length, 1);
+});
+
+test("a lost pong leaves one heartbeat on the new socket", (t) => {
+  connected(t);
+  mock.timers.tick(PING_INTERVAL);
+  mock.timers.tick(PONG_TIMEOUT);
+  const reopened = FakeWebSocket.opened[1];
+  reopened.open();
+
+  mock.timers.tick(PING_INTERVAL);
+
+  assert.deepEqual(reopened.sent, [{ type: "ping" }]);
+});
+
+test("a disconnect cancels the retry that was waiting", (t) => {
+  const { client, socket } = connected(t);
+  socket.closedByServer(1006);
+
+  client.disconnect();
+  mock.timers.tick(LAST_RETRY + FIRST_RETRY);
+
+  assert.equal(FakeWebSocket.opened.length, 1);
+});

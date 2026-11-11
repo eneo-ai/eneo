@@ -105,10 +105,8 @@ export function createEneoSocket(args, options) {
     try {
       /** @type {import("./types").WebsocketMessage} */
       const { type, data } = JSON.parse(event.data);
-      if (type === "pong") {
-        clearTimeout(heartbeatReconnectTimeout);
-        return;
-      }
+      // A pong ends the wait for it; handlers registered for it still hear it.
+      if (type === "pong") clearTimeout(heartbeatReconnectTimeout);
       handlers.get(type)?.forEach((handler) => handler(data));
     } catch (error) {
       console.error("Failed to parse message: ", error);
