@@ -37,6 +37,7 @@ from eneo.object_content.content import ObjectContentError
 from eneo.object_content.object_store_connection import ObjectStoreConnectionError
 from eneo.object_content.reconciliation_repository import InventoryListingFollower
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
+from eneo.redis.clients import redis_clients
 from eneo.settings.encryption_service import EncryptionService
 
 Emit = Callable[[str], None]
@@ -151,6 +152,8 @@ def _describe(round_number: int, report: RetentionRunReport) -> str:
 async def _main() -> int:
     settings = get_settings()
     sessionmanager.init(settings.database_url)
+    # The tasks read Redis through the process's clients, like the worker's.
+    redis_clients.start()
     object_content_runtime.start(
         encryption=EncryptionService(
             None if settings.testing else settings.encryption_key
@@ -164,6 +167,7 @@ async def _main() -> int:
         return 1
     finally:
         await object_content_runtime.stop()
+        await redis_clients.stop()
         await sessionmanager.close()
 
 
