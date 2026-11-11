@@ -1,7 +1,6 @@
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import {
   brokenRule,
   newPasswordErrors,
@@ -89,7 +88,7 @@ describe("policyChecks", () => {
 });
 
 // The app's Swedish catalog, looked up by any key as the forms do.
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 describe("the words the forms use", () => {
   it("says what is wrong with a new password and its confirmation", () => {

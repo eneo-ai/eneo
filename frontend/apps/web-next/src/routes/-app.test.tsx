@@ -2,7 +2,6 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createTranslator } from "use-intl";
 import { latestRelease } from "@eneo/whats-new";
 import {
   Profiler,
@@ -28,6 +27,7 @@ import type { WrapperDetail } from "@/features/knowledge/integrations/wrapper-de
 import type { KnowledgePage } from "@/features/knowledge/knowledge-page";
 import type { WebsiteDetail } from "@/features/knowledge/detail/website-detail.client";
 import { setViewport } from "@/test/setup-dom";
+import { testTranslator } from "@/test/i18n";
 
 vi.unmock("@/lib/link");
 
@@ -486,7 +486,7 @@ it.each(["apps", "assistants", "group-chats"] as const)(
       }
     );
     const input = await screen.findByRole("textbox", { name: "Editor resource-1" });
-    const t = createTranslator({ locale: "sv", messages });
+    const t = testTranslator();
     expect(document.title).toBe(
       `${t("space_edit_title", { name: "Name resource-1" })} · Upphandling · Eneo`
     );
@@ -658,7 +658,7 @@ it.each([false, true])(
     expect(edit?.getAttribute("href") ?? null).toBe(
       canEdit ? "/spaces/space-1/apps/app-1/edit" : null
     );
-    const t = createTranslator({ locale: "sv", messages });
+    const t = testTranslator();
     expect(document.title).toBe(
       `${t("space_app_result_title", { name: dashboardApp.name })} · Upphandling · Eneo`
     );
@@ -927,7 +927,7 @@ async function createRouteRouter(path = "/does-not-exist") {
   const { createAppRouter } = await import("@/router");
   const { BootContext } = await import("@/boot-context");
   const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
+    { queryClient, t: testTranslator() },
     { history: createMemoryHistory({ initialEntries: [path] }) }
   );
   return { router, queryClient, owner, BootContext };

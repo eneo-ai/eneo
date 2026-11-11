@@ -1,7 +1,6 @@
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../knowledge";
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
 import {
   countSourceFilters,
   findWrapperSource,
@@ -20,7 +19,7 @@ import {
 } from "./sources";
 import type { IntegrationSyncProgress } from "./sync-progress";
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 const swedish = new Intl.Collator("sv").compare;
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;

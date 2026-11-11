@@ -1,9 +1,9 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { Schema } from "@/lib/api/models";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import {
   humanizeToolName,
   isSkillCall,
@@ -411,8 +411,8 @@ describe("toolTarget", () => {
 
 /** The loopback flows server, as the flow authoring chat calls it. */
 describe("Eneo's flows server", () => {
-  const svT = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
-  const enT = createTranslator({ locale: "en", messages: en as Record<string, string> });
+  const svT = testTranslator();
+  const enT = testTranslator("en");
   const flows = (toolName: string, input: Record<string, unknown> = {}) => ({
     toolName,
     input,

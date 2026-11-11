@@ -1,9 +1,9 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { runErrorText } from "./run-messages";
 
-const t = createTranslator({ locale: "sv", messages: messages as Record<string, string> });
+const t = testTranslator();
 
 describe("runErrorText", () => {
   it("names the service and its status when an HTTP step was answered with an error", () => {
