@@ -1252,6 +1252,109 @@ async def test_streaming_abort_keeps_the_tool_calls_already_made_without_text():
     session_service_mock.complete_question_with_answer.assert_not_called()
 
 
+def _call(call_id: str, status: str, result: str | None = None) -> ToolCallMetadata:
+    return ToolCallMetadata(
+        server_name="flows",
+        tool_name="read_flow",
+        tool_call_id=call_id,
+        result_status=status,
+        result=result,
+        mcp_tool_name="flows__read_flow",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("chunks", "expected_ids"),
+    [
+        pytest.param(
+            [
+                Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=[_call("call-1", "pending")],
+                )
+            ],
+            None,
+            id="only-pending",
+        ),
+        pytest.param(
+            [
+                Completion(
+                    response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
+                    tool_calls_metadata=[_call("call-1", "pending")],
+                )
+            ],
+            None,
+            id="awaiting-approval",
+        ),
+        pytest.param(
+            [
+                Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=[_call("call-1", "succeeded", "ok")],
+                ),
+                Completion(
+                    response_type=ResponseType.TOOL_CALL,
+                    tool_calls_metadata=[_call("call-2", "pending")],
+                ),
+            ],
+            ["call-1"],
+            id="finished-and-pending",
+        ),
+    ],
+)
+async def test_streaming_abort_saves_only_tool_calls_that_ran(
+    chunks: list[Completion], expected_ids: list[str] | None
+):
+    """A stop saves only the calls that have a result. A call still being
+    written or waiting for approval never ran; saving it would show it as
+    failed or done after a reload and take away the turn's "Försök igen"."""
+
+    async def stream():
+        for chunk in chunks:
+            yield chunk
+        await asyncio.sleep(10)
+
+    response = SimpleNamespace(
+        completion=stream(), total_token_count=0, usage=None, extended_logging=None
+    )
+    svc = _make_assistant_service_for_streaming(AsyncMock())
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module, "persist_partial_question_answer", tracking_persist
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+        await _drain_until(gen, len(chunks))
+        await gen.aclose()
+        await asyncio.sleep(0)
+
+    if expected_ids is None:
+        assert persist_calls == []
+    else:
+        assert len(persist_calls) == 1
+        stored = persist_calls[0]["tool_calls"]
+        assert isinstance(stored, list)
+        assert [call.tool_call_id for call in stored] == expected_ids
+
+
 @pytest.mark.asyncio
 async def test_streaming_abort_links_files_a_tool_already_produced():
     """A file a tool produced before the model failed is linked to the question
@@ -1417,6 +1520,7 @@ async def test_streaming_handle_response_persists_round_break_verbatim(
                     tool_name="now",
                     tool_call_id="call-1",
                     result_status="succeeded",
+                    result="10:00",
                 )
             ],
         )
@@ -1467,6 +1571,7 @@ async def test_streaming_handle_response_persists_round_break_verbatim(
 
     if aborted:
         assert [call["answer"] for call in persist_calls] == [expected_answer]
+        assert [c.tool_call_id for c in persist_calls[0]["tool_calls"]] == ["call-1"]
     else:
         persisted = session_service_mock.complete_question_with_answer.call_args
         assert persisted.kwargs["answer"] == expected_answer

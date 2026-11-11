@@ -3413,15 +3413,18 @@ class AssistantService:
                     # error, network drop, etc. The placeholder row already captures
                     # the user's question, so nothing streamed means there is
                     # nothing further to persist — skip the redundant UPDATE.
-                    # Anything else (partial answer, reasoning, or tool calls made
-                    # before abort) must be saved via a fresh DB session because the
-                    # request-scoped AsyncSession may already be torn down and
-                    # `await` across GeneratorExit is fragile.
+                    # Anything else (partial answer, reasoning, or tool calls that
+                    # ran before abort) must be saved via a fresh DB session because
+                    # the request-scoped AsyncSession may already be torn down and
+                    # `await` across GeneratorExit is fragile. Only calls with a
+                    # result ran; one still pending or awaiting approval is left
+                    # out so the stopped turn does not show it as done or failed.
+                    finished = [tc for tc in tool_calls if tc.result is not None]
                     if not completed and (
                         response_string
                         or reasoning_string
                         or generated_files
-                        or tool_calls
+                        or finished
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (
@@ -3442,9 +3445,7 @@ class AssistantService:
                         skill_provenance, skill_activation = (
                             _final_skill_runtime_state()
                         )
-                        _attach_generated_file_ids(
-                            tool_calls, generated_file_ids_by_call
-                        )
+                        _attach_generated_file_ids(finished, generated_file_ids_by_call)
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -3455,7 +3456,7 @@ class AssistantService:
                                 skill_provenance=skill_provenance,
                                 skill_activation=skill_activation,
                                 generated_files=list(generated_files),
-                                tool_calls=tool_calls or None,
+                                tool_calls=finished or None,
                             )
                         )
                         logger.info(
