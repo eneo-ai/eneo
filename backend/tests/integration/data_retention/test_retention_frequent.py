@@ -8,7 +8,7 @@ due at its time.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from uuid import UUID
@@ -658,7 +658,7 @@ async def test_a_failed_frequent_run_degrades_health(
 async def test_a_failing_probe_reads_unknown(
     test_tenant, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Mutant: a probe that fails or times out reads healthy."""
+    """Mutant: a probe that fails reads healthy."""
 
     class _Broken(_DueItems):
         async def has_due(self) -> bool:
@@ -670,19 +670,39 @@ async def test_a_failing_probe_reads_unknown(
     assert (await _health()).status is RetentionHealthStatus.UNKNOWN
 
 
-async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
-    test_tenant, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """A probe's error is its own task's: that task reads unknown and the next
-    task's overdue work still degrades the block.
+async def _sql_error(session: AsyncSession) -> None:
+    await session.execute(sa.text("SELECT 1 / 0"))
 
-    Mutants: the error escapes, so the whole block reads unknown and hides the
-    other task's degraded; the error aborts the shared transaction, so the
-    next task's reads fail; the failing task reads healthy."""
+
+async def _os_error(session: AsyncSession) -> None:
+    raise OSError("probe could not reach its store")
+
+
+async def _runtime_error(session: AsyncSession) -> None:
+    raise RuntimeError("probe is broken")
+
+
+@pytest.mark.parametrize(
+    "fail",
+    [_sql_error, _os_error, _runtime_error],
+    ids=["sql-error", "os-error", "runtime-error"],
+)
+async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
+    test_tenant,
+    monkeypatch: pytest.MonkeyPatch,
+    fail: Callable[[AsyncSession], Awaitable[None]],
+) -> None:
+    """A probe's error, of any kind, is its own task's: that task reads
+    unknown and the next task's overdue work still degrades the block.
+
+    Mutants: an error escapes, so the whole block reads unknown and hides the
+    other task's degraded, or the public read raises; the error aborts the
+    shared transaction, so the next task's reads fail; the failing task reads
+    healthy."""
 
     class _Broken(_DueItems):
         async def has_due(self) -> bool:
-            await self.session.execute(sa.text("SELECT 1 / 0"))
+            await fail(self.session)
             return False
 
     now = await _database_now()

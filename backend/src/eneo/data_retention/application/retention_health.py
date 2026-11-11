@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 from enum import StrEnum
 
 from pydantic import BaseModel
-from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
@@ -121,8 +120,8 @@ async def load_retention_health(
     A frequent task has no overdue snapshot: its due probe, on tasks the
     caller built an hour back, says whether anything is overdue, and with
     nothing overdue it reads healthy also before its first job row. Without a
-    probe, or when its probe fails or hits the statement timeout, it reads
-    unknown; the probe runs in a savepoint, so the other tasks still read.
+    probe, or when its probe raises any error, it reads unknown; the probe
+    runs in a savepoint, so the other tasks still read.
     Any other failed read is the caller's.
     """
     names = [registered.name for registered in tasks]
@@ -290,7 +289,10 @@ async def _ask(
     try:
         async with repository.session.begin_nested():
             return await probe.has_due(), False
-    except SQLAlchemyError as exc:
+    # Any error, as in the runner's own probe call: a probe is task code, and
+    # its failure must not take the public read down. The health read's own
+    # time limit cancels rather than raises here, so it still ends the block.
+    except Exception as exc:
         log_error(
             logger,
             logging.ERROR,
