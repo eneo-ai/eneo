@@ -129,8 +129,9 @@ def transcription_offer(space: Any) -> dict[str, Any]:
 
 
 def run_form_fields(metadata_json: Mapping[str, object] | None) -> list[dict[str, Any]]:
-    """The run form's fields as saved, in short: name, type, label, required
-    and the options of a choice. Empty when the form cannot be read."""
+    """The run form's fields as saved, in short: name, type, label, required,
+    the options of a choice and the role of a field that names or dates the
+    run. Empty when the form cannot be read."""
     try:
         schema = parse_flow_form_schema(
             metadata_json, mode=FlowFormSchemaParseMode.PERSISTED_READ
@@ -150,6 +151,8 @@ def run_form_fields(metadata_json: Mapping[str, object] | None) -> list[dict[str
             item["label"] = field.label
         if field.options:
             item["options"] = field.options
+        if field.role:
+            item["role"] = field.role
         fields.append(item)
     return fields
 

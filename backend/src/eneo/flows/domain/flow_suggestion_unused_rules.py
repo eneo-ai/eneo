@@ -272,7 +272,10 @@ def unused_form_fields(draft: DraftReads) -> list[FlowSuggestion]:
     """``unused_form_field``: a field of the run form that no step reads, by
     ``flow_input.<field>`` or its bare name, in any channel, while no step
     takes the whole run input. The fix removes it from
-    ``metadata_json.form_schema``. About the form, so about no step."""
+    ``metadata_json.form_schema``. About the form, so about no step.
+
+    Not judged: a field with a role (``run_label``, ``run_date``), since the
+    run takes its name or day from it."""
 
     if not draft.form_fields or draft.unreadable or draft.metadata_json is None:
         return []
@@ -283,7 +286,7 @@ def unused_form_fields(draft: DraftReads) -> list[FlowSuggestion]:
     }
     suggestions: list[FlowSuggestion] = []
     for field in draft.form_fields:
-        if field in read:
+        if field in read or field in draft.role_form_fields:
             continue
         patch = form_without_field_patch(draft.metadata_json, field)
         suggestions.append(

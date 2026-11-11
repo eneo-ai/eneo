@@ -367,6 +367,8 @@ class DraftReads:
     form_field_reads: Mapping[int, tuple[FormFieldRead, ...]]
     form_fields: tuple[str, ...]
     unreadable: frozenset[int]
+    # Form fields that name or date the run: used though no step reads them.
+    role_form_fields: frozenset[str] = frozenset()
 
     @classmethod
     def of(cls, flow: SuggestionFlow) -> DraftReads:
@@ -375,7 +377,8 @@ class DraftReads:
             {"step_order": step.step_order, "user_description": step.user_description}
             for step in ordered
         )
-        form_fields = run_form_field_names(flow.metadata_json)
+        form = run_form_field_roles(flow.metadata_json)
+        form_fields = tuple(name for name, _ in form)
         reads: dict[int, tuple[StepRead, ...]] = {}
         field_reads: dict[int, tuple[FormFieldRead, ...]] = {}
         unreadable: set[int] = set()
@@ -405,6 +408,7 @@ class DraftReads:
             form_field_reads=field_reads,
             form_fields=form_fields,
             unreadable=frozenset(unreadable),
+            role_form_fields=frozenset(name for name, role in form if role),
         )
 
     def step_at(self, order: int) -> SuggestionStep | None:
@@ -486,8 +490,11 @@ def step_reads(
     )
 
 
-def run_form_field_names(metadata_json: Mapping[str, object] | None) -> tuple[str, ...]:
-    """The names of the run form's fields as saved, in their order."""
+def run_form_field_roles(
+    metadata_json: Mapping[str, object] | None,
+) -> tuple[tuple[str, str | None], ...]:
+    """The names of the run form's fields as saved, in their order, each with
+    its role (``run_label``, ``run_date``) or None."""
     try:
         schema = parse_flow_form_schema(
             metadata_json, mode=FlowFormSchemaParseMode.PERSISTED_READ
@@ -496,7 +503,9 @@ def run_form_field_names(metadata_json: Mapping[str, object] | None) -> tuple[st
         return ()
     if schema is None:
         return ()
-    return tuple(name for item in schema.fields if (name := item.name.strip()))
+    return tuple(
+        (name, item.role) for item in schema.fields if (name := item.name.strip())
+    )
 
 
 def uses_completion_model(step: SuggestionStep) -> bool:
@@ -559,7 +568,7 @@ __all__ = [
     "join_descriptions",
     "make_suggestion",
     "read_payload",
-    "run_form_field_names",
+    "run_form_field_roles",
     "step_reads",
     "suggestion_fingerprint",
     "uses_completion_model",
