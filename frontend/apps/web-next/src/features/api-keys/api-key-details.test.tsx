@@ -31,3 +31,26 @@ it("says the usage could not be read, not that the key has none", async () => {
   expect(screen.getByRole("button", { name: /^Försök igen/ })).toBeTruthy();
   expect(screen.queryByText("Inga användningshändelser hittades för den här nyckeln.")).toBeNull();
 });
+
+it("lists every resource the key reaches, Flows and Flow evidence included", () => {
+  api.GET.mockReturnValue(new Promise(() => {}));
+  renderInApp(
+    <ApiKeyDetailsDialog
+      apiKey={{
+        ...apiKey,
+        key_type: "sk_",
+        permission: "write",
+        scope_type: "tenant",
+        resource_permissions: { flows: "write", flow_evidence: "read", spaces: "none" }
+      }}
+      mode="admin"
+      tab="overview"
+      open
+      onOpenChange={() => {}}
+    />
+  );
+
+  expect(screen.getByText("Flöden: Skriv")).toBeTruthy();
+  expect(screen.getByText("Flödesbevis: Läs")).toBeTruthy();
+  expect(screen.queryByText(/^Ytor:/)).toBeNull();
+});

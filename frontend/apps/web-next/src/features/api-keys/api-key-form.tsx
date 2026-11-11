@@ -491,6 +491,8 @@ function ChoiceGroup({
 const RESOURCE_LABEL: Record<ResourceKey, string> = {
   assistants: "api_keys_resource_assistants",
   apps: "api_keys_resource_applications",
+  flows: "api_keys_resource_flows",
+  flow_evidence: "api_keys_resource_flow_evidence",
   spaces: "api_keys_resource_spaces",
   knowledge: "api_keys_resource_knowledge",
   conversations: "api_keys_resource_conversations",
