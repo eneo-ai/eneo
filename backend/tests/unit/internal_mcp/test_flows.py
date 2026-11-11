@@ -1611,6 +1611,15 @@ async def test_the_tools_that_act_beyond_the_draft_declare_destructive_hint():
     assert flows.EDIT_MODE_TOOLS <= set(tools) - _READING_TOOLS
 
 
+async def test_the_model_reads_each_tool_description_without_the_codes_indentation():
+    # The descriptions reach the model in every round; indentation is only
+    # the source's layout.
+    for tool in await flows.mcp.list_tools():
+        description = tool.description or ""
+        assert description.strip(), tool.name
+        assert "\n " not in description, tool.name
+
+
 # --- Settings keep what the change leaves out ---------------------------------
 
 

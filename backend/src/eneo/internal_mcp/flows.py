@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -42,6 +43,19 @@ mcp = FastMCP(
 _READS = ToolAnnotations(readOnlyHint=True)
 _EDITS_DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 _ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+
+
+def _tool(annotations: ToolAnnotations):
+    """Register a flow tool. Its description is its docstring without the
+    source's indentation: the model reads every description in every round."""
+
+    def register(fn):
+        return mcp.tool(
+            annotations=annotations, description=inspect.cleandoc(fn.__doc__ or "")
+        )(fn)
+
+    return register
+
 
 # How the audit entries of a change made through the chat name their origin.
 AUTHORING_CHAT_ORIGIN = "authoring_chat"
@@ -485,7 +499,7 @@ _OVERVIEW_STEP_FIELDS = frozenset(
 )
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_flow(
     ctx: Context,
     section: FlowSection = "overview",
@@ -576,7 +590,7 @@ async def read_flow(
     return await _call(ctx, operation)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def update_flow_settings(
     ctx: Context, expected_revision: int, changes: dict[str, Any]
 ) -> CallToolResult:
@@ -621,7 +635,7 @@ async def update_flow_settings(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_step_assistant(
     ctx: Context, step_id: UUID, offset: int = 0
 ) -> CallToolResult:
@@ -764,7 +778,7 @@ def require_safe_model_configuration(
             )
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def update_step(
     ctx: Context,
     expected_revision: int,
@@ -963,7 +977,7 @@ def _merged_settings(
     return {**settings, "metadata_json": merged}
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def update_steps(
     ctx: Context,
     expected_revision: int,
@@ -1079,7 +1093,7 @@ _EXAMPLE_PROBLEMS = {
 }
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def contract_from_example(
     ctx: Context, expected_revision: int, step_id: UUID, example: str
 ) -> CallToolResult:
@@ -1149,7 +1163,7 @@ async def contract_from_example(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def add_step(
     ctx: Context,
     expected_revision: int,
@@ -1229,7 +1243,7 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def move_step(
     ctx: Context, expected_revision: int, step_id: UUID, position: int
 ) -> CallToolResult:
@@ -1250,7 +1264,7 @@ async def move_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def remove_step(
     ctx: Context, expected_revision: int, step_id: UUID
 ) -> CallToolResult:
@@ -1307,7 +1321,7 @@ async def _save_order(container, chat, request, expected_revision, ids):
     )
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
     """Publish the current revision after the user explicitly requests
     publication. The person confirms it in the chat before it happens; a
@@ -1330,7 +1344,7 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
@@ -1350,7 +1364,7 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     return await _call(ctx, operation)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_flow_suggestions(
     ctx: Context, include_runs: bool = False, offset: int = 0
 ) -> CallToolResult:
@@ -1424,7 +1438,7 @@ _NO_TRACE_NOTE = (
 )
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def apply_flow_suggestions(
     ctx: Context, fingerprints: list[str], expected_revision: int
 ) -> CallToolResult:
@@ -1469,7 +1483,7 @@ async def apply_flow_suggestions(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def dismiss_flow_suggestion(
     ctx: Context, fingerprint: str, code: str
 ) -> CallToolResult:
@@ -1513,7 +1527,7 @@ async def dismiss_flow_suggestion(
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def run_flow(
     ctx: Context,
     expected_flow_version: int,
@@ -1556,7 +1570,7 @@ async def run_flow(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToolResult:
     """Start a failed run again from its failed step, on the same flow version
     with the same inputs, keeping the steps that completed before it. Only
@@ -1606,7 +1620,7 @@ async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToo
 RunSection = Literal["summary", "all"]
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_run(
     ctx: Context, run_id: UUID, section: RunSection = "summary", offset: int = 0
 ) -> CallToolResult:
@@ -1663,7 +1677,7 @@ async def read_run(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
     """Cancel a run of this flow only when the user asks to cancel it. The
     person confirms it in the chat first; a denied call cancelled nothing."""
@@ -1681,7 +1695,7 @@ async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
     """Read the active review and its revision before proposing a review decision."""
 
@@ -1698,7 +1712,7 @@ async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolRe
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def review_run(
     ctx: Context,
     run_id: UUID,
