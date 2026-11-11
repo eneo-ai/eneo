@@ -140,6 +140,8 @@ test("apt has deadlines only on its network phase and installs nothing it did no
   // The PDF sidecar's libraries come through the same mirror fallback (run 43049725075).
   assert.match(toolRuntime, /"\$GITHUB_WORKSPACE\/\.github\/scripts\/ci-apt-install\.sh" \\\n +libpango-1\.0-0 /);
   assert.doesNotMatch(toolRuntime, /apt-get/);
+  // ...and a change to the script runs that workflow on the pull request.
+  assert.match(toolRuntime, /^    paths: \[.*'\.github\/scripts\/ci-apt-install\.sh'.*\]$/m);
 
   // The three bounded attempts (13.5 min at worst) still leave each Playwright job its time.
   const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/)

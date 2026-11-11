@@ -3,7 +3,7 @@ name: Tool Runtime Image
 
 on:
   pull_request:
-    paths: ['tool-runtime/**', '.github/workflows/tool_runtime_image.yml']
+    paths: ['tool-runtime/**', '.github/workflows/tool_runtime_image.yml', '.github/scripts/ci-apt-install.sh']
   workflow_call:
     inputs:
       version:

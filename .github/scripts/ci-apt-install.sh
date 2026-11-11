@@ -10,8 +10,8 @@
 # Each attempt uses its own mirror: the runner's list, then archive.ubuntu.com,
 # then mirrors.edge.kernel.org. In run 43049732281 neither azure.archive.ubuntu.com
 # nor archive.ubuntu.com resolved, while kernel.org's mirror served the same
-# packages that day; a third mirror outside ubuntu.com lets CI pass such an
-# outage. Every attempt fetches its mirror's index before downloading.
+# packages that day (third attempt of eneo-mod-speech-to-text run 43053141729);
+# a third mirror outside ubuntu.com lets CI pass such an outage. Every attempt fetches its mirror's index before downloading.
 # `apt-get update` exits 0 when it fetched none ("ignored, or old ones used"),
 # so its warning about the mirror list ends the attempt, and a download is
 # never tried against the old index. Only the URI of the same Ubuntu archive
