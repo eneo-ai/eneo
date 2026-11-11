@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.data_retention.application import retention_sql_limits
 from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
@@ -33,6 +34,9 @@ from eneo.data_retention.application.retention_runner import (
     RetentionStep,
     RetentionStepResult,
     RetentionTenantEffect,
+)
+from eneo.data_retention.application.retention_sql_limits import (
+    set_retention_timeouts,
 )
 from eneo.data_retention.domain.retention import (
     RetentionBudget,
@@ -903,6 +907,21 @@ async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
         )
 
     monkeypatch.setattr(retention_tasks, "retention_task_registrations", registrations)
+    # The health read imports the setter inside its function, so it is
+    # replaced where it is defined.
+    timeouts: list[tuple[int, int]] = []
+
+    async def spy(
+        session: AsyncSession, *, statement_timeout_ms: int, lock_timeout_ms: int
+    ) -> None:
+        timeouts.append((statement_timeout_ms, lock_timeout_ms))
+        await set_retention_timeouts(
+            session,
+            statement_timeout_ms=statement_timeout_ms,
+            lock_timeout_ms=lock_timeout_ms,
+        )
+
+    monkeypatch.setattr(retention_sql_limits, "set_retention_timeouts", spy)
     settings = get_settings()
     if limit_seconds is not None:
         settings = settings.model_copy(
@@ -910,6 +929,11 @@ async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
         )
 
     health = await _health(settings)
+
+    # Half the read's limit, whatever the limit: the default here, two
+    # seconds in the slow case.
+    half = settings.retention_health_timeout_seconds * 1000 / 2
+    assert timeouts == [(half, half)]
 
     assert [(task.name, task.status) for task in health.tasks] == [
         ("tests.broken", RetentionHealthStatus.UNKNOWN),
