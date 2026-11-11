@@ -51,6 +51,8 @@ def test_fresh_database_and_each_parent_reach_combined_schema(test_settings, sta
             assert current_revisions(conn) == {head}
             with conn.cursor() as cursor:
                 assert _has_column(cursor, "sessions", "feedback_set_at")
-                assert _has_column(cursor, "flow_live_transcripts", "part_start_samples")
+                assert _has_column(
+                    cursor, "flow_live_transcripts", "part_start_samples"
+                )
                 cursor.execute("SELECT to_regclass('public.retention_job_runs')")
                 assert cursor.fetchone() == ("retention_job_runs",)

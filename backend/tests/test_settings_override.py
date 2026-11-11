@@ -270,6 +270,8 @@ def test_platform_task_runtime_settings_are_environment_configurable(
 
     assert settings.task_execution_timeout_seconds == 3600
     assert settings.task_maintenance_timeout_seconds == 120
+
+
 BROWSER_SIGN_IN_VALUES = {
     "OIDC_DISCOVERY_ENDPOINT": "https://idp.example.org/.well-known/openid-configuration",
     "OIDC_CLIENT_ID": "env-client-id",

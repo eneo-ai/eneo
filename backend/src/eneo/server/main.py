@@ -16,6 +16,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
     require_endpoint_access,
 )
+from eneo.data_retention.application.retention_health import RetentionHealthStatus
 from eneo.flows.runtime.flow_runtime_health import (
     FlowRuntimeHealthResponse,
     FlowRuntimeProbe,
@@ -25,7 +26,6 @@ from eneo.flows.runtime.flow_runtime_health import (
     flow_runtime_health_probe_failure_response,
     load_flow_runtime_health_snapshot,
 )
-from eneo.data_retention.application.retention_health import RetentionHealthStatus
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger

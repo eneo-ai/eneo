@@ -504,7 +504,8 @@ async def test_pdf_fixture_preserves_golden_text(bounded):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("stem", "code"), [("Utredning", "EXTRACTION_FAILED"), ("Utredning corrupt", "CORRUPT")]
+    ("stem", "code"),
+    [("Utredning", "EXTRACTION_FAILED"), ("Utredning corrupt", "CORRUPT")],
 )
 async def test_a_parser_error_quoting_the_file_stays_out_of_the_bounded_extraction_error(
     tmp_path, stem, code

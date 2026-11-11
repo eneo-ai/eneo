@@ -275,6 +275,8 @@ def test_legacy_inline_limit_does_not_block_admin_policy_rollout(caplog):
     assert "stored policy takes precedence" in caplog.text
     assert "removed in Eneo 2.3" in caplog.text
     assert UPGRADE_GUIDE_URL not in caplog.text
+
+
 MOBILITYGUARD_RENAMES = [
     ("MOBILITYGUARD_DISCOVERY_ENDPOINT", "OIDC_DISCOVERY_ENDPOINT"),
     ("MOBILITYGUARD_CLIENT_ID", "OIDC_CLIENT_ID"),
