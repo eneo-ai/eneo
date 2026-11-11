@@ -1832,6 +1832,9 @@ async def test_a_recording_put_first_takes_the_run_input_over_in_one_revision(
     revision = created.json()["draft_revision"]
     first, last = created.json()["steps"]
     ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    kinds = json.loads(_page(await flows.read_step_kinds(ctx, position=1))["content"])
+    (offered,) = [item for item in kinds["kinds"] if item["kind"] == "transcribe"]
+    assert offered["allowed"] is True
 
     added = await flows.add_step(
         ctx, revision, "Transkribera", FlowStepKind.TRANSCRIBE, position=1
@@ -1848,6 +1851,11 @@ async def test_a_recording_put_first_takes_the_run_input_over_in_one_revision(
             "name": "Sammanfatta",
             "changes": {"input_source": "previous_step"},
         }
+    ]
+    # The read said beforehand what the addition would hand over.
+    assert offered["hand_over"] == [
+        {key: item[key] for key in ("step_order", "changes")}
+        for item in content["hand_over"]
     ]
     current = (await client.get(base + "/", headers=headers)).json()
     assert current["draft_revision"] == revision + 1
@@ -1971,3 +1979,74 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
         "Beslut {{ step_1.output.structured.beslut }}"
     )
     assert (word["output_mode"], word["output_type"]) == ("template_fill", "docx")
+
+
+async def test_a_speaker_step_is_added_with_the_run_form_field_it_reads(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    transcribed = await flows.add_step(
+        ctx, revision, "Transkribera", FlowStepKind.TRANSCRIBE
+    )
+    assert not transcribed.isError, transcribed.content[0].text
+    revision += 1
+    form = {"fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]}
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Granska transkript",
+        FlowStepKind.SPEAKERS,
+        values={"participants_field": "deltagare"},
+        settings={"metadata_json": {"form_schema": form}},
+    )
+
+    assert not added.isError, added.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    speakers = current["steps"][1]
+    assert speakers["output_mode"] == "speaker_mapping"
+    assert speakers["review_policy"]["mode"] == "edit"
+    assert speakers["output_config"]["speaker_mapping"]["participants_field"] == (
+        "deltagare"
+    )
+    assert current["metadata_json"]["form_schema"]["fields"][0]["name"] == ("deltagare")
+    # The transcription turned on by the first step survives the new form.
+    assert current["metadata_json"]["wizard"]["transcription_enabled"] is True
+
+
+async def test_a_word_step_is_added_with_a_template_the_flow_has(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    template_id = word["output_config"]["template_asset_id"]
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={
+            "template_asset_id": template_id,
+            "bindings": {"case_id": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    assert not [
+        blocker
+        for blocker in page["publish_blockers"]
+        if blocker.get("step", {}).get("step_order") == 3
+    ]
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    new = steps[2]
+    assert new["output_mode"] == "template_fill"
+    assert new["output_config"]["template_asset_id"] == template_id
+    assert new["output_config"]["placeholders"] == ["case_id"]
+    assert new["output_config"]["bindings"] == {"case_id": "{{ step_1.output.text }}"}

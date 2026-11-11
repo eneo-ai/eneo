@@ -479,6 +479,11 @@ _FACTS = '{"beslut": "Bifall", "datum": "2026-11-11"}'
             {"output_mode": "render_verbatim", "output_type": "pdf"},
         ),
         (
+            FlowStepKind.FETCH_HTTP,
+            {"url": _URL, "http": {"response_format": "json"}},
+            {"input_source": "http_get", "output_mode": "compose_text"},
+        ),
+        (
             FlowStepKind.SEND_HTTP,
             {
                 "url": _URL,
@@ -503,6 +508,13 @@ async def test_each_value_a_kind_takes_is_in_the_saved_step(
     dumped = step.model_dump(mode="json")
     for column, value in saved.items():
         assert dumped[column] == value, column
+    if kind is FlowStepKind.FETCH_HTTP:
+        config = dumped["input_config"]
+        assert (config["url"], config["response_format"], config["auth"]) == (
+            _URL,
+            "json",
+            {"mode": "none"},
+        )
     if kind is FlowStepKind.SEND_HTTP:
         config = dumped["output_config"]
         assert (config["url"], config["auth"]["mode"], config["timeout_seconds"]) == (
