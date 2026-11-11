@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -825,6 +826,8 @@ async def test_a_change_reports_what_stands_between_the_draft_and_publishing(
         },
     ]
     assert page["publish_blocker_count"] == 2
+    assert page["publish_blockers_complete"] is True
+    assert "publish_blockers_note" not in page
     assert json.loads(page["content"])["saved"] is True
 
 
@@ -837,6 +840,29 @@ async def test_a_draft_with_nothing_in_the_way_reports_no_publish_blockers(
 
     assert page["publish_blockers"] == []
     assert page["publish_blocker_count"] == 0
+    assert page["publish_blockers_complete"] is True
+
+
+async def test_the_same_refusal_met_twice_is_one_blocker(monkeypatch):
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+
+    def refusal():
+        return FlowStepValidationError(
+            "Step 2: input_bindings.source_refs[0] has unsupported key 'step'.",
+            step_order=2,
+            code="flow_input_binding_unsupported_key",
+        )
+
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[refusal(), refusal(), refusal()],
+    )
+
+    page = await _update_step()
+
+    assert len(page["publish_blockers"]) == page["publish_blocker_count"] == 1
 
 
 async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
@@ -855,11 +881,64 @@ async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
         f"Refusal {number}." for number in range(flows.MAX_REPORTED_PUBLISH_BLOCKERS)
     ]
     assert page["publish_blocker_count"] == 12
+    # The rest is not silently dropped: the page says where all of them are.
+    assert page["publish_blockers_complete"] is False
+    assert 'read_flow section "blockers"' in page["publish_blockers_note"]
 
 
-async def test_unreadable_publish_blockers_still_save_and_report_nothing(
-    monkeypatch, caplog
+@pytest.mark.parametrize("cap", range(1000, 1400, 9))
+async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch, cap):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: cap)
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[BadRequestException(f"Refusal {n}. " + "x" * 400) for n in range(3)],
+    )
+
+    page = await _update_step()
+
+    assert len(page["publish_blockers"]) < page["publish_blocker_count"] == 3
+    assert page["publish_blockers_complete"] is False
+    assert 'read_flow section "blockers"' in page["publish_blockers_note"]
+    # The note is part of the page it fits in.
+    assert len(json.dumps(page, ensure_ascii=False)) <= cap
+
+
+@pytest.mark.parametrize(
+    "blockers",
+    [
+        [BadRequestException(f"Refusal {n}. " + "x" * 200) for n in range(3)],
+        [],
+        RuntimeError("unreadable"),
+    ],
+    ids=["computed", "empty", "unreadable"],
+)
+@pytest.mark.parametrize("cap", [800, 900, 1000])
+async def test_a_crowded_change_result_stays_within_its_page(
+    monkeypatch, blockers, cap
 ):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: cap)
+    _changing_chat(
+        monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT, blockers=blockers
+    )
+
+    page = await _update_step()
+
+    # The optional lists and the note give way; the counters and the flag stay.
+    assert len(json.dumps(page, ensure_ascii=False)) <= cap
+    assert page["suggestion_count"] >= 1
+    if isinstance(blockers, Exception):
+        assert page["publish_blockers"] is page["publish_blocker_count"] is None
+        assert page["publish_blockers_complete"] is False
+    else:
+        assert page["publish_blocker_count"] == len(blockers)
+        assert page["publish_blockers_complete"] is (
+            len(page["publish_blockers"]) == len(blockers)
+        )
+
+
+async def test_unreadable_publish_blockers_still_save_and_say_so(monkeypatch, caplog):
     save = _changing_chat(
         monkeypatch,
         before="Sammanfatta.",
@@ -871,8 +950,11 @@ async def test_unreadable_publish_blockers_still_save_and_report_nothing(
 
     save.assert_awaited_once()
     assert json.loads(page["content"])["saved"] is True
-    assert "publish_blockers" not in page
-    assert "publish_blocker_count" not in page
+    # Never silence: the page says the blockers could not be read now.
+    assert page["publish_blockers"] is None
+    assert page["publish_blocker_count"] is None
+    assert page["publish_blockers_complete"] is False
+    assert "could not be read" in page["publish_blockers_note"]
     # The suggestions are reported all the same.
     assert page["introduced_suggestions"] == []
     # Logged by its kind, without the content it read.
@@ -976,18 +1058,25 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         MagicMock(),
         expected_revision=4,
         step_id=_DRAFT_IDS[1],
-        example='{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null}',
+        example=(
+            '{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null,'
+            ' "sak": {"nr": "1"}, "c.d": "x"}'
+        ),
     )
 
     assert result.isError is not True
     page = json.loads(result.content[0].text)
     body = json.loads(page["content"])
     assert body["saved"] is True
+    # word: whether a Word field may read the field (publish's rule): a list,
+    # an object and a field that may be null cannot be.
     assert body["fields"] == [
-        {"name": "beslut", "type": "string", "variable": True},
-        {"name": "belopp", "type": "number", "variable": True},
-        {"name": "a.b", "type": "array", "variable": False},
-        {"name": "n", "type": ["string", "null"], "variable": True},
+        {"name": "beslut", "type": "string", "variable": True, "word": True},
+        {"name": "belopp", "type": "number", "variable": True, "word": True},
+        {"name": "a.b", "type": "array", "variable": False, "word": False},
+        {"name": "n", "type": ["string", "null"], "variable": True, "word": False},
+        {"name": "sak", "type": "object", "variable": True, "word": False},
+        {"name": "c.d", "type": "string", "variable": False, "word": False},
     ]
     assert body["notes"] == ["empty_list", "null_value"]
     request = save.await_args.args[2]
@@ -998,9 +1087,39 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         "belopp",
         "a.b",
         "n",
+        "sak",
+        "c.d",
     ]
     # The contract carries the fields' types, never the example's values.
     assert "Bifall" not in json.dumps(request.model_dump(mode="json"))
+    # word says what publish accepts as a Word field's read of the field.
+    for field in body["fields"]:
+        assert (
+            _word_field_publishes(edit.changes.output_contract, field["name"])
+            is field["word"]
+        ), field
+
+
+def _word_field_publishes(contract, name):
+    from eneo.flows.flow_validators import publish_step_refusals
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    steps = [
+        _step(1, output_type="json", output_contract=contract),
+        _step(
+            2,
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "placeholders": ["falt"],
+                "bindings": {"falt": "{{ step_1.output.structured." + name + " }}"},
+            },
+        ),
+    ]
+    return not publish_step_refusals(
+        steps, metadata_json=None, prompt_templates={1: "Ta fram fakta.", 2: ""}
+    )
 
 
 async def test_an_example_that_gives_no_contract_is_refused_without_saving(monkeypatch):
@@ -1236,9 +1355,10 @@ async def test_the_chat_has_no_tool_to_unpublish_a_flow():
 _STEP_2_PROMPT = "Sammanfatta {{ step_1.output.text }}."
 
 
-def _reading_chat(monkeypatch):
+def _reading_chat(monkeypatch, blockers=()):
     """A view-mode chat over the example flow: step 2 reads step 1 as its
-    input and again in its prompt."""
+    input and again in its prompt; publish would refuse it for
+    ``blockers``."""
     from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
     from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
     from tests.unit.flows.application.test_flow_suggestion_service import (
@@ -1276,6 +1396,11 @@ def _reading_chat(monkeypatch):
     service = container.flow_service.return_value
     service.get_flow = AsyncMock(return_value=saved)
     service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
+    service.publish_blockers = (
+        AsyncMock(side_effect=blockers)
+        if isinstance(blockers, Exception)
+        else AsyncMock(return_value=list(blockers))
+    )
     monkeypatch.setattr(
         flow_authoring_operations, "get_flow", AsyncMock(return_value=public)
     )
@@ -1327,6 +1452,48 @@ async def test_the_steps_section_gives_the_chosen_steps_in_full_with_prompts(
     assert step["prompt"] == _STEP_2_PROMPT
     assert "input_bindings" in step and "output_config" in step
     assert len(step["reads"]) == 2
+
+
+async def test_the_blockers_section_lists_every_publish_blocker(monkeypatch):
+    _reading_chat(
+        monkeypatch,
+        blockers=[BadRequestException(f"Refusal {n}.") for n in range(12)],
+    )
+
+    _page, content = await _read(section="blockers")
+
+    assert [blocker["message"] for blocker in content["publish_blockers"]] == [
+        f"Refusal {n}." for n in range(12)
+    ]
+    assert content["publish_blocker_count"] == 12
+
+
+async def test_blockers_that_cannot_be_read_are_refused_and_say_so(monkeypatch):
+    _reading_chat(monkeypatch, blockers=RuntimeError("unreadable"))
+
+    result = await flows.read_flow(MagicMock(), section="blockers")
+
+    assert result.isError is True
+    assert "could not be read" in json.loads(result.content[0].text)["message"]
+
+
+async def test_more_blockers_than_a_page_holds_are_read_in_full_page_by_page(
+    monkeypatch,
+):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: 2000)
+    messages = [f"Refusal {n}. " + "x" * 200 for n in range(40)]
+    _reading_chat(monkeypatch, blockers=[BadRequestException(m) for m in messages])
+
+    text, offset, pages = "", 0, 0
+    while offset is not None:
+        result = await flows.read_flow(MagicMock(), section="blockers", offset=offset)
+        page = json.loads(result.content[0].text)
+        text, offset, pages = text + page["content"], page["next_offset"], pages + 1
+
+    assert pages > 1
+    content = json.loads(text)
+    assert [blocker["message"] for blocker in content["publish_blockers"]] == messages
+    assert content["publish_blocker_count"] == 40
 
 
 async def test_a_step_number_the_flow_lacks_is_refused(monkeypatch):
@@ -1578,6 +1745,415 @@ def test_the_tools_that_describe_a_step_name_no_kind_of_step():
     )
 
 
+# --- A Word step keeps its template ------------------------------------------
+
+
+_WORD_STEP = {
+    "output_mode": "template_fill",
+    "output_config": {
+        "template_asset_id": "7b0e2f0a-8d4c-4c3e-9f51-2b6a1f0c9d11",
+        "template_name": "Beslut.docx",
+        "placeholders": ["namn"],
+        "bindings": {},
+    },
+}
+
+
+_TEMPLATE_ID = _WORD_STEP["output_config"]["template_asset_id"]
+
+
+@pytest.mark.parametrize(
+    "output_config",
+    [
+        {"bindings": {"namn": "{{ flow_input.namn }}"}},
+        {"template_asset_id": None, "bindings": {}},
+        {"template_asset_id": " ", "bindings": {}},
+        {"template_asset_id": "0f7c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f", "bindings": {}},
+    ],
+)
+def test_an_object_without_the_word_steps_template_is_refused(output_config):
+    with pytest.raises(BadRequestException) as refused:
+        flows.require_kept_template({"output_config": output_config}, _WORD_STEP)
+
+    # It says how to keep the template and how to remove it on purpose.
+    assert _TEMPLATE_ID in str(refused.value)
+    assert "null" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        # The id alone keeps the template: the save refills its field names
+        # and publish reads its name and checksum itself.
+        {
+            "output_config": {
+                "template_asset_id": _TEMPLATE_ID,
+                "bindings": {"namn": ""},
+            }
+        },
+        # null removes the template on purpose.
+        {"output_config": None},
+        # A step that stops filling a template takes its template with it.
+        {"output_mode": "pass_through", "output_config": {}},
+        {"user_description": "Beslut"},
+    ],
+)
+def test_a_change_that_keeps_or_removes_the_template_on_purpose_is_saved(changes):
+    flows.require_kept_template(changes, _WORD_STEP)
+
+
+# --- What a step reads ---------------------------------------------------------
+
+
+async def _descriptions() -> dict[str, str]:
+    return {
+        tool.name: " ".join((tool.description or "").split())
+        for tool in await flows.mcp.list_tools()
+    }
+
+
+async def test_a_step_that_mostly_copies_its_input_is_worth_trying_without_a_model():
+    description = (await _descriptions())["read_flow_suggestions"]
+
+    # What the check measured, not a verdict that the step only copies.
+    assert "only copies its inputs" not in description
+    assert "most of the step's output was its input copied" in description
+    assert (
+        "a step without a model is worth trying when the step's own part is not "
+        "needed" in description
+    )
+
+
+async def test_update_step_states_the_shape_of_what_a_step_reads():
+    from eneo.flows.input_binding_contract_rules import (
+        SOURCE_REF_KEYS,
+        SUPPORTED_INPUT_BINDING_KEYS,
+    )
+
+    descriptions = await _descriptions()
+    shape = descriptions["update_step"]
+
+    # Every key the step rules accept is named where the chat reads it.
+    for key in SUPPORTED_INPUT_BINDING_KEYS | SOURCE_REF_KEYS:
+        assert key in shape, key
+    assert "input_contract" in shape
+    for example in [*flows.INPUT_BINDINGS_EXAMPLES.values(), flows.JSON_READ_EXAMPLE]:
+        assert json.dumps(example, ensure_ascii=False) in shape
+    # What a json step's projection excludes, and when no contract is sent.
+    assert "no question and no item_template" in shape
+    assert "With other input_bindings send no input_contract" in shape
+    assert "a json step without input_bindings may keep its own" in shape
+    assert "otherwise send no input_contract" not in shape
+    # Both configs are replaced whole.
+    assert "input_config and output_config are each replaced whole" in shape
+    # add_step names every step field it takes.
+    assert "input_contract" in descriptions["add_step"]
+    # The other tools that take a step's fields point to it, without a copy.
+    for name in ("add_step", "update_steps"):
+        assert "update_step" in descriptions[name]
+        assert '"source_refs"' not in descriptions[name]
+
+
+@pytest.mark.parametrize("name", ["fields", "text", "json"])
+def test_each_read_update_step_shows_is_saved_and_published(name):
+    from eneo.flows.flow_validators import publish_step_refusals, validate_steps
+    from eneo.flows.input_binding_contract_rules import (
+        derive_structured_projection_contract,
+    )
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    facts = {
+        "type": "object",
+        "properties": {
+            "beslut": {"type": "string"},
+            "datum": {"type": "string"},
+            "deltagare": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["beslut", "datum", "deltagare"],
+    }
+    reader = (
+        flows.JSON_READ_EXAMPLE
+        if name == "json"
+        else {"input_bindings": flows.INPUT_BINDINGS_EXAMPLES[name]}
+    )
+    steps = [
+        _step(1, output_type="json", output_contract=facts),
+        _step(2, **reader),
+    ]
+    prompts = {1: "Ta fram fakta ur protokollet.", 2: "Skriv ett beslutsbrev."}
+    if name == "json":
+        # The contract shown is the one the step rules derive.
+        assert reader["input_contract"] == derive_structured_projection_contract(
+            input_bindings=reader["input_bindings"],
+            source_contracts_by_step_ref={"step_1": facts},
+        )
+
+    validate_steps(steps, metadata_json=None, prompt_templates=prompts)
+    assert (
+        publish_step_refusals(steps, metadata_json=None, prompt_templates=prompts) == []
+    )
+
+
+# --- The examples the chat reads -------------------------------------------------
+
+# The assistant's own fields as add_step and update_step show them.
+_ASSISTANT_EXAMPLES = [{"prompt": {"text": "Sammanfatta brevet."}}]
+# Shapes of a tool's arguments that hold no configuration, by why.
+_ARGUMENT_SHAPES = {
+    '{"old name": "new name"}': "form_field_renames maps the form's own names",
+    '{"step_id": ..., "changes": {...}': "update_steps' call shape",
+}
+
+
+async def test_every_example_the_chat_reads_is_one_the_rules_are_held_to():
+    from eneo.flows.api.flow_models import FlowAssistantUpdateRequest
+
+    texts = [
+        flow_authoring_chat.AUTHORING_INSTRUCTIONS,
+        *(await _descriptions()).values(),
+    ]
+    validated = [
+        *flow_authoring_chat.CONFIGURATION_EXAMPLES.values(),
+        *flows.INPUT_BINDINGS_EXAMPLES.values(),
+        flows.JSON_READ_EXAMPLE,
+        *_ASSISTANT_EXAMPLES,
+    ]
+    for example in _ASSISTANT_EXAMPLES:
+        FlowAssistantUpdateRequest.model_validate(example)
+
+    decoder = json.JSONDecoder()
+    found = []
+    for text in texts:
+        flat = " ".join(text.split())
+        end = 0
+        for opener in re.finditer(r'[{\[]\s*"', flat):
+            if opener.start() < end:
+                continue  # inside the example just read
+            if any(
+                flat.startswith(shape, opener.start()) for shape in _ARGUMENT_SHAPES
+            ):
+                end = opener.end()
+                continue
+            try:
+                value, length = decoder.raw_decode(flat, opener.start())
+            except json.JSONDecodeError:
+                pytest.fail(
+                    f"Not an example the code can read: {flat[opener.start() :][:80]}"
+                )
+            end = length
+            found.append(value)
+            assert value in validated, value
+            # A placeholder is a value the rules accept and a model can save.
+            assert '"..."' not in json.dumps(value), value
+    # Every example kept as data is one the chat reads.
+    for example in validated:
+        assert example in found, example
+
+
+def _configured_flows(examples):
+    """Flows that put each configuration example where its rules run."""
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    form = {
+        "fields": [
+            examples["form_field"],
+            {"name": "datum", "type": "date", "label": "Datum", "required": True},
+            {"name": "arende", "type": "text", "label": "Ärende", "required": True},
+        ]
+    }
+    upload = [
+        _step(
+            1,
+            input_type="document",
+            input_config={
+                "runtime_input": examples["runtime_input"],
+                "long_material": examples["long_material"],
+            },
+        ),
+        _step(
+            2,
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "placeholders": ["datum"],
+                "bindings": examples["word_bindings"],
+            },
+        ),
+    ]
+    speakers = [
+        _step(
+            1,
+            input_type="audio",
+            output_mode="transcribe_only",
+            input_config={
+                "runtime_input": {**examples["runtime_input"], "input_format": "audio"}
+            },
+        ),
+        _step(
+            2,
+            output_type="json",
+            output_mode="speaker_mapping",
+            review_policy=examples["review_edit"],
+            output_config=examples["speaker_mapping"],
+        ),
+    ]
+    request = examples["http_request"]
+    deliveries = [
+        [
+            _step(1, input_source="http_get", input_type="json", input_config=request),
+            _step(2),
+            _step(
+                3,
+                output_mode="http_post",
+                output_config={
+                    **request,
+                    "auth": examples[auth],
+                    "body": examples[body],
+                    "custom_headers": [examples["secret_header"]],
+                },
+            ),
+        ]
+        for auth in ("auth_none", "auth_bearer_token", "auth_api_key", "auth_basic")
+        for body in ("body_auto", "body_template", "body_none")
+    ]
+    return [
+        (upload, {"form_schema": form}),
+        (
+            speakers,
+            {
+                "form_schema": form,
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(uuid4())},
+                },
+            },
+        ),
+        *((steps, {"form_schema": form}) for steps in deliveries),
+    ]
+
+
+def _refusals(steps, metadata):
+    """What a draft save and a publish refuse ``steps`` for, by the step rules
+    and the run form's."""
+    from eneo.flows.flow_validators import draft_step_refusals, publish_step_refusals
+    from eneo.flows.flow_validators_form import validate_form_schema
+
+    validate_form_schema(metadata)
+    prompts = {
+        step.step_order: (
+            "Sammanfatta underlaget."
+            if step.output_mode in ("pass_through", "http_post")
+            else ""
+        )
+        for step in steps
+    }
+    return (
+        draft_step_refusals(steps, metadata_json=metadata),
+        publish_step_refusals(steps, metadata_json=metadata, prompt_templates=prompts),
+    )
+
+
+class _Placed(dict):
+    """The examples, recording which ones a flow places."""
+
+    def __init__(self, examples):
+        super().__init__(examples)
+        self.placed = set()
+
+    def __getitem__(self, name):
+        self.placed.add(name)
+        return super().__getitem__(name)
+
+
+def test_each_configuration_example_is_saved_and_published():
+    examples = _Placed(flow_authoring_chat.CONFIGURATION_EXAMPLES)
+    configured = _configured_flows(examples)
+    # Every example is placed where its rules run.
+    assert examples.placed == set(flow_authoring_chat.CONFIGURATION_EXAMPLES)
+    for steps, metadata in configured:
+        draft, publish = _refusals(steps, metadata)
+
+        assert draft == []
+        # A declared auth mode waits only for the credential the person enters.
+        assert all("HTTP_MISSING_AUTH" in str(refusal) for refusal in publish), publish
+
+
+@pytest.mark.parametrize(
+    ("name", "broken"),
+    [
+        ("runtime_input", {"enabled": True, "input_format": "pdf"}),
+        ("long_material", {"mode": "summary"}),
+        ("word_bindings", {"datum": "{{ flow_input.datum }} och mer"}),
+        ("http_request", {"url": "...", "auth": {"mode": "none"}}),
+        ("review_edit", {"mode": "redigera"}),
+        ("speaker_mapping", {"speaker_mapping": {"participants_field": "saknas"}}),
+        ("form_field", {"name": "deltagare", "type": "lista", "label": "Deltagare"}),
+    ],
+)
+def test_an_example_the_rules_refuse_fails_the_check(name, broken):
+    from pydantic import ValidationError
+
+    examples = {**flow_authoring_chat.CONFIGURATION_EXAMPLES, name: broken}
+
+    def refused(steps, metadata):
+        try:
+            draft, publish = _refusals(steps, metadata)
+        except (BadRequestException, ValidationError):
+            return True
+        return bool(draft) or any(
+            "HTTP_MISSING_AUTH" not in str(refusal) for refusal in publish
+        )
+
+    try:
+        configured = _configured_flows(examples)
+    except ValidationError:
+        return  # the step model refuses it
+    assert any(refused(*flow) for flow in configured)
+
+
+def test_a_refused_read_names_the_shape_the_step_rules_take():
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        SOURCE_REF_KEYS,
+    )
+
+    result = flows._error_result(
+        FlowStepValidationError(
+            "Step 2: input_bindings.source_refs[0] has unsupported key 'step'.",
+            step_order=2,
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        )
+    )
+
+    refusal = json.loads(result.content[0].text)
+    assert refusal["code"] == FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refusal["message"].startswith("Step 2: input_bindings.source_refs[0]")
+    for key in SOURCE_REF_KEYS:
+        assert key in refusal["message"], key
+    assert "update_step" in refusal["message"]
+
+
+def test_a_refusal_that_names_no_unsupported_key_gets_no_shape_hint():
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+    )
+
+    message = (
+        "Step 2: Input binding path 'step_1.output.structured.x' requires the "
+        "referenced step to declare output_contract."
+    )
+    result = flows._error_result(
+        FlowStepValidationError(
+            message, step_order=2, code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+        )
+    )
+
+    assert json.loads(result.content[0].text)["message"] == message
+
+
 # --- What each tool declares ---------------------------------------------------
 
 
@@ -1609,6 +2185,15 @@ async def test_the_tools_that_act_beyond_the_draft_declare_destructive_hint():
             False,
         ), name
     assert flows.EDIT_MODE_TOOLS <= set(tools) - _READING_TOOLS
+
+
+async def test_the_model_reads_each_tool_description_without_the_codes_indentation():
+    # The descriptions reach the model in every round; indentation is only
+    # the source's layout.
+    for tool in await flows.mcp.list_tools():
+        description = tool.description or ""
+        assert description.strip(), tool.name
+        assert "\n " not in description, tool.name
 
 
 # --- Settings keep what the change leaves out ---------------------------------

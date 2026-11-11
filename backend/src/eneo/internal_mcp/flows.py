@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
@@ -42,6 +43,85 @@ mcp = FastMCP(
 _READS = ToolAnnotations(readOnlyHint=True)
 _EDITS_DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 _ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
+
+
+def _tool(annotations: ToolAnnotations, *, appendix: str = ""):
+    """Register a flow tool. Its description is its docstring without the
+    source's indentation, then ``appendix``: the model reads every
+    description in every round."""
+
+    def register(fn):
+        return mcp.tool(
+            annotations=annotations,
+            description=inspect.cleandoc(fn.__doc__ or "") + appendix,
+        )(fn)
+
+    return register
+
+
+# The two reads update_step shows the model; the tests hold them to the step
+# rules (save and publish), so the chat never learns a shape the flow refuses.
+INPUT_BINDINGS_EXAMPLES: dict[str, dict[str, Any]] = {
+    "fields": {
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "beslut",
+                "label": "Beslut",
+            },
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "datum",
+                "label": "Datum",
+            },
+        ]
+    },
+    "text": {"source_refs": [{"step_ref": "step_1", "output": "text"}]},
+}
+# A json step whose input is exactly two fields of step 1's json result, with
+# the input_contract the step rules derive for them.
+JSON_READ_EXAMPLE: dict[str, Any] = {
+    "input_type": "json",
+    "input_bindings": INPUT_BINDINGS_EXAMPLES["fields"],
+    "input_contract": {
+        "type": "object",
+        "properties": {"beslut": {"type": "string"}, "datum": {"type": "string"}},
+        "additionalProperties": False,
+        "required": ["beslut", "datum"],
+    },
+}
+
+
+def _example(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+# What a step reads, said once, where a change to a step is described
+# (input_binding_contract_rules owns the keys; step_definition_parser the
+# input_contract rule).
+_INPUT_BINDINGS_SHAPE = (
+    "\ninput_bindings sets what the step reads; its input_source is then not"
+    " read. It takes question (the input as text with {{ }} references)"
+    " and/or source_refs, a list of reads. A source_ref has step_ref"
+    ' ("step_N"), output ("text": the step\'s whole text; "structured":'
+    " its json result, with field_path naming one field of its"
+    ' output_contract, dotted for a nested field: "sak.diarienummer"),'
+    " label (written before the value) and, in a compose_text step,"
+    ' item_template ("{titel}: {text}" for each item of a list field).'
+    " A step that reads two fields of step 1's json result: "
+    + _example(INPUT_BINDINGS_EXAMPLES["fields"])
+    + ". A step that reads the whole text of step 1: "
+    + _example(INPUT_BINDINGS_EXAMPLES["text"])
+    + ". With input_type json and only structured refs (each with field_path;"
+    " no question and no item_template), the step's input is exactly those"
+    " fields and needs an input_contract equal to them: "
+    + _example(JSON_READ_EXAMPLE)
+    + ". With other input_bindings send no input_contract; a json step without"
+    " input_bindings may keep its own."
+)
+
 
 # How the audit entries of a change made through the chat name their origin.
 AUTHORING_CHAT_ORIGIN = "authoring_chat"
@@ -134,9 +214,10 @@ async def _call(
                     result = await _with_introduced(
                         result, scope.container, chat.flow_id, before
                     )
-                    return await _with_publish_blockers(
+                    result = await _with_publish_blockers(
                         result, scope.container, chat.flow_id
                     )
+                    return _within_page_cap(result)
             except BadRequestException as exc:
                 if exc.code != FlowApiErrorCode.STALE_REVISION:
                     raise
@@ -183,11 +264,35 @@ def _error_result(
     | UnauthorizedException
     | ValidationError,
 ) -> CallToolResult:
-    """The refusal of a tool call that raised ``exc``."""
+    """The refusal of a tool call that raised ``exc``. A refused read
+    (``input_bindings``) also names the keys the step rules take, as
+    ``invalid_message`` names a step's fields."""
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        SOURCE_REF_KEYS,
+        SUPPORTED_INPUT_BINDING_KEYS,
+    )
+
     if isinstance(exc, ValidationError):
         errors = exc.errors(include_input=False, include_context=False)
         return _refusal(invalid_message(errors), code=None, errors=errors)
-    return _refusal(str(exc), code=getattr(exc, "code", None))
+    code = getattr(exc, "code", None)
+    message = str(exc)
+    # The code also covers reads the rules cannot resolve; only a refusal
+    # that names an unsupported key is about the shape.
+    if code == FLOW_INPUT_BINDING_UNSUPPORTED_KEY and (
+        "unsupported key" in message.lower()
+        or "unsupported input_bindings key" in message.lower()
+    ):
+        message += (
+            " input_bindings takes "
+            + " and ".join(sorted(SUPPORTED_INPUT_BINDING_KEYS))
+            + "; a source_ref takes "
+            + ", ".join(sorted(SOURCE_REF_KEYS))
+            + ", as update_step describes them. Correct the read and make the"
+            " call again."
+        )
+    return _refusal(message, code=code)
 
 
 async def _current_revision(scope: Any) -> int | None:
@@ -322,11 +427,6 @@ async def _with_introduced(
     ]
     page["introduced_suggestions"] = introduced[:MAX_REPORTED_INTRODUCED]
     page["suggestion_count"] = len(suggestions)
-    while (
-        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
-        and page["introduced_suggestions"]
-    ):
-        page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
@@ -336,14 +436,22 @@ async def _with_introduced(
 # The most publish blockers one change result lists; the count says how many
 # there are.
 MAX_REPORTED_PUBLISH_BLOCKERS = 10
+_CUT_BLOCKERS_NOTE = (
+    'Only the first publish blockers are listed; read_flow section "blockers" '
+    "lists them all."
+)
+_UNREAD_BLOCKERS_NOTE = (
+    "The change is saved, but its publish blockers could not be read now; "
+    'read_flow section "blockers" reads them again.'
+)
 
 
 async def _publish_blockers(container, flow_id: UUID) -> list[dict[str, Any]] | None:
     """What publish would refuse the draft for now (``FlowService
     .publish_blockers``), each in short with its step by order and name, read
-    in a savepoint of the change's transaction; None when it cannot be
-    computed. A failure is logged by its kind only and never fails the
-    change."""
+    in a savepoint of the caller's transaction, the same refusal met twice
+    listed once; None when it cannot be computed. A failure is logged by its
+    kind only and never fails the change."""
     try:
         async with cast(AsyncSession, container.session()).begin_nested():
             service = container.flow_service()
@@ -366,7 +474,8 @@ async def _publish_blockers(container, flow_id: UUID) -> list[dict[str, Any]] | 
         order = getattr(refusal, "step_order", None) or context.get("step_order")
         if isinstance(order, int):
             blocker["step"] = {"step_order": order, "name": names.get(order)}
-        blockers.append(blocker)
+        if blocker not in blockers:
+            blockers.append(blocker)
     return blockers
 
 
@@ -375,25 +484,72 @@ async def _with_publish_blockers(
 ) -> CallToolResult:
     """``result`` with what stands between the draft, as the change left it,
     and publishing added to its page: ``publish_blockers`` (the first
-    ``MAX_REPORTED_PUBLISH_BLOCKERS``, fewer when the page is full) and
-    ``publish_blocker_count`` (all of them); ``result`` unchanged when they
-    cannot be computed."""
+    ``MAX_REPORTED_PUBLISH_BLOCKERS``; ``_within_page_cap`` may list fewer),
+    ``publish_blocker_count`` (all of them) and ``publish_blockers_complete``;
+    when the list could not be read (both null then), ``publish_blockers_note``
+    says so; ``_within_page_cap`` notes a cut list."""
     if result.isError or not result.content:
         return result
     content = result.content[0]
     if not isinstance(content, TextContent):
         return result
     blockers = await _publish_blockers(container, flow_id)
+    page = json.loads(content.text)
     if blockers is None:
+        page["publish_blockers"] = page["publish_blocker_count"] = None
+        page["publish_blockers_complete"] = False
+        page["publish_blockers_note"] = _UNREAD_BLOCKERS_NOTE
+    else:
+        page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
+        page["publish_blocker_count"] = len(blockers)
+    result.content = [
+        TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
+    ]
+    return result
+
+
+def _within_page_cap(result: CallToolResult) -> CallToolResult:
+    """The one owner of a change result's page budget, run once both the
+    introduced suggestions and the publish blockers are on the page. Optional
+    content gives way, last item first, until the serialised page fits: the
+    introduced suggestions, then the listed blockers, then the blockers note.
+    suggestion_count, publish_blocker_count and publish_blockers_complete
+    always stay, and the flag and note always describe the list as cut.
+
+    The introduced suggestions are a hint and carry no completeness flag of
+    their own: suggestion_count says how many the draft has, and
+    read_flow_suggestions returns them all. A page whose mandatory part alone
+    exceeds the cap is page_result's matter, not handled here."""
+    if result.isError or not result.content:
+        return result
+    content = result.content[0]
+    if not isinstance(content, TextContent):
         return result
     page = json.loads(content.text)
-    page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
-    page["publish_blocker_count"] = len(blockers)
-    while (
-        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
-        and page["publish_blockers"]
-    ):
+    cap = default_page_cap()
+
+    def over() -> bool:
+        return len(json.dumps(page, ensure_ascii=False)) > cap
+
+    def describe_blockers() -> None:
+        listed = page.get("publish_blockers")
+        if listed is None:
+            return  # unread: the flag and its note are set where it was read
+        complete = len(listed) == page["publish_blocker_count"]
+        page["publish_blockers_complete"] = complete
+        if complete:
+            page.pop("publish_blockers_note", None)
+        else:
+            page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
+
+    describe_blockers()
+    while over() and page.get("introduced_suggestions"):
+        page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
+    while over() and page.get("publish_blockers"):
         page["publish_blockers"] = page["publish_blockers"][:-1]
+        describe_blockers()
+    if over():
+        page.pop("publish_blockers_note", None)
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
@@ -449,7 +605,7 @@ def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolRe
     return result
 
 
-FlowSection = Literal["overview", "steps", "settings", "all"]
+FlowSection = Literal["overview", "steps", "settings", "blockers", "all"]
 
 
 async def _transcription_offer(container, space_id: UUID) -> dict[str, Any] | None:
@@ -485,7 +641,7 @@ _OVERVIEW_STEP_FIELDS = frozenset(
 )
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_flow(
     ctx: Context,
     section: FlowSection = "overview",
@@ -498,11 +654,14 @@ async def read_flow(
     declares (output_fields), whether a person reviews it, what it reads
     (reads: each earlier result as the reference the flow resolves and
     where the read is written), which later steps read its result (readers,
-    the same way) and the run form fields it reads. Section "steps" gives
+    the same way), the run form fields it reads and, for a Word step, its
+    template's fields (word_fields: each field and what it reads, null when
+    nothing does, and bindings_without_field). Section "steps" gives
     the steps in full with their assistants' prompts and the same reads;
     section "settings" the flow without its steps (description,
     metadata_json with the run form, retention, permissions); section "all"
-    everything, paged. The overview and the settings also say what the
+    everything, paged; section "blockers" every publish blocker the draft
+    has now, of which a change result lists the first. The overview and the settings also say what the
     flow's space offers for transcription, by name (transcription_offer:
     transcription_models, speaker_services). steps=[5, 8] limits the overview or the steps section
     to those step numbers (1 is first). A step marked unreadable has a
@@ -516,6 +675,7 @@ async def read_flow(
             run_form_fields,
             step_connections,
             step_reads_summary,
+            word_fields,
         )
 
         flow = await get_flow(chat.flow_id, request, container)
@@ -526,6 +686,16 @@ async def read_flow(
             offer = await _transcription_offer(container, chat.space_id)
             if offer is not None:
                 value["transcription_offer"] = offer
+        elif section == "blockers":
+            blockers = await _publish_blockers(container, chat.flow_id)
+            if blockers is None:
+                raise BadRequestException(
+                    "The publish blockers could not be read now; try again."
+                )
+            value = {
+                "publish_blockers": blockers,
+                "publish_blocker_count": len(blockers),
+            }
         else:
             orders = {step.step_order for step in flow.steps}
             if steps is not None and (missing := sorted(set(steps) - orders)):
@@ -556,6 +726,8 @@ async def read_flow(
                     item["prompt"] = prompt.text if prompt is not None else None
                 # The services the step talks to, never their secrets.
                 item["connections"] = step_connections(dump)
+                if step.output_mode == "template_fill":
+                    item["word_fields"] = word_fields(step.output_config)
                 item.update(reads.get(step.step_order, {}))
                 items.append(item)
             value = {
@@ -576,7 +748,7 @@ async def read_flow(
     return await _call(ctx, operation)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def update_flow_settings(
     ctx: Context, expected_revision: int, changes: dict[str, Any]
 ) -> CallToolResult:
@@ -621,7 +793,7 @@ async def update_flow_settings(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_step_assistant(
     ctx: Context, step_id: UUID, offset: int = 0
 ) -> CallToolResult:
@@ -764,7 +936,7 @@ def require_safe_model_configuration(
             )
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT, appendix=_INPUT_BINDINGS_SHAPE)
 async def update_step(
     ctx: Context,
     expected_revision: int,
@@ -773,12 +945,12 @@ async def update_step(
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Patch one saved step and optionally its assistant in one revision. Use the flow's own
-    field names; input_config is replaced whole (long material:
+    field names; input_config and output_config are each replaced whole (long material:
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
     keep theirs; the result names the step's assistant_id. assistant_changes
-    takes the assistant's own fields, for example {"prompt": {"text": "..."}};
+    takes the assistant's own fields, for example {"prompt": {"text": "Sammanfatta brevet."}};
     an instruction is always prompt.text. A change that reaches several steps
     goes in one update_steps call instead."""
 
@@ -900,6 +1072,28 @@ class _StepEdit:
         self.card_fields = card_fields
 
 
+def require_kept_template(changes: dict[str, Any], saved: dict[str, Any]) -> None:
+    """Refuse an output_config object that would drop a Word step's template.
+    A change replaces output_config whole and only the person uploads a
+    template, so an object must carry the saved template_asset_id; the save
+    refills the template's field names from it and publish reads the rest.
+    null removes the template on purpose, and so does another output_mode."""
+    if (changes.get("output_mode") or saved.get("output_mode")) != "template_fill":
+        return
+    sent = changes.get("output_config")
+    kept = (saved.get("output_config") or {}).get("template_asset_id")
+    if not isinstance(sent, dict) or not kept:
+        return
+    if str(sent.get("template_asset_id") or "").strip() == str(kept):
+        return
+    raise BadRequestException(
+        "output_config is replaced whole, and this one does not carry the Word"
+        f' step\'s template. To keep the template, send "template_asset_id":'
+        f' "{kept}" with it; to remove the template on purpose, send'
+        " output_config null."
+    )
+
+
 def _step_edit(
     step: Any,
     changes: dict[str, Any] | None,
@@ -921,6 +1115,7 @@ def _step_edit(
         mode="json", include=set(FlowStepUpdateRequest.model_fields)
     )
     require_safe_model_configuration(changes, saved)
+    require_kept_template(changes, saved)
     return _StepEdit(
         step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
         fields=step_changes(saved, changes, assistant_before, assistant_changes),
@@ -963,7 +1158,7 @@ def _merged_settings(
     return {**settings, "metadata_json": merged}
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def update_steps(
     ctx: Context,
     expected_revision: int,
@@ -1079,7 +1274,7 @@ _EXAMPLE_PROBLEMS = {
 }
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def contract_from_example(
     ctx: Context, expected_revision: int, step_id: UUID, example: str
 ) -> CallToolResult:
@@ -1088,8 +1283,10 @@ async def contract_from_example(
     become required fields typed by their values (numbers as number, lists by
     their first element). Saves output_type json and the contract on the step;
     the example itself is not kept. The result lists the fields, marks a name a
-    later step cannot read as a reference, and notes what one example could
-    not decide (an empty list, a null, a list of mixed elements)."""
+    later step cannot read as a reference (variable false) and a field a Word
+    field cannot read (word false: a list, an object or a null), and notes what
+    one example could not decide (an empty list, a null, a list of mixed
+    elements)."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
@@ -1103,6 +1300,7 @@ async def contract_from_example(
         from eneo.flows.domain.contract_from_example import (
             contract_from_example as read_example,
         )
+        from eneo.flows.flow_validators import template_bound_path_ok
 
         try:
             reading = read_example(example)
@@ -1137,6 +1335,10 @@ async def contract_from_example(
                         "name": item.name,
                         "type": item.schema.get("type"),
                         "variable": item.variable,
+                        # Publish's rule for what a Word field may read: a
+                        # field it can name, of one required primitive type.
+                        "word": item.variable
+                        and template_bound_path_ok(reading.contract, (item.name,)),
                     }
                     for item in reading.fields
                 ],
@@ -1149,7 +1351,7 @@ async def contract_from_example(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def add_step(
     ctx: Context,
     expected_revision: int,
@@ -1164,11 +1366,10 @@ async def add_step(
     what update_flow_settings takes and is saved in the same revision, so a
     step that reads a run form field is added together with the field (the
     whole form_schema in metadata_json); everything is saved or nothing.
-    configuration
-    takes a step's own fields and no other: input_source, input_type,
-    output_mode and output_type, and where the step needs them input_config,
-    output_config, input_bindings, output_contract and review_policy. A step
-    has no kind field. assistant_changes takes the assistant's own
+    configuration takes a step's own fields and no other: input_source,
+    input_type, output_mode and output_type, and where the step needs them
+    input_config, output_config, input_bindings and input_contract (shaped
+    as update_step describes), output_contract and review_policy. A step has no kind field. assistant_changes takes the assistant's own
     fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
     instruction is always prompt.text, never instructions or a bare string.
     An http_post step needs its url in output_config: ask for the address
@@ -1229,7 +1430,7 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def move_step(
     ctx: Context, expected_revision: int, step_id: UUID, position: int
 ) -> CallToolResult:
@@ -1250,7 +1451,7 @@ async def move_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def remove_step(
     ctx: Context, expected_revision: int, step_id: UUID
 ) -> CallToolResult:
@@ -1307,7 +1508,7 @@ async def _save_order(container, chat, request, expected_revision, ids):
     )
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
     """Publish the current revision after the user explicitly requests
     publication. The person confirms it in the chat before it happens; a
@@ -1330,7 +1531,7 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
@@ -1350,7 +1551,7 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     return await _call(ctx, operation)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_flow_suggestions(
     ctx: Context, include_runs: bool = False, offset: int = 0
 ) -> CallToolResult:
@@ -1370,8 +1571,9 @@ async def read_flow_suggestions(
     overlapping_inputs (two inputs of a step share much of their text; when
     a duplicate_read or broad_all_previous_steps names the same two reads,
     the overlap is in its params.measured_overlaps instead) and
-    deterministic_candidate (a model step only copies its inputs, which a
-    compose_text step does without a model), and oversized_reasoning (a step
+    deterministic_candidate (the runs show that most of the step's output was
+    its input copied; a step without a model is worth trying when the step's
+    own part is not needed), and oversized_reasoning (a step
     asks for high reasoning effort for a small extraction into JSON);
     runs.counted and runs.left_out say how many runs were measured. Only
     numbers come from the runs, never their content, and the read is
@@ -1424,7 +1626,7 @@ _NO_TRACE_NOTE = (
 )
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def apply_flow_suggestions(
     ctx: Context, fingerprints: list[str], expected_revision: int
 ) -> CallToolResult:
@@ -1469,7 +1671,7 @@ async def apply_flow_suggestions(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@mcp.tool(annotations=_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT)
 async def dismiss_flow_suggestion(
     ctx: Context, fingerprint: str, code: str
 ) -> CallToolResult:
@@ -1513,7 +1715,7 @@ async def dismiss_flow_suggestion(
     return await _call(ctx, operation, editing=True)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def run_flow(
     ctx: Context,
     expected_flow_version: int,
@@ -1556,7 +1758,7 @@ async def run_flow(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToolResult:
     """Start a failed run again from its failed step, on the same flow version
     with the same inputs, keeping the steps that completed before it. Only
@@ -1606,7 +1808,7 @@ async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToo
 RunSection = Literal["summary", "all"]
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_run(
     ctx: Context, run_id: UUID, section: RunSection = "summary", offset: int = 0
 ) -> CallToolResult:
@@ -1663,7 +1865,7 @@ async def read_run(
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
     """Cancel a run of this flow only when the user asks to cancel it. The
     person confirms it in the chat first; a denied call cancelled nothing."""
@@ -1681,7 +1883,7 @@ async def cancel_run(ctx: Context, run_id: UUID) -> CallToolResult:
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_READS)
+@_tool(_READS)
 async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
     """Read the active review and its revision before proposing a review decision."""
 
@@ -1698,7 +1900,7 @@ async def read_review(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolRe
     return await _call_runtime(ctx, operation)
 
 
-@mcp.tool(annotations=_ACTS)
+@_tool(_ACTS)
 async def review_run(
     ctx: Context,
     run_id: UUID,
