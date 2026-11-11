@@ -30,6 +30,7 @@ from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
     load_authoring_chat,
 )
+from eneo.flows.domain.step_kinds import FlowStepKind, StepKindValues
 from eneo.internal_mcp import flows
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId
@@ -1775,3 +1776,198 @@ async def test_a_word_step_turned_into_another_kind_leaves_its_template(
     assert not changed.isError, changed.content[0].text
     after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
     assert after["output_mode"] == "pass_through"
+
+
+async def _flow_assistant_count(db_container, flow_id: str) -> int:
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(Assistants)
+            .where(Assistants.managing_flow_id == UUID(flow_id))
+        )
+
+
+async def test_a_recording_put_first_takes_the_run_input_over_in_one_revision(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    form = {
+        "fields": [
+            {"name": "arende", "type": "text", "label": "Ärende", "role": "run_label"}
+        ]
+    }
+    summarise = {
+        "name": "Sammanfatta",
+        "configuration": {
+            "input_source": "flow_input",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "review_policy": {"mode": "view"},
+        },
+        "assistant": {"prompt": {"text": "Sammanfatta {{ flow_input.arende }}."}},
+    }
+    deliver = {
+        "name": "Leverera",
+        "configuration": {
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_mode": "compose_text",
+            "output_type": "text",
+            "input_bindings": {"question": "Sammanfattning: {{ step_1.output.text }}"},
+        },
+        "assistant": {},
+    }
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {"metadata_json": {"form_schema": form}},
+            "new_steps": [summarise, deliver],
+        },
+    )
+    assert created.status_code == 200, created.text
+    revision = created.json()["draft_revision"]
+    first, last = created.json()["steps"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    added = await flows.add_step(
+        ctx, revision, "Transkribera", FlowStepKind.TRANSCRIBE, position=1
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    assert page["draft_revision"] == revision + 1
+    content = json.loads(page["content"])
+    assert content["hand_over"] == [
+        {
+            "step_id": first["id"],
+            "step_order": 2,
+            "name": "Sammanfatta",
+            "changes": {"input_source": "previous_step"},
+        }
+    ]
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    steps = current["steps"]
+    assert [step["user_description"] for step in steps] == [
+        "Transkribera",
+        "Sammanfatta",
+        "Leverera",
+    ]
+    assert (steps[0]["input_source"], steps[0]["output_mode"]) == (
+        "flow_input",
+        "transcribe_only",
+    )
+    # The step that was first keeps its instruction, form reads and review,
+    # and now reads the transcript.
+    assert steps[1]["input_source"] == "previous_step"
+    assert steps[1]["review_policy"]["mode"] == "view"
+    assert await _prompt(client, base, headers, steps[1]) == (
+        "Sammanfatta {{ flow_input.arende }}."
+    )
+    # The delivery still reads the summary, now step 2.
+    assert steps[2]["id"] == last["id"]
+    assert steps[2]["input_bindings"] == {
+        "question": "Sammanfattning: {{ step_2.output.text }}"
+    }
+    metadata = current["metadata_json"]
+    assert metadata["form_schema"]["fields"][0]["role"] == "run_label"
+    assert metadata["wizard"]["transcription_enabled"] is True
+
+
+async def test_a_step_added_on_a_revision_read_before_a_change_leaves_no_trace(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    ctx = await _editing_chat(
+        client, db_container, admin_user, base, headers, flow["draft_revision"]
+    )
+    read = _page(await flows.read_flow(ctx))["draft_revision"]
+    changed = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={"expected_revision": read, "definition": {"description": "Ny"}},
+    )
+    assert changed.status_code == 200, changed.text
+    before = (await client.get(base + "/", headers=headers)).json()
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    stale = await flows.add_step(
+        ctx,
+        read,
+        "Sammanfatta",
+        FlowStepKind.AI,
+        values=StepKindValues(instruction="Sammanfatta."),
+        settings={
+            "metadata_json": {
+                "form_schema": {"fields": [{"name": "arende", "type": "text"}]}
+            }
+        },
+    )
+
+    assert stale.isError
+    assert _page(stale)["code"] == "stale_revision"
+    after = (await client.get(base + "/", headers=headers)).json()
+    assert after["draft_revision"] == before["draft_revision"]
+    assert after["steps"] == []
+    assert after["metadata_json"] == before["metadata_json"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+
+async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    builds = [
+        (
+            "Fakta",
+            FlowStepKind.STRUCTURED,
+            {
+                "instruction": "Ta fram beslutet och datumet.",
+                "example": '{"beslut": "Bifall", "datum": "2026-11-11"}',
+                "upload": {"format": "document"},
+            },
+        ),
+        (
+            "Text",
+            FlowStepKind.COMPOSE,
+            {
+                "input_bindings": {
+                    "question": "Beslut {{ step_1.output.structured.beslut }}"
+                }
+            },
+        ),
+        ("Beslut", FlowStepKind.TEMPLATE, {}),
+    ]
+    for name, kind, values in builds:
+        added = await flows.add_step(
+            ctx, revision, name, kind, values=StepKindValues.model_validate(values)
+        )
+        assert not added.isError, added.content[0].text
+        revision += 1
+    page = _page(added)
+    # A Word step without its template is saved and waits for it.
+    assert page["publish_blocker_count"] >= 1
+
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    facts, text, word = steps
+    assert facts["output_contract"]["required"] == ["beslut", "datum"]
+    assert facts["input_type"] == "document"
+    assert facts["input_config"]["runtime_input"]["required"] is True
+    assert await _prompt(client, base, headers, facts) == (
+        "Ta fram beslutet och datumet."
+    )
+    assert text["output_mode"] == "compose_text"
+    assert text["input_bindings"]["question"] == (
+        "Beslut {{ step_1.output.structured.beslut }}"
+    )
+    assert (word["output_mode"], word["output_type"]) == ("template_fill", "docx")

@@ -962,43 +962,135 @@ async def test_unreadable_publish_blockers_still_save_and_say_so(monkeypatch, ca
     assert "unreadable" not in caplog.text
 
 
-_SPEAKER_STEP = {
-    "input_source": "previous_step",
-    "input_type": "text",
-    "output_mode": "speaker_mapping",
-    "output_type": "json",
-    "output_config": {
-        "speaker_mapping": {"participants_field": "deltagare", "infer_names": True}
-    },
-    "review_policy": {"mode": "edit"},
-}
 _PARTICIPANTS_FORM = {
     "fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]
 }
 
 
+def _adding_chat(monkeypatch, steps, *, metadata_json=None):
+    """A chat in edit mode on a draft of ``steps`` whose save is recorded;
+    the saved draft has the steps in the order the update gives them."""
+    from eneo.flows.api import flow_definition_access
+    from tests.unit.flows.application.test_flow_step_kinds import _flow
+
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    flow = _flow(steps, metadata_json=metadata_json)
+    monkeypatch.setattr(
+        flow_definition_access,
+        "require_flow_current_definition_access",
+        AsyncMock(return_value=SimpleNamespace(flow=flow)),
+    )
+
+    def saved(_id, _request, update, _container, **_):
+        from eneo.flows.domain.flow import FlowStep
+
+        by_id = {str(step.id): step for step in steps}
+        added = FlowStep.model_validate(
+            {
+                **update.new_steps[0].configuration.model_dump(exclude_unset=True),
+                "id": _ADDED_ID,
+                "assistant_id": uuid4(),
+                "step_order": 1,
+                "user_description": update.new_steps[0].name,
+            }
+        )
+        order = [
+            by_id[str(slot.step_id)] if slot.step_id is not None else added
+            for slot in update.step_order
+        ]
+        return SimpleNamespace(
+            steps=[
+                step.model_copy(update={"step_order": number})
+                for number, step in enumerate(order, start=1)
+            ],
+            draft_revision=update.expected_revision + 1,
+        )
+
+    save.side_effect = saved
+    return save
+
+
+_ADDED_ID = uuid4()
+
+
+async def _add(**arguments):
+    result = await flows.add_step(MagicMock(), expected_revision=4, **arguments)
+    return result, json.loads(result.content[0].text)
+
+
+async def test_a_step_is_added_by_its_kind_in_one_revision_at_its_place(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    first = _step(1)
+    save = _adding_chat(monkeypatch, [first, _step(2)])
+
+    result, page = await _add(
+        name="Fakta",
+        kind="structured",
+        position=1,
+        values={
+            "instruction": "Ta fram beslutet.",
+            "example": '{"beslut": "Bifall"}',
+        },
+    )
+
+    assert result.isError is not True, page
+    save.assert_awaited_once()
+    update = save.await_args.args[2]
+    # Saved against the revision the chat read.
+    assert update.expected_revision == 4
+    assert update.assistants == []
+    (new_step,) = update.new_steps
+    assert new_step.assistant.prompt.text == "Ta fram beslutet."
+    content = json.loads(page["content"])
+    assert content["saved"] is True
+    assert content["step_id"] == str(_ADDED_ID)
+    assert content["step"]["step_order"] == 1
+    assert content["step"]["input_source"] == "flow_input"
+    assert content["step"]["output_type"] == "json"
+    assert content["step"]["output_fields"] == ["beslut"]
+    assert content["step"]["review"] is False
+    # The old first step now reads the new one; the answer says so.
+    assert content["hand_over"] == [
+        {
+            "step_id": str(first.id),
+            "step_order": 2,
+            "name": "Step 1",
+            "changes": {"input_source": "previous_step"},
+        }
+    ]
+    assert page["draft_revision"] == 5
+    assert "publish_blockers" in page
+
+
 async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
     monkeypatch,
 ):
-    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
-    kept = {"transcription_enabled": True, "transcription_language": "sv"}
-    monkeypatch.setattr(
-        flow_authoring_operations,
-        "get_flow",
-        AsyncMock(
-            return_value=SimpleNamespace(steps=[], metadata_json={"wizard": kept})
-        ),
-    )
+    from tests.unit.flows.application.test_flow_step_kinds import _step
 
-    result = await flows.add_step(
-        MagicMock(),
-        expected_revision=4,
+    kept = {"transcription_enabled": True, "transcription_language": "sv"}
+    transcribing = _step(
+        1,
+        input_type="audio",
+        output_mode="transcribe_only",
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "required": True,
+                "input_format": "audio",
+            }
+        },
+    )
+    save = _adding_chat(monkeypatch, [transcribing], metadata_json={"wizard": kept})
+
+    result, page = await _add(
         name="Granska transkript",
-        configuration=_SPEAKER_STEP,
+        kind="speakers",
+        values={"participants_field": "deltagare"},
         settings={"metadata_json": {"form_schema": _PARTICIPANTS_FORM}},
     )
 
-    assert result.isError is not True, result.content[0].text
+    assert result.isError is not True, page
     # One revision holds the step and the field; the saved settings are kept.
     save.assert_awaited_once()
     update = save.await_args.args[2]
@@ -1008,24 +1100,90 @@ async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
     }
     (step,) = update.new_steps
     assert step.name == "Granska transkript"
-    assert step.configuration.output_config == _SPEAKER_STEP["output_config"]
+    assert step.configuration.output_config == {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": None,
+            "infer_names": False,
+        }
+    }
+    assert json.loads(page["content"])["step"]["review"] is True
 
 
-async def test_a_step_added_with_a_setting_the_flow_lacks_is_refused_unsaved(
-    monkeypatch,
+@pytest.mark.parametrize(
+    ("arguments", "message"),
+    [
+        (
+            {"settings": {"steps": []}, "values": {"instruction": "Läs."}},
+            "can be changed in settings",
+        ),
+        ({"values": {"url": "https://example.org/"}}, "It does not use url"),
+        ({"values": {}}, "It needs instruction"),
+    ],
+)
+async def test_a_step_that_cannot_be_added_as_asked_is_refused_unsaved(
+    monkeypatch, arguments, message
 ):
-    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    save = _adding_chat(monkeypatch, [])
 
-    result = await flows.add_step(
-        MagicMock(),
-        expected_revision=4,
-        name="Granska transkript",
-        configuration=_SPEAKER_STEP,
-        settings={"steps": []},
+    result, page = await _add(name="Sammanfatta", kind="ai", **arguments)
+
+    assert result.isError is True
+    assert message in page["message"]
+    save.assert_not_awaited()
+
+
+async def test_a_credential_sent_with_a_new_step_is_refused_unsaved(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Skicka",
+        kind="send_http",
+        values={
+            "url": "https://example.org/hook",
+            "http": {"auth": {"mode": "bearer_token", "token": "hemligt"}},
+        },
     )
 
     assert result.isError is True
-    assert "can be changed in settings" in json.loads(result.content[0].text)["message"]
+    assert "A credential never passes the chat" in page["message"]
+    assert "hemligt" not in result.content[0].text
+    save.assert_not_awaited()
+
+
+async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
+    from eneo.flows.domain.step_kinds import STEP_KIND_DESCRIPTIONS, FlowStepKind
+
+    (tool,) = [tool for tool in await flows.mcp.list_tools() if tool.name == "add_step"]
+    schema = tool.inputSchema
+    kinds = schema["$defs"]["FlowStepKind"]["enum"]
+    assert kinds == [kind.value for kind in FlowStepKind]
+    values = schema["$defs"]["StepKindValues"]
+    assert values["additionalProperties"] is False
+    assert "configuration" not in schema["properties"]
+    assert "assistant_changes" not in schema["properties"]
+    description = " ".join((tool.description or "").split())
+    for kind, text in STEP_KIND_DESCRIPTIONS.items():
+        assert f"{kind.value} ({text})" in description
+
+
+async def test_a_value_no_kind_has_is_refused_before_the_tool_runs(monkeypatch):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    save = _adding_chat(monkeypatch, [])
+
+    with pytest.raises(ToolError, match="input_source"):
+        await flows.mcp.call_tool(
+            "add_step",
+            {
+                "expected_revision": 4,
+                "name": "Sammanfatta",
+                "kind": "ai",
+                "values": {"instruction": "Läs.", "input_source": "flow_input"},
+            },
+        )
     save.assert_not_awaited()
 
 
@@ -1690,9 +1848,8 @@ def test_an_assistant_given_a_field_it_lacks_is_told_its_shape():
     assert '{"prompt": {"text": "..."}}' in flows.invalid_message(errors)
     # Any other invalid configuration keeps the plain refusal.
     assert flows.invalid_message([]) == "The submitted configuration is invalid."
-    # The tools that take an assistant say its shape up front.
-    for tool in (flows.add_step, flows.update_step):
-        assert '{"prompt": {"text": ' in (tool.__doc__ or "")
+    # The tool that takes an assistant says its shape up front.
+    assert '{"prompt": {"text": ' in (flows.update_step.__doc__ or "")
 
 
 @pytest.mark.parametrize(
@@ -1738,9 +1895,9 @@ def test_a_step_given_a_field_it_lacks_is_told_which_and_what_a_step_takes(updat
     assert "An assistant takes" not in message
 
 
-def test_the_tools_that_describe_a_step_name_no_kind_of_step():
+def test_a_step_is_added_by_its_kind_and_changed_by_its_fields():
     assert "with its kind" not in (flows.read_flow.__doc__ or "")
-    assert "A step has no kind field" in " ".join(
+    assert "A saved step is changed with update_step, never by a kind" in " ".join(
         (flows.add_step.__doc__ or "").split()
     )
 
@@ -1846,8 +2003,6 @@ async def test_update_step_states_the_shape_of_what_a_step_reads():
     assert "otherwise send no input_contract" not in shape
     # Both configs are replaced whole.
     assert "input_config and output_config are each replaced whole" in shape
-    # add_step names every step field it takes.
-    assert "input_contract" in descriptions["add_step"]
     # The other tools that take a step's fields point to it, without a copy.
     for name in ("add_step", "update_steps"):
         assert "update_step" in descriptions[name]

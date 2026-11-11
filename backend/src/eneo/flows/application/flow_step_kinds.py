@@ -202,7 +202,9 @@ def insertion_change(
     return StepKindChange(
         configuration=configuration,
         step_edits=step_edits,
-        turns_on_transcription=_turns_on_transcription(flow, configuration),
+        turns_on_transcription=_turns_on_transcription(
+            flow.metadata_json, configuration
+        ),
     )
 
 
@@ -225,7 +227,9 @@ def step_change(
     )
     return StepKindChange(
         configuration=configuration,
-        turns_on_transcription=_turns_on_transcription(flow, configuration),
+        turns_on_transcription=_turns_on_transcription(
+            flow.metadata_json, configuration
+        ),
     )
 
 
@@ -237,9 +241,13 @@ def editor_update(
     position: int | None = None,
     step_id: UUID | None = None,
     name: str = "New step",
+    assistant: Mapping[str, object] | None = None,
+    definition: Mapping[str, object] | None = None,
 ) -> FlowEditorUpdateRequest:
     """The editor update that makes ``change``: adding a step named ``name``
-    at ``position``, or turning the saved step ``step_id``. It is saved
+    at ``position`` with ``assistant`` (its assistant's own fields), or
+    turning the saved step ``step_id``. ``definition`` is saved in the same
+    revision (the flow's settings, its metadata_json whole). It is saved
     against ``expected_revision``, the revision its caller read: a draft that
     changed since is refused as stale, never changed over."""
 
@@ -247,13 +255,22 @@ def editor_update(
         {"step_id": str(edited), "changes": changes}
         for edited, changes in change.step_edits
     ]
+    settings = dict(definition or {})
+    sends_metadata = isinstance(settings.get("metadata_json"), dict)
+    metadata = cast(
+        FlowPersistedJsonObject | None,
+        settings["metadata_json"] if sends_metadata else flow.metadata_json,
+    )
+    # Transcription is turned on over the metadata the update saves.
+    if (
+        _turns_on_transcription(metadata, change.configuration)
+        if sends_metadata
+        else change.turns_on_transcription
+    ):
+        settings["metadata_json"] = _with_transcription_on(metadata)
     payload: dict[str, object] = {
         "expected_revision": expected_revision,
-        "definition": (
-            {"metadata_json": _with_transcription_on(flow.metadata_json)}
-            if change.turns_on_transcription
-            else {}
-        ),
+        "definition": settings,
     }
     if step_id is not None:
         payload["step_edits"] = [
@@ -266,7 +283,11 @@ def editor_update(
         ]
         slots.insert(cast(int, position) - 1, {"new_step": 0})
         payload["new_steps"] = [
-            {"name": name, "configuration": change.configuration, "assistant": {}}
+            {
+                "name": name,
+                "configuration": change.configuration,
+                "assistant": dict(assistant or {}),
+            }
         ]
         payload["step_order"] = slots
         payload["step_edits"] = step_edits
@@ -425,14 +446,16 @@ def _refusal(
     )
 
 
-def _turns_on_transcription(flow: Flow, configuration: Mapping[str, object]) -> bool:
+def _turns_on_transcription(
+    metadata: FlowPersistedJsonObject | None, configuration: Mapping[str, object]
+) -> bool:
     step = FlowStep.model_validate(
         {**configuration, "assistant_id": _JUDGED_ASSISTANT_ID, "step_order": 1}
     )
     if not requires_audio_transcription([step]):
         return False
     try:
-        return not parse_transcription_config(flow.metadata_json).enabled
+        return not parse_transcription_config(metadata).enabled
     except FlowTranscriptionConfigError:
         # The save refuses the malformed choice; nothing is turned on over it.
         return False

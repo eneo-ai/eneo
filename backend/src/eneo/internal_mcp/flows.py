@@ -15,6 +15,13 @@ from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.flows.domain.step_kinds import (
+    STEP_KIND_DESCRIPTIONS,
+    STEP_KIND_REQUIRED_VALUES,
+    STEP_KIND_VALUES,
+    FlowStepKind,
+    StepKindValues,
+)
 from eneo.internal_mcp.constants import FLOWS_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -641,6 +648,21 @@ _OVERVIEW_STEP_FIELDS = frozenset(
 )
 
 
+def _step_overview(step: Any) -> dict[str, Any]:
+    """A step in short, as the overview gives it: what it reads and gives,
+    the fields its result declares and whether a person reviews it."""
+    from eneo.flows.application.flow_authoring_reads import output_fields
+
+    item = {
+        key: value
+        for key, value in step.model_dump(mode="json").items()
+        if key in _OVERVIEW_STEP_FIELDS
+    }
+    item["output_fields"] = output_fields(step.output_contract)
+    item["review"] = step.review_policy is not None
+    return item
+
+
 @_tool(_READS)
 async def read_flow(
     ctx: Context,
@@ -671,7 +693,6 @@ async def read_flow(
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
         from eneo.flows.application.flow_authoring_reads import (
-            output_fields,
             run_form_fields,
             step_connections,
             step_reads_summary,
@@ -713,13 +734,7 @@ async def read_flow(
             for step in chosen:
                 dump = step.model_dump(mode="json")
                 if section == "overview":
-                    item = {
-                        key: value
-                        for key, value in dump.items()
-                        if key in _OVERVIEW_STEP_FIELDS
-                    }
-                    item["output_fields"] = output_fields(step.output_contract)
-                    item["review"] = step.review_policy is not None
+                    item = _step_overview(step)
                 else:
                     item = dump
                     prompt = prompts.get(step.assistant_id)
@@ -1351,81 +1366,124 @@ async def contract_from_example(
     return await _call(ctx, operation, changes_draft=True)
 
 
-@_tool(_EDITS_DRAFT)
+def _kinds_appendix() -> str:
+    """Each kind, what it does and the values it takes, from their owner."""
+
+    def takes(kind: FlowStepKind) -> str:
+        required = STEP_KIND_REQUIRED_VALUES.get(kind, ())
+        optional = [name for name in STEP_KIND_VALUES[kind] if name not in required]
+        parts = [f"needs {', '.join(required)}"] if required else []
+        if optional:
+            parts.append(f"may take {', '.join(optional)}")
+        return "; ".join(parts) or "takes no values"
+
+    return (
+        "\nThe kinds: "
+        + "; ".join(
+            f"{kind.value} ({text}): {takes(kind)}"
+            for kind, text in STEP_KIND_DESCRIPTIONS.items()
+        )
+        + "."
+    )
+
+
+@_tool(_EDITS_DRAFT, appendix=_kinds_appendix())
 async def add_step(
     ctx: Context,
     expected_revision: int,
     name: str,
-    configuration: dict[str, Any],
-    assistant_changes: dict[str, Any] | None = None,
+    kind: FlowStepKind,
+    values: StepKindValues | None = None,
     position: int | None = None,
     settings: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Add a step with a new managed assistant, atomically: last, or at `position`
-    (1 is first). Reads of the steps after it move with them. settings takes
-    what update_flow_settings takes and is saved in the same revision, so a
-    step that reads a run form field is added together with the field (the
-    whole form_schema in metadata_json); everything is saved or nothing.
-    configuration takes a step's own fields and no other: input_source,
-    input_type, output_mode and output_type, and where the step needs them
-    input_config, output_config, input_bindings and input_contract (shaped
-    as update_step describes), output_contract and review_policy. A step has no kind field. assistant_changes takes the assistant's own
-    fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
-    instruction is always prompt.text, never instructions or a bare string.
-    An http_post step needs its url in output_config: ask for the address
-    before adding it."""
+    """Add one step of a kind with a new assistant, in one revision: last, or
+    at `position` (1 is first). The flow builds the step for its place: a
+    step put first reads the run's input, and the step that was first then
+    reads the new step (hand_over in the result); the steps after it keep
+    their reads. values takes what the kind needs and nothing else, and a
+    value the kind does not use is refused; instruction is the step's
+    instruction to its model. read_step_kinds says which kinds may stand at a
+    place and why the others may not. settings takes what
+    update_flow_settings takes and is saved in the same revision, so a step
+    that reads a run form field is added together with the field (the whole
+    form_schema in metadata_json); everything is saved or nothing. A
+    send_http step needs its url: ask for the address before adding it. A
+    saved step is changed with update_step, never by a kind."""
 
     async def operation(container, chat, request):
-        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+        from eneo.flows.api.flow_definition_access import (
+            require_flow_current_definition_access,
+        )
         from eneo.flows.application.flow_authoring_operations import (
             apply_editor_update,
-            get_flow,
         )
+        from eneo.flows.application.flow_step_kinds import (
+            editor_update,
+            insertion_change,
+        )
+        from eneo.flows.domain.contract_from_example import ExampleProblemError
+        from eneo.flows.domain.step_kinds import check_step_kind_values
 
-        require_safe_model_configuration(configuration, {})
         if settings and set(settings) - _SETTINGS_FIELDS:
             raise BadRequestException(
                 "Only name, description, metadata_json and form_field_renames "
                 "can be changed in settings."
             )
-        step_order = None
+        step_kind = FlowStepKind(kind)
+        chosen = StepKindValues.model_validate(values or {})
+        check_step_kind_values(step_kind, chosen)
+        flow = (
+            await require_flow_current_definition_access(
+                request, container, flow_id=chat.flow_id
+            )
+        ).flow
+        places = len(flow.steps) + 1
+        place = places if position is None else _index_at(position, places) + 1
+        try:
+            change = insertion_change(flow, step_kind, position=place, values=chosen)
+        except ExampleProblemError as error:
+            raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
+        require_safe_model_configuration(change.configuration, {})
         definition = settings or {}
-        if position is not None or isinstance(definition.get("metadata_json"), dict):
-            flow = await get_flow(chat.flow_id, request, container)
-            if position is not None:
-                slots: list[dict[str, Any]] = [
-                    {"step_id": str(step.id)} for step in flow.steps
-                ]
-                slots.insert(_index_at(position, len(slots) + 1), {"new_step": 0})
-                step_order = slots
-            if isinstance(definition.get("metadata_json"), dict):
-                definition = _merged_settings(definition, flow.metadata_json)
+        if isinstance(definition.get("metadata_json"), dict):
+            definition = _merged_settings(definition, flow.metadata_json)
         updated = await apply_editor_update(
             chat.flow_id,
             request,
-            FlowEditorUpdateRequest.model_validate(
-                {
-                    "expected_revision": expected_revision,
-                    "definition": definition,
-                    "new_steps": [
-                        {
-                            "name": name,
-                            "configuration": configuration,
-                            "assistant": assistant_changes or {},
-                        }
-                    ],
-                    "step_order": step_order,
-                }
+            editor_update(
+                flow,
+                change,
+                expected_revision=expected_revision,
+                position=place,
+                name=name,
+                assistant=(
+                    {"prompt": {"text": chosen.instruction}}
+                    if chosen.instruction
+                    else None
+                ),
+                definition=definition,
             ),
             container,
             audit_context=_CHAT_AUDIT,
         )
-        added = updated.steps[-1 if position is None else position - 1]
-        return page_result(
-            {"saved": True, "step_id": str(added.id)},
-            flow_id=chat.flow_id,
-            revision=updated.draft_revision,
-        )
+        by_id = {step.id: step for step in updated.steps}
+        added = next(step for step in updated.steps if step.step_order == place)
+        page: dict[str, Any] = {
+            "saved": True,
+            "step_id": str(added.id),
+            "step": _step_overview(added),
+            "hand_over": [
+                {
+                    "step_id": str(step_id),
+                    "step_order": by_id[step_id].step_order,
+                    "name": by_id[step_id].user_description,
+                    "changes": changes,
+                }
+                for step_id, changes in change.step_edits
+            ],
+        }
+        return page_result(page, flow_id=chat.flow_id, revision=updated.draft_revision)
 
     return await _call(ctx, operation, changes_draft=True)
 

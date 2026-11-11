@@ -20,6 +20,7 @@ from eneo.flows.application.flow_step_kinds import (
     StepKindChange,
     StepKindOption,
     editor_update,
+    insertion_change,
     step_kind_answer,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
@@ -27,7 +28,11 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionContributors,
     FlowRunRetentionOff,
 )
-from eneo.flows.domain.step_kinds import FlowStepKind
+from eneo.flows.domain.step_kinds import (
+    FlowStepKind,
+    StepKindValues,
+    check_step_kind_values,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.main.exceptions import BadRequestException
@@ -199,8 +204,10 @@ async def _save(
     *,
     position: int | None = None,
     step_id: UUID | None = None,
+    saved: list[Flow] | None = None,
 ) -> BadRequestException | ValidationError | None:
-    """The editor's save of ``change``: its refusal, or None when it saves."""
+    """The editor's save of ``change``: its refusal, or None when it saves;
+    the saved flow is appended to ``saved``."""
     user = SimpleNamespace(
         id=uuid4(),
         tenant_id=flow.tenant_id,
@@ -275,6 +282,8 @@ async def _save(
         )
     except (BadRequestException, ValidationError) as exc:
         return exc
+    if saved is not None:
+        saved.append(flow_repo.update.call_args.kwargs["flow"])
     return None
 
 
@@ -406,3 +415,202 @@ def test_the_update_carries_the_revision_its_caller_read() -> None:
 
     assert flow.draft_revision == 3
     assert update.expected_revision == 1
+
+
+async def _added(
+    flow: Flow,
+    kind: FlowStepKind,
+    values: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    position: int | None = None,
+) -> FlowStep:
+    """The step a kind with ``values`` is saved as, by the editor's save."""
+    place = position or len(flow.steps) + 1
+    kind_values = StepKindValues.model_validate(values)
+    check_step_kind_values(kind, kind_values)
+    change = insertion_change(flow, kind, position=place, values=kind_values)
+    saved: list[Flow] = []
+    refusal = await _save(flow, change, {}, monkeypatch, position=place, saved=saved)
+    assert refusal is None, refusal
+    return next(step for step in saved[0].steps if step.step_order == place)
+
+
+_FACTS = '{"beslut": "Bifall", "datum": "2026-11-11"}'
+
+
+@pytest.mark.parametrize(
+    ("kind", "values", "saved"),
+    [
+        (
+            FlowStepKind.AI,
+            {"instruction": "Sammanfatta.", "review": {"mode": "view"}},
+            {
+                "output_mode": "pass_through",
+                "review_policy": {"mode": "view", "expires_after_seconds": None},
+            },
+        ),
+        (
+            FlowStepKind.STRUCTURED,
+            {"instruction": "Ta fram fakta.", "example": _FACTS},
+            {
+                "output_type": "json",
+                "output_contract": {
+                    "type": "object",
+                    "properties": {
+                        "beslut": {"type": "string"},
+                        "datum": {"type": "string"},
+                    },
+                    "required": ["beslut", "datum"],
+                },
+            },
+        ),
+        (
+            FlowStepKind.COMPOSE,
+            {"input_bindings": {"question": "Beslut: {{ step_1.output.text }}"}},
+            {
+                "output_mode": "compose_text",
+                "input_bindings": {"question": "Beslut: {{ step_1.output.text }}"},
+            },
+        ),
+        (
+            FlowStepKind.DOCUMENT,
+            {"format": "pdf"},
+            {"output_mode": "render_verbatim", "output_type": "pdf"},
+        ),
+        (
+            FlowStepKind.SEND_HTTP,
+            {
+                "url": _URL,
+                "http": {"auth": {"mode": "bearer_token"}, "timeout_seconds": 10},
+                "instruction": "Lämna det vidare oförändrat.",
+            },
+            {"output_mode": "http_post"},
+        ),
+    ],
+    ids=lambda value: value.value if isinstance(value, FlowStepKind) else None,
+)
+async def test_each_value_a_kind_takes_is_in_the_saved_step(
+    kind: FlowStepKind,
+    values: dict[str, Any],
+    saved: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _flow([_step(1)])
+
+    step = await _added(flow, kind, values, monkeypatch)
+
+    dumped = step.model_dump(mode="json")
+    for column, value in saved.items():
+        assert dumped[column] == value, column
+    if kind is FlowStepKind.SEND_HTTP:
+        config = dumped["output_config"]
+        assert (config["url"], config["auth"]["mode"], config["timeout_seconds"]) == (
+            _URL,
+            "bearer_token",
+            10,
+        )
+
+
+async def test_a_speaker_step_is_saved_with_its_choices_and_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow, _ = DRAFTS["transcript and speakers"]()
+    flow = flow.model_copy(update={"steps": flow.steps[:1]})
+
+    step = await _added(
+        flow,
+        FlowStepKind.SPEAKERS,
+        {"participants_field": "deltagare", "infer_names": True},
+        monkeypatch,
+    )
+
+    assert step.output_config == {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": None,
+            "infer_names": True,
+        }
+    }
+    assert step.review_policy is not None
+
+
+async def test_a_first_step_reads_an_upload_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty = _flow([])
+
+    text = await _added(empty, FlowStepKind.AI, {"instruction": "Läs."}, monkeypatch)
+    upload = await _added(
+        empty,
+        FlowStepKind.AI,
+        {"instruction": "Läs.", "upload": {"format": "document", "required": False}},
+        monkeypatch,
+    )
+
+    assert (text.input_type, text.input_config) == ("text", None)
+    assert upload.input_type == "document"
+    assert upload.input_config == {
+        "runtime_input": {
+            "enabled": True,
+            "required": False,
+            "input_format": "document",
+        }
+    }
+
+
+def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
+    first = _step(1, input_type="json")
+    flow = _flow([first])
+
+    change = insertion_change(
+        flow,
+        FlowStepKind.STRUCTURED,
+        position=1,
+        values=StepKindValues(instruction="Ta fram fakta.", example=_FACTS),
+    )
+
+    # The new step gives json, which the old first step reads as it is.
+    assert change.step_edits == ((first.id, {"input_source": "previous_step"}),)
+
+
+@pytest.mark.parametrize(
+    ("kind", "values", "message"),
+    [
+        (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),
+        (FlowStepKind.COMPOSE, {"review": {"mode": "edit"}}, "not use review"),
+        (FlowStepKind.STRUCTURED, {"instruction": "Ta fram."}, "needs example"),
+        (FlowStepKind.SEND_HTTP, {}, "needs url"),
+    ],
+)
+def test_a_value_the_kind_does_not_use_or_lacks_is_refused(
+    kind: FlowStepKind, values: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(BadRequestException) as refused:
+        check_step_kind_values(kind, StepKindValues.model_validate(values))
+
+    assert message in str(refused.value)
+    assert refused.value.code == "flow_step_kind_values_invalid"
+
+
+def test_a_value_no_kind_has_is_refused_by_the_values_shape() -> None:
+    with pytest.raises(ValidationError):
+        StepKindValues.model_validate({"input_source": "flow_input"})
+
+
+def test_settings_saved_with_the_step_keep_transcription_on() -> None:
+    flow = _flow([_step(1)], metadata_json=_TRANSCRIBING)
+    change = insertion_change(flow, FlowStepKind.TRANSCRIBE, position=1)
+
+    # The settings replace wizard whole without the switch the step needs.
+    update = editor_update(
+        flow,
+        change,
+        expected_revision=flow.draft_revision,
+        position=1,
+        definition={"metadata_json": {"wizard": {"transcription_language": "sv"}}},
+    )
+
+    assert update.definition.metadata_json == {
+        "wizard": {"transcription_language": "sv", "transcription_enabled": True}
+    }
