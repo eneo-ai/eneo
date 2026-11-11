@@ -124,6 +124,11 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.BACKEND_IMAGE_NAME }}
+          # metadata-action adds :latest to every final semver tag by default.
+          # Only the explicit rule below may publish it, so a patch on an older
+          # line never takes :latest from a newer release.
+          flavor: |
+            latest=false
           tags: |
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
@@ -221,6 +226,11 @@ jobs:
         uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.FRONTEND_IMAGE_NAME }}
+          # metadata-action adds :latest to every final semver tag by default.
+          # Only the explicit rule below may publish it, so a patch on an older
+          # line never takes :latest from a newer release.
+          flavor: |
+            latest=false
           tags: |
             # Branch-based tags
             type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
