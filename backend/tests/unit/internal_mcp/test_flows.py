@@ -1578,6 +1578,86 @@ def test_the_tools_that_describe_a_step_name_no_kind_of_step():
     )
 
 
+# --- What a step reads ---------------------------------------------------------
+
+
+async def _descriptions() -> dict[str, str]:
+    return {
+        tool.name: " ".join((tool.description or "").split())
+        for tool in await flows.mcp.list_tools()
+    }
+
+
+async def test_update_step_states_the_shape_of_what_a_step_reads():
+    from eneo.flows.input_binding_contract_rules import (
+        SOURCE_REF_KEYS,
+        SUPPORTED_INPUT_BINDING_KEYS,
+    )
+
+    descriptions = await _descriptions()
+    shape = descriptions["update_step"]
+
+    # Every key the step rules accept is named where the chat reads it.
+    for key in SUPPORTED_INPUT_BINDING_KEYS | SOURCE_REF_KEYS:
+        assert key in shape, key
+    assert "input_contract" in shape
+    for example in flows.INPUT_BINDINGS_EXAMPLES.values():
+        assert json.dumps(example, ensure_ascii=False) in shape
+    # The other tools that take a step's fields point to it, without a copy.
+    for name in ("add_step", "update_steps"):
+        assert "update_step" in descriptions[name]
+        assert '"source_refs"' not in descriptions[name]
+
+
+@pytest.mark.parametrize("name", ["fields", "text"])
+def test_each_read_update_step_shows_is_saved_and_published(name):
+    from eneo.flows.flow_validators import publish_step_refusals, validate_steps
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    facts = {
+        "type": "object",
+        "properties": {
+            "beslut": {"type": "string"},
+            "datum": {"type": "string"},
+            "deltagare": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["beslut", "datum", "deltagare"],
+    }
+    steps = [
+        _step(1, output_type="json", output_contract=facts),
+        _step(2, input_bindings=flows.INPUT_BINDINGS_EXAMPLES[name]),
+    ]
+    prompts = {1: "Ta fram fakta ur protokollet.", 2: "Skriv ett beslutsbrev."}
+
+    validate_steps(steps, metadata_json=None, prompt_templates=prompts)
+    assert (
+        publish_step_refusals(steps, metadata_json=None, prompt_templates=prompts) == []
+    )
+
+
+def test_a_refused_read_names_the_shape_the_step_rules_take():
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        SOURCE_REF_KEYS,
+    )
+
+    result = flows._error_result(
+        FlowStepValidationError(
+            "Step 2: input_bindings.source_refs[0] has unsupported key 'step'.",
+            step_order=2,
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        )
+    )
+
+    refusal = json.loads(result.content[0].text)
+    assert refusal["code"] == FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refusal["message"].startswith("Step 2: input_bindings.source_refs[0]")
+    for key in SOURCE_REF_KEYS:
+        assert key in refusal["message"], key
+    assert "update_step" in refusal["message"]
+
+
 # --- What each tool declares ---------------------------------------------------
 
 

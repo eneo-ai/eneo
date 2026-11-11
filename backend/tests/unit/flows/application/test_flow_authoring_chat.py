@@ -261,6 +261,22 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     )
 
 
+def test_the_instructions_design_reads_from_what_must_come_out() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Design the reads backwards from what must come out" in instructions
+    assert "as narrowly as the task allows" in instructions
+    # Fields of an earlier json step for chosen facts, the whole text once
+    # where the task needs it, and a run form value straight to a Word field.
+    assert "reads those fields of an earlier json step" in instructions
+    assert "A step that needs the whole text reads the whole text" in instructions
+    assert "is bound to it directly, with no step between" in instructions
+    # The shape is read where the tools are described, not repeated here.
+    assert "the shape is in update_step" in instructions
+    assert '"source_refs"' not in instructions
+    assert "let an earlier json step declare them" not in instructions
+
+
 def test_the_instructions_take_a_contract_from_an_example() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 

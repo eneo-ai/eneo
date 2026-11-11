@@ -54,7 +54,9 @@ async def enabled_flow(db_container, admin_user, client, flow_process_auth_heade
         await container.session().execute(
             sa.update(CompletionModels)
             .where(CompletionModels.tenant_id == admin_user.tenant_id)
-            .values(supports_tool_calling=True)
+            # The chat's instructions alone exceed the seeded models' 8000
+            # input tokens; a model that builds flows has a larger window.
+            .values(supports_tool_calling=True, max_input_tokens=128_000)
         )
     headers = dict(flow_process_auth_headers)
     space_response = await client.post(
@@ -851,7 +853,7 @@ async def model_choices(
         await session.execute(
             sa.update(CompletionModels)
             .where(CompletionModels.id.in_([strong.id, outside.id]))
-            .values(supports_tool_calling=True)
+            .values(supports_tool_calling=True, max_input_tokens=128_000)
         )
         await session.execute(
             sa.update(CompletionModels)
@@ -1063,7 +1065,11 @@ async def test_a_model_below_the_spaces_classification_is_refused(
         await session.execute(
             sa.update(CompletionModels)
             .where(CompletionModels.id.in_([lowered.id, kept.id]))
-            .values(security_classification_id=high.id, supports_tool_calling=True)
+            .values(
+                security_classification_id=high.id,
+                supports_tool_calling=True,
+                max_input_tokens=128_000,
+            )
         )
         await session.execute(
             sa.update(Tenants)
@@ -1572,3 +1578,63 @@ async def test_a_flow_deleted_while_its_chat_waits_for_the_flow_gets_no_chat(
             .where(FlowAuthoringChats.flow_id == UUID(flow["id"]))
         )
     assert chats == 0
+
+
+# --- What a step reads, through the chat's tools -------------------------------
+
+
+_FACTS_CONTRACT = {
+    "type": "object",
+    "properties": {"beslut": {"type": "string"}, "datum": {"type": "string"}},
+    "required": ["beslut", "datum"],
+}
+
+
+async def test_a_read_the_step_rules_refuse_comes_back_with_their_shape(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    facts = _new_step("Fakta", "Ta fram fakta.", input_source="flow_input")
+    facts["configuration"].update(
+        output_mode="pass_through",
+        output_type="json",
+        output_contract=_FACTS_CONTRACT,
+    )
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                facts,
+                _new_step("Brev", "Skriv brevet.", input_source="previous_step"),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    _facts, letter = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(letter["id"]),
+        {"input_bindings": {"source_refs": [{"step": "step_1", "output": "text"}]}},
+    )
+
+    assert refused.isError
+    page = _page(refused)
+    assert page["code"] == "flow_input_binding_unsupported_key"
+    assert "has unsupported key 'step'" in page["message"]
+    assert "step_ref" in page["message"] and "update_step" in page["message"]
+
+    saved = await flows.update_step(
+        ctx,
+        revision,
+        UUID(letter["id"]),
+        {"input_bindings": flows.INPUT_BINDINGS_EXAMPLES["fields"]},
+    )
+    assert not saved.isError, saved.content[0].text

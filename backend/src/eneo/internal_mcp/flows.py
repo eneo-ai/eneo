@@ -45,16 +45,68 @@ _EDITS_DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 _ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 
 
-def _tool(annotations: ToolAnnotations):
+def _tool(annotations: ToolAnnotations, *, appendix: str = ""):
     """Register a flow tool. Its description is its docstring without the
-    source's indentation: the model reads every description in every round."""
+    source's indentation, then ``appendix``: the model reads every
+    description in every round."""
 
     def register(fn):
         return mcp.tool(
-            annotations=annotations, description=inspect.cleandoc(fn.__doc__ or "")
+            annotations=annotations,
+            description=inspect.cleandoc(fn.__doc__ or "") + appendix,
         )(fn)
 
     return register
+
+
+# The two reads update_step shows the model; the tests hold them to the step
+# rules (save and publish), so the chat never learns a shape the flow refuses.
+INPUT_BINDINGS_EXAMPLES: dict[str, dict[str, Any]] = {
+    "fields": {
+        "source_refs": [
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "beslut",
+                "label": "Beslut",
+            },
+            {
+                "step_ref": "step_1",
+                "output": "structured",
+                "field_path": "datum",
+                "label": "Datum",
+            },
+        ]
+    },
+    "text": {"source_refs": [{"step_ref": "step_1", "output": "text"}]},
+}
+
+
+def _example(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False)
+
+
+# What a step reads, said once, where a change to a step is described
+# (input_binding_contract_rules owns the keys; step_definition_parser the
+# input_contract rule).
+_INPUT_BINDINGS_SHAPE = (
+    "\ninput_bindings sets what the step reads; its input_source is then not"
+    " read. It takes question (the input as text with {{ }} references)"
+    " and/or source_refs, a list of reads. A source_ref has step_ref"
+    ' ("step_N"), output ("text": the step\'s whole text; "structured":'
+    " its json result, with field_path naming one field of its"
+    ' output_contract, dotted for a nested field: "sak.diarienummer"),'
+    " label (written before the value) and, in a compose_text step,"
+    ' item_template ("{titel}: {text}" for each item of a list field).'
+    " With input_type json and only structured refs, the step's input is"
+    " exactly those fields and needs an input_contract equal to them;"
+    " otherwise send no input_contract. A step that reads two fields of"
+    " step 1's json result: "
+    + _example(INPUT_BINDINGS_EXAMPLES["fields"])
+    + ". A step that reads the whole text of step 1: "
+    + _example(INPUT_BINDINGS_EXAMPLES["text"])
+    + "."
+)
 
 
 # How the audit entries of a change made through the chat name their origin.
@@ -197,11 +249,30 @@ def _error_result(
     | UnauthorizedException
     | ValidationError,
 ) -> CallToolResult:
-    """The refusal of a tool call that raised ``exc``."""
+    """The refusal of a tool call that raised ``exc``. A refused read
+    (``input_bindings``) also names the keys the step rules take, as
+    ``invalid_message`` names a step's fields."""
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+        SOURCE_REF_KEYS,
+        SUPPORTED_INPUT_BINDING_KEYS,
+    )
+
     if isinstance(exc, ValidationError):
         errors = exc.errors(include_input=False, include_context=False)
         return _refusal(invalid_message(errors), code=None, errors=errors)
-    return _refusal(str(exc), code=getattr(exc, "code", None))
+    code = getattr(exc, "code", None)
+    message = str(exc)
+    if code == FLOW_INPUT_BINDING_UNSUPPORTED_KEY:
+        message += (
+            " input_bindings takes "
+            + " and ".join(sorted(SUPPORTED_INPUT_BINDING_KEYS))
+            + "; a source_ref takes "
+            + ", ".join(sorted(SOURCE_REF_KEYS))
+            + ", as update_step describes them. Correct the read and make the"
+            " call again."
+        )
+    return _refusal(message, code=code)
 
 
 async def _current_revision(scope: Any) -> int | None:
@@ -778,7 +849,7 @@ def require_safe_model_configuration(
             )
 
 
-@_tool(_EDITS_DRAFT)
+@_tool(_EDITS_DRAFT, appendix=_INPUT_BINDINGS_SHAPE)
 async def update_step(
     ctx: Context,
     expected_revision: int,
@@ -1178,11 +1249,10 @@ async def add_step(
     what update_flow_settings takes and is saved in the same revision, so a
     step that reads a run form field is added together with the field (the
     whole form_schema in metadata_json); everything is saved or nothing.
-    configuration
-    takes a step's own fields and no other: input_source, input_type,
-    output_mode and output_type, and where the step needs them input_config,
-    output_config, input_bindings, output_contract and review_policy. A step
-    has no kind field. assistant_changes takes the assistant's own
+    configuration takes a step's own fields and no other: input_source,
+    input_type, output_mode and output_type, and where the step needs them
+    input_config, output_config, input_bindings (shaped as update_step
+    describes), output_contract and review_policy. A step has no kind field. assistant_changes takes the assistant's own
     fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
     instruction is always prompt.text, never instructions or a bare string.
     An http_post step needs its url in output_config: ask for the address

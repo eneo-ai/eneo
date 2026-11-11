@@ -139,9 +139,15 @@ In a prompt or input_bindings.question, {{ step_N.output.text }} reads the text 
 step N (numbered from 1 in flow order), {{ step_N.output.structured.<field> }} a
 field of a JSON step's output_contract, {{ flow_input.<field> }} a run form field
 and {{ step_input.text }} the step's own upload. A step reads only earlier steps.
-When a later step needs specific facts, let an earlier json step declare them in
-its output_contract. Give every step a short, unique name. Publishing checks the
-whole flow and names what to fix.
+Design the reads backwards from what must come out (the flow's result, or the
+Word template's fields): what each step must get to do its part, read as
+narrowly as the task allows, by the rules below. A step that needs chosen facts
+of a long text reads those fields of an earlier json step that declares them in
+its output_contract (source_refs in input_bindings; the shape is in
+update_step). A step that needs the whole text reads the whole text. A run form
+value that a Word field shows is bound to it directly, with no step between.
+Give every step a short, unique name. Publishing checks the whole flow and names
+what to fix.
 Moving, removing or renaming a step, or renaming a run form field (send
 form_field_renames with the new metadata_json), keeps every read pointing where
 it pointed: the reads are rewritten, and a change that would leave a read without
