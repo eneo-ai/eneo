@@ -214,6 +214,31 @@ describe("CreateApiKeyDialog", () => {
     expect(api.POST).not.toHaveBeenCalled();
   });
 
+  it("offers Flows and Flow evidence to a secret key and Flows alone to a public one", async () => {
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-1" }, secret: "sk_secret" }));
+    const { dialog } = await open();
+    fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Tal till text" } });
+    expect(within(dialog).getByRole("combobox", { name: "Flöden" }).textContent).toBe("Läs");
+    expect(within(dialog).getByRole("combobox", { name: "Flödesbevis" }).textContent).toBe(
+      "Ingen åtkomst"
+    );
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Publik nyckel" }));
+    expect(within(dialog).getByRole("combobox", { name: "Flöden" })).toBeTruthy();
+    expect(within(dialog).queryByRole("combobox", { name: "Flödesbevis" })).toBeNull();
+
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Hemlig nyckel" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa" }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/api-keys", {
+        body: expect.objectContaining({
+          key_type: "sk_",
+          resource_permissions: expect.objectContaining({ flows: "read", flow_evidence: "none" })
+        })
+      })
+    );
+  });
+
   it("scopes a key to a picked assistant, with the assistant's access", async () => {
     api.POST.mockReturnValue(ok({ api_key: { id: "key-1" }, secret: "sk_secret" }));
     const { dialog } = await open();

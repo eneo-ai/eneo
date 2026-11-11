@@ -189,6 +189,11 @@ user:
 - **The user is the actor.** Runs the module creates belong to the user, and
   the audit log records the user as the actor.
 
+Give the module's key this permission in **Administration → API keys**: set
+**Flows** to **Write**, so that the module can both list and run flows, and
+scope the key to the organization or to the space whose flows the module runs.
+Access to **Spaces** gives the module nothing here.
+
 This includes requesting a live transcription ticket. The socket itself checks
 only the ticket and the page's origin, so the module's backend can pass the
 ticket to its browser when Eneo accepts the module's origin, or relay the

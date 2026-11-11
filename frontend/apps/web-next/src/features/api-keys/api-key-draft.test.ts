@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import type { Schema } from "@/lib/api/models";
 import type { ApiKey, ApiKeyCreationConstraints } from "./api-keys";
 import {
   createRequest,
@@ -7,6 +8,7 @@ import {
   ipProblem,
   newApiKeyDraft,
   originProblem,
+  type ResourceKey,
   resourceLevel,
   updateRequest,
   visibleResources,
@@ -44,6 +46,8 @@ const key = {
   resource_permissions: {
     assistants: "read",
     apps: "none",
+    flows: "none",
+    flow_evidence: "none",
     spaces: "none",
     knowledge: "none",
     conversations: "read",
@@ -111,6 +115,8 @@ describe("createRequest", () => {
     expect(request.resource_permissions).toEqual({
       assistants: "none",
       apps: "read",
+      flows: "none",
+      flow_evidence: "none",
       spaces: "none",
       knowledge: "none",
       conversations: "none",
@@ -118,6 +124,68 @@ describe("createRequest", () => {
       jobs: "none",
       prompts: "none"
     });
+  });
+});
+
+describe("resource types", () => {
+  it("are every type the backend accepts, so a new one cannot be dropped on save", () => {
+    expectTypeOf<ResourceKey>().toEqualTypeOf<keyof Schema<"ResourcePermissions">>();
+  });
+
+  it("give a new secret key Flows to read and never Flow evidence by default", () => {
+    const draft = newApiKeyDraft();
+    expect(visibleResources(draft)).toEqual(expect.arrayContaining(["flows", "flow_evidence"]));
+    expect(createRequest({ ...draft, name: "Modul" }).resource_permissions).toMatchObject({
+      flows: "read",
+      flow_evidence: "none"
+    });
+    const reset = withKeyType(withKeyType(draft, "pk_"), "sk_");
+    expect(reset.resourcePermissions).toMatchObject({ flows: "read", flow_evidence: "none" });
+    expect(createRequest({ ...reset, name: "Modul" }).resource_permissions).toMatchObject({
+      flows: "read",
+      flow_evidence: "none"
+    });
+  });
+
+  it("send a secret key's Flows at write, and write as its permission", () => {
+    const draft = newApiKeyDraft();
+    const request = createRequest({
+      ...draft,
+      name: "Tal till text",
+      resourcePermissions: { ...draft.resourcePermissions, flows: "write" as const }
+    });
+    expect(request.resource_permissions?.flows).toBe("write");
+    expect(request.permission).toBe("write");
+  });
+
+  it("show Flows and Flow evidence for organization and space keys only", () => {
+    expect(visibleResources(withScopeType(newApiKeyDraft(), "space"))).toEqual(
+      expect.arrayContaining(["flows", "flow_evidence"])
+    );
+    for (const scope of ["assistant", "app"] as const) {
+      expect(visibleResources(withScopeType(newApiKeyDraft(), scope))).not.toContain("flows");
+    }
+  });
+
+  it("let a public key read Flows but never reach Flow evidence", () => {
+    const draft = withKeyType(newApiKeyDraft(), "pk_");
+    expect(draft.resourcePermissions).toMatchObject({ flows: "none", flow_evidence: "none" });
+    expect(visibleResources(draft)).toContain("flows");
+    expect(visibleResources(draft)).not.toContain("flow_evidence");
+    const granted = {
+      ...draft,
+      resourcePermissions: {
+        ...draft.resourcePermissions,
+        flows: "read" as const,
+        flow_evidence: "read" as const
+      }
+    };
+    expect(resourceLevel(granted, "flows")).toBe("read");
+    expect(resourceLevel(granted, "flow_evidence")).toBe("none");
+    expect(
+      createRequest({ ...granted, name: "Widget", allowedOrigins: ["https://example.com"] })
+        .resource_permissions
+    ).toMatchObject({ flows: "read", flow_evidence: "none" });
   });
 });
 
@@ -274,9 +342,45 @@ describe("updateRequest", () => {
       ...opened,
       resourcePermissions: { ...opened.resourcePermissions, spaces: "read" as const }
     };
+    // Flow evidence is granted one by one, never along with the rest.
     expect(updateRequest(narrowed, legacy).resource_permissions).toMatchObject({
       spaces: "read",
-      assistants: "write"
+      assistants: "write",
+      flows: "write",
+      flow_evidence: "none"
+    });
+  });
+
+  it("keeps a key's Flows and Flow evidence when another resource changes", () => {
+    const module = {
+      ...key,
+      key_type: "sk_",
+      permission: "write",
+      scope_type: "tenant",
+      scope_id: null,
+      allowed_origins: null,
+      resource_permissions: { ...key.resource_permissions, flows: "write", flow_evidence: "read" }
+    } as ApiKey;
+    const opened = draftFromApiKey(module);
+    const changed = {
+      ...opened,
+      resourcePermissions: { ...opened.resourcePermissions, spaces: "read" as const }
+    };
+    expect(updateRequest(changed, module).resource_permissions).toMatchObject({
+      spaces: "read",
+      flows: "write",
+      flow_evidence: "read"
+    });
+  });
+
+  it("renames a key stored without Flows without sending its access", () => {
+    // As a key created before the form offered Flows was stored.
+    const stored = {
+      ...key,
+      resource_permissions: { assistants: "read", conversations: "read" }
+    } as ApiKey;
+    expect(updateRequest({ ...draftFromApiKey(stored), name: "Ny" }, stored)).toEqual({
+      name: "Ny"
     });
   });
 
