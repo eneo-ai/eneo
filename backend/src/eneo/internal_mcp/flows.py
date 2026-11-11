@@ -323,6 +323,20 @@ def _refusal(
     )
 
 
+class _Refused(BadRequestException):
+    """A tool's own refusal that tells the model more than its message:
+    ``fields`` stand beside the message and the code, as ``_refusal`` takes
+    them. Raised, so the call's transaction rolls back like any refusal."""
+
+    def __init__(self, message: str, *, code: str, **fields: Any):
+        super().__init__(message, code=code)
+        self.fields = fields
+
+
+# The most rejected fields or templates one refusal lists.
+MAX_REFUSAL_ITEMS = 10
+
+
 def _error_result(
     exc: BadRequestException
     | ConflictException
@@ -342,6 +356,8 @@ def _error_result(
     if isinstance(exc, ValidationError):
         errors = exc.errors(include_input=False, include_context=False)
         return _refusal(invalid_message(errors), code=None, errors=errors)
+    if isinstance(exc, _Refused):
+        return _refusal(str(exc), code=exc.code, **exc.fields)
     code = getattr(exc, "code", None)
     message = str(exc)
     # The code also covers reads the rules cannot resolve; only a refusal
@@ -1529,10 +1545,12 @@ async def add_step(
         try:
             chosen = StepKindValues.model_validate(values or {})
         except ValidationError as error:
+            # Where each value was wrong and what it takes, never what was sent.
             errors = error.errors(include_input=False, include_context=False)
-            raise BadRequestException(
+            raise _Refused(
                 f"{invalid_message(errors)} {step_kind_takes(step_kind)}",
                 code="flow_step_kind_values_invalid",
+                errors=errors[:MAX_REFUSAL_ITEMS],
             ) from None
         check_step_kind_values(step_kind, chosen)
         flow = (

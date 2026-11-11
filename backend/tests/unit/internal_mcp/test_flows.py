@@ -1282,6 +1282,32 @@ async def test_a_value_no_kind_has_is_refused_without_its_value(monkeypatch):
     save.assert_not_awaited()
 
 
+async def test_a_value_of_the_wrong_type_is_refused_with_its_field_and_what_it_takes(
+    monkeypatch,
+):
+    save = _adding_chat(monkeypatch, [])
+
+    result, page = await _add(
+        name="Läs bilaga",
+        kind="ai",
+        values={"instruction": "Läs.", "upload": {"format": "MARKOR-5"}},
+    )
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert (
+        "A ai step takes instruction, input_bindings, review, upload"
+        in (page["message"])
+    )
+    # Where it was wrong and what that value takes, never what was sent.
+    (error,) = page["errors"]
+    assert error["loc"] == ["upload", "format"]
+    assert error["type"] == "literal_error"
+    assert "'document' or 'file'" in error["msg"]
+    assert "MARKOR-5" not in result.content[0].text
+    save.assert_not_awaited()
+
+
 async def _through_the_server(tool_name, /, **arguments):
     """The text a tool call answers with when the tool server takes it: the
     server checks the arguments before the tool runs."""
