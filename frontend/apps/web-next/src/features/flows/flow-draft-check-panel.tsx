@@ -125,6 +125,8 @@ function stepProblemText(
       return t("flow_editor_tools_check_template_structured");
     case "speaker_participants_missing":
       return t("flow_editor_tools_check_speaker_participants_missing");
+    case "speaker_transcript_missing":
+      return t("flow_editor_tools_check_speaker_transcript_missing");
     case "model_missing":
       return t("flow_editor_tools_check_model_missing");
     case "reference": {

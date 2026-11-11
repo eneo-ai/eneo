@@ -254,6 +254,35 @@ async def test_speakers_to_name_without_a_chosen_service_block_publishing_last()
     assert blockers[-1].code == "flow_speaker_service_not_chosen"
 
 
+async def test_a_speaker_step_in_a_flow_that_transcribes_nothing_blocks_publishing():
+    from eneo.flows.flow_validators import draft_step_refusals
+
+    flow = _speaker_flow(
+        _user(),
+        speaker_mapping={
+            "participants_field": None,
+            "speaker_count_field": None,
+            "infer_names": True,
+        },
+        wizard={},
+    )
+    typed = _step(1, input_type="text", output_mode="pass_through")
+    flow = flow.model_copy(
+        update={"steps": [typed, flow.steps[1]], "metadata_json": None}
+    )
+
+    _, blockers = await _publish_blockers(flow)
+
+    (blocker,) = [blocker for blocker in blockers if _names_speakers(blocker)]
+    assert "'transcribe_only' must come before it" in str(blocker)
+    # The draft is saved all the same: the transcribing step may come later.
+    assert not [
+        refusal
+        for refusal in draft_step_refusals(flow.steps, metadata_json=None)
+        if _names_speakers(refusal)
+    ]
+
+
 async def test_a_draft_that_does_not_transcribe_asks_nothing_of_its_space():
     flow = _saved_flow(_user()).model_copy(
         update={"steps": [_step(1, input_type="text", output_mode="pass_through")]}

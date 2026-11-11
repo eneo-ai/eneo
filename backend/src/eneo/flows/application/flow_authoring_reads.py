@@ -96,6 +96,38 @@ def step_reads_summary(
     return summary
 
 
+def transcription_offer(space: Any) -> dict[str, Any]:
+    """What a flow in ``space`` can be transcribed with, by name and never by
+    id: the models that write the text, with those that can stream while
+    someone records marked, and the services that time the words and label
+    the speakers. ``default`` marks the one a flow gets by itself. The chat
+    reads it so that it offers a flow only what its space has."""
+    from eneo.transcription_models.domain.realtime import streams_live
+
+    models = [model for model in space.transcription_models if model.can_access]
+    default_model = space.get_marked_default_transcription_model()
+    services = space.usable_transcription_services
+    default_service = space.default_transcription_service
+    return {
+        "transcription_models": [
+            {
+                "name": model.nickname or model.name,
+                "streams_live": streams_live(model),
+                "default": default_model is not None and model.id == default_model.id,
+            }
+            for model in models
+        ],
+        "speaker_services": [
+            {
+                "name": service.name,
+                "default": default_service is not None
+                and service.id == default_service.id,
+            }
+            for service in services
+        ],
+    }
+
+
 def run_form_fields(metadata_json: Mapping[str, object] | None) -> list[dict[str, Any]]:
     """The run form's fields as saved, in short: name, type, label, required
     and the options of a choice. Empty when the form cannot be read."""

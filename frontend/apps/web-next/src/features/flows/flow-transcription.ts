@@ -126,6 +126,22 @@ export function speakersRequired(steps: readonly Pick<FlowStep, "output_mode">[]
   return steps.some((step) => step.output_mode === "speaker_mapping");
 }
 
+/**
+ * A step that names speakers with no step transcribing audio before it: the
+ * labels it names are made from audio, so the core refuses to publish it.
+ */
+export function speakerStepLacksTranscript(
+  step: Pick<FlowStep, "output_mode" | "step_order">,
+  steps: readonly Pick<FlowStep, "output_mode" | "step_order">[]
+): boolean {
+  return (
+    step.output_mode === "speaker_mapping" &&
+    !steps.some(
+      (other) => other.step_order < step.step_order && other.output_mode === "transcribe_only"
+    )
+  );
+}
+
 /** The granted services new work in the space may use (the core's rule). */
 export function usableSpeakerServices<T extends SpeakerServiceLink>(services: readonly T[]): T[] {
   return services.filter((service) => service.meets_security_classification && service.available);
