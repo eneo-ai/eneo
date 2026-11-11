@@ -7,7 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from eneo.flows.domain.flow_suggestions import (
+    FLOW_SUGGESTION_AUTHORING_RULES,
     FlowSuggestion,
     FlowSuggestionCode,
     SuggestionFlow,
@@ -392,6 +395,93 @@ def test_a_relay_read_another_way_is_another_relay() -> None:
     )
 
     assert by_question.fingerprint != by_input.fingerprint
+
+
+# --------------------------------------------------------------------------- #
+# The authoring rules name the situations the engine does not judge
+# --------------------------------------------------------------------------- #
+
+_HTTP_POST = {
+    "url": "https://example.org/",
+    "auth": {"mode": "none"},
+    "timeout_seconds": 30,
+    "body": {"mode": "auto"},
+    "custom_headers": [],
+}
+_ITEMS = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+    "required": ["items"],
+}
+_STEP_2_TITLE = {"question": "{{ step_2.output.structured.title }}"}
+
+
+def _unreader() -> SuggestionStep:
+    """A last step that reads none of step 1."""
+    return _step(2, input_source="flow_input")
+
+
+@pytest.mark.parametrize(
+    ("code", "concept", "steps"),
+    [
+        (_FIELDS, "last step", [_producer()]),
+        (_FIELDS, "review", [_producer(has_review_policy=True), _title_reader()]),
+        (
+            _FIELDS,
+            "posts",
+            [
+                _producer(output_mode="http_post", output_config=_HTTP_POST),
+                _title_reader(),
+            ],
+        ),
+        (
+            _FIELDS,
+            "per item",
+            [
+                _step(1, output_type="json", output_contract=_ITEMS),
+                _step(
+                    2,
+                    input_type="json",
+                    input_config={"item_map": {"enabled": True}},
+                    output_type="json",
+                    output_contract=_CONTRACT,
+                ),
+                _step(3, input_source="flow_input", input_bindings=_STEP_2_TITLE),
+            ],
+        ),
+        (
+            _FIELDS,
+            "per section",
+            [
+                _producer(
+                    input_config={"text_processing": {"mode": "process_each_section"}}
+                ),
+                _title_reader(),
+            ],
+        ),
+        (_UNREAD, "intermediate", [_step(1)]),
+        (_UNREAD, "review", [_step(1, has_review_policy=True), _unreader()]),
+        (_UNREAD, "document", [_step(1, output_type="docx"), _unreader()]),
+        (
+            _UNREAD,
+            "posts",
+            [_step(1, output_mode="http_post", output_config=_HTTP_POST), _unreader()],
+        ),
+        (
+            _UNREAD,
+            "transcribes",
+            [_step(1, output_mode="transcribe_only"), _unreader()],
+        ),
+        (_UNREAD, "speakers", [_step(1, output_mode="speaker_mapping"), _unreader()]),
+        (_UNREAD, "tool", [_step(1, input_source="tool"), _unreader()]),
+        (_RELAY, "review", [_step(1), _relay(has_review_policy=True), _step(3)]),
+    ],
+)
+def test_a_situation_the_engine_does_not_judge_is_named_in_its_rule(
+    code: FlowSuggestionCode, concept: str, steps: list[SuggestionStep]
+) -> None:
+    assert _of(code, steps) == []
+    assert concept in FLOW_SUGGESTION_AUTHORING_RULES[code]
 
 
 # --------------------------------------------------------------------------- #
