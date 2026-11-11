@@ -486,6 +486,8 @@ class TestProviderEndpoints:
             "http://idp.example/.well-known/openid-configuration",
             "https://user:secret@idp.example/.well-known/openid-configuration",
             "https://169.254.169.254/.well-known/openid-configuration",
+            # Full-width dots: aiohttp would connect to 169.254.169.254.
+            "https://169\u3002254\u3002169\u3002254/.well-known/openid-configuration",
         ],
     )
     def test_a_discovery_endpoint_no_request_may_go_to_is_refused(self, url: str):
@@ -520,6 +522,9 @@ class TestProviderEndpoints:
             ["keys.example:443"],
             [""],
             ["keys example"],
+            ["[2001:db8::5"],
+            ["2001:db8::zz"],
+            ["[keys.example]"],
         ],
     )
     def test_allowed_endpoint_hosts_are_host_names(self, hosts: list[str]):
@@ -567,6 +572,49 @@ class TestProviderEndpoints:
         with pytest.raises(HTTPException) as refused:
             _usable(config)
         assert refused.value.status_code == 400
-        assert "keys.example.net" in refused.value.detail
+        # The Svelte admin page reads the host out of this exact sentence
+        # (ENDPOINT_HOST in routes/(app)/admin/federation/+page.server.ts);
+        # change both together.
+        assert refused.value.detail == (
+            f"The {'token endpoint' if key == 'token_endpoint' else 'JWKS URI'} "
+            "is on keys.example.net, which is neither the discovery host nor in "
+            "allowed_endpoint_hosts"
+        )
 
         _usable({**config, "allowed_endpoint_hosts": ["keys.example.net"]})
+
+    @pytest.mark.parametrize(
+        ("endpoint", "listed"),
+        [
+            ("https://[2001:db8:0::5]/token", ["[2001:DB8::5]"]),
+            ("https://[2001:DB8::5]/token", ["2001:db8:0:0::5"]),
+            ("https://10.0.0.5/token", ["10.0.0.5"]),
+        ],
+    )
+    def test_a_listed_address_matches_however_it_is_written(
+        self, endpoint: str, listed: list[str]
+    ):
+        config = _config(token_endpoint=endpoint)
+        with pytest.raises(HTTPException):
+            _usable(config)
+
+        request = SetFederationRequest.model_validate(
+            {**self.BODY, "allowed_endpoint_hosts": listed}
+        )
+        _usable({**config, "allowed_endpoint_hosts": request.allowed_endpoint_hosts})
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "https://idp.example:bad/token",
+            "https://idp.example:99999/token",
+            "https://[invalid/token",
+        ],
+    )
+    def test_a_stored_endpoint_no_request_can_be_sent_to_is_refused(
+        self, endpoint: str
+    ):
+        """A 400 before anything is stored, not an error from the URL parser."""
+        with pytest.raises(HTTPException) as refused:
+            _usable(_config(token_endpoint=endpoint))
+        assert refused.value.status_code == 400

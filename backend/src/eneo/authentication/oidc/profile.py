@@ -6,14 +6,15 @@ no migration. Only protocol constants and security floors are fixed here.
 """
 
 import asyncio
+import ipaddress
 import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
-from urllib.parse import urlsplit
 
 import aiohttp
+from yarl import URL
 
 from eneo.authentication.auth_models import DEFAULT_EMAIL_VERIFIED_CLAIMS
 from eneo.authentication.oidc import outbound
@@ -49,7 +50,7 @@ _TOKEN_AUTH_METHODS = ("client_secret_post", "client_secret_basic")
 # userinfo is stored but never fetched, so it is not among them.
 _FETCHED_ENDPOINTS = {"token endpoint": "token_endpoint", "JWKS URI": "jwks_uri"}
 # A host name as allowed_endpoint_hosts lists it: no scheme, port, path or
-# wildcard.
+# wildcard. An IP address may be listed too, IPv6 with or without brackets.
 _HOST_NAME = re.compile(
     r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*"
 )
@@ -262,19 +263,40 @@ def _email_claim(config: Mapping[str, object]) -> str:
     return _mapped_claim(config.get("claims_mapping"), "email") or "email"
 
 
+def _address(host: str) -> str | None:
+    """An IP address in one written form, or None when the host is a name."""
+    bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        return ipaddress.ip_address(bare).compressed
+    except ValueError:
+        return None
+
+
+def _host_key(host: str) -> str:
+    """A host as the host rule compares it: an address in one form, a name
+    lower-cased."""
+    return _address(host) or host.lower()
+
+
+def _url_host(url: str) -> str:
+    """The host a request to ``url`` connects to, read as aiohttp reads it."""
+    return _host_key(URL(url).raw_host or "")
+
+
 def endpoint_host_names(hosts: object) -> tuple[str, ...]:
-    """The other hosts the token and JWKS endpoints may be on, lower-cased;
-    refused unless a list of host names."""
+    """The other hosts the token and JWKS endpoints may be on, as the host
+    rule compares them; refused unless a list of host names or addresses."""
     if hosts is None:
         return ()
     if not isinstance(hosts, list) or not all(
-        isinstance(host, str) and _HOST_NAME.fullmatch(host.lower())
+        isinstance(host, str)
+        and (_address(host) is not None or _HOST_NAME.fullmatch(host.lower()))
         for host in cast(list[object], hosts)
     ):
         raise OidcProviderError(
             "allowed_endpoint_hosts must list host names, without scheme, port or path"
         )
-    return tuple(host.lower() for host in cast(list[str], hosts))
+    return tuple(_host_key(host) for host in cast(list[str], hosts))
 
 
 def check_endpoint_hosts(
@@ -288,13 +310,13 @@ def check_endpoint_hosts(
     fetching the keys that sign the ID token, at another host. The reason
     names the host, so the operator knows what to list.
     """
-    hosts = {urlsplit(discovery_url).hostname, *allowed_hosts}
+    hosts = {_url_host(discovery_url), *map(_host_key, allowed_hosts)}
     for name, url in endpoints.items():
         try:
             outbound.check_url(url)
         except outbound.OidcFetchError as exc:
             raise OidcProviderError(f"The {name}: {exc.reason}") from exc
-        host = urlsplit(url).hostname
+        host = _url_host(url)
         if host not in hosts:
             raise OidcProviderError(
                 f"The {name} is on {host}, which is neither the discovery host "
