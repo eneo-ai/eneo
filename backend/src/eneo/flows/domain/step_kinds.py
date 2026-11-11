@@ -126,7 +126,10 @@ class StepKindValues(BaseModel):
     )
     upload: StepKindUpload | None = Field(
         default=None,
-        description="Step 1 only: the run brings an upload the step reads.",
+        description=(
+            "The run brings an upload the step reads; the save refuses it on any "
+            "step but the first."
+        ),
     )
     format: Literal["docx", "pdf"] | None = Field(
         default=None,

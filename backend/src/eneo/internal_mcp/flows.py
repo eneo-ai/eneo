@@ -1619,10 +1619,11 @@ def _whole(page: dict[str, Any], step_order: int) -> dict[str, Any]:
 
 
 _STEP_KINDS_NOTE = (
-    "This judges the place and the flow's structure. What the space and the "
-    "organisation allow (models, security classification, the transcription "
-    "service, the real address of an HTTP step) is checked when the step is "
-    "saved."
+    "This judges the place and the flow's structure with each kind's own "
+    "configuration. The values add_step is given (an upload, reads, a review, "
+    "a format) and what the space and the organisation allow (models, "
+    "security classification, the transcription service, the real address of "
+    "an HTTP step) are checked when the step is saved."
 )
 
 

@@ -672,6 +672,33 @@ def test_a_value_the_kind_does_not_use_or_lacks_is_refused(
     assert refused.value.code == "flow_step_kind_values_invalid"
 
 
+@pytest.mark.parametrize(
+    "reads",
+    [None, {"question": "Läs {{ step_1.output.text }}"}],
+    ids=["after the step before", "with its own reads"],
+)
+async def test_an_upload_on_a_later_step_is_refused_by_the_save(
+    reads: dict[str, str] | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow = _flow([_step(1)])
+    values = StepKindValues.model_validate(
+        {
+            "instruction": "Läs.",
+            "upload": {"format": "document"},
+            **({"input_bindings": reads} if reads else {}),
+        }
+    )
+    check_step_kind_values(FlowStepKind.AI, values)
+    change = insertion_change(flow, FlowStepKind.AI, position=2, values=values)
+    saved: list[Flow] = []
+
+    refusal = await _save(flow, change, {}, monkeypatch, position=2, saved=saved)
+
+    assert refusal is not None
+    assert "only supported with input_source 'flow_input'" in str(refusal)
+    assert saved == []
+
+
 def test_the_value_tables_cover_every_kind_with_fields_the_values_have() -> None:
     kinds = set(FlowStepKind)
     assert set(STEP_KIND_DESCRIPTIONS) == kinds
