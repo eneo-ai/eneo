@@ -905,6 +905,39 @@ async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch, cap):
     assert len(json.dumps(page, ensure_ascii=False)) <= cap
 
 
+@pytest.mark.parametrize(
+    "blockers",
+    [
+        [BadRequestException(f"Refusal {n}. " + "x" * 200) for n in range(3)],
+        [],
+        RuntimeError("unreadable"),
+    ],
+    ids=["computed", "empty", "unreadable"],
+)
+@pytest.mark.parametrize("cap", [800, 900, 1000])
+async def test_a_crowded_change_result_stays_within_its_page(
+    monkeypatch, blockers, cap
+):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: cap)
+    _changing_chat(
+        monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT, blockers=blockers
+    )
+
+    page = await _update_step()
+
+    # The optional lists and the note give way; the counters and the flag stay.
+    assert len(json.dumps(page, ensure_ascii=False)) <= cap
+    assert page["suggestion_count"] >= 1
+    if isinstance(blockers, Exception):
+        assert page["publish_blockers"] is page["publish_blocker_count"] is None
+        assert page["publish_blockers_complete"] is False
+    else:
+        assert page["publish_blocker_count"] == len(blockers)
+        assert page["publish_blockers_complete"] is (
+            len(page["publish_blockers"]) == len(blockers)
+        )
+
+
 async def test_unreadable_publish_blockers_still_save_and_say_so(monkeypatch, caplog):
     save = _changing_chat(
         monkeypatch,

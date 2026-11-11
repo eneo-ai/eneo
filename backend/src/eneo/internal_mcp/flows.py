@@ -214,9 +214,10 @@ async def _call(
                     result = await _with_introduced(
                         result, scope.container, chat.flow_id, before
                     )
-                    return await _with_publish_blockers(
+                    result = await _with_publish_blockers(
                         result, scope.container, chat.flow_id
                     )
+                    return _within_page_cap(result)
             except BadRequestException as exc:
                 if exc.code != FlowApiErrorCode.STALE_REVISION:
                     raise
@@ -426,11 +427,6 @@ async def _with_introduced(
     ]
     page["introduced_suggestions"] = introduced[:MAX_REPORTED_INTRODUCED]
     page["suggestion_count"] = len(suggestions)
-    while (
-        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
-        and page["introduced_suggestions"]
-    ):
-        page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
@@ -488,10 +484,10 @@ async def _with_publish_blockers(
 ) -> CallToolResult:
     """``result`` with what stands between the draft, as the change left it,
     and publishing added to its page: ``publish_blockers`` (the first
-    ``MAX_REPORTED_PUBLISH_BLOCKERS``, fewer when the page is full),
+    ``MAX_REPORTED_PUBLISH_BLOCKERS``; ``_within_page_cap`` may list fewer),
     ``publish_blocker_count`` (all of them) and ``publish_blockers_complete``;
-    when the list is cut or could not be read (both null then),
-    ``publish_blockers_note`` says so and where to read them all."""
+    when the list could not be read (both null then), ``publish_blockers_note``
+    says so; ``_within_page_cap`` notes a cut list."""
     if result.isError or not result.content:
         return result
     content = result.content[0]
@@ -503,25 +499,57 @@ async def _with_publish_blockers(
         page["publish_blockers"] = page["publish_blocker_count"] = None
         page["publish_blockers_complete"] = False
         page["publish_blockers_note"] = _UNREAD_BLOCKERS_NOTE
-        if len(json.dumps(page, ensure_ascii=False)) > default_page_cap():
-            del page["publish_blockers_note"]  # the nulls still say it
     else:
         page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
         page["publish_blocker_count"] = len(blockers)
-        # The flag and the note are measured with the list they describe.
-        while True:
-            complete = len(page["publish_blockers"]) == len(blockers)
-            page["publish_blockers_complete"] = complete
-            if complete:
-                page.pop("publish_blockers_note", None)
-            else:
-                page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
-            if (
-                len(json.dumps(page, ensure_ascii=False)) <= default_page_cap()
-                or not page["publish_blockers"]
-            ):
-                break
-            page["publish_blockers"] = page["publish_blockers"][:-1]
+    result.content = [
+        TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
+    ]
+    return result
+
+
+def _within_page_cap(result: CallToolResult) -> CallToolResult:
+    """The one owner of a change result's page budget, run once both the
+    introduced suggestions and the publish blockers are on the page. Optional
+    content gives way, last item first, until the serialised page fits: the
+    introduced suggestions, then the listed blockers, then the blockers note.
+    suggestion_count, publish_blocker_count and publish_blockers_complete
+    always stay, and the flag and note always describe the list as cut.
+
+    The introduced suggestions are a hint and carry no completeness flag of
+    their own: suggestion_count says how many the draft has, and
+    read_flow_suggestions returns them all. A page whose mandatory part alone
+    exceeds the cap is page_result's matter, not handled here."""
+    if result.isError or not result.content:
+        return result
+    content = result.content[0]
+    if not isinstance(content, TextContent):
+        return result
+    page = json.loads(content.text)
+    cap = default_page_cap()
+
+    def over() -> bool:
+        return len(json.dumps(page, ensure_ascii=False)) > cap
+
+    def describe_blockers() -> None:
+        listed = page.get("publish_blockers")
+        if listed is None:
+            return  # unread: the flag and its note are set where it was read
+        complete = len(listed) == page["publish_blocker_count"]
+        page["publish_blockers_complete"] = complete
+        if complete:
+            page.pop("publish_blockers_note", None)
+        else:
+            page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
+
+    describe_blockers()
+    while over() and page.get("introduced_suggestions"):
+        page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
+    while over() and page.get("publish_blockers"):
+        page["publish_blockers"] = page["publish_blockers"][:-1]
+        describe_blockers()
+    if over():
+        page.pop("publish_blockers_note", None)
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
