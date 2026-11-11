@@ -294,6 +294,11 @@ const eslintConfig = defineConfig([
               name: "use-intl",
               importNames: ["createTranslator"],
               message: "Use `testTranslator` from @/test/i18n: it keeps the catalog's types cheap."
+            },
+            {
+              name: "use-intl/core",
+              importNames: ["createTranslator"],
+              message: "Use `testTranslator` from @/test/i18n: it keeps the catalog's types cheap."
             }
           ]
         }
