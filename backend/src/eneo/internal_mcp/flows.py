@@ -1513,14 +1513,16 @@ _STEP_KINDS_NOTE = (
 
 
 @_tool(_READS)
-async def read_step_kinds(ctx: Context, position: int | None = None) -> CallToolResult:
+async def read_step_kinds(
+    ctx: Context, position: int | None = None, offset: int = 0
+) -> CallToolResult:
     """Read which kinds of step may stand at a place of the draft: `position`
     (1 is first), after the last step when left out. For each kind: allowed,
     or the refusals (code and message) the save would give it there; the
     values it needs and may take; the output_type it gives; review true when
     a person reviews it; and hand_over, the saved steps (by their order after
     the addition) adding it there would also change. Allowed is not yet
-    saved: see the note."""
+    saved: see the note. Follow next_offset until it is null."""
 
     async def operation(container, chat, request):
         import asyncio
@@ -1586,6 +1588,7 @@ async def read_step_kinds(ctx: Context, position: int | None = None) -> CallTool
         return page_result(
             {"position": place, "kinds": kinds, "note": _STEP_KINDS_NOTE},
             flow_id=chat.flow_id,
+            offset=offset,
             revision=flow.draft_revision,
         )
 

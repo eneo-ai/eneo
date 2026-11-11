@@ -2516,3 +2516,26 @@ async def test_read_step_kinds_refuses_a_place_the_flow_lacks(monkeypatch):
 
     assert result.isError is True
     assert "position must be between 1 and 2" in result.content[0].text
+
+
+@pytest.mark.parametrize("draft", ["already broken", "published"])
+async def test_a_long_step_kinds_answer_is_read_page_by_page(monkeypatch, draft):
+    from tests.unit.flows.application.test_flow_step_kinds import DRAFTS
+
+    flow, _ = DRAFTS[draft]()
+    _kinds_chat(monkeypatch, flow)
+    monkeypatch.setattr(flows, "default_page_cap", lambda: 2000)
+
+    content, offset = "", 0
+    while offset is not None:
+        result = await flows.read_step_kinds(MagicMock(), position=1, offset=offset)
+        assert result.isError is not True, result.content[0].text
+        page = json.loads(result.content[0].text)
+        assert len(result.content[0].text) <= 2000
+        content += page["content"]
+        offset = page["next_offset"]
+
+    kinds = json.loads(content)["kinds"]
+    assert len(kinds) == len(flows.FlowStepKind)
+    if draft == "published":
+        assert not any(item["allowed"] for item in kinds)
