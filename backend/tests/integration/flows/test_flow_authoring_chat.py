@@ -2050,3 +2050,80 @@ async def test_a_word_step_is_added_with_a_template_the_flow_has(
     assert new["output_config"]["template_asset_id"] == template_id
     assert new["output_config"]["placeholders"] == ["case_id"]
     assert new["output_config"]["bindings"] == {"case_id": "{{ step_1.output.text }}"}
+
+
+def _overview_step(page: dict, order: int) -> dict:
+    steps = json.loads(page["content"])["steps"]
+    return next(step for step in steps if step["step_order"] == order)
+
+
+async def test_an_added_step_answers_with_what_it_reads_as_the_overview_does(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    form = {"fields": [{"name": "kommun", "type": "text", "label": "Kommun"}]}
+    for name, settings in (
+        ("Fakta", {"metadata_json": {"form_schema": form}}),
+        ("Sammanfatta", None),
+    ):
+        added = await flows.add_step(
+            ctx,
+            revision,
+            name,
+            FlowStepKind.AI,
+            values={"instruction": f"{name}."},
+            settings=settings,
+        )
+        assert not added.isError, added.content[0].text
+        revision += 1
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Svar",
+        FlowStepKind.AI,
+        values={
+            "instruction": "Svara för {{ flow_input.kommun }}.",
+            "input_bindings": {"question": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    step = json.loads(_page(added)["content"])["step"]
+    overview = _overview_step(_page(await flows.read_flow(ctx)), 3)
+    # It reads step 1, not the step before it, and the run form field.
+    assert [read["step_order"] for read in step["reads"]] == [1]
+    assert [read["field"] for read in step["form_fields"]] == ["kommun"]
+    for key in ("reads", "readers", "form_fields", "connections"):
+        assert step[key] == overview[key], key
+
+
+async def test_an_added_word_step_answers_with_what_its_fields_read(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={
+            "template_asset_id": word["output_config"]["template_asset_id"],
+            "bindings": {"case_id": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    step = json.loads(_page(added)["content"])["step"]
+    assert step["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }
+    overview = _overview_step(_page(await flows.read_flow(ctx)), 3)
+    assert step["word_fields"] == overview["word_fields"]
+    assert step["reads"] == overview["reads"]

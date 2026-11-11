@@ -715,6 +715,34 @@ def _step_overview(step: Any) -> dict[str, Any]:
     return item
 
 
+async def _saved_reads(container, flow_id: UUID) -> tuple[dict[int, Any], Any]:
+    """What each step of the saved draft reads, by step order, and the
+    prompts of its assistants."""
+    from eneo.flows.application.flow_authoring_reads import step_reads_summary
+
+    saved = await container.flow_service().get_flow(flow_id)
+    prompts = await container.flow_service().get_flow_assistant_prompts(saved)
+    return step_reads_summary(saved, prompts), prompts
+
+
+def _step_reads(step: Any, reads: dict[int, Any]) -> dict[str, Any]:
+    """What ``step`` reads and talks to, as the overview gives it: its
+    connections, a Word step's fields, and its reads (see ``_saved_reads``)."""
+    from eneo.flows.application.flow_authoring_reads import (
+        step_connections,
+        word_fields,
+    )
+
+    # The services the step talks to, never their secrets.
+    item: dict[str, Any] = {
+        "connections": step_connections(step.model_dump(mode="json"))
+    }
+    if step.output_mode == "template_fill":
+        item["word_fields"] = word_fields(step.output_config)
+    item.update(reads.get(step.step_order, {}))
+    return item
+
+
 @_tool(_READS)
 async def read_flow(
     ctx: Context,
@@ -744,12 +772,7 @@ async def read_flow(
 
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
-        from eneo.flows.application.flow_authoring_reads import (
-            run_form_fields,
-            step_connections,
-            step_reads_summary,
-            word_fields,
-        )
+        from eneo.flows.application.flow_authoring_reads import run_form_fields
 
         flow = await get_flow(chat.flow_id, request, container)
         if section == "all":
@@ -779,23 +802,16 @@ async def read_flow(
             chosen = [
                 step for step in flow.steps if steps is None or step.step_order in steps
             ]
-            saved = await container.flow_service().get_flow(chat.flow_id)
-            prompts = await container.flow_service().get_flow_assistant_prompts(saved)
-            reads = step_reads_summary(saved, prompts)
+            reads, prompts = await _saved_reads(container, chat.flow_id)
             items: list[dict[str, Any]] = []
             for step in chosen:
-                dump = step.model_dump(mode="json")
                 if section == "overview":
                     item = _step_overview(step)
                 else:
-                    item = dump
+                    item = step.model_dump(mode="json")
                     prompt = prompts.get(step.assistant_id)
                     item["prompt"] = prompt.text if prompt is not None else None
-                # The services the step talks to, never their secrets.
-                item["connections"] = step_connections(dump)
-                if step.output_mode == "template_fill":
-                    item["word_fields"] = word_fields(step.output_config)
-                item.update(reads.get(step.step_order, {}))
+                item.update(_step_reads(step, reads))
                 items.append(item)
             value = {
                 "name": flow.name,
@@ -1542,10 +1558,11 @@ async def add_step(
         )
         by_id = {step.id: step for step in updated.steps}
         added = next(step for step in updated.steps if step.step_order == place)
+        reads, _prompts = await _saved_reads(container, chat.flow_id)
         page: dict[str, Any] = {
             "saved": True,
             "step_id": str(added.id),
-            "step": _step_overview(added),
+            "step": _step_overview(added) | _step_reads(added, reads),
             "hand_over": [
                 {
                     "step_id": str(step_id),
