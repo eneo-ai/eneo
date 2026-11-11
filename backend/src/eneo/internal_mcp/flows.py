@@ -277,7 +277,12 @@ def _error_result(
         return _refusal(invalid_message(errors), code=None, errors=errors)
     code = getattr(exc, "code", None)
     message = str(exc)
-    if code == FLOW_INPUT_BINDING_UNSUPPORTED_KEY:
+    # The code also covers reads the rules cannot resolve; only a refusal
+    # that names an unsupported key is about the shape.
+    if code == FLOW_INPUT_BINDING_UNSUPPORTED_KEY and (
+        "unsupported key" in message.lower()
+        or "unsupported input_bindings key" in message.lower()
+    ):
         message += (
             " input_bindings takes "
             + " and ".join(sorted(SUPPORTED_INPUT_BINDING_KEYS))
@@ -498,18 +503,25 @@ async def _with_publish_blockers(
         page["publish_blockers"] = page["publish_blocker_count"] = None
         page["publish_blockers_complete"] = False
         page["publish_blockers_note"] = _UNREAD_BLOCKERS_NOTE
+        if len(json.dumps(page, ensure_ascii=False)) > default_page_cap():
+            del page["publish_blockers_note"]  # the nulls still say it
     else:
         page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
         page["publish_blocker_count"] = len(blockers)
-        page["publish_blockers_complete"] = True
-        while (
-            len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
-            and page["publish_blockers"]
-        ):
+        # The flag and the note are measured with the list they describe.
+        while True:
+            complete = len(page["publish_blockers"]) == len(blockers)
+            page["publish_blockers_complete"] = complete
+            if complete:
+                page.pop("publish_blockers_note", None)
+            else:
+                page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
+            if (
+                len(json.dumps(page, ensure_ascii=False)) <= default_page_cap()
+                or not page["publish_blockers"]
+            ):
+                break
             page["publish_blockers"] = page["publish_blockers"][:-1]
-        if len(page["publish_blockers"]) < len(blockers):
-            page["publish_blockers_complete"] = False
-            page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]

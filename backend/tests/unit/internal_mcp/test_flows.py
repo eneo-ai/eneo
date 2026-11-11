@@ -886,8 +886,9 @@ async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
     assert 'read_flow section "blockers"' in page["publish_blockers_note"]
 
 
-async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch):
-    monkeypatch.setattr(flows, "default_page_cap", lambda: 1200)
+@pytest.mark.parametrize("cap", range(1000, 1400, 9))
+async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch, cap):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: cap)
     _changing_chat(
         monkeypatch,
         before="Sammanfatta.",
@@ -900,6 +901,8 @@ async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch):
     assert len(page["publish_blockers"]) < page["publish_blocker_count"] == 3
     assert page["publish_blockers_complete"] is False
     assert 'read_flow section "blockers"' in page["publish_blockers_note"]
+    # The note is part of the page it fits in.
+    assert len(json.dumps(page, ensure_ascii=False)) <= cap
 
 
 async def test_unreadable_publish_blockers_still_save_and_say_so(monkeypatch, caplog):
@@ -1360,7 +1363,11 @@ def _reading_chat(monkeypatch, blockers=()):
     service = container.flow_service.return_value
     service.get_flow = AsyncMock(return_value=saved)
     service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
-    service.publish_blockers = AsyncMock(return_value=list(blockers))
+    service.publish_blockers = (
+        AsyncMock(side_effect=blockers)
+        if isinstance(blockers, Exception)
+        else AsyncMock(return_value=list(blockers))
+    )
     monkeypatch.setattr(
         flow_authoring_operations, "get_flow", AsyncMock(return_value=public)
     )
@@ -1426,6 +1433,15 @@ async def test_the_blockers_section_lists_every_publish_blocker(monkeypatch):
         f"Refusal {n}." for n in range(12)
     ]
     assert content["publish_blocker_count"] == 12
+
+
+async def test_blockers_that_cannot_be_read_are_refused_and_say_so(monkeypatch):
+    _reading_chat(monkeypatch, blockers=RuntimeError("unreadable"))
+
+    result = await flows.read_flow(MagicMock(), section="blockers")
+
+    assert result.isError is True
+    assert "could not be read" in json.loads(result.content[0].text)["message"]
 
 
 async def test_more_blockers_than_a_page_holds_are_read_in_full_page_by_page(
@@ -2005,10 +2021,24 @@ def _refusals(steps, metadata):
     )
 
 
+class _Placed(dict):
+    """The examples, recording which ones a flow places."""
+
+    def __init__(self, examples):
+        super().__init__(examples)
+        self.placed = set()
+
+    def __getitem__(self, name):
+        self.placed.add(name)
+        return super().__getitem__(name)
+
+
 def test_each_configuration_example_is_saved_and_published():
-    for steps, metadata in _configured_flows(
-        flow_authoring_chat.CONFIGURATION_EXAMPLES
-    ):
+    examples = _Placed(flow_authoring_chat.CONFIGURATION_EXAMPLES)
+    configured = _configured_flows(examples)
+    # Every example is placed where its rules run.
+    assert examples.placed == set(flow_authoring_chat.CONFIGURATION_EXAMPLES)
+    for steps, metadata in configured:
         draft, publish = _refusals(steps, metadata)
 
         assert draft == []
@@ -2036,7 +2066,7 @@ def test_an_example_the_rules_refuse_fails_the_check(name, broken):
     def refused(steps, metadata):
         try:
             draft, publish = _refusals(steps, metadata)
-        except Exception:  # noqa: BLE001 - any refusal counts
+        except (BadRequestException, ValidationError):
             return True
         return bool(draft) or any(
             "HTTP_MISSING_AUTH" not in str(refusal) for refusal in publish
@@ -2070,6 +2100,25 @@ def test_a_refused_read_names_the_shape_the_step_rules_take():
     for key in SOURCE_REF_KEYS:
         assert key in refusal["message"], key
     assert "update_step" in refusal["message"]
+
+
+def test_a_refusal_that_names_no_unsupported_key_gets_no_shape_hint():
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+    from eneo.flows.input_binding_contract_rules import (
+        FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+    )
+
+    message = (
+        "Step 2: Input binding path 'step_1.output.structured.x' requires the "
+        "referenced step to declare output_contract."
+    )
+    result = flows._error_result(
+        FlowStepValidationError(
+            message, step_order=2, code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+        )
+    )
+
+    assert json.loads(result.content[0].text)["message"] == message
 
 
 # --- What each tool declares ---------------------------------------------------
