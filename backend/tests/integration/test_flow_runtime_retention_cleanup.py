@@ -1378,6 +1378,33 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         )
         assert await session.get(Sessions, authoring_session_id) is not None
         assert await session.get(FlowAuthoringChats, authoring_session_id) is not None
+        # Readable, not only referenced: the reader refuses content that is no
+        # longer AVAILABLE although its reference remains.
+        for file_id, payload in (
+            (generated_file_id, b"g" * 1024),
+            (runtime_input_file_id, b"r" * 128),
+            (abandoned_file_id, b"u" * 321),
+            (template_file_id, b"t" * 1024),
+        ):
+            contents = (
+                await session.execute(
+                    select(ObjectContents.state, InlineContentPayloads.payload)
+                    .join(
+                        FileContentReferences,
+                        FileContentReferences.content_id == ObjectContents.id,
+                    )
+                    .join(
+                        InlineContentPayloads,
+                        InlineContentPayloads.content_id == ObjectContents.id,
+                    )
+                    .where(FileContentReferences.file_id == file_id)
+                )
+            ).all()
+            assert contents == [(ContentState.AVAILABLE.value, payload)], file_id
+        for transcript_id in (live_transcript_id, expired_live_transcript_id):
+            transcript = await session.get(FlowLiveTranscripts, transcript_id)
+            assert transcript is not None
+            assert transcript.text == "Hej."
 
 
 @pytest.mark.asyncio
