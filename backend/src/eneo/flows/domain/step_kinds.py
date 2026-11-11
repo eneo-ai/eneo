@@ -32,6 +32,7 @@ from eneo.flows.flow_review_policy import (
     FlowStepReviewPolicy,
     dump_flow_step_review_policy,
 )
+from eneo.flows.http_transport.authored_config import HTTP_CONFIG_KEYS
 from eneo.main.exceptions import BadRequestException
 
 
@@ -203,6 +204,9 @@ STEP_KIND_REQUIRED_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
     FlowStepKind.SEND_HTTP: ("url",),
 }
 
+# What http takes: the request besides its address, which is the value url.
+_HTTP_VALUE_KEYS: Final = HTTP_CONFIG_KEYS - {"url"}
+
 
 def check_step_kind_values(kind: FlowStepKind, values: StepKindValues) -> None:
     """Refuse values ``kind`` does not use and values it cannot do without."""
@@ -218,7 +222,8 @@ def check_step_kind_values(kind: FlowStepKind, values: StepKindValues) -> None:
         for name in STEP_KIND_REQUIRED_VALUES.get(kind, ())
         if getattr(values, name) in (None, "")
     ]
-    if not unused and not missing:
+    stray = sorted(set(values.http or {}) - _HTTP_VALUE_KEYS) if "http" in takes else []
+    if not unused and not missing and not stray:
         return
     message = f"A {kind.value} step takes " + (
         ", ".join(takes) + "." if takes else "no values."
@@ -227,6 +232,11 @@ def check_step_kind_values(kind: FlowStepKind, values: StepKindValues) -> None:
         message += f" It does not use {', '.join(unused)}: leave it out."
     if missing:
         message += f" It needs {', '.join(missing)}."
+    if stray:
+        message += (
+            f" http takes {', '.join(sorted(_HTTP_VALUE_KEYS))}, not {', '.join(stray)}"
+            " (the address is the value url)."
+        )
     raise BadRequestException(message, code="flow_step_kind_values_invalid")
 
 

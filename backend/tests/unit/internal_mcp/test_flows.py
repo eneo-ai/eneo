@@ -1169,6 +1169,7 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     assert "$ref" not in json.dumps(values)
     assert "configuration" not in schema["properties"]
     assert "assistant_changes" not in schema["properties"]
+    assert schema["additionalProperties"] is False
     description = " ".join((tool.description or "").split())
     for kind, text in STEP_KIND_DESCRIPTIONS.items():
         assert f"{kind.value} ({text})" in description
@@ -1186,6 +1187,106 @@ async def test_a_value_no_kind_has_is_refused_without_its_value(monkeypatch):
     assert result.isError is True
     assert "It names api_token, which is not a field here" in page["message"]
     assert "hemligt" not in result.content[0].text
+    save.assert_not_awaited()
+
+
+async def _through_the_server(tool_name, /, **arguments):
+    """The text a tool call answers with when the tool server takes it: the
+    server checks the arguments before the tool runs."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    tool = flows.mcp._tool_manager.get_tool(tool_name)
+    try:
+        result = await tool.run(arguments, context=MagicMock())
+    except ToolError as error:
+        return True, str(error)
+    return bool(result.isError), result.content[0].text
+
+
+@pytest.mark.parametrize(
+    "argument",
+    ["review", "upload", "configuration", "assistant_changes"],
+)
+async def test_an_argument_add_step_does_not_have_is_refused_unsaved(
+    monkeypatch, argument
+):
+    save = _adding_chat(monkeypatch, [])
+
+    refused, text = await _through_the_server(
+        "add_step",
+        expected_revision=4,
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Läs."},
+        **{argument: {"mode": "MARKOR-1"}},
+    )
+
+    assert refused, text
+    assert argument in text
+    assert "MARKOR-1" not in text
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments"),
+    [
+        (
+            "add_step",
+            {"name": "Sammanfatta", "kind": "ai", "values": ["MARKOR-2"]},
+        ),
+        ("add_step", {"name": "Sammanfatta", "kind": "MARKOR-2"}),
+        ("update_steps", {"edits": ["MARKOR-2"]}),
+        ("update_steps", {"edits": [{"step_id": "MARKOR-2"}]}),
+    ],
+)
+async def test_a_wrongly_shaped_argument_is_refused_without_its_value(
+    monkeypatch, name, arguments
+):
+    save = _adding_chat(monkeypatch, [])
+
+    refused, text = await _through_the_server(name, expected_revision=4, **arguments)
+
+    assert refused, text
+    assert "MARKOR-2" not in text
+    save.assert_not_awaited()
+
+
+async def test_an_unknown_key_in_http_is_refused_without_its_value(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    refused, text = await _through_the_server(
+        "add_step",
+        expected_revision=4,
+        name="Skicka",
+        kind="send_http",
+        values={"url": "https://example.org/hook", "http": {"losenord": "MARKOR-3"}},
+    )
+
+    assert refused, text
+    assert "losenord" in text
+    assert "MARKOR-3" not in text
+    save.assert_not_awaited()
+
+
+async def test_a_url_inside_http_is_refused_unsaved(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Hämta",
+        kind="fetch_http",
+        values={
+            "url": "https://example.org/a",
+            "http": {"url": "https://example.org/MARKOR-4"},
+        },
+    )
+
+    assert result.isError is True
+    assert "url" in page["message"]
+    assert "MARKOR-4" not in result.content[0].text
     save.assert_not_awaited()
 
 

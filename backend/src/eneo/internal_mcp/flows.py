@@ -60,16 +60,40 @@ _EDITS_DRAFT = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 _ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 
 
-def _tool(annotations: ToolAnnotations, *, appendix: str = ""):
+def _tool(annotations: ToolAnnotations, *, appendix: str = "", closed: bool = False):
     """Register a flow tool. Its description is its docstring without the
     source's indentation, then ``appendix``: the model reads every
-    description in every round."""
+    description in every round.
+
+    The tool server checks the arguments before the tool runs, and its
+    refusal would repeat each value it rejects; a credential sent in a wrongly
+    shaped argument would be written back into the conversation. The check
+    here names the argument and leaves its value out, as the tools' own
+    refusals do. ``closed`` refuses an argument the tool does not have instead
+    of dropping it."""
 
     def register(fn):
-        return mcp.tool(
+        registered = mcp.tool(
             annotations=annotations,
             description=inspect.cleandoc(fn.__doc__ or "") + appendix,
         )(fn)
+        # The SDK hands out no registered tool but through its manager.
+        tool = mcp._tool_manager.get_tool(fn.__name__)
+        assert tool is not None
+        checked = tool.fn_metadata.arg_model
+        config = ConfigDict(checked.model_config)
+        config["hide_input_in_errors"] = True
+        if closed:
+            config["extra"] = "forbid"
+            tool.parameters["additionalProperties"] = False
+        tool.fn_metadata = tool.fn_metadata.model_copy(
+            update={
+                "arg_model": type(
+                    checked.__name__, (checked,), {"model_config": config}
+                )
+            }
+        )
+        return registered
 
     return register
 
@@ -1433,7 +1457,7 @@ def _kinds_appendix() -> str:
     )
 
 
-@_tool(_EDITS_DRAFT, appendix=_kinds_appendix())
+@_tool(_EDITS_DRAFT, appendix=_kinds_appendix(), closed=True)
 async def add_step(
     ctx: Context,
     expected_revision: int,
