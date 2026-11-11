@@ -44,9 +44,14 @@ fetch() {
 }
 
 # Other sources (packages.microsoft.com) may fail without affecting our packages,
-# so only the Ubuntu mirror list's warning counts.
+# so only the Ubuntu mirror list's warning counts. The output is printed once
+# update has ended, not reopened through /dev/stderr, which Linux refuses when
+# stderr is a socket.
 fetch_index() {
-  fetch 60s update 2>&1 | tee /dev/stderr | { ! grep 'Failed to fetch mirror+file:' >/dev/null; }
+  local log status=0
+  log=$(fetch 60s update 2>&1) || status=$?
+  printf '%s\n' "$log" >&2
+  ((status == 0)) && [[ $log != *'Failed to fetch mirror+file:'* ]]
 }
 
 for attempt in 1 2 3; do
