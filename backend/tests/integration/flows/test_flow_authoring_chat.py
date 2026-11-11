@@ -2137,3 +2137,35 @@ async def test_an_added_word_step_answers_with_what_its_fields_read(
     overview = _overview_step(_page(await flows.read_flow(ctx)), 3)
     assert step["word_fields"] == overview["word_fields"]
     assert step["reads"] == overview["reads"]
+
+
+async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    first = await flows.add_step(
+        ctx, revision, "Sammanfatta", FlowStepKind.AI, values={"instruction": "Läs."}
+    )
+    assert not first.isError, first.content[0].text
+    revision += 1
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+
+    # The values pass their own check; the save makes the new step's assistant
+    # and then refuses an upload on step 2.
+    refused = await flows.add_step(
+        ctx,
+        revision,
+        "Läs bilaga",
+        FlowStepKind.AI,
+        values={"instruction": "Läs.", "upload": {"format": "document"}},
+    )
+
+    assert refused.isError, refused.content[0].text
+    assert "only supported with input_source 'flow_input'" in (refused.content[0].text)
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert [step["user_description"] for step in current["steps"]] == ["Sammanfatta"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
