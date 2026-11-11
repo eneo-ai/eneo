@@ -79,6 +79,7 @@ logger = get_logger(__name__)
 # holds each against the rules a draft save and a publish apply; a section
 # names one as ${name}.
 CONFIGURATION_EXAMPLES: dict[str, Any] = {
+    "runtime_input": {"enabled": True, "required": True, "input_format": "document"},
     "long_material": {"mode": "digest"},
     "word_bindings": {"datum": "{{ flow_input.datum }}"},
     "http_request": {
@@ -176,9 +177,11 @@ the others may not. A first step that takes an upload says so with upload;
 an audio upload is a transcribe step. When the flow cannot run without the
 upload it is required. When the person may type the material instead of
 uploading it, also add a text field to the run form and make the upload not
-required. An AI
-step whose input may exceed its model's window can set
-input_config.long_material to ${long_material}: such input is read in parts
+required. A first step that is already saved gets an upload with update_step:
+input_config.runtime_input with its input_type (document or file) as
+input_format, for example ${runtime_input}.
+An AI step whose input may exceed its model's window can set, with update_step
+once the step is added, input_config.long_material to ${long_material}: such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
 result records the coverage, and partial coverage fails the step unless it has
 a review. A change to input_config or output_config replaces it whole, so send
@@ -215,7 +218,8 @@ A Word step (template_fill) has no AI: each Word field gets the value it reads
 as it is, word for word, and the step's instruction is never used. Its fields
 are those of the template the person uploaded: read_flow lists them
 (word_fields), and you never guess a field's name. Until a template is
-uploaded the step has no fields to bind. output_config.bindings gives each
+uploaded the step has no fields to bind. output_config.bindings (in add_step,
+the value bindings) gives each
 field exactly one reference, or "" only when the person asks for that field
 to stay empty, for example
 ${word_bindings}. A field can read a run form field of type

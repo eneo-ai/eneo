@@ -1194,6 +1194,7 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     upload = values["properties"]["upload"]["anyOf"][0]
     assert upload["properties"]["format"]["enum"] == ["document", "file"]
     assert "$ref" not in json.dumps(values)
+    assert "runtime_input" not in (tool.description or "")
     assert "configuration" not in schema["properties"]
     assert "assistant_changes" not in schema["properties"]
     assert schema["additionalProperties"] is False
@@ -1213,6 +1214,10 @@ async def test_a_value_no_kind_has_is_refused_without_its_value(monkeypatch):
 
     assert result.isError is True
     assert "It names api_token, which is not a field here" in page["message"]
+    assert (
+        "A ai step takes instruction, input_bindings, review, upload"
+        in (page["message"])
+    )
     assert "hemligt" not in result.content[0].text
     save.assert_not_awaited()
 
@@ -2277,7 +2282,7 @@ def _configured_flows(examples):
             1,
             input_type="document",
             input_config={
-                "runtime_input": {"enabled": True, "input_format": "document"},
+                "runtime_input": examples["runtime_input"],
                 "long_material": examples["long_material"],
             },
         ),
@@ -2366,6 +2371,7 @@ def test_each_configuration_example_is_saved_and_published():
 @pytest.mark.parametrize(
     ("name", "broken"),
     [
+        ("runtime_input", {"enabled": True, "input_format": "pdf"}),
         ("long_material", {"mode": "summary"}),
         ("word_bindings", {"datum": "{{ flow_input.datum }} och mer"}),
         ("http_request", {"url": "...", "auth": {"mode": "none"}}),

@@ -208,6 +208,20 @@ STEP_KIND_REQUIRED_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
 _HTTP_VALUE_KEYS: Final = HTTP_CONFIG_KEYS - {"url"}
 
 
+def step_kind_value_names(kind: FlowStepKind) -> tuple[list[str], list[str]]:
+    """The values ``kind`` needs, and those it may take besides."""
+    needs: list[str] = list(STEP_KIND_REQUIRED_VALUES.get(kind, ()))
+    return needs, [name for name in STEP_KIND_VALUES[kind] if name not in needs]
+
+
+def step_kind_takes(kind: FlowStepKind) -> str:
+    """The sentence a refusal of ``kind``'s values starts with."""
+    takes = STEP_KIND_VALUES[kind]
+    return f"A {kind.value} step takes " + (
+        ", ".join(takes) + "." if takes else "no values."
+    )
+
+
 def check_step_kind_values(kind: FlowStepKind, values: StepKindValues) -> None:
     """Refuse values ``kind`` does not use and values it cannot do without."""
 
@@ -225,9 +239,7 @@ def check_step_kind_values(kind: FlowStepKind, values: StepKindValues) -> None:
     stray = sorted(set(values.http or {}) - _HTTP_VALUE_KEYS) if "http" in takes else []
     if not unused and not missing and not stray:
         return
-    message = f"A {kind.value} step takes " + (
-        ", ".join(takes) + "." if takes else "no values."
-    )
+    message = step_kind_takes(kind)
     if unused:
         message += f" It does not use {', '.join(unused)}: leave it out."
     if missing:

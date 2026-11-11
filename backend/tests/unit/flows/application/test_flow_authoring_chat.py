@@ -197,7 +197,21 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     assert "When the flow cannot run without the upload it is required" in (
         instructions
     )
-    assert "runtime_input" not in instructions
+    # A new step's upload is its value; only a saved first step is changed
+    # with the raw field.
+    assert all(
+        "update_step" in sentence
+        for sentence in instructions.split(". ")
+        if "runtime_input" in sentence
+    )
+    assert "A first step that is already saved gets an upload with update_step" in (
+        instructions
+    )
+    assert (
+        "can set, with update_step once the step is added, "
+        "input_config.long_material" in " ".join(instructions.split())
+    )
+    assert "in add_step, the value bindings" in " ".join(instructions.split())
 
 
 def test_a_new_chat_builds_an_empty_draft_and_only_reads_any_other_flow() -> None:

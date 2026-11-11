@@ -25,10 +25,10 @@ from typing_extensions import Annotated, Required, TypedDict
 
 from eneo.flows.domain.step_kinds import (
     STEP_KIND_DESCRIPTIONS,
-    STEP_KIND_REQUIRED_VALUES,
-    STEP_KIND_VALUES,
     FlowStepKind,
     StepKindValues,
+    step_kind_takes,
+    step_kind_value_names,
 )
 from eneo.internal_mcp.constants import FLOWS_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -1463,8 +1463,7 @@ def _kinds_appendix() -> str:
     """Each kind, what it does and the values it takes, from their owner."""
 
     def takes(kind: FlowStepKind) -> str:
-        required = STEP_KIND_REQUIRED_VALUES.get(kind, ())
-        optional = [name for name in STEP_KIND_VALUES[kind] if name not in required]
+        required, optional = step_kind_value_names(kind)
         parts = [f"needs {', '.join(required)}"] if required else []
         if optional:
             parts.append(f"may take {', '.join(optional)}")
@@ -1527,7 +1526,14 @@ async def add_step(
                 "can be changed in settings."
             )
         step_kind = FlowStepKind(kind)
-        chosen = StepKindValues.model_validate(values or {})
+        try:
+            chosen = StepKindValues.model_validate(values or {})
+        except ValidationError as error:
+            errors = error.errors(include_input=False, include_context=False)
+            raise BadRequestException(
+                f"{invalid_message(errors)} {step_kind_takes(step_kind)}",
+                code="flow_step_kind_values_invalid",
+            ) from None
         check_step_kind_values(step_kind, chosen)
         flow = (
             await require_flow_current_definition_access(
@@ -1664,7 +1670,6 @@ async def read_step_kinds(
         kinds: list[dict[str, Any]] = []
         for option in answer.insertions[0].options:
             configuration = option.change.configuration
-            required = STEP_KIND_REQUIRED_VALUES.get(option.kind, ())
             item: dict[str, Any] = {
                 "kind": option.kind.value,
                 "allowed": option.allowed,
@@ -1677,11 +1682,10 @@ async def read_step_kinds(
                     }
                     for refusal in option.refusals
                 ]
+            required, optional = step_kind_value_names(option.kind)
             if required:
-                item["needs"] = list(required)
-            if optional := [
-                name for name in STEP_KIND_VALUES[option.kind] if name not in required
-            ]:
+                item["needs"] = required
+            if optional:
                 item["may_take"] = optional
             item["gives"] = FlowOutputType(configuration["output_type"]).value
             if configuration["review_policy"] is not None:
