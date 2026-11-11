@@ -689,24 +689,27 @@ async def test_create_logs_warning_when_tenant_has_no_default_role(
 
 async def _race_a_sign_in_to(monkeypatch, db_session, test_tenant, **winner) -> str:
     """The account appears between the precheck and the insert: the first
-    precheck's two email lookups miss it, every later one sees it."""
-    async with db_session() as session:
-        user = Users(state="active", tenant_id=test_tenant.id, **winner)
-        session.add(user)
-        await session.flush()
-        winner_id = str(user.id)
+    insert commits it in a session of its own, then runs as it would."""
+    winner_id = str(uuid.uuid4())
+    create = ScimUserRepository.create
+    raced = False
 
-    lookups = 0
-    get_by_email = ScimUserRepository.get_by_email
+    async def committed_first(self, model):
+        nonlocal raced
+        if not raced:
+            raced = True
+            async with db_session() as session:
+                session.add(
+                    Users(
+                        id=uuid.UUID(winner_id),
+                        state="active",
+                        tenant_id=test_tenant.id,
+                        **winner,
+                    )
+                )
+        return await create(self, model)
 
-    async def missed_twice(self, email, *, tenant_id):
-        nonlocal lookups
-        lookups += 1
-        if lookups <= 2:
-            return None
-        return await get_by_email(self, email, tenant_id=tenant_id)
-
-    monkeypatch.setattr(ScimUserRepository, "get_by_email", missed_twice)
+    monkeypatch.setattr(ScimUserRepository, "create", committed_first)
     return winner_id
 
 
