@@ -105,7 +105,7 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
     FlowSuggestionCode.UNREAD_CONTRACT_FIELDS: (
         "Declare only the output fields that later steps read, except in the "
         "last step, a step with a review, and a step that posts its result or "
-        "runs once per item or per section."
+        "runs once per item, per source or per section."
     ),
     FlowSuggestionCode.UNREAD_RESULT: (
         "Add an intermediate step only when a later step reads its result, "
@@ -126,7 +126,8 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "rather than in several steps."
     ),
     FlowSuggestionCode.UNUSED_FORM_FIELD: (
-        "Declare only the run form fields that a step reads."
+        "Declare only the run form fields that a step reads or that name or "
+        "date the run."
     ),
     FlowSuggestionCode.IDENTICAL_INPUTS: (
         "Give a step each text once: read the original rather than also a "
@@ -373,7 +374,7 @@ class DraftReads:
     form_fields: tuple[str, ...]
     unreadable: frozenset[int]
     # Form fields that name or date the run: used though no step reads them.
-    role_form_fields: frozenset[str] = frozenset()
+    role_form_fields: frozenset[str]
 
     @classmethod
     def of(cls, flow: SuggestionFlow) -> DraftReads:
