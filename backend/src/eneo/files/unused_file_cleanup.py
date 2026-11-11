@@ -177,10 +177,13 @@ async def _run_from_cli(*, dry_run: bool) -> UnusedFileSweepResult | RetentionRu
     from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
     from eneo.main.container.container import Container
     from eneo.main.retention_tasks import retention_task_registrations
+    from eneo.redis.clients import redis_clients
 
     settings = get_settings()
     database = DatabaseSessionManager()
     database.init(settings.database_url)
+    # The runner reads Redis through the process's clients, like the worker's.
+    redis_clients.start()
     try:
         async with database.session() as session:
             if dry_run:
@@ -208,6 +211,7 @@ async def _run_from_cli(*, dry_run: bool) -> UnusedFileSweepResult | RetentionRu
                 return await runner.skip(registration.name)
             return await runner.run(registration.build(session))
     finally:
+        await redis_clients.stop()
         await database.close()
 
 
