@@ -73,8 +73,8 @@ test("apt has deadlines only on its network phase and installs nothing it did no
   assert.doesNotMatch(action, /^        bun run --bun playwright install-deps chromium$/m);
 
   // Stubs record every apt-get call with its deadline and the mirror apt reads at that
-  // moment; FAIL lists the mirrors on which update or the download fails, and on which
-  // update fetches no index but exits 0 (stale).
+  // moment; FAIL lists the mirrors on which update or the download fails, on which
+  // update fetches no index but exits 0 (stale), and on which only another source fails (other).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-apt-"));
   try {
     const log = path.join(dir, "apt.log");
@@ -86,6 +86,7 @@ test("apt has deadlines only on its network phase and installs nothing it did no
       'echo "${DEADLINE:-none} $mirror $*" >> "$APT_LOG"',
       'kind=install; [ "$2" = update ] && kind=update; [[ "$*" == *--download-only* ]] && kind=download',
       '[ $kind = update ] && [[ " $FAIL " == *" stale@$mirror "* ]] && echo "W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble/InRelease  Temporary failure resolving" >&2',
+      '[ $kind = update ] && [[ " $FAIL " == *" other@$mirror "* ]] && echo "W: Failed to fetch https://packages.microsoft.com/ubuntu/24.04/prod/dists/noble/InRelease  Temporary failure resolving" >&2',
       '[[ " $FAIL " != *" $kind@$mirror "* ]]',
     ].join("\n"));
     const mirrors = path.join(dir, "apt-mirrors.txt");
@@ -114,6 +115,10 @@ test("apt has deadlines only on its network phase and installs nothing it did no
     // that mirror gets no download, and the next one fetches its own index first.
     assert.deepEqual(run(packages, [`stale@${azure}`]), {
       status: 0, calls: [update(azure), update(archive), download(archive), install(archive)], mirrors: only(archive),
+    });
+    // A failure in another source (packages.microsoft.com) leaves the Ubuntu mirror in use.
+    assert.deepEqual(run(packages, [`other@${azure}`]), {
+      status: 0, calls: [update(azure), download(azure), install(azure)], mirrors: hosted,
     });
     // A failed download also moves apt to the next mirror, which fetches its own index.
     assert.deepEqual(run(packages, [`download@${azure}`]), {
