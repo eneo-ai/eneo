@@ -409,7 +409,7 @@ def test_the_instructions_describe_an_http_steps_whole_config() -> None:
     assert json.dumps(examples["http_request"], ensure_ascii=False) in instructions
     assert 'where response_format is "text" or "json"' in instructions
     assert json.dumps(examples["body_template"], ensure_ascii=False) in instructions
-    assert "a json_template takes JSON the same way" in instructions
+    assert "a json_template takes its JSON as such a string" in instructions
     assert '{"mode": "none"}. The step decides the method' in instructions
     assert "there is no method key" in instructions
     assert "the address, the method" not in instructions

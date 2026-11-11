@@ -495,7 +495,7 @@ whether the credential is stored, never the value. An http_get step keeps its
 request in input_config and an http_post step in output_config, flat, for
 example ${http_request}, where response_format is "text" or "json" and auth is
 one of the modes below. An http_post may add "body": ${body_auto} (the step's
-result), ${body_template} (a json_template takes JSON the same way) or
+result), ${body_template} (a json_template takes its JSON as such a string) or
 ${body_none}. The step decides the method, so there is no method key. The url and a body template
 may read {{ flow_input.<field> }} and earlier steps. An HTTP step is added
 through the tools like any other step; it does not depend on read_tool_options.
