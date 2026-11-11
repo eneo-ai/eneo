@@ -1202,6 +1202,24 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             bound_file_ids=[runtime_input_file_id],
         )
         session.add(live_transcript)
+        # Expired when the run happens but still bound: its file keeps it, so
+        # no task may remove it for its expiry alone.
+        expired_live_transcript = FlowLiveTranscripts(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            flow_id=flow_id,
+            flow_version=1,
+            step_id=runtime.step_id,
+            model_id=uuid4(),
+            recording_id="recording-2",
+            text="Hej.",
+            segments=None,
+            received_audio_seconds=1.0,
+            expires_at=now + timedelta(days=1),
+            bound_file_id=runtime_input_file_id,
+            bound_file_ids=[runtime_input_file_id],
+        )
+        session.add(expired_live_transcript)
         authoring_assistant = Assistants(
             name="Flow chat",
             user_id=user.id,
@@ -1235,6 +1253,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         )
         await session.flush()
         live_transcript_id = live_transcript.id
+        expired_live_transcript_id = expired_live_transcript.id
         authoring_session_id = authoring_session.id
 
         # Content outside Flows that the same run must remove.
@@ -1353,6 +1372,10 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             .where(FlowRunStepInputFiles.flow_run_id == run_id)
         )
         assert await session.get(FlowLiveTranscripts, live_transcript_id) is not None
+        assert (
+            await session.get(FlowLiveTranscripts, expired_live_transcript_id)
+            is not None
+        )
         assert await session.get(Sessions, authoring_session_id) is not None
         assert await session.get(FlowAuthoringChats, authoring_session_id) is not None
 
