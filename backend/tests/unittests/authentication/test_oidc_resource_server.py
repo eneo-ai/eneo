@@ -232,8 +232,12 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_tenant_id=None,
         # Stored mode: the tenant's config names the subject claim.
         federation_enabled=True,
-        # JIT admission requires allowed domains (resolve_federated_user).
+        # Ignored in stored mode; the env-mode cases name their own.
         oidc_allowed_domains=["example.com"],
+        # What FEDERATION_ENABLED=false signs in with.
+        oidc_discovery_endpoint=DISCOVERY_URL,
+        oidc_client_id="eneo-client",
+        oidc_client_secret="env-client-secret",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -392,7 +396,9 @@ async def test_unknown_email_with_provisioning_off_is_forbidden(setup):
 @pytest.mark.asyncio
 async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key):
     private_pem, jwk = idp_key
-    tenant = _make_tenant(provisioning=True)
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(["example.com"])
+    )
     user_repo = UserRepoStub(tenant)
     audit_service = AuditServiceStub()
     http = FakeHttpClient(
@@ -422,7 +428,9 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     monkeypatch, idp_key
 ):
     private_pem, jwk = idp_key
-    tenant = _make_tenant(provisioning=True)
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(["example.com"])
+    )
     user_repo = RacingUserRepoStub(tenant)
     audit_service = AuditServiceStub()
     http = FakeHttpClient(
@@ -644,3 +652,83 @@ async def test_a_conflicting_identity_is_refused_typed(setup):
 
     [conflict] = setup.audit_service.of(ActionType.IDENTITY_CONFLICT)
     assert conflict["metadata"]["reason"] == "subject_mismatch"
+
+
+def _stored_provider(allowed_domains: list[str]) -> dict[str, object]:
+    return {
+        "provider": "example",
+        "discovery_endpoint": DISCOVERY_URL,
+        "client_id": "eneo-client",
+        "client_secret": "stored-client-secret",
+        "allowed_domains": allowed_domains,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("federation_enabled", "stored_domains", "email", "admitted"),
+    [
+        # The OIDC_* settings: their domains, whatever is stored.
+        (False, ["stored.example"], "new@example.org", True),
+        (False, ["stored.example"], "new@stored.example", False),
+        # Stored in Eneo: the stored domains only, as at browser sign-in. An
+        # empty stored list creates no account from OIDC_ALLOWED_DOMAINS.
+        (True, ["stored.example"], "new@stored.example", True),
+        (True, ["stored.example"], "new@example.org", False),
+        (True, [], "new@example.org", False),
+    ],
+)
+async def test_access_tokens_create_accounts_by_the_domains_browser_sign_in_uses(
+    monkeypatch, idp_key, federation_enabled, stored_domains, email, admitted
+):
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(stored_domains)
+    )
+    user_repo = UserRepoStub(tenant)
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(
+        federation_enabled=federation_enabled, oidc_allowed_domains=["example.org"]
+    )
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+    token = _make_idp_token(private_pem, "kid-a", email=email)
+
+    if admitted:
+        assert (await service.authenticate(token=token)).email == email
+        assert user_repo.add_calls == 1
+    else:
+        with pytest.raises(HTTPException) as refused:
+            await service.authenticate(token=token)
+        assert refused.value.status_code == 403
+        assert user_repo.add_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_with_no_stored_domains_an_existing_account_is_admitted_as_in_the_browser(
+    monkeypatch, idp_key
+):
+    """An empty stored list filters no domain, for an access token as for
+    browser sign-in; OIDC_ALLOWED_DOMAINS does not narrow it."""
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(federation_config=_stored_provider([]))
+    user = _make_user("person@elsewhere.example", tenant)
+    user_repo = UserRepoStub(tenant, users=[user])
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(oidc_allowed_domains=["example.org"])
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+
+    admitted = await service.authenticate(
+        token=_make_idp_token(private_pem, "kid-a", email="person@elsewhere.example")
+    )
+
+    assert admitted.id == user.id
