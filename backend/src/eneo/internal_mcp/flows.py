@@ -12,8 +12,9 @@ from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import ValidationError
+from pydantic import ConfigDict, Field, ValidationError, with_config
 from sqlalchemy.ext.asyncio import AsyncSession
+from typing_extensions import Annotated, Required, TypedDict
 
 from eneo.flows.domain.step_kinds import (
     STEP_KIND_DESCRIPTIONS,
@@ -1173,11 +1174,26 @@ def _merged_settings(
     return {**settings, "metadata_json": merged}
 
 
+@with_config(ConfigDict(extra="forbid"))
+class StepEdit(TypedDict, total=False):
+    """One saved step's part of update_steps; a part left out is unchanged."""
+
+    step_id: Required[UUID]
+    changes: Annotated[
+        dict[str, Any],
+        Field(description="The step's fields to change, as update_step takes them."),
+    ]
+    assistant_changes: Annotated[
+        dict[str, Any],
+        Field(description="The assistant's own fields, as update_step takes them."),
+    ]
+
+
 @_tool(_EDITS_DRAFT)
 async def update_steps(
     ctx: Context,
     expected_revision: int,
-    edits: list[dict[str, Any]],
+    edits: list[StepEdit],
     settings: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Change several saved steps, and optionally the flow's settings, in one

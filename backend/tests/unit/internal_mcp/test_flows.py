@@ -1824,6 +1824,34 @@ async def test_update_steps_refuses_a_bad_batch_without_saving(
     save.assert_not_awaited()
 
 
+async def test_update_steps_states_the_shape_of_an_edit_in_its_schema():
+    (tool,) = [t for t in await flows.mcp.list_tools() if t.name == "update_steps"]
+    items = tool.inputSchema["properties"]["edits"]["items"]
+    edit = tool.inputSchema["$defs"][items["$ref"].rsplit("/", 1)[-1]]
+
+    assert set(edit["properties"]) == {"step_id", "changes", "assistant_changes"}
+    assert edit["required"] == ["step_id"]
+    assert edit["additionalProperties"] is False
+
+
+async def test_an_edit_of_another_shape_is_refused_before_anything_runs(
+    monkeypatch,
+):
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    with pytest.raises(ToolError, match="edits.0.edits"):
+        await flows.mcp.call_tool(
+            "update_steps",
+            {
+                "expected_revision": 4,
+                "edits": [{"step_id": str(_DRAFT_IDS[1]), "edits": {}}],
+            },
+        )
+    save.assert_not_awaited()
+
+
 def test_an_assistant_given_a_field_it_lacks_is_told_its_shape():
     from pydantic import ValidationError
 
