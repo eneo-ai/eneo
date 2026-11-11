@@ -1019,29 +1019,25 @@ class _StepEdit:
 
 
 def require_kept_template(changes: dict[str, Any], saved: dict[str, Any]) -> None:
-    """Refuse a change that would drop a Word step's template. A change
-    replaces output_config whole, and only the person uploads a template, so
-    an output_config sent with its bindings alone would lose the upload
-    without a word."""
+    """Refuse an output_config object that would drop a Word step's template.
+    A change replaces output_config whole and only the person uploads a
+    template, so an object must carry the saved template_asset_id; the save
+    refills the template's field names from it and publish reads the rest.
+    null removes the template on purpose, and so does another output_mode."""
     if (changes.get("output_mode") or saved.get("output_mode")) != "template_fill":
         return
-    if "output_config" not in changes:
+    sent = changes.get("output_config")
+    kept = (saved.get("output_config") or {}).get("template_asset_id")
+    if not isinstance(sent, dict) or not kept:
         return
-    before = saved.get("output_config") or {}
-    after = (
-        changes["output_config"] if isinstance(changes["output_config"], dict) else {}
+    if str(sent.get("template_asset_id") or "").strip() == str(kept):
+        return
+    raise BadRequestException(
+        "output_config is replaced whole, and this one does not carry the Word"
+        f' step\'s template. To keep the template, send "template_asset_id":'
+        f' "{kept}" with it; to remove the template on purpose, send'
+        " output_config null."
     )
-    lost = sorted(
-        key for key in before if key.startswith("template_") and key not in after
-    )
-    if lost:
-        raise BadRequestException(
-            "output_config is replaced whole, and this one leaves out "
-            + ", ".join(lost)
-            + ", which link the Word step to the template the person uploaded."
-            " Send output_config as the step's full read gives it, with only"
-            " what you change changed."
-        )
 
 
 def _step_edit(

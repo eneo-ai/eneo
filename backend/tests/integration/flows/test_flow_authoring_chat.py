@@ -1715,13 +1715,15 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
     assert "template_asset_id" in _page(refused)["message"]
     assert after["output_config"] == saved_config
 
+    # The id alone keeps the template: the save refills its field names.
+    template_id = saved_config["template_asset_id"]
     bound = await flows.update_step(
         ctx,
         revision,
         UUID(word["id"]),
         {
             "output_config": {
-                **saved_config,
+                "template_asset_id": template_id,
                 "bindings": {"case_id": "{{ step_1.output.text }}"},
             }
         },
@@ -1730,7 +1732,46 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
     assert "template_unbound" not in {
         b["code"] for b in _page(bound)["publish_blockers"]
     }
+    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
+    assert after["output_config"]["placeholders"] == saved_config["placeholders"]
     overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
     assert overview["steps"][0]["word_fields"] == {
         "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
     }
+    revision = _page(bound)["draft_revision"]
+
+    # An id of null inside the object is not a removal.
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"template_asset_id": None, "bindings": {}}},
+    )
+    assert refused.isError
+
+    # null removes the template on purpose.
+    detached = await flows.update_step(
+        ctx, revision, UUID(word["id"]), {"output_config": None}
+    )
+    assert not detached.isError, detached.content[0].text
+    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
+    assert not (after["output_config"] or {}).get("template_asset_id")
+
+
+async def test_a_word_step_turned_into_another_kind_leaves_its_template(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+
+    changed = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_mode": "pass_through", "output_type": "text", "output_config": {}},
+    )
+
+    assert not changed.isError, changed.content[0].text
+    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
+    assert after["output_mode"] == "pass_through"

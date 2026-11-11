@@ -1680,29 +1680,47 @@ _WORD_STEP = {
 }
 
 
-def test_a_change_that_would_drop_a_word_steps_template_is_refused():
-    with pytest.raises(BadRequestException) as refused:
-        flows.require_kept_template(
-            {"output_config": {"bindings": {"namn": "{{ flow_input.namn }}"}}},
-            _WORD_STEP,
-        )
-    assert "template_asset_id, template_name" in str(refused.value)
+_TEMPLATE_ID = _WORD_STEP["output_config"]["template_asset_id"]
 
-    # The whole config with the bindings changed is a change like any other,
-    # and the placeholders follow the uploaded template on their own.
-    kept = {
-        key: value
-        for key, value in _WORD_STEP["output_config"].items()
-        if key != "placeholders"
-    }
-    flows.require_kept_template(
-        {"output_config": {**kept, "bindings": {"namn": ""}}}, _WORD_STEP
-    )
-    # A step that stops filling a template takes its template with it.
-    flows.require_kept_template(
-        {"output_mode": "pass_through", "output_config": None}, _WORD_STEP
-    )
-    flows.require_kept_template({"user_description": "Beslut"}, _WORD_STEP)
+
+@pytest.mark.parametrize(
+    "output_config",
+    [
+        {"bindings": {"namn": "{{ flow_input.namn }}"}},
+        {"template_asset_id": None, "bindings": {}},
+        {"template_asset_id": " ", "bindings": {}},
+        {"template_asset_id": "0f7c1d2e-3b4a-4c5d-8e6f-7a8b9c0d1e2f", "bindings": {}},
+    ],
+)
+def test_an_object_without_the_word_steps_template_is_refused(output_config):
+    with pytest.raises(BadRequestException) as refused:
+        flows.require_kept_template({"output_config": output_config}, _WORD_STEP)
+
+    # It says how to keep the template and how to remove it on purpose.
+    assert _TEMPLATE_ID in str(refused.value)
+    assert "null" in str(refused.value)
+
+
+@pytest.mark.parametrize(
+    "changes",
+    [
+        # The id alone keeps the template: the save refills its field names
+        # and publish reads its name and checksum itself.
+        {
+            "output_config": {
+                "template_asset_id": _TEMPLATE_ID,
+                "bindings": {"namn": ""},
+            }
+        },
+        # null removes the template on purpose.
+        {"output_config": None},
+        # A step that stops filling a template takes its template with it.
+        {"output_mode": "pass_through", "output_config": {}},
+        {"user_description": "Beslut"},
+    ],
+)
+def test_a_change_that_keeps_or_removes_the_template_on_purpose_is_saved(changes):
+    flows.require_kept_template(changes, _WORD_STEP)
 
 
 # --- What a step reads ---------------------------------------------------------
