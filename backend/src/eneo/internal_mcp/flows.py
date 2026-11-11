@@ -421,14 +421,22 @@ async def _with_introduced(
 # The most publish blockers one change result lists; the count says how many
 # there are.
 MAX_REPORTED_PUBLISH_BLOCKERS = 10
+_CUT_BLOCKERS_NOTE = (
+    'Only the first publish blockers are listed; read_flow section "blockers" '
+    "lists them all."
+)
+_UNREAD_BLOCKERS_NOTE = (
+    "The change is saved, but its publish blockers could not be read now; "
+    'read_flow section "blockers" reads them again.'
+)
 
 
 async def _publish_blockers(container, flow_id: UUID) -> list[dict[str, Any]] | None:
     """What publish would refuse the draft for now (``FlowService
     .publish_blockers``), each in short with its step by order and name, read
-    in a savepoint of the change's transaction; None when it cannot be
-    computed. A failure is logged by its kind only and never fails the
-    change."""
+    in a savepoint of the caller's transaction, the same refusal met twice
+    listed once; None when it cannot be computed. A failure is logged by its
+    kind only and never fails the change."""
     try:
         async with cast(AsyncSession, container.session()).begin_nested():
             service = container.flow_service()
@@ -451,7 +459,8 @@ async def _publish_blockers(container, flow_id: UUID) -> list[dict[str, Any]] | 
         order = getattr(refusal, "step_order", None) or context.get("step_order")
         if isinstance(order, int):
             blocker["step"] = {"step_order": order, "name": names.get(order)}
-        blockers.append(blocker)
+        if blocker not in blockers:
+            blockers.append(blocker)
     return blockers
 
 
@@ -460,25 +469,33 @@ async def _with_publish_blockers(
 ) -> CallToolResult:
     """``result`` with what stands between the draft, as the change left it,
     and publishing added to its page: ``publish_blockers`` (the first
-    ``MAX_REPORTED_PUBLISH_BLOCKERS``, fewer when the page is full) and
-    ``publish_blocker_count`` (all of them); ``result`` unchanged when they
-    cannot be computed."""
+    ``MAX_REPORTED_PUBLISH_BLOCKERS``, fewer when the page is full),
+    ``publish_blocker_count`` (all of them) and ``publish_blockers_complete``;
+    when the list is cut or could not be read (both null then),
+    ``publish_blockers_note`` says so and where to read them all."""
     if result.isError or not result.content:
         return result
     content = result.content[0]
     if not isinstance(content, TextContent):
         return result
     blockers = await _publish_blockers(container, flow_id)
-    if blockers is None:
-        return result
     page = json.loads(content.text)
-    page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
-    page["publish_blocker_count"] = len(blockers)
-    while (
-        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
-        and page["publish_blockers"]
-    ):
-        page["publish_blockers"] = page["publish_blockers"][:-1]
+    if blockers is None:
+        page["publish_blockers"] = page["publish_blocker_count"] = None
+        page["publish_blockers_complete"] = False
+        page["publish_blockers_note"] = _UNREAD_BLOCKERS_NOTE
+    else:
+        page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
+        page["publish_blocker_count"] = len(blockers)
+        page["publish_blockers_complete"] = True
+        while (
+            len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
+            and page["publish_blockers"]
+        ):
+            page["publish_blockers"] = page["publish_blockers"][:-1]
+        if len(page["publish_blockers"]) < len(blockers):
+            page["publish_blockers_complete"] = False
+            page["publish_blockers_note"] = _CUT_BLOCKERS_NOTE
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
@@ -534,7 +551,7 @@ def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolRe
     return result
 
 
-FlowSection = Literal["overview", "steps", "settings", "all"]
+FlowSection = Literal["overview", "steps", "settings", "blockers", "all"]
 
 
 async def _transcription_offer(container, space_id: UUID) -> dict[str, Any] | None:
@@ -589,7 +606,8 @@ async def read_flow(
     the steps in full with their assistants' prompts and the same reads;
     section "settings" the flow without its steps (description,
     metadata_json with the run form, retention, permissions); section "all"
-    everything, paged. The overview and the settings also say what the
+    everything, paged; section "blockers" every publish blocker the draft
+    has now, of which a change result lists the first. The overview and the settings also say what the
     flow's space offers for transcription, by name (transcription_offer:
     transcription_models, speaker_services). steps=[5, 8] limits the overview or the steps section
     to those step numbers (1 is first). A step marked unreadable has a
@@ -614,6 +632,16 @@ async def read_flow(
             offer = await _transcription_offer(container, chat.space_id)
             if offer is not None:
                 value["transcription_offer"] = offer
+        elif section == "blockers":
+            blockers = await _publish_blockers(container, chat.flow_id)
+            if blockers is None:
+                raise BadRequestException(
+                    "The publish blockers could not be read now; try again."
+                )
+            value = {
+                "publish_blockers": blockers,
+                "publish_blocker_count": len(blockers),
+            }
         else:
             orders = {step.step_order for step in flow.steps}
             if steps is not None and (missing := sorted(set(steps) - orders)):

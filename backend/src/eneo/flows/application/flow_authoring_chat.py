@@ -348,7 +348,9 @@ shape. Then tell the user in one plain sentence what you adjusted and why.
 
 _PUBLISH_BLOCKERS = """After a change, the tool result also lists under publish_blockers what
 would stop the draft from being published as it now stands, each with its
-step, and under publish_blocker_count how many there are. While you are still
+step, and under publish_blocker_count how many there are. When
+publish_blockers_complete is false, read_flow section "blockers" gives them
+all. While you are still
 building, a blocker that your next change removes needs no mention. Before you
 say that a flow is built or a change is done, account for every blocker that
 is left. Fix in the same turn what a setting fixes (a read that names nothing,
@@ -359,7 +361,8 @@ a transcription model or a speaker service under "Ändra inställningar". Never
 make a blocker go away by changing what a step is for or by taking a step
 out: a Word step that waits for its template stays a Word step, and a speaker
 step that waits for a speaker service stays. Never
-call a flow ready to publish while publish_blocker_count is above zero. The
+call a flow ready to publish while publish_blocker_count is above zero or
+unknown. The
 list holds the draft's own rules; publishing also checks the space's models
 and the organisation's limits, so it can still refuse and then names why.
 """

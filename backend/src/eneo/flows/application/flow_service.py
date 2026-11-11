@@ -880,11 +880,13 @@ class FlowService:
         """What publish would refuse ``flow``'s draft for, as far as the draft
         itself says, in the order publish meets it: every refusal of the step
         rules (``publish_step_refusals``, of which publish raises the first),
-        then, in a flow that transcribes, the transcription choice publish
-        refuses (speakers to label and no service chosen to label them).
-        Nothing is written. Publish's other checks (the organisation's
-        limits, the security classification, stored secrets) need more than
-        the draft and stay publish's own."""
+        then a Word step's template fields without a binding, then, in a flow
+        that transcribes, the transcription choice publish refuses (speakers
+        to label and no service chosen to label them). Nothing is written.
+        The template fields are those the draft saved; publish reads them
+        from the template file itself. Publish's other checks (the
+        organisation's limits, the security classification, stored secrets)
+        need more than the draft and stay publish's own."""
         metadata = normalize_persisted_flow_metadata(flow.metadata_json)
         prompts = await self.get_flow_assistant_prompts(flow)
         refusals = publish_step_refusals(
@@ -896,6 +898,7 @@ class FlowService:
                 if (prompt := prompts.get(step.assistant_id)) is not None
             },
         )
+        refusals.extend(_unbound_template_field_refusals(flow.steps))
         config = kept_transcription_config(metadata)
         if config is None or config.enabled:
             try:
@@ -1824,3 +1827,43 @@ def _form_schema(
         return None
     form_schema = cast(FlowPersistedJsonObject, schema)
     return form_schema if isinstance(form_schema.get("fields"), list) else None
+
+
+def _unbound_template_field_refusals(
+    steps: Sequence[FlowStep],
+) -> list[BadRequestException]:
+    """Publish's refusal of a Word step whose template has a field without a
+    binding (``validate_template_placeholder_bindings``), judged on the
+    fields the draft saved and named with the step, as the editor's draft
+    check names it. Bindings that are not an object are the step rules'."""
+    refusals: list[BadRequestException] = []
+    for step in steps:
+        config = step.output_config or {}
+        names = config.get("placeholders")
+        bindings = config.get("bindings")
+        if (
+            step.output_mode != "template_fill"
+            or not isinstance(names, list)
+            or not isinstance(bindings, dict)
+        ):
+            continue
+        try:
+            validate_template_placeholder_bindings(
+                step_order=step.step_order,
+                placeholder_names=[
+                    name for name in cast(list[object], names) if isinstance(name, str)
+                ],
+                bindings=cast(dict[str, object], bindings),
+            )
+        except BadRequestException as exc:
+            refusals.append(
+                FlowStepValidationError(
+                    str(exc),
+                    step_order=step.step_order,
+                    context={
+                        "issue_code": "template_unbound",
+                        "step_order": step.step_order,
+                    },
+                )
+            )
+    return refusals

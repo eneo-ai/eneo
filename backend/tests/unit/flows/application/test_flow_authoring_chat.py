@@ -251,6 +251,11 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "lists under publish_blockers" in instructions
+    # A cut or unread list is read whole before anything is called done.
+    assert (
+        'When publish_blockers_complete is false, read_flow section "blockers"'
+        in instructions
+    )
     assert "account for every blocker that is left" in instructions
     assert "Fix in the same turn what a setting fixes" in instructions
     assert "What only the person can do, say in one plain sentence each" in (
@@ -263,8 +268,8 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     )
     assert "a Word step that waits for its template stays a Word step" in instructions
     assert (
-        "Never call a flow ready to publish while publish_blocker_count is above zero"
-        in instructions
+        "Never call a flow ready to publish while publish_blocker_count is above "
+        "zero or unknown" in instructions
     )
 
 

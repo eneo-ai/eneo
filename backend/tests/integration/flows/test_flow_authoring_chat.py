@@ -1694,6 +1694,14 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
     overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
     (step,) = overview["steps"]
     assert step["word_fields"] == {"fields": [{"name": "case_id", "reads": None}]}
+    # The unbound field blocks publishing, named with its step.
+    listed = json.loads(
+        _page(await flows.read_flow(ctx, section="blockers"))["content"]
+    )
+    unbound = [b for b in listed["publish_blockers"] if b["code"] == "template_unbound"]
+    assert [(b["step"]["step_order"], "case_id" in b["message"]) for b in unbound] == [
+        (2, True)
+    ]
 
     # Only the bindings: the template the person uploaded would be lost.
     refused = await flows.update_step(
@@ -1719,6 +1727,9 @@ async def test_a_word_steps_fields_are_read_and_its_template_kept(
         },
     )
     assert not bound.isError, bound.content[0].text
+    assert "template_unbound" not in {
+        b["code"] for b in _page(bound)["publish_blockers"]
+    }
     overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
     assert overview["steps"][0]["word_fields"] == {
         "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]

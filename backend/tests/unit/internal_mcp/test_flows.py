@@ -825,6 +825,8 @@ async def test_a_change_reports_what_stands_between_the_draft_and_publishing(
         },
     ]
     assert page["publish_blocker_count"] == 2
+    assert page["publish_blockers_complete"] is True
+    assert "publish_blockers_note" not in page
     assert json.loads(page["content"])["saved"] is True
 
 
@@ -837,6 +839,29 @@ async def test_a_draft_with_nothing_in_the_way_reports_no_publish_blockers(
 
     assert page["publish_blockers"] == []
     assert page["publish_blocker_count"] == 0
+    assert page["publish_blockers_complete"] is True
+
+
+async def test_the_same_refusal_met_twice_is_one_blocker(monkeypatch):
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+
+    def refusal():
+        return FlowStepValidationError(
+            "Step 2: input_bindings.source_refs[0] has unsupported key 'step'.",
+            step_order=2,
+            code="flow_input_binding_unsupported_key",
+        )
+
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[refusal(), refusal(), refusal()],
+    )
+
+    page = await _update_step()
+
+    assert len(page["publish_blockers"]) == page["publish_blocker_count"] == 1
 
 
 async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
@@ -855,11 +880,28 @@ async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
         f"Refusal {number}." for number in range(flows.MAX_REPORTED_PUBLISH_BLOCKERS)
     ]
     assert page["publish_blocker_count"] == 12
+    # The rest is not silently dropped: the page says where all of them are.
+    assert page["publish_blockers_complete"] is False
+    assert 'read_flow section "blockers"' in page["publish_blockers_note"]
 
 
-async def test_unreadable_publish_blockers_still_save_and_report_nothing(
-    monkeypatch, caplog
-):
+async def test_a_full_page_says_its_publish_blockers_are_cut(monkeypatch):
+    monkeypatch.setattr(flows, "default_page_cap", lambda: 1200)
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[BadRequestException(f"Refusal {n}. " + "x" * 400) for n in range(3)],
+    )
+
+    page = await _update_step()
+
+    assert len(page["publish_blockers"]) < page["publish_blocker_count"] == 3
+    assert page["publish_blockers_complete"] is False
+    assert 'read_flow section "blockers"' in page["publish_blockers_note"]
+
+
+async def test_unreadable_publish_blockers_still_save_and_say_so(monkeypatch, caplog):
     save = _changing_chat(
         monkeypatch,
         before="Sammanfatta.",
@@ -871,8 +913,11 @@ async def test_unreadable_publish_blockers_still_save_and_report_nothing(
 
     save.assert_awaited_once()
     assert json.loads(page["content"])["saved"] is True
-    assert "publish_blockers" not in page
-    assert "publish_blocker_count" not in page
+    # Never silence: the page says the blockers could not be read now.
+    assert page["publish_blockers"] is None
+    assert page["publish_blocker_count"] is None
+    assert page["publish_blockers_complete"] is False
+    assert "could not be read" in page["publish_blockers_note"]
     # The suggestions are reported all the same.
     assert page["introduced_suggestions"] == []
     # Logged by its kind, without the content it read.
@@ -1243,9 +1288,10 @@ async def test_the_chat_has_no_tool_to_unpublish_a_flow():
 _STEP_2_PROMPT = "Sammanfatta {{ step_1.output.text }}."
 
 
-def _reading_chat(monkeypatch):
+def _reading_chat(monkeypatch, blockers=()):
     """A view-mode chat over the example flow: step 2 reads step 1 as its
-    input and again in its prompt."""
+    input and again in its prompt; publish would refuse it for
+    ``blockers``."""
     from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
     from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
     from tests.unit.flows.application.test_flow_suggestion_service import (
@@ -1283,6 +1329,7 @@ def _reading_chat(monkeypatch):
     service = container.flow_service.return_value
     service.get_flow = AsyncMock(return_value=saved)
     service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
+    service.publish_blockers = AsyncMock(return_value=list(blockers))
     monkeypatch.setattr(
         flow_authoring_operations, "get_flow", AsyncMock(return_value=public)
     )
@@ -1334,6 +1381,20 @@ async def test_the_steps_section_gives_the_chosen_steps_in_full_with_prompts(
     assert step["prompt"] == _STEP_2_PROMPT
     assert "input_bindings" in step and "output_config" in step
     assert len(step["reads"]) == 2
+
+
+async def test_the_blockers_section_lists_every_publish_blocker(monkeypatch):
+    _reading_chat(
+        monkeypatch,
+        blockers=[BadRequestException(f"Refusal {n}.") for n in range(12)],
+    )
+
+    _page, content = await _read(section="blockers")
+
+    assert [blocker["message"] for blocker in content["publish_blockers"]] == [
+        f"Refusal {n}." for n in range(12)
+    ]
+    assert content["publish_blocker_count"] == 12
 
 
 async def test_a_step_number_the_flow_lacks_is_refused(monkeypatch):
