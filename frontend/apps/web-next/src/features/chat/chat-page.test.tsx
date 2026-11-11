@@ -132,6 +132,11 @@ const api = vi.hoisted(() => ({
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+// The insights chat's own endpoints: no earlier analyses.
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: vi.fn(async () => Response.json({ items: [], total_count: 0 }))
+}));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
@@ -660,7 +665,26 @@ describe("ChatPage while an answer streams", () => {
     setRoute("/chat?other=tab%3Dinsights");
     rerender(null);
     expect(composer()).toBeTruthy();
-    expect(screen.queryByText("Totala konversationer")).toBeNull();
+    expect(document.getElementById(CHAT_PANEL_IDS.insights)?.hidden).toBe(true);
+  });
+
+  it("keeps an analysis in Insikter when switching to Chatt and back", async () => {
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    const field = await screen.findByRole("textbox", { name: "Fråga om användningen" });
+    fireEvent.change(field, { target: { value: "Vad frågar folk om?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    await act(async () => answer(spies.streams[0]!, "analysis-1", "Mest om parkering."));
+    expect(await within(screen.getByRole("log")).findByText("Mest om parkering.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
+    expect(composer()).toBeTruthy();
+    expect(document.getElementById(CHAT_PANEL_IDS.insights)?.hidden).toBe(true);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    expect(within(screen.getByRole("log")).getByText("Mest om parkering.")).toBeTruthy();
+    expect(within(screen.getByRole("log")).getByText("Vad frågar folk om?")).toBeTruthy();
   });
 
   it.each([false, true])(

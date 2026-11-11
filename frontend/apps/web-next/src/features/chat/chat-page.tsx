@@ -303,6 +303,11 @@ export function ChatPage({
         ? "history"
         : "chat";
 
+  // Insikter mounts on its first visit and then stays, like the conversation behind it:
+  // an analysis (and an answer still streaming) is there again when the tab is.
+  const [insightsVisited, setInsightsVisited] = useState(viewTab === "insights");
+  if (viewTab === "insights" && !insightsVisited) setInsightsVisited(true);
+
   const sessionId = active?.sessionId ?? null;
   const started = Boolean(active?.started);
   // The page has one h1: the conversation title in the header, the start
@@ -380,8 +385,9 @@ export function ChatPage({
       />
       <div ref={rowRef} className="flex min-h-0 flex-1">
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          {/* The tabs' panels are always there for aria-controls; only the
-              selected one renders its content (Historik loads on demand). */}
+          {/* The tabs' panels are always there for aria-controls; Historik renders
+              its content only while selected (it loads on demand), Insikter from its
+              first visit on. */}
           {insightPartner && (
             <div
               id={CHAT_PANEL_IDS.insights}
@@ -390,7 +396,7 @@ export function ChatPage({
               hidden={viewTab !== "insights"}
               className="flex min-h-0 min-w-0 flex-1 flex-col"
             >
-              {viewTab === "insights" && <InsightsPanel partner={insightPartner} />}
+              {insightsVisited && <InsightsPanel partner={insightPartner} />}
             </div>
           )}
           <div

@@ -150,6 +150,23 @@ describe("ExploreConversationsDialog", () => {
     ).toBeTruthy();
   });
 
+  it("opens on a conversation an analysis cited, read beside the period's list", async () => {
+    renderInApp(
+      <ExploreConversationsDialog
+        partner={partner}
+        range={{ start: "2026-09-02", end: "2026-10-02" }}
+        isOpen
+        onOpenChange={vi.fn()}
+        initialSessionId="s-1"
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    const preview = within(dialog).getByRole("region", { name: "Vald konversation" });
+    expect(await within(preview).findByText("Vad är gränsen?")).toBeTruthy();
+    const row = await within(dialog).findByRole("button", { name: /Direktupphandling/ });
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("filters by title once typing pauses", async () => {
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });

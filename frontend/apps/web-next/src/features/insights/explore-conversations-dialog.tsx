@@ -235,21 +235,24 @@ function SessionPreview({ partner, sessionId }: { partner: Partner; sessionId: s
  * "Utforska konversationer": every conversation users had with the partner
  * in the chosen period (owners and editors of a partner with insights on),
  * searchable by title and loaded a page at a time, with the picked one
- * readable beside the list.
+ * readable beside the list. `initialSessionId` opens it on one conversation
+ * (one an analysis cited), read beside the list whether the list holds it or not.
  */
 export function ExploreConversationsDialog({
   partner,
   range,
   isOpen,
-  onOpenChange
+  onOpenChange,
+  initialSessionId = null
 }: {
   partner: Partner;
   range: InsightRange;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  initialSessionId?: string | null;
 }) {
   const t = useTranslations();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSessionId);
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={onOpenChange} width={960} maxHeight="85dvh">

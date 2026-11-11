@@ -5,6 +5,7 @@ import type { EneoUIMessage } from "@/lib/chat/types";
 import { renderInApp, testQueryClient } from "@/test/render";
 import type { ToolCall } from "./activity";
 import { ToolCallList } from "./tool-call-list";
+import { ToolResultsContext } from "./tool-results";
 
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -111,6 +112,17 @@ describe("ToolCallList", () => {
     expect(await screen.findByText("Kunde inte hämta verktygssvaret")).toBeTruthy();
     await settle();
     expect(api.GET).toHaveBeenCalledTimes(4);
+  });
+
+  it("reads a result from the conversation's own source", async () => {
+    const read = vi.fn(async () => "Frågor 1-2 av 2");
+    renderInApp(
+      <ToolResultsContext value={{ scope: "own", read }}>{list(true)}</ToolResultsContext>
+    );
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    expect(await screen.findByText("Frågor 1-2 av 2")).toBeTruthy();
+    expect(read).toHaveBeenCalledWith("session-1", "call-1");
+    expect(api.GET).not.toHaveBeenCalled();
   });
 
   it("shows a failed call's error while the answer is written, without asking", async () => {

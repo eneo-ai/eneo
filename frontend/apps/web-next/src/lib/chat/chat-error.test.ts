@@ -152,6 +152,23 @@ describe("describeChatFailure", () => {
     });
   });
 
+  it("says a conversation removed with what it was based on is gone, for good", () => {
+    const removed = new EneoApiError("Gone", {
+      status: 410,
+      reason: "derived_source_removed",
+      traceId: "trace-1"
+    });
+    const failure = describeChatFailure(removed, null, t);
+    expect(failure).toMatchObject({ message: "derived_source_removed", gone: true });
+    expect(failure.details.join("\n")).toContain("trace-1");
+    expect(testTranslator()("derived_source_removed")).toBe(sv.derived_source_removed);
+    expect(en).toHaveProperty("derived_source_removed");
+    // Any other refusal can be asked again.
+    expect(
+      describeChatFailure(new EneoApiError("Not found", { status: 404 }), null, t).gone
+    ).toBeUndefined();
+  });
+
   it("cuts a long backend text (an HTML error page, a stack trace) to one line", () => {
     const long = new Error(`<html>\n${"x".repeat(500)}\n</html>`);
     const [detail] = describeChatFailure(long, null, t).details;

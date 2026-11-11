@@ -517,3 +517,104 @@ describe("Eneo's flows server", () => {
     expect(toolTarget(flows("add_step", { name: "  " }), t)).toBeNull();
   });
 });
+
+/** The loopback insights server, as the insights chat's analysis calls it. */
+describe("Eneo's insights server", () => {
+  const svT = testTranslator();
+  const enT = testTranslator("en");
+  const insights = (toolName: string, input: Record<string, unknown> = {}) => ({
+    toolName,
+    input,
+    providerMetadata: { eneo: { server_name: "insights", is_internal: true } }
+  });
+  const tools = [
+    "usage_summary",
+    "list_questions",
+    "top_questions",
+    "search_questions",
+    "read_conversation",
+    "find_gaps"
+  ];
+
+  it("names each call in plain words while it runs and once it is done", () => {
+    expect(toolPresentation(insights("top_questions"), svT, false)).toEqual({
+      label: "Räknar de vanligaste frågorna",
+      server: "Insikter"
+    });
+    expect(toolPresentation(insights("top_questions"), svT, true).label).toBe(
+      "Räknade de vanligaste frågorna"
+    );
+    expect(toolPresentation(insights("find_gaps"), enT, true)).toEqual({
+      label: "Looked for gaps in the answers",
+      server: "Insights"
+    });
+  });
+
+  it("says what a search looked for", () => {
+    const search = insights("search_questions", { query: "parkering" });
+    expect(toolPresentation(search, svT, false).label).toBe("Söker frågor om ”parkering”");
+    expect(toolPresentation(search, svT, true).label).toBe("Sökte frågor om ”parkering”");
+    expect(toolPresentation(insights("search_questions"), svT, true).label).toBe(
+      "Sökte bland frågorna"
+    );
+  });
+
+  it("has both forms of every label in both languages", () => {
+    const calls = [
+      ...tools.map((tool) => insights(tool)),
+      insights("search_questions", { query: "parkering" })
+    ];
+    for (const call of calls) {
+      for (const done of [false, true]) {
+        const key = toolPresentation(call, t, done).label.split(":")[0]!;
+        expect(key).toMatch(/^tool_insights_/);
+        expect(sv).toHaveProperty(key);
+        expect(en).toHaveProperty(key);
+      }
+    }
+  });
+
+  it("shows the period a call covered in the operator's time zone, its end excluded", () => {
+    const period = {
+      start: "2026-11-02T00:00:00+01:00",
+      end: "2026-11-09T00:00:00+01:00",
+      timezone: "Europe/Stockholm"
+    };
+    expect(toolTarget(insights("usage_summary", { ...period, granularity: "day" }), svT)).toBe(
+      "2–8 nov. 2026"
+    );
+    // The browser puts thin spaces around the dash in English.
+    expect(
+      toolTarget(insights("search_questions", { ...period, query: "x" }), enT, {
+        locale: "en"
+      })?.replace(/\s/gu, " ")
+    ).toBe("Nov 2 – 8, 2026");
+    expect(toolTarget(insights("list_questions", { offset: 50 }), svT)).toBeNull();
+    expect(
+      toolTarget(insights("list_questions", { start: "igår", end: period.end }), svT)
+    ).toBeNull();
+  });
+
+  it("names the conversation a call read by the start of its id", () => {
+    expect(
+      toolTarget(
+        insights("read_conversation", { session_id: "1a2b3c4d-0000-4000-8000-000000000001" }),
+        svT
+      )
+    ).toBe("Konversation 1a2b3c4d");
+  });
+
+  it("leaves an external server named insights to its own titles and arguments", () => {
+    const call = {
+      toolName: "usage_summary",
+      input: { team: "Support" },
+      providerMetadata: { eneo: { server_name: "insights", title: "Usage", is_internal: false } }
+    };
+    expect(toolPresentation(call, svT, true)).toEqual({
+      label: "Usage",
+      server: "insights",
+      provider: null
+    });
+    expect(toolTarget(call, svT)).toBe("team: Support");
+  });
+});

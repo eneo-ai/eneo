@@ -275,6 +275,21 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9052: "eneo_error_9052" // SKILL_EXECUTION_BLOCK_CONFLICT
 };
 
+/**
+ * The reason a copy of other content (an insights analysis of conversations)
+ * is refused with once content it was based on has been removed: it is gone
+ * with it, and is never shown again.
+ */
+const DERIVED_SOURCE_REMOVED = "derived_source_removed";
+
+/** Refused because it was removed with content it was based on (410, `derived_source_removed`). */
+export function isDerivedSourceRemoved(error: unknown): boolean {
+  return (
+    error instanceof EneoApiError &&
+    (error.status === 410 || error.reason === DERIVED_SOURCE_REMOVED)
+  );
+}
+
 /** Public backend reasons shared by HTTP errors and streamed answer failures. */
 const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
   ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
@@ -291,7 +306,10 @@ const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
   ["provider_model_not_found", "provider_failure_model_not_found"],
   ["provider_rejected_request", "provider_failure_rejected_request"],
   ["provider_error", "eneo_error_9010"],
-  ["stream_error", "chat_answer_failed_internal"]
+  ["stream_error", "chat_answer_failed_internal"],
+  // A copy (an insights analysis) whose sources were removed is refused (410).
+  [DERIVED_SOURCE_REMOVED, "derived_source_removed"],
+  ["insights_model_unavailable", "insights_chat_model_unavailable"]
 ]);
 
 export function getErrorMessageForReason(

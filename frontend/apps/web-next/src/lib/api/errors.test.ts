@@ -9,6 +9,7 @@ import {
   errorReferenceLines,
   extractTraceId,
   getErrorMessage,
+  isDerivedSourceRemoved,
   orOn404,
   unwrap
 } from "./errors";
@@ -96,6 +97,24 @@ describe("apiErrorFromResponse", () => {
     expect(apiErrorFromResponse(errorResponse(502), "upstream died").message).toBe(
       "Request failed with status 502"
     );
+  });
+});
+
+describe("isDerivedSourceRemoved", () => {
+  it("tells content removed with what it was based on from other refusals", () => {
+    expect(
+      isDerivedSourceRemoved(
+        new EneoApiError("Gone", { status: 410, reason: "derived_source_removed" })
+      )
+    ).toBe(true);
+    expect(isDerivedSourceRemoved(new EneoApiError("Gone", { status: 410 }))).toBe(true);
+    expect(
+      isDerivedSourceRemoved(
+        new EneoApiError("Gone", { status: 404, reason: "derived_source_removed" })
+      )
+    ).toBe(true);
+    expect(isDerivedSourceRemoved(new EneoApiError("Not found", { status: 404 }))).toBe(false);
+    expect(isDerivedSourceRemoved(new Error("Gone"))).toBe(false);
   });
 });
 

@@ -130,6 +130,21 @@ const FLOW_TOOLS = new Set([
 ]);
 
 /**
+ * The tools of Eneo's own insights server (the insights chat's analysis of
+ * an assistant's or group chat's conversations). Each has a label
+ * `tool_insights_<tool>` with a `_done` form; a search names its words
+ * (`tool_insights_search_questions_query`).
+ */
+const INSIGHT_TOOLS = new Set([
+  "usage_summary",
+  "list_questions",
+  "top_questions",
+  "search_questions",
+  "read_conversation",
+  "find_gaps"
+]);
+
+/**
  * The flows server's calls that wait for the person's approval, named by what
  * they will do (`tool_flows_<tool>_approval`). A review is named by its
  * action (the `action` values `review_run` takes); one it does not know reads
@@ -320,6 +335,16 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
       server: t("flows")
     };
   }
+  if (ownServer && serverName === "insights" && INSIGHT_TOOLS.has(part.toolName)) {
+    const searching = part.toolName === "search_questions" && query !== null;
+    return {
+      label: t(
+        `tool_insights_${part.toolName}${searching ? "_query" : ""}${suffix}`,
+        searching ? { query } : undefined
+      ),
+      server: t("insights")
+    };
+  }
   // An external provider's own name stays visible as the source; one of
   // Eneo's own (loopback or built in) is not named, the label says it all.
   const provider = (own: boolean) => (serverName && !own && !bundled ? serverName : null);
@@ -394,12 +419,52 @@ export function readableArguments(args: Record<string, unknown>): string | null 
 }
 
 /**
+ * The period an insights call covered, as dates in the operator's time zone
+ * (the call's `timezone`): `end` is exclusive, so the last day is the one
+ * just before it. Null when the call names no valid period.
+ */
+function insightPeriod(args: Record<string, unknown>, locale: string): string | null {
+  if (typeof args.start !== "string" || typeof args.end !== "string") return null;
+  const start = new Date(args.start);
+  const end = new Date(args.end);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end <= start) return null;
+  const last = new Date(end.getTime() - 1);
+  const timeZone = typeof args.timezone === "string" ? args.timezone : undefined;
+  try {
+    return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone }).formatRange(
+      start,
+      last
+    );
+  } catch {
+    // A time zone the browser does not know: the browser's own.
+    return new Intl.DateTimeFormat(locale, { dateStyle: "medium" }).formatRange(start, last);
+  }
+}
+
+/**
+ * What an insights call looked at: the conversation it read (by the start of
+ * its id, as the answer's citations name it), else the period it covered.
+ */
+function insightTarget(
+  toolName: string,
+  args: Record<string, unknown>,
+  t: Translate,
+  locale: string
+): string | null {
+  if (toolName === "read_conversation") {
+    const id = typeof args.session_id === "string" ? args.session_id.trim() : "";
+    return id ? t("insights_chat_conversation_ref", { id: id.slice(0, 8) }) : null;
+  }
+  return insightPeriod(args, locale);
+}
+
+/**
  * What a call acted on, for the row under its label: the file and position
  * for a read of an attachment, the query for a search, the new step's name
  * for a flow step added in the authoring chat, else the readable arguments.
  * A signed download url never shows; the attachment's name does. The flows
  * server's other arguments (revisions, offsets, ids) say nothing to a person,
- * so its calls show none.
+ * so its calls show none; an insights call shows its period or conversation.
  */
 export function toolTarget(
   part: ToolLike,
@@ -425,6 +490,9 @@ export function toolTarget(
   if (ownServer && serverName === "flows") {
     const name = part.toolName === "add_step" && typeof args.name === "string" ? args.name : "";
     return name.trim() || null;
+  }
+  if (ownServer && serverName === "insights" && INSIGHT_TOOLS.has(part.toolName)) {
+    return insightTarget(part.toolName, args, t, locale);
   }
   return readableArguments(args);
 }

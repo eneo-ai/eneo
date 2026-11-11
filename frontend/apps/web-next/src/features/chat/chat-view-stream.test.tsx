@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
-import { useState, type ReactNode } from "react";
+import { useState, type ComponentProps, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
@@ -9,7 +9,7 @@ import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { ChatView, type ActivityState } from "./chat-view";
+import { ChatView, type ActivityState, type ConversationApi } from "./chat-view";
 import type { Schema } from "@/lib/api/models";
 import type { ToolCallRecord } from "./side-panel/message-tool-calls";
 import { ModelReasoningPicker } from "./model-reasoning-picker";
@@ -1368,5 +1368,142 @@ describe("ChatView with a saved question that got no answer", () => {
     await waitFor(() => expect(spies.sent).toHaveLength(1));
     expect(spies.sent[0]!.text).toBe("Sammanfatta brevet");
     await waitFor(() => expect(screen.queryByText("Det kom inget svar på frågan.")).toBeNull());
+  });
+});
+
+describe("ChatView on its own endpoints", () => {
+  /** A conversation another API holds: its own transport, results and drafts. */
+  function ownApi(stream: () => Promise<ReadableStream<Record<string, unknown>>>) {
+    const bodies: unknown[] = [];
+    const api: ConversationApi = {
+      transport: {
+        sendMessages: async ({ body }: { body?: unknown }) => {
+          bodies.push(body);
+          return stream();
+        },
+        reconnectToStream: async () => null
+      } as unknown as ConversationApi["transport"],
+      toolResults: { scope: "own", read: vi.fn(async () => "Resultat") },
+      draftScope: "own"
+    };
+    return { api, bodies };
+  }
+
+  const answered = async () =>
+    new ReadableStream<Record<string, unknown>>({
+      start(controller) {
+        for (const chunk of [
+          { type: "start", messageId: "answer-1" },
+          {
+            type: "data-session",
+            data: { session_id: "own-1", files: [], web_search_references: [] }
+          },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "Mest om parkering." },
+          { type: "text-end", id: "t" },
+          { type: "finish" }
+        ]) {
+          controller.enqueue(chunk);
+        }
+        controller.close();
+      }
+    });
+
+  function OwnHarness(props: Partial<ComponentProps<typeof ChatView>>) {
+    const [activity, setActivity] = useState<ActivityState | null>(null);
+    return (
+      <ChatView partner={partner} activity={activity} onActivityChange={setActivity} {...props} />
+    );
+  }
+
+  it("sends through its own transport without the chat API's title, rating or Felsökning", async () => {
+    const { api, bodies } = ownApi(answered);
+    const onSessionCreated = vi.fn();
+    renderInApp(<OwnHarness api={api} onSessionCreated={onSessionCreated} />, {
+      appContext: testAppContext({ permissions: ["assistant_debug"] })
+    });
+    ask("Vad frågar folk om?");
+
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    expect(await within(log).findByText("Mest om parkering.")).toBeTruthy();
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
+    expect(onSessionCreated).toHaveBeenCalledWith("own-1");
+    expect(spies.sent).toHaveLength(0);
+    expect(bodies[0]).toMatchObject({ session_id: null, assistant_id: "assistant-1" });
+    expect(spies.titled).toEqual([]);
+    expect(within(log).queryByRole("group", { name: "Betygsätt svaret" })).toBeNull();
+    fireEvent.click(within(log).getByRole("button", { name: "Fler åtgärder" }));
+    await screen.findByRole("menuitem", { name: "Kopiera som markdown" });
+    expect(screen.queryByRole("menuitem", { name: "Felsök" })).toBeNull();
+  });
+
+  it("keeps its drafts apart from the chat API's conversation with the same partner", () => {
+    sessionStorage.clear();
+    const { api } = ownApi(answered);
+    renderInApp(<OwnHarness />);
+    fireEvent.change(screen.getByRole("textbox", { name: /^Fråga / }), {
+      target: { value: "Utkast i chatten" }
+    });
+    cleanup();
+
+    renderInApp(<OwnHarness api={api} />);
+    expect((screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value).toBe(
+      ""
+    );
+  });
+
+  it("draws the page's own start state around the composer, and its lead above the messages", async () => {
+    const { api } = ownApi(answered);
+    renderInApp(
+      <OwnHarness
+        api={api}
+        start={(composer) => (
+          <section aria-label="Egen start">
+            <p>Ställ en fråga om perioden.</p>
+            {composer}
+          </section>
+        )}
+        lead={<p>Statistik för perioden</p>}
+      />
+    );
+    const start = screen.getByRole("region", { name: "Egen start" });
+    expect(within(start).getByRole("textbox", { name: /^Fråga / })).toBeTruthy();
+    expect(screen.queryByText("Statistik för perioden")).toBeNull();
+
+    ask("Vad frågar folk om?");
+    await screen.findByText("Mest om parkering.");
+    expect(screen.getByText("Statistik för perioden")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Egen start" })).toBeNull();
+  });
+
+  const gone = async (): Promise<ReadableStream<Record<string, unknown>>> => {
+    const { EneoApiError } = await import("@/lib/api/errors");
+    throw new EneoApiError("Gone", { status: 410, reason: "derived_source_removed" });
+  };
+
+  it("hands a conversation that is gone to the page, which says why", async () => {
+    const { api } = ownApi(gone);
+    const onGone = vi.fn();
+    renderInApp(<OwnHarness api={api} onGone={onGone} initialSessionId="own-1" />);
+    ask("Och igår?");
+
+    await waitFor(() => expect(onGone).toHaveBeenCalledTimes(1));
+    expect(spies.announce.mock.calls).toEqual([["Assistenten skriver ett svar"]]);
+  });
+
+  it("offers a new conversation, not a retry, for a conversation that is gone", async () => {
+    const { api } = ownApi(gone);
+    const onNewConversation = vi.fn();
+    renderInApp(
+      <OwnHarness api={api} initialSessionId="own-1" onNewConversation={onNewConversation} />
+    );
+    ask("Och igår?");
+
+    const sentence = "Det här har tagits bort, eftersom innehåll det byggde på har tagits bort.";
+    expect(await screen.findByText(sentence)).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith(sentence);
+    expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ny konversation" }));
+    expect(onNewConversation).toHaveBeenCalledTimes(1);
   });
 });

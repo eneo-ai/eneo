@@ -199,7 +199,7 @@ function Question({
         <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
           {caption && <span className="text-ax-text-secondary text-xs">{caption}</span>}
-          {references ? (
+          {references?.tokens ? (
             <ChatTokenizedText tokens={references.tokens(text)}>{text}</ChatTokenizedText>
           ) : (
             text
