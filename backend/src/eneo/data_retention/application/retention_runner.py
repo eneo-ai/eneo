@@ -452,9 +452,10 @@ class RetentionRunner:
             due = True
         if not due:
             return None
-        # A claim that times out waits on the chunk another tick is running:
-        # the task is held, as with a lost claim, and that execution's row
-        # records the work. The nightly run records a claim timeout.
+        # A claim whose lock wait times out waited on the chunk another tick
+        # is running: the task is held, as with a lost claim, and that
+        # execution's row records the work. Any other timeout, and every
+        # timeout on the nightly run, records a claim timeout.
         return await self._run(task, record_claim_timeout=False)
 
     async def run(self, task: RetentionTask) -> RetentionRunReport:
@@ -485,7 +486,7 @@ class RetentionRunner:
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
-            if not record_claim_timeout:
+            if not record_claim_timeout and is_lock_wait_timeout(exc):
                 logger.warning(
                     "Retention task %s is held by another execution; not started.",
                     task.name,

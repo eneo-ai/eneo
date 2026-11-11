@@ -542,6 +542,47 @@ async def test_overlapping_ticks_never_run_the_same_task_at_once(test_tenant) ->
     assert await _job_rows("tests.slow") == [("tests.slow", "succeeded")]
 
 
+async def test_a_claim_that_hits_the_statement_timeout_records_a_skip(
+    test_tenant,
+) -> None:
+    """Only a lock wait means another tick holds the task. A claim that hits
+    the statement timeout with no other owner is recorded as on the nightly
+    path. (The overlap test above is the lock wait, which writes no row.)
+
+    Mutant: the frequent path holds every retention timeout, so a slow or
+    overloaded database leaves no trace in the job history."""
+    now = await _database_now()
+    await _items("tests.x", 1, finished=now - 2 * _AFTER)
+
+    class _SlowClaims(RetentionJobRunRepository):
+        async def claim(self, *, task: str, lease_stale_seconds: int) -> UUID | None:
+            await self.session.execute(sa.text("SET LOCAL statement_timeout = 1"))
+            await self.session.execute(sa.text("SELECT pg_sleep(0.2)"))
+            return await super().claim(
+                task=task, lease_stale_seconds=lease_stale_seconds
+            )
+
+    async with sessionmanager.session() as session:
+        made = _runner_for(session)
+
+        def runner(budget: RetentionBudget) -> RetentionRunner:
+            slow = made(budget)
+            slow.job_runs = _SlowClaims(session)
+            return slow
+
+        reports = await run_due_tasks(
+            session,
+            [_frequent("tests.x", lambda s: _DueItems(s, "tests.x", now=now))],
+            runner,
+        )
+
+    assert [(r.task, r.outcome, r.error_code) for r in reports] == [
+        ("tests.x", RetentionJobOutcome.SKIPPED, RetentionErrorCode.CLAIM_TIMEOUT)
+    ]
+    assert await _job_rows("tests.x") == [("tests.x", "skipped")]
+    assert await _left("tests.x") == 1
+
+
 async def test_the_nightly_run_runs_a_frequent_task_without_its_probe(
     test_tenant,
 ) -> None:
