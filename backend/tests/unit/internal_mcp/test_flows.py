@@ -1788,17 +1788,27 @@ async def test_update_step_states_the_shape_of_what_a_step_reads():
     for key in SUPPORTED_INPUT_BINDING_KEYS | SOURCE_REF_KEYS:
         assert key in shape, key
     assert "input_contract" in shape
-    for example in flows.INPUT_BINDINGS_EXAMPLES.values():
+    for example in [*flows.INPUT_BINDINGS_EXAMPLES.values(), flows.JSON_READ_EXAMPLE]:
         assert json.dumps(example, ensure_ascii=False) in shape
+    # What a json step's projection excludes, and when no contract is sent.
+    assert "no question and no item_template" in shape
+    assert "With other input_bindings send no input_contract" in shape
+    assert "a json step without input_bindings may keep its own" in shape
+    assert "otherwise send no input_contract" not in shape
+    # add_step names every step field it takes.
+    assert "input_contract" in descriptions["add_step"]
     # The other tools that take a step's fields point to it, without a copy.
     for name in ("add_step", "update_steps"):
         assert "update_step" in descriptions[name]
         assert '"source_refs"' not in descriptions[name]
 
 
-@pytest.mark.parametrize("name", ["fields", "text"])
+@pytest.mark.parametrize("name", ["fields", "text", "json"])
 def test_each_read_update_step_shows_is_saved_and_published(name):
     from eneo.flows.flow_validators import publish_step_refusals, validate_steps
+    from eneo.flows.input_binding_contract_rules import (
+        derive_structured_projection_contract,
+    )
     from tests.unit.flows.application.test_flow_suggestion_service import _step
 
     facts = {
@@ -1810,11 +1820,22 @@ def test_each_read_update_step_shows_is_saved_and_published(name):
         },
         "required": ["beslut", "datum", "deltagare"],
     }
+    reader = (
+        flows.JSON_READ_EXAMPLE
+        if name == "json"
+        else {"input_bindings": flows.INPUT_BINDINGS_EXAMPLES[name]}
+    )
     steps = [
         _step(1, output_type="json", output_contract=facts),
-        _step(2, input_bindings=flows.INPUT_BINDINGS_EXAMPLES[name]),
+        _step(2, **reader),
     ]
     prompts = {1: "Ta fram fakta ur protokollet.", 2: "Skriv ett beslutsbrev."}
+    if name == "json":
+        # The contract shown is the one the step rules derive.
+        assert reader["input_contract"] == derive_structured_projection_contract(
+            input_bindings=reader["input_bindings"],
+            source_contracts_by_step_ref={"step_1": facts},
+        )
 
     validate_steps(steps, metadata_json=None, prompt_templates=prompts)
     assert (
@@ -1846,6 +1867,7 @@ async def test_every_example_the_chat_reads_is_one_the_rules_are_held_to():
     validated = [
         *flow_authoring_chat.CONFIGURATION_EXAMPLES.values(),
         *flows.INPUT_BINDINGS_EXAMPLES.values(),
+        flows.JSON_READ_EXAMPLE,
         *_ASSISTANT_EXAMPLES,
     ]
     for example in _ASSISTANT_EXAMPLES:

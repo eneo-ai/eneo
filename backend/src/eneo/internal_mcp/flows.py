@@ -80,6 +80,18 @@ INPUT_BINDINGS_EXAMPLES: dict[str, dict[str, Any]] = {
     },
     "text": {"source_refs": [{"step_ref": "step_1", "output": "text"}]},
 }
+# A json step whose input is exactly two fields of step 1's json result, with
+# the input_contract the step rules derive for them.
+JSON_READ_EXAMPLE: dict[str, Any] = {
+    "input_type": "json",
+    "input_bindings": INPUT_BINDINGS_EXAMPLES["fields"],
+    "input_contract": {
+        "type": "object",
+        "properties": {"beslut": {"type": "string"}, "datum": {"type": "string"}},
+        "additionalProperties": False,
+        "required": ["beslut", "datum"],
+    },
+}
 
 
 def _example(value: Any) -> str:
@@ -98,14 +110,16 @@ _INPUT_BINDINGS_SHAPE = (
     ' output_contract, dotted for a nested field: "sak.diarienummer"),'
     " label (written before the value) and, in a compose_text step,"
     ' item_template ("{titel}: {text}" for each item of a list field).'
-    " With input_type json and only structured refs, the step's input is"
-    " exactly those fields and needs an input_contract equal to them;"
-    " otherwise send no input_contract. A step that reads two fields of"
-    " step 1's json result: "
+    " A step that reads two fields of step 1's json result: "
     + _example(INPUT_BINDINGS_EXAMPLES["fields"])
     + ". A step that reads the whole text of step 1: "
     + _example(INPUT_BINDINGS_EXAMPLES["text"])
-    + "."
+    + ". With input_type json and only structured refs (each with field_path;"
+    " no question and no item_template), the step's input is exactly those"
+    " fields and needs an input_contract equal to them: "
+    + _example(JSON_READ_EXAMPLE)
+    + ". With other input_bindings send no input_contract; a json step without"
+    " input_bindings may keep its own."
 )
 
 
@@ -1314,8 +1328,8 @@ async def add_step(
     whole form_schema in metadata_json); everything is saved or nothing.
     configuration takes a step's own fields and no other: input_source,
     input_type, output_mode and output_type, and where the step needs them
-    input_config, output_config, input_bindings (shaped as update_step
-    describes), output_contract and review_policy. A step has no kind field. assistant_changes takes the assistant's own
+    input_config, output_config, input_bindings and input_contract (shaped
+    as update_step describes), output_contract and review_policy. A step has no kind field. assistant_changes takes the assistant's own
     fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
     instruction is always prompt.text, never instructions or a bare string.
     An http_post step needs its url in output_config: ask for the address
