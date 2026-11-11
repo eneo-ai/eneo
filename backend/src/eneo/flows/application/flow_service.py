@@ -880,9 +880,10 @@ class FlowService:
         """What publish would refuse ``flow``'s draft for, as far as the draft
         itself says, in the order publish meets it: every refusal of the step
         rules (``publish_step_refusals``, of which publish raises the first),
-        then a Word step's template fields without a binding, then, in a flow
-        that transcribes, the transcription choice publish refuses (speakers
-        to label and no service chosen to label them). Nothing is written.
+        then, in a flow that transcribes, the transcription choice publish
+        refuses (speakers to label and no service chosen to label them), then
+        a Word step's template fields without a binding, which publish meets
+        as it builds each step's definition. Nothing is written.
         The template fields are those the draft saved; publish reads them
         from the template file itself. Publish's other checks (the
         organisation's limits, the security classification, stored secrets)
@@ -898,7 +899,6 @@ class FlowService:
                 if (prompt := prompts.get(step.assistant_id)) is not None
             },
         )
-        refusals.extend(_unbound_template_field_refusals(flow.steps))
         config = kept_transcription_config(metadata)
         if config is None or config.enabled:
             try:
@@ -909,6 +909,7 @@ class FlowService:
                 )
             except BadRequestException as exc:
                 refusals.append(exc)
+        refusals.extend(_unbound_template_field_refusals(flow.steps))
         return refusals
 
     def _refuse_step_timeouts_above_the_maximum(

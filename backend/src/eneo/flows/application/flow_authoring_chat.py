@@ -98,8 +98,8 @@ CONFIGURATION_EXAMPLES: dict[str, Any] = {
     "auth_none": {"mode": "none"},
     "auth_bearer_token": {"mode": "bearer_token"},
     "auth_api_key": {"mode": "api_key", "header_name": "X-API-Key"},
-    "auth_basic": {"mode": "basic_auth", "username": "..."},
-    "secret_header": {"name": "...", "secret": True},
+    "auth_basic": {"mode": "basic_auth", "username": "eneo-tjanst"},
+    "secret_header": {"name": "X-Api-Token", "secret": True},
     "review_edit": {"mode": "edit"},
     "speaker_mapping": {
         "speaker_mapping": {
@@ -196,8 +196,9 @@ step N (numbered from 1 in flow order), {{ step_N.output.structured.<field> }} a
 field of a JSON step's output_contract, {{ flow_input.<field> }} a run form field
 and {{ step_input.text }} the step's own upload. A step reads only earlier steps.
 Design the reads backwards from what must come out (the flow's result, or the
-Word template's fields): what each step must get to do its part, read as
-narrowly as the task allows, by the rules below. A step that needs chosen facts
+Word template's fields): give each step what it needs for its part, read as
+narrowly as the task allows, and follow the rules under "Design every step by
+these rules". A step that needs chosen facts
 of a long text reads those fields of an earlier json step that declares them in
 its output_contract (source_refs in input_bindings; the shape is in
 update_step). A step that needs the whole text reads the whole text. A run form
@@ -219,7 +220,8 @@ as it is, word for word, and the step's instruction is never used. Its fields
 are those of the template the person uploaded: read_flow lists them
 (word_fields), and you never guess a field's name. Until a template is
 uploaded the step has no fields to bind. output_config.bindings gives each
-field exactly one reference, or "" to leave it empty on purpose, for example
+field exactly one reference, or "" only when the person asks for that field
+to stay empty, for example
 ${word_bindings}. A field can read a run form field of type
 text, number, date or select, the text of a step ({{ step_N.output.text }}),
 or a field of a json step that is required and of one type: string, number,
@@ -414,8 +416,8 @@ a missing contract, a speaker step without a source of names). What only the
 person can do, say in one plain sentence each, with the step and where it is
 done: uploading a Word template or entering a credential in the step, choosing
 a transcription model or a speaker service under "Ändra inställningar". Never
-make a blocker go away by changing what a step is for or by taking a step
-out: a Word step that waits for its template stays a Word step, and a speaker
+make a blocker go away by changing what a step is for, by taking a step out
+or by binding a Word field to "": a Word step that waits for its template stays a Word step, and a speaker
 step that waits for a speaker service stays. Never
 call a flow ready to publish while publish_blocker_count is above zero or
 unknown. The

@@ -168,7 +168,19 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     # reference to a value publish lets it read.
     assert "read_flow lists them (word_fields)" in instructions
     assert "you never guess a field's name" in instructions
-    assert 'exactly one reference, or "" to leave it empty on purpose' in (instructions)
+    # "" is the person's choice, never a way to clear a blocker.
+    assert (
+        'exactly one reference, or "" only when the person asks for that field '
+        "to stay empty" in instructions
+    )
+    assert "leave it empty on purpose" not in instructions
+    # Every run form field type publish lets a Word field read is named.
+    from eneo.flows.flow_validators import _SCALAR_FORM_FIELD_TYPES
+
+    word = instructions[instructions.index("A Word step (template_fill)") :]
+    sentence = word[word.index("A field can read a run form field") :][:120]
+    for field_type in _SCALAR_FORM_FIELD_TYPES:
+        assert field_type in sentence, field_type
     assert "It cannot read a list, a multiselect, an object" in instructions
     assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
@@ -265,8 +277,8 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     )
     # A blocker the person removes is never removed by rebuilding the step.
     assert (
-        "Never make a blocker go away by changing what a step is for or by "
-        "taking a step out" in instructions
+        "Never make a blocker go away by changing what a step is for, by "
+        'taking a step out or by binding a Word field to ""' in instructions
     )
     assert "a Word step that waits for its template stays a Word step" in instructions
     assert (
@@ -280,6 +292,9 @@ def test_the_instructions_design_reads_from_what_must_come_out() -> None:
 
     assert "Design the reads backwards from what must come out" in instructions
     assert "as narrowly as the task allows" in instructions
+    # It names where the rules are, hundreds of lines further on.
+    assert 'follow the rules under "Design every step by these rules"' in (instructions)
+    assert "by the rules below" not in instructions
     # Fields of an earlier json step for chosen facts, the whole text once
     # where the task needs it, and a run form value straight to a Word field.
     assert "reads those fields of an earlier json step" in instructions
@@ -378,9 +393,11 @@ def test_the_instructions_declare_the_auth_mode_and_leave_the_credential_out() -
     )
     assert "declare its mode with the credential left out" in instructions
     assert '{"mode": "api_key", "header_name": "X-API-Key"}' in instructions
-    assert '{"mode": "basic_auth", "username": "..."}' in instructions
-    assert 'A secret header is declared as {"name": "...", "secret": true}' in (
-        instructions
+    assert json.dumps(CONFIGURATION_EXAMPLES["auth_basic"]) in instructions
+    assert (
+        "A secret header is declared as "
+        + json.dumps(CONFIGURATION_EXAMPLES["secret_header"])
+        in instructions
     )
     assert "read_flow shows it as missing until then" in instructions
     # One rule for the mode: none of the earlier contradicting forms is left.

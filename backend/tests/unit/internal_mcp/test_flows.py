@@ -1795,6 +1795,8 @@ async def test_update_step_states_the_shape_of_what_a_step_reads():
     assert "With other input_bindings send no input_contract" in shape
     assert "a json step without input_bindings may keep its own" in shape
     assert "otherwise send no input_contract" not in shape
+    # Both configs are replaced whole.
+    assert "input_config and output_config are each replaced whole" in shape
     # add_step names every step field it takes.
     assert "input_contract" in descriptions["add_step"]
     # The other tools that take a step's fields point to it, without a copy.
@@ -1846,10 +1848,7 @@ def test_each_read_update_step_shows_is_saved_and_published(name):
 # --- The examples the chat reads -------------------------------------------------
 
 # The assistant's own fields as add_step and update_step show them.
-_ASSISTANT_EXAMPLES = [
-    {"prompt": {"text": "..."}},
-    {"prompt": {"text": "Sammanfatta brevet."}},
-]
+_ASSISTANT_EXAMPLES = [{"prompt": {"text": "Sammanfatta brevet."}}]
 # Shapes of a tool's arguments that hold no configuration, by why.
 _ARGUMENT_SHAPES = {
     '{"old name": "new name"}': "form_field_renames maps the form's own names",
@@ -1895,6 +1894,8 @@ async def test_every_example_the_chat_reads_is_one_the_rules_are_held_to():
             end = length
             found.append(value)
             assert value in validated, value
+            # A placeholder is a value the rules accept and a model can save.
+            assert '"..."' not in json.dumps(value), value
     # Every example kept as data is one the chat reads.
     for example in validated:
         assert example in found, example

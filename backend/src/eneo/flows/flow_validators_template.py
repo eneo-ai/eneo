@@ -150,8 +150,9 @@ def unbound_template_fields(
 def orphaned_template_bindings(
     placeholder_names: Sequence[str], bindings: dict[str, object]
 ) -> list[str]:
-    """The bindings that name no field of the template. Publish and the run
-    ignore them; the editor's draft check names them."""
+    """The bindings that name no field of the template. Publish accepts
+    them and no field shows their value, though their expressions are still
+    checked and resolved; the editor's draft check names them."""
 
     return [name for name in bindings if name not in placeholder_names]
 

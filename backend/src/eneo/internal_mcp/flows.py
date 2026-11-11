@@ -905,12 +905,12 @@ async def update_step(
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Patch one saved step and optionally its assistant in one revision. Use the flow's own
-    field names; input_config is replaced whole (long material:
+    field names; input_config and output_config are each replaced whole (long material:
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
     keep theirs; the result names the step's assistant_id. assistant_changes
-    takes the assistant's own fields, for example {"prompt": {"text": "..."}};
+    takes the assistant's own fields, for example {"prompt": {"text": "Sammanfatta brevet."}};
     an instruction is always prompt.text. A change that reaches several steps
     goes in one update_steps call instead."""
 
