@@ -136,14 +136,23 @@ async def test_this_machine_is_refused_outside_development(session, url):
     assert seen == []
 
 
-async def test_ipv6_loopback_is_refused_outside_development(
-    in_environment, monkeypatch
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[::1]:9134/discovery",
+        # Full-width digits and dots: aiohttp connects to 127.0.0.1.
+        "https://127\u30020\u30020\u30021/discovery",
+        "https://\uff11\uff12\uff17.0.0.1/discovery",
+    ],
+)
+async def test_other_spellings_of_loopback_are_refused_outside_development(
+    in_environment, monkeypatch, url
 ):
     in_environment("production")
     recorder = _Recorder()
     monkeypatch.setattr(aiohttp_client, "session", recorder)
     with pytest.raises(OidcFetchError) as refused:
-        await outbound.get_json("http://[::1]:9134/discovery")
+        await outbound.get_json(url)
     assert refused.value.reason == REFUSED
     assert recorder.sent == []
 
@@ -193,6 +202,14 @@ async def test_another_name_for_this_machine_is_refused(
         "https://[::ffff:127.0.0.1]/token",
         "http://[::ffff:127.0.0.1]/token",
         "https://0.0.0.0/token",
+        # Full-width dots: aiohttp reads these as 169.254.169.254 and connects
+        # without resolving, so the resolver never sees them.
+        "https://169\u3002254\u3002169\u3002254/latest/meta-data",
+        "https://169\uff0e254\uff0e169\uff0e254/latest/meta-data",
+        # A URL aiohttp cannot read.
+        "https://idp.example.org:bad/token",
+        "https://idp.example.org:99999/token",
+        "https://[invalid/token",
     ],
 )
 @pytest.mark.parametrize("environment", ["production", "development"])
@@ -220,7 +237,8 @@ def test_allowed_destinations_pass_the_url_check(url):
     outbound.check_url(url)
 
 
-async def test_a_redirect_is_refused_and_not_followed(session):
+@pytest.mark.parametrize("method", ["GET", "POST"])
+async def test_a_redirect_is_refused_and_not_followed(session, method):
     session("development")
     app, seen = _app(
         {
@@ -229,12 +247,14 @@ async def test_a_redirect_is_refused_and_not_followed(session):
         }
     )
     async with _serve(app) as port:
+        url = f"http://127.0.0.1:{port}/token"
         with pytest.raises(OidcFetchError) as refused:
-            await outbound.post_form(
-                f"http://127.0.0.1:{port}/token", {"client_secret": "s"}
-            )
+            if method == "GET":
+                await outbound.get_json(url)
+            else:
+                await outbound.post_form(url, {"client_secret": "s"})
     assert "redirect" in refused.value.reason
-    assert seen == ["POST /token"]
+    assert seen == [f"{method} /token"]
 
 
 @pytest.mark.parametrize("declared", [True, False])

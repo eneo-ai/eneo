@@ -8,7 +8,8 @@ go through ``get_json`` and ``post_form`` on the shared session. Each request:
 - connects only to addresses ``PROVIDER_POLICY`` allows: private networks yes,
   never link-local, metadata or IPv4-in-IPv6 addresses. The session's
   resolver checks the addresses a name resolves to; aiohttp never resolves an
-  IP literal, so ``check_url`` checks those;
+  IP literal, so ``check_url`` checks those, reading the URL as aiohttp reads
+  it (yarl), so a literal spelled with full-width digits or dots is one too;
 - does not follow redirects, so a 3xx cannot move a request carrying the code
   and the client secret elsewhere;
 - reads at most 256 KiB of the answer.
@@ -23,9 +24,9 @@ import ipaddress
 import json
 from collections.abc import Mapping
 from typing import cast
-from urllib.parse import urlsplit
 
 import aiohttp
+from yarl import URL
 
 from eneo.crawler.destination_policy import DisallowedDestination
 from eneo.main.aiohttp_client import (
@@ -53,9 +54,18 @@ class OidcFetchError(Exception):
 
 def check_url(url: str) -> None:
     """Refuse a URL no request to a provider may go to."""
-    parts = urlsplit(url)
-    host = parts.hostname
-    if not host or parts.username is not None or parts.password is not None:
+    try:
+        parts = URL(url)
+        host = parts.raw_host
+        port = parts.port
+    except ValueError as exc:  # UnicodeError is one too.
+        raise OidcFetchError("the URL cannot be read") from exc
+    if (
+        not host
+        or port is None
+        or parts.raw_user is not None
+        or parts.raw_password is not None
+    ):
         raise OidcFetchError("the URL must name a host and no user")
     if host in LOOPBACK_HOSTS:
         if not loopback_allowed():
