@@ -94,7 +94,9 @@ async def _call(
 ) -> CallToolResult:
     """Run ``operation`` for the chat's flow in one authoring transaction.
     ``editing`` requires edit mode; ``changes_draft`` (which implies it)
-    also reports the suggestions the change introduced (``_with_introduced``).
+    also reports the suggestions the change introduced (``_with_introduced``)
+    and what stands between the draft and publishing
+    (``_with_publish_blockers``).
     """
     from eneo.flows.application.flow_authoring_chat import (
         load_authoring_chat,
@@ -129,8 +131,11 @@ async def _call(
                         return await operation(scope.container, chat, request)
                     before = await _draft_suggestions(scope.container, chat.flow_id)
                     result = await operation(scope.container, chat, request)
-                    return await _with_introduced(
+                    result = await _with_introduced(
                         result, scope.container, chat.flow_id, before
+                    )
+                    return await _with_publish_blockers(
+                        result, scope.container, chat.flow_id
                     )
             except BadRequestException as exc:
                 if exc.code != FlowApiErrorCode.STALE_REVISION:
@@ -214,15 +219,46 @@ async def _current_revision(scope: Any) -> int | None:
         return None
 
 
+# What a step's own fields are not: the core gives a step its identity and place.
+_STEP_IDENTITY_FIELDS = frozenset({"id", "assistant_id", "step_order"})
+
+
+def _step_fields() -> list[str]:
+    """The fields a step's configuration takes, as the core's model has them."""
+    from eneo.flows.api.flow_models import FlowEditorStepPatch
+
+    return [
+        name
+        for name in FlowEditorStepPatch.model_fields
+        if name not in _STEP_IDENTITY_FIELDS
+    ]
+
+
 def invalid_message(errors: Any) -> str:
-    """The refusal of a configuration the core's models reject, with the
-    shape of an assistant when the model gave one a field it does not have."""
+    """The refusal of a configuration the core's models reject. A field the
+    core does not have is named, with the fields a step takes when it stood
+    in a step and the shape of an assistant when it stood in one, so the
+    model corrects the call and makes it again."""
     message = "The submitted configuration is invalid."
-    if any(
-        error.get("type") == "extra_forbidden"
-        and {"assistant", "assistants"} & set(error.get("loc", ()))
+    unknown = [
+        tuple(error.get("loc", ()))
         for error in errors
-    ):
+        if error.get("type") == "extra_forbidden"
+    ]
+    if not unknown:
+        return message
+    names = ", ".join(dict.fromkeys(str(loc[-1]) for loc in unknown if loc))
+    message += (
+        f" It names {names}, which is not a field here: leave it out and make"
+        " the call again."
+    )
+    if any({"configuration", "changes"} & set(loc) for loc in unknown):
+        message += (
+            " A step is described by these fields and no other: "
+            + ", ".join(_step_fields())
+            + "."
+        )
+    if any({"assistant", "assistants"} & set(loc) for loc in unknown):
         message += (
             " An assistant takes only its own fields: its instruction is"
             ' {"prompt": {"text": "..."}}.'
@@ -291,6 +327,73 @@ async def _with_introduced(
         and page["introduced_suggestions"]
     ):
         page["introduced_suggestions"] = page["introduced_suggestions"][:-1]
+    result.content = [
+        TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
+    ]
+    return result
+
+
+# The most publish blockers one change result lists; the count says how many
+# there are.
+MAX_REPORTED_PUBLISH_BLOCKERS = 10
+
+
+async def _publish_blockers(container, flow_id: UUID) -> list[dict[str, Any]] | None:
+    """What publish would refuse the draft for now (``FlowService
+    .publish_blockers``), each in short with its step by order and name, read
+    in a savepoint of the change's transaction; None when it cannot be
+    computed. A failure is logged by its kind only and never fails the
+    change."""
+    try:
+        async with cast(AsyncSession, container.session()).begin_nested():
+            service = container.flow_service()
+            flow = await service.get_flow(flow_id)
+            refusals = await service.publish_blockers(flow)
+    except Exception as exc:  # noqa: BLE001 - the change must not depend on it
+        logger.warning(
+            "Publish blockers could not be computed after a chat change",
+            extra={"flow_id": str(flow_id), "error_type": type(exc).__name__},
+        )
+        return None
+    names = {step.step_order: step.user_description for step in flow.steps}
+    blockers: list[dict[str, Any]] = []
+    for refusal in refusals:
+        context = refusal.context or {}
+        blocker: dict[str, Any] = {
+            "code": context.get("issue_code") or refusal.code,
+            "message": str(refusal),
+        }
+        order = getattr(refusal, "step_order", None) or context.get("step_order")
+        if isinstance(order, int):
+            blocker["step"] = {"step_order": order, "name": names.get(order)}
+        blockers.append(blocker)
+    return blockers
+
+
+async def _with_publish_blockers(
+    result: CallToolResult, container, flow_id: UUID
+) -> CallToolResult:
+    """``result`` with what stands between the draft, as the change left it,
+    and publishing added to its page: ``publish_blockers`` (the first
+    ``MAX_REPORTED_PUBLISH_BLOCKERS``, fewer when the page is full) and
+    ``publish_blocker_count`` (all of them); ``result`` unchanged when they
+    cannot be computed."""
+    if result.isError or not result.content:
+        return result
+    content = result.content[0]
+    if not isinstance(content, TextContent):
+        return result
+    blockers = await _publish_blockers(container, flow_id)
+    if blockers is None:
+        return result
+    page = json.loads(content.text)
+    page["publish_blockers"] = blockers[:MAX_REPORTED_PUBLISH_BLOCKERS]
+    page["publish_blocker_count"] = len(blockers)
+    while (
+        len(json.dumps(page, ensure_ascii=False)) > default_page_cap()
+        and page["publish_blockers"]
+    ):
+        page["publish_blockers"] = page["publish_blockers"][:-1]
     result.content = [
         TextContent(type="text", text=json.dumps(page, ensure_ascii=False))
     ]
@@ -371,7 +474,8 @@ async def read_flow(
     offset: int = 0,
 ) -> CallToolResult:
     """Read the saved draft. The overview (default) is short: the flow's name,
-    its run form fields and every step with its kind, the fields its result
+    its run form fields and every step with what it reads and gives
+    (input_source, input_type, output_mode, output_type), the fields its result
     declares (output_fields), whether a person reviews it, what it reads
     (reads: each earlier result as the reference the flow resolves and
     where the read is written), which later steps read its result (readers,
@@ -1028,8 +1132,11 @@ async def add_step(
     position: int | None = None,
 ) -> CallToolResult:
     """Add a step with a new managed assistant, atomically: last, or at `position`
-    (1 is first). Reads of the steps after it move with them. Use the flow's own
-    configuration field names. assistant_changes takes the assistant's own
+    (1 is first). Reads of the steps after it move with them. configuration
+    takes a step's own fields and no other: input_source, input_type,
+    output_mode and output_type, and where the step needs them input_config,
+    output_config, input_bindings, output_contract and review_policy. A step
+    has no kind field. assistant_changes takes the assistant's own
     fields, for example {"prompt": {"text": "Sammanfatta brevet."}}: the
     instruction is always prompt.text, never instructions or a bare string.
     An http_post step needs its url in output_config: ask for the address

@@ -876,6 +876,38 @@ class FlowService:
         # The maximum may have been lowered since the draft was saved.
         self._refuse_step_timeouts_above_the_maximum(flow.steps)
 
+    async def publish_blockers(self, flow: Flow) -> list[BadRequestException]:
+        """What publish would refuse ``flow``'s draft for, as far as the draft
+        itself says, in the order publish meets it: every refusal of the step
+        rules (``publish_step_refusals``, of which publish raises the first),
+        then, in a flow that transcribes, the transcription choice publish
+        refuses (speakers to label and no service chosen to label them).
+        Nothing is written. Publish's other checks (the organisation's
+        limits, the security classification, stored secrets) need more than
+        the draft and stay publish's own."""
+        metadata = normalize_persisted_flow_metadata(flow.metadata_json)
+        prompts = await self.get_flow_assistant_prompts(flow)
+        refusals = publish_step_refusals(
+            flow.steps,
+            metadata_json=metadata,
+            prompt_templates={
+                step.step_order: prompt.text
+                for step in flow.steps
+                if (prompt := prompts.get(step.assistant_id)) is not None
+            },
+        )
+        config = kept_transcription_config(metadata)
+        if config is None or config.enabled:
+            try:
+                await self._check_transcription_choices(
+                    space_id=flow.space_id,
+                    metadata_json=metadata,
+                    publishing_steps=flow.steps,
+                )
+            except BadRequestException as exc:
+                refusals.append(exc)
+        return refusals
+
     def _refuse_step_timeouts_above_the_maximum(
         self, steps: Sequence[FlowStep]
     ) -> None:
