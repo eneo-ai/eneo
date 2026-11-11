@@ -2316,6 +2316,7 @@ _ACTING_TOOLS = {"run_flow", "retry_run", "cancel_run", "review_run", "publish_f
 _READING_TOOLS = {
     "read_flow",
     "read_step_assistant",
+    "read_step_kinds",
     "read_tool_options",
     "read_flow_suggestions",
     "read_run",
@@ -2435,3 +2436,85 @@ async def test_update_steps_merges_its_settings_metadata_the_same_way(monkeypatc
         "wizard": {"transcription_enabled": False},
     }
     assert save.await_args.kwargs["audit_context"] == {"origin": "authoring_chat"}
+
+
+# --- Which kinds may stand at a place -----------------------------------------
+
+
+def _kinds_chat(monkeypatch, flow):
+    from eneo.flows.api import flow_definition_access
+
+    container = _transaction_container([])
+    container.flow_service.return_value.get_flow_assistant_prompts = AsyncMock(
+        return_value={}
+    )
+    chat = SimpleNamespace(flow_id=flow.id, space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(
+        flow_definition_access,
+        "require_flow_current_definition_access",
+        AsyncMock(return_value=SimpleNamespace(flow=flow)),
+    )
+
+
+async def test_read_step_kinds_says_which_kinds_may_stand_first_and_why_not(
+    monkeypatch,
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _flow, _step
+
+    flow = _flow([_step(1), _step(2)])
+    _kinds_chat(monkeypatch, flow)
+
+    result = await flows.read_step_kinds(MagicMock(), position=1)
+
+    assert result.isError is not True, result.content[0].text
+    page = json.loads(result.content[0].text)
+    assert page["next_offset"] is None
+    assert page["draft_revision"] == flow.draft_revision
+    answer = json.loads(page["content"])
+    assert answer["position"] == 1
+    kinds = {item["kind"]: item for item in answer["kinds"]}
+    assert list(kinds) == [kind.value for kind in flows.FlowStepKind]
+    transcribe = kinds["transcribe"]
+    assert transcribe["allowed"] is True
+    assert transcribe["gives"] == "text"
+    assert "review" not in transcribe
+    assert transcribe["hand_over"] == [
+        {"step_order": 2, "changes": {"input_source": "previous_step"}}
+    ]
+    review = kinds["review"]
+    assert review["allowed"] is False
+    assert review["refusals"][0]["code"] == "typed_io_invalid_input_source_position"
+    assert review["review"] is True
+    assert kinds["structured"]["needs"] == ["instruction", "example"]
+    assert "upload" in kinds["structured"]["may_take"]
+    # Allowed here is not saved: the space's checks come with the save.
+    assert "checked when the step is saved" in answer["note"]
+
+
+async def test_read_step_kinds_reads_after_the_last_step_by_default(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _flow, _step
+
+    _kinds_chat(monkeypatch, _flow([_step(1)]))
+
+    result = await flows.read_step_kinds(MagicMock())
+
+    answer = json.loads(json.loads(result.content[0].text)["content"])
+    assert answer["position"] == 2
+    kinds = {item["kind"]: item for item in answer["kinds"]}
+    assert kinds["send_http"]["allowed"] is True
+    assert kinds["transcribe"]["allowed"] is False
+
+
+async def test_read_step_kinds_refuses_a_place_the_flow_lacks(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _flow, _step
+
+    _kinds_chat(monkeypatch, _flow([_step(1)]))
+
+    result = await flows.read_step_kinds(MagicMock(), position=3)
+
+    assert result.isError is True
+    assert "position must be between 1 and 2" in result.content[0].text

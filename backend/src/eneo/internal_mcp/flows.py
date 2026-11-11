@@ -1488,6 +1488,94 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
+_STEP_KINDS_NOTE = (
+    "This judges the place and the flow's structure. What the space and the "
+    "organisation allow (models, security classification, the transcription "
+    "service, the real address of an HTTP step) is checked when the step is "
+    "saved."
+)
+
+
+@_tool(_READS)
+async def read_step_kinds(ctx: Context, position: int | None = None) -> CallToolResult:
+    """Read which kinds of step may stand at a place of the draft: `position`
+    (1 is first), after the last step when left out. For each kind: allowed,
+    or the refusals (code and message) the save would give it there; the
+    values it needs and may take; the output_type it gives; review true when
+    a person reviews it; and hand_over, the saved steps (by their order after
+    the addition) adding it there would also change. Allowed is not yet
+    saved: see the note."""
+
+    async def operation(container, chat, request):
+        import asyncio
+
+        from eneo.flows.api.flow_definition_access import (
+            require_flow_current_definition_access,
+        )
+        from eneo.flows.application.flow_step_kinds import step_kind_answer
+        from eneo.flows.enums import FlowOutputType
+
+        flow = (
+            await require_flow_current_definition_access(
+                request, container, flow_id=chat.flow_id
+            )
+        ).flow
+        places = len(flow.steps) + 1
+        place = places if position is None else _index_at(position, places) + 1
+        stored = await container.flow_service().get_flow_assistant_prompts(flow)
+        # Each kind judges the whole draft; off the event loop as the
+        # editor's own read does.
+        answer = await asyncio.to_thread(
+            step_kind_answer,
+            flow,
+            prompts={
+                assistant_id: prompt.text for assistant_id, prompt in stored.items()
+            },
+            positions=[place],
+            step_ids=[],
+        )
+        orders = {step.id: step.step_order for step in flow.steps}
+        kinds: list[dict[str, Any]] = []
+        for option in answer.insertions[0].options:
+            configuration = option.change.configuration
+            required = STEP_KIND_REQUIRED_VALUES.get(option.kind, ())
+            item: dict[str, Any] = {
+                "kind": option.kind.value,
+                "allowed": option.allowed,
+            }
+            if not option.allowed:
+                item["refusals"] = [
+                    {
+                        "code": refusal.issue_code or refusal.code,
+                        "message": refusal.message,
+                    }
+                    for refusal in option.refusals
+                ]
+            if required:
+                item["needs"] = list(required)
+            if optional := [
+                name for name in STEP_KIND_VALUES[option.kind] if name not in required
+            ]:
+                item["may_take"] = optional
+            item["gives"] = FlowOutputType(configuration["output_type"]).value
+            if configuration["review_policy"] is not None:
+                item["review"] = True
+            if option.change.step_edits:
+                item["hand_over"] = [
+                    # Numbered as after the step is added before it.
+                    {"step_order": orders[step_id] + 1, "changes": changes}
+                    for step_id, changes in option.change.step_edits
+                ]
+            kinds.append(item)
+        return page_result(
+            {"position": place, "kinds": kinds, "note": _STEP_KINDS_NOTE},
+            flow_id=chat.flow_id,
+            revision=flow.draft_revision,
+        )
+
+    return await _call(ctx, operation)
+
+
 @_tool(_EDITS_DRAFT)
 async def move_step(
     ctx: Context, expected_revision: int, step_id: UUID, position: int
