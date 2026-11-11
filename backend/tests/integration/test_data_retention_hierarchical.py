@@ -1176,7 +1176,7 @@ async def test_an_oversized_question_is_proved_within_one_limit_and_passed(
         Files(
             name=f"attachment-{index}",
             mimetype="application/pdf",
-            user_id=admin_user.id,
+            owner_user_id=admin_user.id,
             tenant_id=test_tenant.id,
         )
         for index in range(2)
@@ -1247,7 +1247,7 @@ async def test_a_unit_its_remainder_cannot_fund_writes_nothing(
     upload = Files(
         name="upload",
         mimetype="application/pdf",
-        user_id=admin_user.id,
+        owner_user_id=admin_user.id,
         tenant_id=test_tenant.id,
     )
     retention_session.add(upload)
@@ -1305,7 +1305,7 @@ async def _held_and_later_questions(
     upload = Files(
         name="upload",
         mimetype="application/pdf",
-        user_id=admin_user.id,
+        owner_user_id=admin_user.id,
         tenant_id=test_tenant.id,
     )
     retention_session.add(upload)

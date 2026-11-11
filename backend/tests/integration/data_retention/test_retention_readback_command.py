@@ -171,7 +171,7 @@ async def test_unused_files_and_job_history_are_judged_at_the_readback_time(
             mimetype="text/plain",
             file_type=FileType.TEXT.value,
             tenant_id=test_tenant.id,
-            user_id=admin_user.id,
+            owner_user_id=admin_user.id,
             created_at=created_at,
             updated_at=created_at,
         )

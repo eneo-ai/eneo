@@ -1836,9 +1836,9 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
     body = response.json()
     if failure == "corrupt":
         assert body["code"] == "EXTRACTION_FAILED"
-        assert body["message"] == (
-            "PDF extraction failed for 'source.pdf': No /Root object! - Is this really a PDF?"
-        )
+        # The parser's own text can quote the file, so only a fixed message
+        # leaves the server.
+        assert body["message"] == "PDF extraction failed"
         assert "context" not in body
     elif failure == "capacity":
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
