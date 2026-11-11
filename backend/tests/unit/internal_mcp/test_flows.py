@@ -1063,6 +1063,33 @@ async def test_a_step_is_added_by_its_kind_in_one_revision_at_its_place(monkeypa
     assert "publish_blockers" in page
 
 
+async def test_a_large_addition_answers_whole_in_one_page(monkeypatch):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    first = _step(1)
+    save = _adding_chat(monkeypatch, [first])
+    example = {f"falt_med_ett_langt_namn_{number:03}": "x" for number in range(400)}
+
+    result, page = await _add(
+        name="Fakta",
+        kind="structured",
+        position=1,
+        values={"instruction": "Ta fram fälten.", "example": example},
+    )
+
+    assert result.isError is not True, page
+    save.assert_awaited_once()
+    assert page["next_offset"] is None
+    assert page["draft_revision"] == 5
+    content = json.loads(page["content"])
+    assert content["saved"] is True
+    assert content["step_id"] == str(_ADDED_ID)
+    assert content["hand_over"][0]["step_id"] == str(first.id)
+    # The fields are counted; read_flow gives them.
+    assert content["step"]["output_fields"] == 400
+    assert "read_flow" in content["in_full"]
+
+
 async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
     monkeypatch,
 ):

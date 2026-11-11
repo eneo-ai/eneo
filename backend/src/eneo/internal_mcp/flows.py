@@ -192,19 +192,26 @@ _STALE_REVISION_MESSAGE = (
 )
 
 
+def _page_size() -> int:
+    """The characters of a value one page carries."""
+    return max(1, min(4000, default_page_cap() // 4))
+
+
+def _serialized(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+
+
 def page_result(
     value: Any, *, flow_id: UUID, offset: int = 0, revision: int | None = None
 ) -> CallToolResult:
     if offset < 0:
         raise BadRequestException("offset must be non-negative.")
-    serialized = json.dumps(
-        value, ensure_ascii=False, default=str, separators=(",", ":")
-    )
+    serialized = _serialized(value)
     if offset > len(serialized):
         raise BadRequestException(
             "offset is beyond this value; read again from offset 0 after a change."
         )
-    end = min(len(serialized), offset + max(1, min(4000, default_page_cap() // 4)))
+    end = min(len(serialized), offset + _page_size())
     page = {
         "flow_id": str(flow_id),
         "draft_revision": revision,
@@ -1573,9 +1580,36 @@ async def add_step(
                 for step_id, changes in change.step_edits
             ],
         }
-        return page_result(page, flow_id=chat.flow_id, revision=updated.draft_revision)
+        return page_result(
+            _whole(page, added.step_order),
+            flow_id=chat.flow_id,
+            revision=updated.draft_revision,
+        )
 
     return await _call(ctx, operation, changes_draft=True)
+
+
+def _whole(page: dict[str, Any], step_order: int) -> dict[str, Any]:
+    """A change's answer in one page: a change cannot be read on from an
+    offset. Past a page, each list of the step's details is given as its
+    count, and read_flow gives them in full; what was saved and handed over
+    is always there."""
+    if len(_serialized(page)) <= _page_size():
+        return page
+
+    def counted(value: Any) -> Any:
+        if isinstance(value, list):
+            return len(value)
+        if isinstance(value, dict):
+            return {key: counted(item) for key, item in value.items()}
+        return value
+
+    return {
+        **page,
+        "step": counted(page["step"]),
+        "in_full": f"Lists are counted here; read_flow steps=[{step_order}] "
+        "gives them.",
+    }
 
 
 _STEP_KINDS_NOTE = (
