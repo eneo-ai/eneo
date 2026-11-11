@@ -13,7 +13,6 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
-import aiohttp
 from yarl import URL
 
 from eneo.authentication.auth_models import DEFAULT_EMAIL_VERIFIED_CLAIMS
@@ -157,12 +156,6 @@ async def download_discovery(url: str) -> dict[str, object]:
         raise OidcProviderUnavailable(
             f"Failed to fetch discovery document: {exc.reason}"
         ) from exc
-    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
-        logger.error(
-            "Failed to fetch OIDC discovery document",
-            extra={"discovery_url": url, "error_type": type(exc).__name__},
-        )
-        raise OidcProviderUnavailable("Failed to fetch IdP configuration") from exc
 
 
 def _text(value: object) -> str | None:

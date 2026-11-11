@@ -8,6 +8,7 @@ shared one, so what is tested is the session's own deadline, not a fake's.
 import asyncio
 import json
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator, Iterator
 from uuid import uuid4
@@ -171,12 +172,29 @@ async def test_a_token_endpoint_that_never_answers_ends_the_exchange_within_the_
 ):
     started = time.monotonic()
     async with asyncio.timeout(10):
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(OidcResponseNotVerifiedError):
             await verification._exchange_code(
                 _profile(f"{provider}/hangs"), _transaction(), "code", "correlation"
             )
 
     assert time.monotonic() - started < 3
+
+
+async def test_a_token_endpoint_that_refuses_the_connection_is_the_fixed_refusal(
+    shared_session,
+):
+    """Not a 500: the sign-in ends with the same 401 as any failed exchange."""
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+
+    with pytest.raises(OidcResponseNotVerifiedError):
+        await verification._exchange_code(
+            _profile(f"http://127.0.0.1:{port}/token"),
+            _transaction(),
+            "code",
+            "correlation",
+        )
 
 
 @pytest.mark.parametrize(

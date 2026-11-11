@@ -14,10 +14,10 @@ go through ``get_json`` and ``post_form`` on the shared session. Each request:
   and the client secret elsewhere;
 - reads at most 256 KiB of the answer.
 
-The shared session's deadline ends a request that takes too long; that and a
-provider that cannot be reached raise as aiohttp raises them. Anything these
-rules refuse raises ``OidcFetchError`` with a fixed reason that names no
-address and repeats nothing the provider sent.
+The shared session's deadline ends a request that takes too long. That, a
+provider that cannot be reached, and anything these rules refuse raise
+``OidcFetchError`` with a fixed reason that names no address and repeats
+nothing the provider sent, so each caller answers with its own fixed refusal.
 """
 
 import ipaddress
@@ -40,6 +40,7 @@ MAX_RESPONSE_BYTES = 256 * 1024
 _CHUNK_BYTES = 64 * 1024
 
 REFUSED_ADDRESS = "the provider's address is not allowed"
+UNREACHABLE = "the provider could not be reached"
 _TOO_LARGE = "the answer is larger than 256 KiB"
 
 
@@ -101,7 +102,7 @@ async def _answer(
             raise OidcFetchError(_TOO_LARGE, status=status)
     try:
         document: object = json.loads(body)
-    except ValueError:
+    except (ValueError, RecursionError):  # Nested deeper than the parser goes.
         return status, None
     return status, cast(dict[str, object], document) if isinstance(
         document, dict
@@ -127,6 +128,10 @@ async def _request(
             return await _answer(response)
     except DisallowedDestination as exc:
         raise OidcFetchError(REFUSED_ADDRESS) from exc
+    except (aiohttp.ClientError, TimeoutError) as exc:
+        # Includes aiohttp refusing a host before it connects, such as a
+        # legacy numeric IPv4 form (2130706433, 127.1, 0177.0.0.1).
+        raise OidcFetchError(UNREACHABLE) from exc
 
 
 async def get_json(url: str) -> dict[str, object]:
