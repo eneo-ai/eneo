@@ -16,6 +16,7 @@ from eneo.flows.runtime.service_transcription import (
     ServiceFlowTranscriber,
 )
 from eneo.flows.runtime.transcription import FlowTranscribers
+from eneo.main import process_scratch
 from eneo.main.exceptions import TypedIOValidationException
 from tests.unit.files import test_audio
 from tests.unit.flows.runtime.test_remote_transcription import (
@@ -209,7 +210,7 @@ async def test_interrupted_download_closes_source_and_removes_partial_spool(
 ):
     from eneo.flows.runtime.audio_spool import spool_audio
 
-    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     closed = []
     started = asyncio.Event()
 
@@ -256,7 +257,7 @@ async def test_inline_payload_is_released_before_measurement(tmp_path, monkeypat
         data = b"inline audio"
 
     retained = []
-    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
 
     async def download(file_id):
         payload = Payload()
@@ -302,7 +303,7 @@ async def test_cancellation_finishes_duration_reader_before_removing_spool(
     from eneo.flows.runtime.audio_spool import spool_audio
     from tests.unittests.flows.audio_spool_test_support import AudioDownloads
 
-    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     started = asyncio.Event()
     finished = []
 
@@ -405,7 +406,7 @@ async def test_duration_is_lazy_and_cached(tmp_path, monkeypatch):
     from eneo.flows.runtime.audio_spool import spool_audio
     from tests.unittests.flows.audio_spool_test_support import AudioDownloads
 
-    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     measure = AsyncMock(return_value=12.5)
     monkeypatch.setattr(audio, "measure_duration", measure)
     file = _audio_file(name="recording.wav")
@@ -421,3 +422,27 @@ async def test_duration_is_lazy_and_cached(tmp_path, monkeypatch):
     finally:
         await spool.aclose()
     downloads.assert_finished()
+
+
+async def test_unverified_download_is_spooled_in_process_scratch(tmp_path, monkeypatch):
+    """A copied download goes into this process's scratch directory, which the
+    process removes when it stops, never the system temporary directory."""
+    from eneo.flows.runtime.audio_spool import spool_audio
+    from tests.unittests.flows.audio_spool_test_support import AudioDownloads
+
+    scratch = tmp_path / "scratch"
+    system = tmp_path / "system"
+    scratch.mkdir()
+    system.mkdir()
+    monkeypatch.setattr(process_scratch, "directory", lambda: scratch)
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(system))
+    file = _audio_file(name="recording.wav")
+    downloads = AudioDownloads([file])
+    spool = await spool_audio(file.id, open_audio_download=downloads)
+    try:
+        assert spool.path.parent == scratch
+        assert list(system.iterdir()) == []
+    finally:
+        await spool.aclose()
+    downloads.assert_finished()
+    assert list(scratch.iterdir()) == []

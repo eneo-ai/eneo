@@ -114,7 +114,9 @@ async def spool_audio(
             with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=Path(filename).suffix or ".audio",
-                dir=verified_path.parent if verified_path is not None else None,
+                dir=verified_path.parent
+                if verified_path is not None
+                else process_scratch.directory(),
             ) as target:
                 path = Path(target.name)
                 byte_size = download.content_length
