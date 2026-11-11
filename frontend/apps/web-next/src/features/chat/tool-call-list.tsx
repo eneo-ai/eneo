@@ -4,11 +4,13 @@ import { Item } from "@astryxdesign/core/Item";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { Ban, CircleCheck, CircleX, Clock, Copy, LoaderCircle, Square, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { retryTransientFailure } from "@/lib/api/query";
 import { cn } from "@/lib/utils";
 import type { StepStatus, ToolCall, ToolPart } from "./activity";
 import { callTimingKey, type TurnDurations } from "./activity-timings";
@@ -118,17 +120,43 @@ function CallArguments({ part, files }: { part: ToolPart; files: AttachedFile[] 
   );
 }
 
-/** The result, loaded when the row is open, in a scroll box with a copy button. */
-function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
+/**
+ * How often a result not found is asked for again: the answer's save, which
+ * holds its calls' results, can reach the server just after the answer's end
+ * (a stopped answer is saved after the stream closes).
+ */
+const NOT_STORED_YET_TRIES = 3;
+
+/**
+ * The result, loaded when the row is open, in a scroll box with a copy button.
+ * The server keeps a call's result with the answer, saved when the answer
+ * ends: while it is written, the row says the result comes then.
+ */
+function CallResult({
+  part,
+  sessionId,
+  shown,
+  stored
+}: {
+  part: ToolPart;
+  sessionId: string | null;
+  shown: boolean;
+  stored: boolean;
+}) {
   const t = useTranslations();
   const locale = useLocale();
   const { copy } = useCopy();
   const finished = part.state === "output-available" || part.state === "output-error";
-  const canLoad = Boolean(sessionId && part.toolCallId && finished);
+  const loadable = Boolean(sessionId && part.toolCallId && finished);
+  const canLoad = loadable && shown && stored;
   const result = useQuery({
     queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
     enabled: canLoad,
     staleTime: Infinity,
+    retry: (failures, error) =>
+      error instanceof EneoApiError && error.status === 404
+        ? failures < NOT_STORED_YET_TRIES
+        : retryTransientFailure(failures, error),
     queryFn: async () => {
       const response = await unwrap(
         browserApi.GET("/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/", {
@@ -139,6 +167,11 @@ function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | n
     }
   });
   const errorText = part.state === "output-error" ? part.errorText : undefined;
+  if (loadable && !stored && !errorText) {
+    return (
+      <p className="text-ax-text-secondary text-[12.5px]">{t("chat_tool_result_after_answer")}</p>
+    );
+  }
   if (!canLoad) {
     return errorText ? <p className="text-ax-error text-[12.5px]">{errorText}</p> : null;
   }
@@ -187,14 +220,20 @@ export function ToolCallList({
   calls,
   files,
   sessionId,
-  durations
+  durations,
+  stored
 }: {
   calls: ToolCall[];
   files: AttachedFile[];
   sessionId: string | null;
   durations: TurnDurations | null;
+  /** Whether the answer, which holds its calls' results, is saved: false while it is written. */
+  stored: boolean;
 }) {
   const t = useTranslations();
+  // The rows open: a result is asked for when its row opens, never for a closed
+  // row (the group keeps a closed row's content in the page).
+  const [open, setOpen] = useState<string[]>([]);
   const locale = useLocale();
   const presented = calls.map((call) => ({
     call,
@@ -210,7 +249,13 @@ export function ToolCallList({
   // chevron out of the row instead of truncating.
   const rows = (
     <div className="px-1 [&_.astryx-collapsible-trigger]:min-h-9 pointer-coarse:[&_.astryx-collapsible-trigger]:min-h-11 [&_.astryx-collapsible-trigger>span:first-child]:min-w-0 [&_.astryx-collapsible-trigger>span:first-child]:flex-1 [&_.astryx-collapsible-trigger>span:first-child>*]:w-full">
-      <CollapsibleGroup type="multiple" hasDividers density="compact">
+      <CollapsibleGroup
+        type="multiple"
+        hasDividers
+        density="compact"
+        value={open}
+        onChange={(value) => setOpen(Array.isArray(value) ? value : [value])}
+      >
         {presented.map(({ call, presentation, target }) => {
           const problem =
             call.status === "error"
@@ -257,7 +302,12 @@ export function ToolCallList({
             >
               <div className="flex flex-col gap-2.5 ps-6 pb-2">
                 <CallArguments part={call.part} files={files} />
-                <CallResult part={call.part} sessionId={sessionId} />
+                <CallResult
+                  part={call.part}
+                  sessionId={sessionId}
+                  shown={open.includes(call.part.toolCallId)}
+                  stored={stored}
+                />
               </div>
             </Collapsible>
           );

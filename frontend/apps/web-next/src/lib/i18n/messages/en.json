@@ -10557,5 +10557,6 @@
   "federation_admin_jit_link": "Change under {setting}",
   "federation_admin_saving_leave_title": "Still saving",
   "federation_admin_saving_leave_description": "The save continues if you leave, but you will not see whether it succeeds.",
-  "federation_admin_saving_leave_confirm": "Leave page"
+  "federation_admin_saving_leave_confirm": "Leave page",
+  "chat_tool_result_after_answer": "The result shows once the answer is done."
 }

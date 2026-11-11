@@ -617,6 +617,10 @@ def _tool_metadata_arguments(tool: ToolCallMetadata) -> dict[str, Any] | None:
     return cast(dict[str, Any] | None, cast(Any, tool).arguments)
 
 
+# The id prefix of the steps that show the always-active Skills of a turn.
+_ALWAYS_ACTIVE_SKILL_STEP_PREFIX = "skill-always-"
+
+
 # The tool result of a call that needs the person's confirmation in a turn
 # that cannot ask for it: a request without a stream, a group chat, a widget
 # visitor or a service key. The call is not run.
@@ -1323,7 +1327,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 tool_name=key,
                 title=display_name,
                 arguments={"skill_key": key, "mode": "always"},
-                tool_call_id=f"skill-always-{key}",
+                tool_call_id=f"{_ALWAYS_ACTIVE_SKILL_STEP_PREFIX}{key}",
                 approved=True,
                 result_status="completed",
                 result=json.dumps({"activated": True, "mode": "always"}),
@@ -1332,6 +1336,14 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             for key, display_name in runtime.initially_active_skills()
         ]
+
+    @staticmethod
+    def is_always_active_skill_step(tool_call_id: str | None) -> bool:
+        """Whether a call is a step from ``_always_active_skill_metadata``:
+        the adapter adds it to the turn, the model did not make it."""
+        return tool_call_id is not None and tool_call_id.startswith(
+            _ALWAYS_ACTIVE_SKILL_STEP_PREFIX
+        )
 
     def _extract_usage(self, response: _LiteLLMHasUsage) -> TokenUsage | None:
         """Extract token usage from a LiteLLM response."""

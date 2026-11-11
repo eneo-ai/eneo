@@ -4522,5 +4522,6 @@
   "authentication_service_error": "Autentiseringstjänsten stötte på ett problem. Försök igen.",
   "federation_admin_saving_leave_title": "Sparningen pågår",
   "federation_admin_saving_leave_description": "Sparningen fortsätter även om du lämnar sidan, men då ser du inte om den lyckas.",
-  "federation_admin_saving_leave_confirm": "Lämna sidan"
+  "federation_admin_saving_leave_confirm": "Lämna sidan",
+  "chat_tool_result_after_answer": "Resultatet visas när svaret är klart."
 }

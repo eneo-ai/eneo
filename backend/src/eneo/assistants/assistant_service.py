@@ -37,6 +37,9 @@ from eneo.assistants.reference_tags import (
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    TenantModelAdapter,
+)
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
@@ -3415,14 +3418,33 @@ class AssistantService:
                     # error, network drop, etc. The placeholder row already captures
                     # the user's question, so nothing streamed means there is
                     # nothing further to persist — skip the redundant UPDATE.
-                    # Anything else (partial answer or reasoning streamed before
-                    # abort) must be saved via a fresh DB session because the
-                    # request-scoped AsyncSession may already be torn down and
-                    # `await` across GeneratorExit is fragile.
+                    # Anything else (partial answer, reasoning, or tool calls
+                    # decided before abort) must be saved via a fresh DB session
+                    # because the request-scoped AsyncSession may already be torn
+                    # down and `await` across GeneratorExit is fragile.
+                    # A call is saved when it ran (it has its result) or was
+                    # refused (denied or timed out: the person saw the refusal,
+                    # its result comes later). A call still pending, awaiting
+                    # approval or approved but not yet run is left out, so the
+                    # stopped turn does not show it as done or failed. Only calls
+                    # the model made save a turn on their own: the always-active
+                    # Skill step opens every turn and is saved only with other
+                    # content, so a turn stopped before any can still be retried.
+                    finished = [
+                        tc
+                        for tc in tool_calls
+                        if tc.result is not None or tc.approved is False
+                    ]
                     if not completed and (
                         response_string
                         or reasoning_string
                         or generated_files
+                        or any(
+                            not TenantModelAdapter.is_always_active_skill_step(
+                                tc.tool_call_id
+                            )
+                            for tc in finished
+                        )
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (
@@ -3443,9 +3465,7 @@ class AssistantService:
                         skill_provenance, skill_activation = (
                             _final_skill_runtime_state()
                         )
-                        _attach_generated_file_ids(
-                            tool_calls, generated_file_ids_by_call
-                        )
+                        _attach_generated_file_ids(finished, generated_file_ids_by_call)
                         schedule_background_save(
                             persist_partial_question_answer(
                                 tenant_id=tenant_id,
@@ -3456,7 +3476,7 @@ class AssistantService:
                                 skill_provenance=skill_provenance,
                                 skill_activation=skill_activation,
                                 generated_files=list(generated_files),
-                                tool_calls=tool_calls or None,
+                                tool_calls=finished or None,
                             )
                         )
                         logger.info(

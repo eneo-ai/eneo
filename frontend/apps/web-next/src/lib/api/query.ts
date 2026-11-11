@@ -30,7 +30,7 @@ export function makeQueryClient(): QueryClient {
  * (4xx) is final, asking again won't change it; a server or network failure
  * is tried three more times.
  */
-function retryTransientFailure(failureCount: number, error: unknown): boolean {
+export function retryTransientFailure(failureCount: number, error: unknown): boolean {
   if (error instanceof EneoApiError && error.status >= 400 && error.status < 500) return false;
   return failureCount < 3;
 }
