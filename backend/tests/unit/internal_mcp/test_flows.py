@@ -14,6 +14,7 @@ from eneo.main.exceptions import (
     BadRequestException,
     ConflictException,
     NotFoundException,
+    UnauthorizedException,
 )
 
 
@@ -2346,6 +2347,21 @@ async def test_a_chat_that_only_reads_is_not_shown_the_flows_templates(monkeypat
     assert "word_templates" not in content
 
 
+async def test_a_chat_left_in_edit_mode_without_edit_access_still_reads(monkeypatch):
+    _reading_chat(monkeypatch, templates=_many_templates(2), editing=True)
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "require_authoring_edit",
+        AsyncMock(side_effect=UnauthorizedException("No edit access.")),
+    )
+
+    _page, content = await _read()
+
+    # The overview is read as before, without the flow's templates.
+    assert len(content["steps"]) == 2
+    assert "word_templates" not in content
+
+
 async def _add_word_step(monkeypatch, templates, **values):
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
@@ -2400,6 +2416,28 @@ async def test_a_new_word_step_in_a_flow_without_templates_waits_for_one(monkeyp
     # An object, so what blocks publishing is the missing template itself.
     assert step.configuration.output_config == {"bindings": {}}
     assert json.loads(page["content"])["step"]["word_template"] is None
+
+
+async def test_a_large_word_addition_still_says_which_template_it_got(monkeypatch):
+    bindings = {
+        f"falt_{number:03}": "{{ step_1.output.text }}" for number in range(400)
+    }
+
+    save, result, page = await _add_word_step(
+        monkeypatch, [(_TEMPLATE_ID, "Beslut.docx")], bindings=bindings
+    )
+
+    assert result.isError is not True, page
+    save.assert_awaited_once()
+    # The step in short, in one whole page, with its template.
+    assert page["next_offset"] is None
+    content = json.loads(page["content"])
+    assert "read_flow steps=[2]" in content["in_full"]
+    assert content["step"]["word_template"] == {
+        "id": _TEMPLATE_ID,
+        "name": "Beslut.docx",
+    }
+    assert "word_fields" not in content["step"]
 
 
 async def test_a_new_word_step_keeps_the_template_it_names(monkeypatch):
