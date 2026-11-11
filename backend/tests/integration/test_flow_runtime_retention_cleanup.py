@@ -1197,7 +1197,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             text="Hej.",
             segments=None,
             received_audio_seconds=1.0,
-            expires_at=now + timedelta(days=1),
+            expires_at=now + timedelta(days=30),
             bound_file_id=runtime_input_file_id,
             bound_file_ids=[runtime_input_file_id],
         )
