@@ -1024,7 +1024,7 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         step_id=_DRAFT_IDS[1],
         example=(
             '{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null,'
-            ' "sak": {"nr": "1"}}'
+            ' "sak": {"nr": "1"}, "c.d": "x"}'
         ),
     )
 
@@ -1040,6 +1040,7 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         {"name": "a.b", "type": "array", "variable": False, "word": False},
         {"name": "n", "type": ["string", "null"], "variable": True, "word": False},
         {"name": "sak", "type": "object", "variable": True, "word": False},
+        {"name": "c.d", "type": "string", "variable": False, "word": False},
     ]
     assert body["notes"] == ["empty_list", "null_value"]
     request = save.await_args.args[2]
@@ -1051,9 +1052,38 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         "a.b",
         "n",
         "sak",
+        "c.d",
     ]
     # The contract carries the fields' types, never the example's values.
     assert "Bifall" not in json.dumps(request.model_dump(mode="json"))
+    # word says what publish accepts as a Word field's read of the field.
+    for field in body["fields"]:
+        assert (
+            _word_field_publishes(edit.changes.output_contract, field["name"])
+            is field["word"]
+        ), field
+
+
+def _word_field_publishes(contract, name):
+    from eneo.flows.flow_validators import publish_step_refusals
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    steps = [
+        _step(1, output_type="json", output_contract=contract),
+        _step(
+            2,
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "placeholders": ["falt"],
+                "bindings": {"falt": "{{ step_1.output.structured." + name + " }}"},
+            },
+        ),
+    ]
+    return not publish_step_refusals(
+        steps, metadata_json=None, prompt_templates={1: "Ta fram fakta.", 2: ""}
+    )
 
 
 async def test_an_example_that_gives_no_contract_is_refused_without_saving(monkeypatch):

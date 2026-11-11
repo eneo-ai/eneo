@@ -1281,8 +1281,10 @@ async def contract_from_example(
                         "name": item.name,
                         "type": item.schema.get("type"),
                         "variable": item.variable,
-                        # Publish's rule for what a Word field may read.
-                        "word": template_bound_path_ok(reading.contract, (item.name,)),
+                        # Publish's rule for what a Word field may read: a
+                        # field it can name, of one required primitive type.
+                        "word": item.variable
+                        and template_bound_path_ok(reading.contract, (item.name,)),
                     }
                     for item in reading.fields
                 ],
