@@ -4560,5 +4560,6 @@
   "flow_run_live_fallback_duration_mismatch": "The audio files are not as long as the audio the live text was written from.",
   "flow_run_live_fallback_transcribed": "The audio files were transcribed with {model} instead.",
   "flow_run_live_fallback_transcribing": "The audio files are being transcribed with {model} instead.",
-  "flow_run_live_fallback_planned": "The audio files were to be transcribed with {model} instead."
+  "flow_run_live_fallback_planned": "The audio files were to be transcribed with {model} instead.",
+  "chat_tool_result_after_answer": "The result shows once the answer is done."
 }
