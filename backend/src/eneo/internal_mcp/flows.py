@@ -1572,22 +1572,20 @@ async def add_step(
         by_id = {step.id: step for step in updated.steps}
         added = next(step for step in updated.steps if step.step_order == place)
         reads, _prompts = await _saved_reads(container, chat.flow_id)
-        page: dict[str, Any] = {
-            "saved": True,
-            "step_id": str(added.id),
-            "step": _step_overview(added) | _step_reads(added, reads),
-            "hand_over": [
-                {
-                    "step_id": str(step_id),
-                    "step_order": by_id[step_id].step_order,
-                    "name": by_id[step_id].user_description,
-                    "changes": changes,
-                }
-                for step_id, changes in change.step_edits
-            ],
-        }
         return page_result(
-            _whole(page, added.step_order),
+            _addition_receipt(
+                added,
+                _step_overview(added) | _step_reads(added, reads),
+                [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": by_id[step_id].step_order,
+                        "name": _cut(by_id[step_id].user_description),
+                        "changes": changes,
+                    }
+                    for step_id, changes in change.step_edits
+                ],
+            ),
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
@@ -1595,26 +1593,43 @@ async def add_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-def _whole(page: dict[str, Any], step_order: int) -> dict[str, Any]:
-    """A change's answer in one page: a change cannot be read on from an
-    offset. Past a page, each list of the step's details is given as its
-    count, and read_flow gives them in full; what was saved and handed over
-    is always there."""
-    if len(_serialized(page)) <= _page_size():
-        return page
+# What the answer to an addition says of the step when its details do not fit.
+_RECEIPT_STEP_FIELDS = (
+    "step_order",
+    "input_source",
+    "input_type",
+    "output_mode",
+    "output_type",
+    "review",
+)
 
-    def counted(value: Any) -> Any:
-        if isinstance(value, list):
-            return len(value)
-        if isinstance(value, dict):
-            return {key: counted(item) for key, item in value.items()}
-        return value
 
+def _cut(text: str | None, limit: int = 80) -> str | None:
+    """Display text in an answer that must stay small; read_flow gives it whole."""
+    return text if text is None or len(text) <= limit else text[:limit] + "…"
+
+
+def _addition_receipt(
+    added: Any, details: dict[str, Any], hand_over: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """What add_step answers with, whole in one page: a change cannot be read
+    on from an offset. That the step was saved, its id and each step it took
+    over from (id, order, changes and the name cut short; an addition hands
+    over from one step at most) are always there. The step's details are as
+    the overview gives them when the answer fits a page; otherwise the step
+    in short, of fixed size, and where to read it in full."""
+    receipt = {
+        "saved": True,
+        "step_id": str(added.id),
+        "step": details,
+        "hand_over": hand_over,
+    }
+    if len(_serialized(receipt)) <= _page_size():
+        return receipt
     return {
-        **page,
-        "step": counted(page["step"]),
-        "in_full": f"Lists are counted here; read_flow steps=[{step_order}] "
-        "gives them.",
+        **receipt,
+        "step": {key: details[key] for key in _RECEIPT_STEP_FIELDS},
+        "in_full": f"read_flow steps=[{added.step_order}] gives the step in full.",
     }
 
 

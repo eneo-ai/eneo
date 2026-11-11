@@ -1091,12 +1091,17 @@ async def test_an_added_step_gets_the_instruction_as_its_prompt(
     assert (given.text if given is not None else None) == prompt
 
 
-async def test_a_large_addition_answers_whole_in_one_page(monkeypatch):
+@pytest.mark.parametrize(
+    ("fields", "described"),
+    [(400, "Step 1"), (1, "Brev " * 1000), (400, '"' * 5000)],
+    ids=["many fields", "a long name before it", "both"],
+)
+async def test_an_addition_answers_whole_in_one_page(monkeypatch, fields, described):
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
-    first = _step(1)
+    first = _step(1, user_description=described)
     save = _adding_chat(monkeypatch, [first])
-    example = {f"falt_med_ett_langt_namn_{number:03}": "x" for number in range(400)}
+    example = {f"falt_med_ett_langt_namn_{number:03}": "x" for number in range(fields)}
 
     result, page = await _add(
         name="Fakta",
@@ -1107,15 +1112,28 @@ async def test_a_large_addition_answers_whole_in_one_page(monkeypatch):
 
     assert result.isError is not True, page
     save.assert_awaited_once()
+    # A change cannot be read on from an offset: its answer is one whole page.
+    assert len(result.content[0].text) <= flows.default_page_cap()
     assert page["next_offset"] is None
     assert page["draft_revision"] == 5
     content = json.loads(page["content"])
     assert content["saved"] is True
     assert content["step_id"] == str(_ADDED_ID)
-    assert content["hand_over"][0]["step_id"] == str(first.id)
-    # The fields are counted; read_flow gives them.
-    assert content["step"]["output_fields"] == 400
-    assert "read_flow" in content["in_full"]
+    # What was handed over is whole; only the name shown with it is cut.
+    (handed,) = content["hand_over"]
+    assert (handed["step_id"], handed["step_order"]) == (str(first.id), 2)
+    assert handed["changes"] == {"input_source": "previous_step"}
+    assert len(handed["name"]) <= 81
+    assert described.startswith(handed["name"].removesuffix("…"))
+    step = content["step"]
+    assert (step["step_order"], step["output_type"]) == (1, "json")
+    if fields == 1:
+        assert step["output_fields"] == list(example)
+        assert "in_full" not in content
+    else:
+        # The step in short; read_flow gives its details.
+        assert "output_fields" not in step
+        assert "read_flow steps=[1]" in content["in_full"]
 
 
 async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
