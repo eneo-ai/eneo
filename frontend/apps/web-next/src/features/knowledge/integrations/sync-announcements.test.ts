@@ -1,6 +1,5 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../knowledge";
 import type { SourceSummary } from "./sources";
 import type { SyncProgressPhase } from "./sync-progress";
@@ -12,7 +11,7 @@ import {
   sourceSnapshot
 } from "./sync-announcements";
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 type Summary = Pick<
   SourceSummary,

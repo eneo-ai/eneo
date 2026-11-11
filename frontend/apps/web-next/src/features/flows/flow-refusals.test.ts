@@ -1,16 +1,14 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { makeStep } from "./flow-fixtures";
 import { flowRefusalMessage, refusalStep } from "./flow-refusals";
 
 /** The app's real catalog, looked up by any key as the refusals do. */
-const translator = (locale: string, messages: Record<string, string>) =>
-  createTranslator({ locale, messages });
-const t = translator("sv", sv);
-const tEn = translator("en", en);
+const t = testTranslator("sv");
+const tEn = testTranslator("en");
 
 function refusal(code: string, context?: Record<string, unknown>, message = "Refused.") {
   return new EneoApiError(message, { status: 400, code: 9007, reason: code, context });
@@ -233,7 +231,7 @@ describe("flowRefusalMessage", () => {
   });
 
   it("gives the Word field a refusal names to the sentence it picks", () => {
-    const sentence = translator("sv", {
+    const sentence = testTranslator("sv", {
       ...sv,
       flow_validation_msg_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
     });

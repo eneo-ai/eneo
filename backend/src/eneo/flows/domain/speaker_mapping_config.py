@@ -27,6 +27,21 @@ def steps_require_speaker_labels(steps: Iterable[_StepWithOutputMode]) -> bool:
     )
 
 
+def speaker_mapping_without_transcript(
+    step_order: int, earlier_output_modes: Iterable[str]
+) -> str | None:
+    """The refusal of a step that names speakers in a flow that transcribes
+    nothing before it, or None. The labels the step names are made from
+    audio, so every run of such a flow would fail at the step."""
+    if FlowOutputMode.TRANSCRIBE_ONLY.value in earlier_output_modes:
+        return None
+    return (
+        f"Step {step_order}: output_mode 'speaker_mapping' names the speakers of "
+        "a transcript the flow makes from audio, so a step with output_mode "
+        "'transcribe_only' must come before it."
+    )
+
+
 def _config_field(output_config: object, key: str) -> str | None:
     if not isinstance(output_config, Mapping):
         return None

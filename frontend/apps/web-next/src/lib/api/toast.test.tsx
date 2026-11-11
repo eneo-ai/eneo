@@ -1,15 +1,14 @@
 // @vitest-environment jsdom
 import { act, cleanup, screen } from "@testing-library/react";
-import { createTranslator } from "use-intl";
 import { toast as sonner } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Toaster } from "@/components/ui/sonner";
-import sv from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
+import { testTranslator } from "@/test/i18n";
 import { EneoApiError } from "./errors";
 import { toastApiError } from "./toast";
 
-const t = createTranslator({ locale: "sv", messages: sv }) as unknown as (key: string) => string;
+const t = testTranslator() as unknown as (key: string) => string;
 
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });

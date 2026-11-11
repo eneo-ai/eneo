@@ -439,7 +439,9 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    # The job takes 12-20 minutes.
+    # The type check stays under a minute only while tests take translators
+    # from frontend/apps/web-next/src/test/i18n.ts: createTranslator handed
+    # the i18n catalog makes it take minutes, and slows typed lint too.
     timeout-minutes: 30
     defaults:
       run:

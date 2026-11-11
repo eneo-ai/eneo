@@ -2,10 +2,9 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems } from "../source-problems";
 import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
@@ -87,7 +86,7 @@ describe("SamePageLink", () => {
   });
 
   it("is what the problems' folder links use", () => {
-    const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+    const t = testTranslator();
     const failed = (id: string, name: string) =>
       ({
         id,

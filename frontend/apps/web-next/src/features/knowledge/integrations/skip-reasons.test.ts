@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "use-intl";
-import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import {
   describeErrorDetail,
   describeSkipReason,
@@ -9,7 +8,7 @@ import {
   type SkipReasonCode
 } from "./skip-reasons";
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 // One example of every code the backend writes (backend/src/eneo/integration/domain/skip_reasons.py).
 const EXAMPLES: Record<SkipReasonCode, [SkipReason, string]> = {

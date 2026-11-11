@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createTranslator } from "use-intl";
-import en from "@/lib/i18n/messages/en.json";
-import sv from "@/lib/i18n/messages/sv.json";
 import { makeSpace, makeIntegration } from "@/features/spaces/testing/space-fixture";
 import { testQueryClient } from "@/test/render";
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../knowledge";
 import {
   createPendingImports,
@@ -194,7 +192,7 @@ it("reports other spaces even while one space is unavailable, without duplicate 
   );
   const context = {
     queryClient: testQueryClient(),
-    t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+    t: testTranslator(),
     navigate: vi.fn()
   };
   const settled = waiting.map((item) => ({ ...item, jobStatus: "complete" as const }));
@@ -223,7 +221,7 @@ it("tells every import finishing in the same space in a toast of its own", async
     waiting.map((item) => ({ ...item, jobStatus: "complete" })),
     {
       queryClient: testQueryClient(),
-      t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+      t: testTranslator(),
       navigate: vi.fn()
     }
   );
@@ -256,7 +254,7 @@ describe("an import of several folders", () => {
     });
   const context = () => ({
     queryClient: testQueryClient(),
-    t: createTranslator({ locale: "sv", messages: sv as Record<string, string> }),
+    t: testTranslator(),
     navigate: vi.fn()
   });
   const done = (item: PendingImport) => ({ ...item, jobStatus: "complete" as const });
@@ -334,7 +332,7 @@ it("tells the organisation's sign-in failure of a single import in the viewer's 
   });
   await reportImports([{ ...pending("a"), jobStatus: "failed" }], {
     queryClient: testQueryClient(),
-    t: createTranslator({ locale: "en", messages: en as Record<string, string> }),
+    t: testTranslator("en"),
     navigate: vi.fn()
   });
   expect(toast.error).toHaveBeenCalledWith("Avtal: the first sync failed", {

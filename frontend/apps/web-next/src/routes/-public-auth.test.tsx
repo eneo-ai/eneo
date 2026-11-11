@@ -3,9 +3,9 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { StrictMode } from "react";
-import { createTranslator } from "use-intl";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
+import { testTranslator } from "@/test/i18n";
 
 vi.unmock("@/lib/link");
 
@@ -89,7 +89,7 @@ async function route(path: string, mount = true) {
   await owner.initializeBrowserSession();
   const { BootContext } = await import("@/boot-context");
   const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
+    { queryClient, t: testTranslator() },
     { history: createMemoryHistory({ initialEntries: [path] }) }
   );
   if (mount) {

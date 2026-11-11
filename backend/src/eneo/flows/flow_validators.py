@@ -31,6 +31,7 @@ from eneo.flows.domain.flow_step_validation import (
 )
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
+    speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
 )
 from eneo.flows.domain.step_mapped_execution import (
@@ -585,6 +586,28 @@ def collect_step_graph_issues(
                 )
             )
         if step.output_mode == "speaker_mapping":
+            # A draft may hold the step before the one that transcribes;
+            # a flow is published only with the transcript the step names.
+            without_transcript = (
+                speaker_mapping_without_transcript(
+                    step.step_order,
+                    [
+                        str(_enum_value(earlier.output_mode))
+                        for earlier in sorted_steps
+                        if earlier.step_order < step.step_order
+                    ],
+                )
+                if require_complete_template_fill_config
+                else None
+            )
+            if without_transcript is not None:
+                issues.append(
+                    _flow_step_issue(
+                        code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                        message=without_transcript,
+                        step_order=step.step_order,
+                    )
+                )
             _capture_flow_step_validation(
                 issues,
                 FlowGraphIssueCode.FLOW_STEP_INVALID,

@@ -190,6 +190,22 @@ reviews. When the user's text is short enough to be one step, one step is
 right; do not pad. When edit mode is off, describe the steps you would build
 in plain words, after the sentence that says nothing was changed and how to
 switch to "Redigera".
+Build the whole flow in the turn that asks for it. A turn has as many rounds
+as the work needs: when one change is saved, go on to the next, until every
+step the flow needs is in place and reads what it should. What only the
+person can do (choosing a model or a service, uploading a template, entering
+a credential) never stops the building: go on, and name it once, when the flow
+is whole. End the turn before that only for a question whose answer changes
+the shape of what is left, and ask it before you build, not between two
+steps.
+Before you say that a flow is built, read its overview once more and hold it
+against the request and the answers you got. Each part of the work has a
+step, and the instructions the person gave are in the instruction of the step
+that does that part; a step that makes a file has no AI, so the text it gets
+is written by an AI step before it. Each answer is in the draft as the person
+gave it: the run form field they chose, the review they asked for, the source
+they named. The last step gives what was asked. Put right what is missing
+before you answer.
 """
 
 # What a flow is made of, in the model's terms. Every member of each enum has a
@@ -246,7 +262,8 @@ def _capabilities() -> str:
 
 _QUESTIONS = """Ask only where the answer changes the shape of the flow: whether one
 result is wanted or one per source, whether all the material or only the
-relevant parts are read, and whether a person reviews before delivery. A
+relevant parts are read, whether a person reviews before delivery, and how
+the speakers of a recorded conversation are named (the speaker rules below). A
 flow's result is read in Eneo; that is the default, built without asking.
 Words like "skickas vidare" or "levereras" often mean only that the result is
 ready for the next person, so when they appear and the person has named no
@@ -295,8 +312,9 @@ result is structured and the person has not described its fields.
 """
 
 _COHERENT_CHANGES = """The tool calls of one round run at the same time on the same revision, so
-make at most one call that changes the draft per round; a change that reaches
-several steps goes in one update_steps call. A change to one step reaches the
+make at most one call that changes the draft per round, and the next change in
+the round after it; a change that reaches several steps goes in one
+update_steps call. A change to one step reaches the
 steps that read it. After changing what a step gives (its name, the fields of
 its result, or the meaning of what it produces), read its readers in read_flow
 and change their instructions and reads in the same update_steps call, so no
@@ -311,6 +329,24 @@ turn, with
 apply_flow_suggestions for a fix whose fix.kind is patch and otherwise by
 adjusting the step with update_step, unless the user explicitly asked for that
 shape. Then tell the user in one plain sentence what you adjusted and why.
+"""
+
+_PUBLISH_BLOCKERS = """After a change, the tool result also lists under publish_blockers what
+would stop the draft from being published as it now stands, each with its
+step, and under publish_blocker_count how many there are. While you are still
+building, a blocker that your next change removes needs no mention. Before you
+say that a flow is built or a change is done, account for every blocker that
+is left. Fix in the same turn what a setting fixes (a read that names nothing,
+a missing contract, a speaker step without a source of names). What only the
+person can do, say in one plain sentence each, with the step and where it is
+done: uploading a Word template or entering a credential in the step, choosing
+a transcription model or a speaker service under "Ändra inställningar". Never
+make a blocker go away by changing what a step is for or by taking a step
+out: a Word step that waits for its template stays a Word step, and a speaker
+step that waits for a speaker service stays. Never
+call a flow ready to publish while publish_blocker_count is above zero. The
+list holds the draft's own rules; publishing also checks the space's models
+and the organisation's limits, so it can still refuse and then names why.
 """
 
 _SUGGESTIONS_ON_REQUEST = """When the user asks to optimize or simplify the flow or make it cheaper, call
@@ -424,10 +460,83 @@ When streamed text cannot be used, the transcription model transcribes the
 recording. transcription_speaker_service gets the audio and the finished text,
 times the words and labels the speakers; it writes no text of its own. A flow
 that should stream needs both: a transcription model for files, and a live
-model (or a transcription model that streams). You cannot see which models and
-services the space offers, so never write their ids: ask the person to choose
-them in the editor under "Ändra inställningar", in the Transkribering part, and
-read the settings again when they say they have.
+model (or a transcription model that streams). read_flow says by name what the
+flow's space offers (transcription_offer: its transcription_models, with
+those that stream, and its speaker_services); the one marked default a flow
+gets by itself. Offer only what is listed there, and when something the flow
+needs is not listed, say that an administrator adds it to the space. The
+choice among several is the person's, so never write their ids: build the
+rest of the flow first, then say that the person chooses them in the editor
+under "Ändra inställningar", in the Transkribering part, and read the settings
+again when they say they have.
+"""
+
+
+_SPEAKERS = """A transcript carries speaker labels when the flow has a
+transcription_speaker_service and transcription_diarization in
+metadata_json.wizard is not false. The labels say that different people speak,
+never who they are. A step with output_mode speaker_mapping, "Granska
+transkript" in the editor, names them: it proposes who each label is, and the
+run then waits for a person to confirm the names and correct the transcript
+before the flow goes on. It stands directly after the transcribing step, with
+input_source previous_step, input_type text, output_type json and review_policy
+{"mode": "edit"}, and takes no instruction and no output_contract. Its settings
+are output_config {"speaker_mapping": {"participants_field": ...,
+"speaker_count_field": ..., "infer_names": ...}}. participants_field ("Fält med
+deltagare") names a run form field of type list, multiselect or text where the
+person who runs the flow says who took part, or is null. infer_names ("Låt
+AI:n föreslå namn och roller") true lets the step also propose names and
+roles the conversation itself gives; the participants are then a hint and
+need not be complete. speaker_count_field ("Fält med antal talare") names a
+number field with how many speak, or is null. The step needs a source of
+names: a participants field, infer_names true, or both. Without one it is
+saved and can never be published. Later steps read the transcript with the
+confirmed names in place of the labels: a step that follows it and reads
+previous_step gets it, and a prompt reads it as {{ step_N.output.text }}.
+The step names only the labels of a transcript the flow itself makes from
+audio, so the step before it is always the one that transcribes. A flow that
+receives a finished transcript, typed or as a file, has no such labels: it
+gets no speaker step, and an AI step works out who is who from the text
+instead. So when the request does not say whether a run brings the recording
+or a finished transcript, ask that first, with those two as the choices.
+A flow built for a recorded conversation between several people (a meeting,
+an interview, a talk between a manager and an employee) depends on who said
+what, so settle the speakers before you build it, asking only what the
+person's text leaves open, one question at a time. Read the flow first: when
+transcription_offer lists no speaker service, the space cannot label
+speakers, so do not offer to name them as if it could. Say in one sentence
+that the space has no service for speaker identification and that an
+administrator adds one, and ask whether to build the flow without named
+speakers, or with the speaker step in place, waiting for the service. First,
+whether the speakers
+are named and confirmed by a person before the rest of the flow runs, or the
+transcript is used with its labels as they are. Then, when they are named,
+where the names come from: the person who runs the flow lists the participants,
+the names and roles are proposed from the conversation, or both. The request
+often answers already: "talaridentifiering", "vem som sa vad" or an
+instruction that tells a step to work out who is who ask for the speaker step,
+and "utifrån innehållet" or "utifrån samtalet" for infer_names true. Then build
+it without asking and say in a sentence what you chose. A recording of one
+voice, or a flow that needs only what was said, gets no speaker step and no
+question.
+To build it, add the step at the place after the transcribing step with
+every setting above. When the names come from the person and the run form has
+no field that fits, the same add_step call gives the form its field in
+settings (as the editor does: {"name": "deltagare", "type": "list", "label":
+"Deltagare", "required": false}, in the whole form_schema), and
+participants_field names it, so the step is never saved without the field it
+reads. Then point the steps that read the transcribing step's text at the
+speaker step's instead, and take out of their instructions the work of telling
+the speakers apart, which the speaker step and its reviewer now do. When the
+request fixes how many speak (a talk between two), set
+transcription_max_speakers in metadata_json.wizard to that whole number and
+say so; wizard is replaced whole, so send it as the settings give it, its
+other keys copied unchanged, with that one key added. When the number varies
+and the person wants to state it per run, use a number field and
+speaker_count_field; otherwise leave both out and the service counts. A
+space with a default speaker service gives it to the flow by
+itself; when publish_blockers says no service is chosen, the person chooses
+it under "Ändra inställningar", in the Transkribering part.
 """
 
 
@@ -456,11 +565,13 @@ AUTHORING_INSTRUCTIONS = (
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()
     + _SUGGESTIONS_INTRODUCED
+    + _PUBLISH_BLOCKERS
     + _SUGGESTIONS_ON_REQUEST
     + _RUN_HELP
     + _CONTENT
     + _CONNECTIONS
     + _TRANSCRIPTION
+    + _SPEAKERS
 )
 
 

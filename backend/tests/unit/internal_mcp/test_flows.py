@@ -640,10 +640,13 @@ def _changing_chat(
     after: str,
     fail: bool = False,
     dismissed: dict | None = None,
+    blockers: list[BadRequestException] | Exception | None = None,
 ):
     """A chat in edit mode whose update_step saves the draft from ``before``
-    to ``after`` (the step 2 prompt); ``fail`` breaks the analysis, and
-    ``dismissed`` are the flow's dismissals by fingerprint."""
+    to ``after`` (the step 2 prompt); ``fail`` breaks the analysis,
+    ``dismissed`` are the flow's dismissals by fingerprint, and ``blockers``
+    is what publish would refuse the saved draft for (an exception when that
+    cannot be read)."""
     container = _transaction_container([])
     container.flow_suggestion_dismissal_repo.return_value.list_for_flow = AsyncMock(
         return_value=dismissed or {}
@@ -654,9 +657,15 @@ def _changing_chat(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
     )
     monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", AsyncMock())
-    drafts = [_draft(before), _draft(after)]
+    # Read before the change, after it, and once more for what blocks publish.
+    drafts = [_draft(before), _draft(after), _draft(after)]
     service = container.flow_service.return_value
     service.get_flow = AsyncMock(side_effect=[flow for flow, _ in drafts])
+    service.publish_blockers = (
+        AsyncMock(side_effect=blockers)
+        if isinstance(blockers, Exception)
+        else AsyncMock(return_value=blockers or [])
+    )
     service.get_flow_assistant_prompts = (
         AsyncMock(side_effect=RuntimeError("unreadable"))
         if fail
@@ -778,6 +787,164 @@ async def test_a_failed_analysis_still_saves_and_reports_nothing(monkeypatch, ca
     # Logged by its kind, without the content it read.
     assert "could not be computed" in caplog.text
     assert "unreadable" not in caplog.text
+
+
+async def test_a_change_reports_what_stands_between_the_draft_and_publishing(
+    monkeypatch,
+):
+    from eneo.flows.domain.flow_step_validation import FlowStepValidationError
+
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[
+            FlowStepValidationError(
+                "Step 2: the speaker step has no source of names.",
+                step_order=2,
+                context={"issue_code": "flow_step_invalid", "step_order": 2},
+            ),
+            BadRequestException(
+                "Choose which speaker identification service the flow uses.",
+                code="flow_speaker_service_not_chosen",
+            ),
+        ],
+    )
+
+    page = await _update_step()
+
+    assert page["publish_blockers"] == [
+        {
+            "code": "flow_step_invalid",
+            "message": "Step 2: the speaker step has no source of names.",
+            "step": {"step_order": 2, "name": "Steg 2"},
+        },
+        {
+            "code": "flow_speaker_service_not_chosen",
+            "message": "Choose which speaker identification service the flow uses.",
+        },
+    ]
+    assert page["publish_blocker_count"] == 2
+    assert json.loads(page["content"])["saved"] is True
+
+
+async def test_a_draft_with_nothing_in_the_way_reports_no_publish_blockers(
+    monkeypatch,
+):
+    _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    page = await _update_step()
+
+    assert page["publish_blockers"] == []
+    assert page["publish_blocker_count"] == 0
+
+
+async def test_a_change_lists_the_first_publish_blockers_and_counts_them_all(
+    monkeypatch,
+):
+    _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=[BadRequestException(f"Refusal {number}.") for number in range(12)],
+    )
+
+    page = await _update_step()
+
+    assert [blocker["message"] for blocker in page["publish_blockers"]] == [
+        f"Refusal {number}." for number in range(flows.MAX_REPORTED_PUBLISH_BLOCKERS)
+    ]
+    assert page["publish_blocker_count"] == 12
+
+
+async def test_unreadable_publish_blockers_still_save_and_report_nothing(
+    monkeypatch, caplog
+):
+    save = _changing_chat(
+        monkeypatch,
+        before="Sammanfatta.",
+        after="Sammanfatta.",
+        blockers=RuntimeError("unreadable"),
+    )
+
+    page = await _update_step()
+
+    save.assert_awaited_once()
+    assert json.loads(page["content"])["saved"] is True
+    assert "publish_blockers" not in page
+    assert "publish_blocker_count" not in page
+    # The suggestions are reported all the same.
+    assert page["introduced_suggestions"] == []
+    # Logged by its kind, without the content it read.
+    assert "Publish blockers could not be computed" in caplog.text
+    assert "unreadable" not in caplog.text
+
+
+_SPEAKER_STEP = {
+    "input_source": "previous_step",
+    "input_type": "text",
+    "output_mode": "speaker_mapping",
+    "output_type": "json",
+    "output_config": {
+        "speaker_mapping": {"participants_field": "deltagare", "infer_names": True}
+    },
+    "review_policy": {"mode": "edit"},
+}
+_PARTICIPANTS_FORM = {
+    "fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]
+}
+
+
+async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    kept = {"transcription_enabled": True, "transcription_language": "sv"}
+    monkeypatch.setattr(
+        flow_authoring_operations,
+        "get_flow",
+        AsyncMock(
+            return_value=SimpleNamespace(steps=[], metadata_json={"wizard": kept})
+        ),
+    )
+
+    result = await flows.add_step(
+        MagicMock(),
+        expected_revision=4,
+        name="Granska transkript",
+        configuration=_SPEAKER_STEP,
+        settings={"metadata_json": {"form_schema": _PARTICIPANTS_FORM}},
+    )
+
+    assert result.isError is not True, result.content[0].text
+    # One revision holds the step and the field; the saved settings are kept.
+    save.assert_awaited_once()
+    update = save.await_args.args[2]
+    assert update.definition.metadata_json == {
+        "wizard": kept,
+        "form_schema": _PARTICIPANTS_FORM,
+    }
+    (step,) = update.new_steps
+    assert step.name == "Granska transkript"
+    assert step.configuration.output_config == _SPEAKER_STEP["output_config"]
+
+
+async def test_a_step_added_with_a_setting_the_flow_lacks_is_refused_unsaved(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.add_step(
+        MagicMock(),
+        expected_revision=4,
+        name="Granska transkript",
+        configuration=_SPEAKER_STEP,
+        settings={"steps": []},
+    )
+
+    assert result.isError is True
+    assert "can be changed in settings" in json.loads(result.content[0].text)["message"]
+    save.assert_not_awaited()
 
 
 def test_every_draft_changing_tool_reports_introduced_suggestions():
@@ -1181,6 +1348,36 @@ async def test_the_settings_section_leaves_the_steps_out(monkeypatch):
     assert content["draft_revision"] == public.draft_revision
 
 
+_OFFER = {
+    "transcription_models": [{"name": "Filer", "streams_live": False, "default": True}],
+    "speaker_services": [],
+}
+
+
+@pytest.mark.parametrize("section", ["overview", "settings"])
+async def test_a_read_says_what_the_space_offers_for_transcription(
+    monkeypatch, section
+):
+    _reading_chat(monkeypatch)
+    monkeypatch.setattr(flows, "_transcription_offer", AsyncMock(return_value=_OFFER))
+
+    _page, content = await _read(section=section)
+
+    assert content["transcription_offer"] == _OFFER
+
+
+async def test_a_space_that_cannot_be_read_leaves_the_offer_out_of_the_read(caplog):
+    container = _transaction_container([])
+    container.space_service.return_value.get_space = AsyncMock(
+        side_effect=RuntimeError("unreadable")
+    )
+
+    assert await flows._transcription_offer(container, uuid4()) is None
+    # Logged by its kind, without the content it read.
+    assert "transcription offer could not be read" in caplog.text
+    assert "unreadable" not in caplog.text
+
+
 async def test_the_all_section_is_the_whole_definition(monkeypatch):
     public = _reading_chat(monkeypatch)
 
@@ -1329,6 +1526,56 @@ def test_an_assistant_given_a_field_it_lacks_is_told_its_shape():
     # The tools that take an assistant say its shape up front.
     for tool in (flows.add_step, flows.update_step):
         assert '{"prompt": {"text": ' in (tool.__doc__ or "")
+
+
+@pytest.mark.parametrize(
+    "update",
+    [
+        {
+            "new_steps": [
+                {
+                    "name": "Transkribera",
+                    "configuration": {
+                        "kind": "transcribe_only",
+                        "output_mode": "transcribe_only",
+                    },
+                }
+            ]
+        },
+        {"step_edits": [{"step_id": str(uuid4()), "changes": {"kind": "ai"}}]},
+    ],
+    ids=["a new step", "a saved step"],
+)
+def test_a_step_given_a_field_it_lacks_is_told_which_and_what_a_step_takes(update):
+    from pydantic import ValidationError
+
+    from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+
+    with pytest.raises(ValidationError) as refused:
+        FlowEditorUpdateRequest.model_validate(
+            {"expected_revision": 1, "definition": {}, **update}
+        )
+    errors = refused.value.errors(include_input=False, include_context=False)
+
+    message = flows.invalid_message(errors)
+
+    assert "It names kind, which is not a field here" in message
+    assert "leave it out and make the call again" in message
+    assert "A step is described by these fields and no other: " in message
+    for field in ("input_source", "input_type", "output_mode", "output_type"):
+        assert field in message
+    # The core gives a step its identity and place; they are not offered.
+    assert "assistant_id" not in message
+    assert "step_order" not in message
+    # Nothing is said of an assistant that was not part of the mistake.
+    assert "An assistant takes" not in message
+
+
+def test_the_tools_that_describe_a_step_name_no_kind_of_step():
+    assert "with its kind" not in (flows.read_flow.__doc__ or "")
+    assert "A step has no kind field" in " ".join(
+        (flows.add_step.__doc__ or "").split()
+    )
 
 
 # --- What each tool declares ---------------------------------------------------

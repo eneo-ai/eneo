@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems, type SkippedDocuments } from "../source-problems";
 import type { SkipReasonCode } from "../skip-reasons";
@@ -15,7 +14,7 @@ vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 const ADMIN_URL = "https://eneo.example.se/admin/integrations";
 const CREDENTIALS =

@@ -3,11 +3,11 @@
  * showed the backend's raw JSON), with the technical facts kept for the
  * details disclosure.
  */
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { describeChatFailure, getContextErrorInfo } from "./chat-error";
 import { StreamContractError } from "./transport";
 
@@ -74,10 +74,7 @@ describe("describeChatFailure", () => {
       ["sv", sv, "För många förfrågningar just nu. Vänta en stund och försök igen."],
       ["en", en, "Too many requests right now. Wait a moment and try again."]
     ] as const) {
-      const translate = createTranslator({
-        locale,
-        messages: messages as Record<string, string>
-      });
+      const translate = testTranslator(locale, messages);
       expect(describeChatFailure(refused, null, translate).message).toBe(sentence);
       expect(describeChatFailure(sdkStyle, null, translate).message).toBe(sentence);
       // A 429 without a reason reaches the same sentence through its status.

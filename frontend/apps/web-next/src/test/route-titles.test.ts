@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { createMemoryHistory, type AnyRoute } from "@tanstack/react-router";
-import { createTranslator } from "use-intl";
 import { expect, it } from "vitest";
-import messages from "@/lib/i18n/messages/sv.json";
 import { routeTree } from "@/routeTree.gen";
 import { createAppRouter } from "@/router";
+import { testTranslator } from "@/test/i18n";
 import { testQueryClient } from "./render";
 
 const TITLE_EXCEPTIONS: Record<string, string> = {
@@ -25,7 +24,7 @@ const TITLE_EXCEPTIONS: Record<string, string> = {
 
 // Initializing the real router resolves fullPath; no loaders or API calls run.
 createAppRouter(
-  { queryClient: testQueryClient(), t: createTranslator({ locale: "sv", messages }) },
+  { queryClient: testQueryClient(), t: testTranslator() },
   { routeTree, history: createMemoryHistory() }
 );
 

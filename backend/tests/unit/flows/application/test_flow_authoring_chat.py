@@ -60,6 +60,27 @@ def test_the_instructions_turn_a_pasted_task_into_a_flow_instead_of_doing_it() -
     assert "When edit mode is off, describe the steps" in instructions
 
 
+def test_the_instructions_build_the_whole_flow_in_the_turn_that_asks() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Build the whole flow in the turn that asks for it" in instructions
+    assert "when one change is saved, go on to the next" in instructions
+    # What waits for the person is named at the end, not waited for.
+    assert "never stops the building: go on, and name it once" in instructions
+    assert "ask it before you build, not between two steps" in instructions
+    # The build is held against the request before it is called done.
+    assert "read its overview once more and hold it against the request" in (
+        instructions
+    )
+    assert "the text it gets is written by an AI step before it" in instructions
+    assert "Each answer is in the draft as the person gave it" in instructions
+    assert "Put right what is missing before you answer" in instructions
+    assert "and the next change in the round after it" in instructions
+    assert "build the rest of the flow first, then say that the person chooses" in (
+        instructions
+    )
+
+
 def test_the_instructions_ask_one_shaping_question_at_a_time() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
@@ -163,7 +184,81 @@ def test_the_instructions_explain_transcription_but_leave_its_choices() -> None:
     assert "that text is the run's text, so the recording is not" in instructions
     assert "it writes no text of its own" in instructions
     assert "never write their ids" in instructions
+    # What the space offers is read by name, and only that is offered.
+    assert "read_flow says by name what the flow's space offers" in instructions
+    assert "Offer only what is listed there" in instructions
+    assert "say that an administrator adds it to the space" in instructions
     assert '"Ändra inställningar", in the Transkribering part' in instructions
+
+
+def test_the_instructions_settle_the_speakers_of_a_recorded_conversation() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    # What the step is, in the tools' fields and in the editor's words.
+    assert (
+        'A step with output_mode speaker_mapping, "Granska transkript" in the '
+        "editor, names them" in instructions
+    )
+    for setting, label in (
+        ("participants_field", "Fält med deltagare"),
+        ("infer_names", "Låt AI:n föreslå namn och roller"),
+        ("speaker_count_field", "Fält med antal talare"),
+    ):
+        assert f'{setting} ("{label}")' in instructions
+    assert (
+        "The step needs a source of names: a participants field, infer_names "
+        "true, or both" in instructions
+    )
+    assert "a prompt reads it as {{ step_N.output.text }}" in instructions
+    # It asks before it builds, and only what the request leaves open.
+    assert "how the speakers of a recorded conversation are named" in instructions
+    assert "settle the speakers before you build it" in instructions
+    assert "asking only what the person's text leaves open, one question at a" in (
+        instructions
+    )
+    assert "Then build it without asking and say in a sentence what you chose" in (
+        instructions
+    )
+    assert "gets no speaker step and no question" in instructions
+    # Only a transcript the flow makes from audio has labels to name.
+    assert "the step before it is always the one that transcribes" in instructions
+    assert "A flow that receives a finished transcript, typed or as a file" in (
+        instructions
+    )
+    assert "whether a run brings the recording or a finished transcript" in (
+        instructions
+    )
+    # A space without a speaker service is not offered named speakers.
+    assert "when transcription_offer lists no speaker service" in instructions
+    assert "do not offer to name them as if it could" in instructions
+    # The step is never saved without the run form field it reads.
+    assert "the same add_step call gives the form its field in settings" in (
+        instructions
+    )
+    # A wizard key is added without dropping the transcription choices.
+    assert "wizard is replaced whole" in instructions
+    assert "its other keys copied unchanged" in instructions
+
+
+def test_the_instructions_account_for_what_blocks_publishing() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "lists under publish_blockers" in instructions
+    assert "account for every blocker that is left" in instructions
+    assert "Fix in the same turn what a setting fixes" in instructions
+    assert "What only the person can do, say in one plain sentence each" in (
+        instructions
+    )
+    # A blocker the person removes is never removed by rebuilding the step.
+    assert (
+        "Never make a blocker go away by changing what a step is for or by "
+        "taking a step out" in instructions
+    )
+    assert "a Word step that waits for its template stays a Word step" in instructions
+    assert (
+        "Never call a flow ready to publish while publish_blocker_count is above zero"
+        in instructions
+    )
 
 
 def test_the_instructions_take_a_contract_from_an_example() -> None:
