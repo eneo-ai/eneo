@@ -1,5 +1,5 @@
-"""Calls to the OpenID provider end at a deadline, and a refused token request
-is logged by its status and protocol code only.
+"""Calls to the OpenID provider end at a deadline, never follow a redirect,
+and a refused token request is logged by its status and protocol code only.
 
 The provider here is a real local HTTP server and the session is the real
 shared one, so what is tested is the session's own deadline, not a fake's.
@@ -8,6 +8,7 @@ shared one, so what is tested is the session's own deadline, not a fake's.
 import asyncio
 import json
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator, Iterator
 from uuid import uuid4
@@ -21,6 +22,7 @@ from eneo.authentication.oidc.profile import OidcProfile
 from eneo.authentication.oidc.transaction import OidcTransaction
 from eneo.main import aiohttp_client as aiohttp_client_module
 from eneo.main.aiohttp_client import aiohttp_client
+from eneo.main.config import get_settings, set_settings
 from eneo.main.logging import OTELJSONFormatter
 
 ISSUER = "https://idp.example"
@@ -51,7 +53,11 @@ async def provider() -> AsyncIterator[str]:
     async def prose(request: web.Request) -> web.Response:  # noqa: ARG001
         return web.Response(status=502, text=f"Upstream refused {ADDRESS} ({NAME})")
 
+    async def redirects(request: web.Request) -> web.Response:
+        raise web.HTTPTemporaryRedirect(location=request.query["to"])
+
     app = web.Application()
+    app.router.add_post("/redirects", redirects)
     app.router.add_post("/hangs", hangs)
     app.router.add_post("/refuses/{error}", refuses)
     app.router.add_post("/prose", prose)
@@ -68,17 +74,43 @@ async def provider() -> AsyncIterator[str]:
 
 
 @pytest.fixture
+async def sink() -> AsyncIterator[tuple[str, list[str]]]:
+    """A second server, recording every request that reaches it."""
+    seen: list[str] = []
+
+    async def record(request: web.Request) -> web.Response:
+        seen.append(f"{request.method} {request.path}")
+        return web.json_response({"access_token": "a", "id_token": "i"})
+
+    app = web.Application()
+    app.router.add_route("*", "/{tail:.*}", record)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    host, port = runner.addresses[0][:2]
+    try:
+        yield f"http://{host}:{port}", seen
+    finally:
+        await runner.cleanup()
+
+
+@pytest.fixture
 async def shared_session(monkeypatch) -> AsyncIterator[None]:
-    """The real shared session, started with a short deadline."""
+    """The real shared session, started with a short deadline, in development,
+    where a provider may run on this machine."""
     monkeypatch.setattr(
         aiohttp_client_module, "REQUEST_TIMEOUT_SECONDS", 0.5, raising=False
     )
     monkeypatch.setattr(aiohttp_client, "session", None)
+    original = get_settings()
+    set_settings(original.model_copy(update={"environment": "development"}))
     aiohttp_client.start()
     try:
         yield
     finally:
         await aiohttp_client.stop()
+        set_settings(original)
 
 
 @pytest.fixture
@@ -140,12 +172,29 @@ async def test_a_token_endpoint_that_never_answers_ends_the_exchange_within_the_
 ):
     started = time.monotonic()
     async with asyncio.timeout(10):
-        with pytest.raises(asyncio.TimeoutError):
+        with pytest.raises(OidcResponseNotVerifiedError):
             await verification._exchange_code(
                 _profile(f"{provider}/hangs"), _transaction(), "code", "correlation"
             )
 
     assert time.monotonic() - started < 3
+
+
+async def test_a_token_endpoint_that_refuses_the_connection_is_the_fixed_refusal(
+    shared_session,
+):
+    """Not a 500: the sign-in ends with the same 401 as any failed exchange."""
+    with socket.socket() as unused:
+        unused.bind(("127.0.0.1", 0))
+        port = unused.getsockname()[1]
+
+    with pytest.raises(OidcResponseNotVerifiedError):
+        await verification._exchange_code(
+            _profile(f"http://127.0.0.1:{port}/token"),
+            _transaction(),
+            "code",
+            "correlation",
+        )
 
 
 @pytest.mark.parametrize(
@@ -172,3 +221,20 @@ async def test_a_token_endpoint_error_logs_only_its_status_and_protocol_code(
     assert attributes["correlation_id"] == "correlation"
     assert attributes["http_status"] in {400, 502}
     assert attributes.get("oauth_error") == oauth_error
+
+
+async def test_a_token_endpoint_that_redirects_is_refused_and_not_followed(
+    provider, sink, shared_session
+):
+    """A 307 keeps the method and body: following it would hand the code and
+    the client secret to whatever the provider names."""
+    elsewhere, seen = sink
+    with pytest.raises(OidcResponseNotVerifiedError):
+        await verification._exchange_code(
+            _profile(f"{provider}/redirects?to={elsewhere}/token"),
+            _transaction(),
+            "code",
+            "correlation",
+        )
+
+    assert seen == []

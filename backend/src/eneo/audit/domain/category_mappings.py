@@ -135,6 +135,7 @@ CATEGORY_MAPPINGS = {
     ActionType.IDENTITY_CONFLICT.value: "security_events",
     ActionType.IDENTITY_REBINDING_UPDATED.value: "security_events",
     ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED.value: "security_events",
+    ActionType.USER_ACCESS_TOKEN_ISSUED.value: "security_events",
     # File Operations (6 actions)
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",

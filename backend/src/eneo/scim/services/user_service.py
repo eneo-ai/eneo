@@ -10,6 +10,7 @@ from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.users_table import Users as UserModel
+from eneo.main.exceptions import UniqueException
 from eneo.main.logging import get_logger
 from eneo.scim.constants import SCIM_CORE_USER_URN, SCIM_ENTERPRISE_USER_URN
 from eneo.scim.domain.enterprise_user import (
@@ -229,6 +230,23 @@ class ScimUserService:
         # Validate before any lookup or write so an invalid extension can never
         # leave a partially applied create behind.
         enterprise = self._enterprise_from_request(data)
+        try:
+            return await self._create_or_claim(data, enterprise)
+        except UniqueException:
+            # A first sign-in or another SCIM request took the address between
+            # the checks and the insert. Decide again on what is there now, so
+            # the answer is the one the request gets without the race.
+            pass
+        try:
+            return await self._create_or_claim(data, enterprise)
+        except UniqueException as exc:
+            raise ScimUserConflictError(
+                f"Email '{_resolve_email(data)}' already exists"
+            ) from exc
+
+    async def _create_or_claim(
+        self, data: ScimUserRequest, enterprise: EnterpriseUser
+    ) -> ScimUser:
         existing = await self._repository.get_by_username(
             data.userName, tenant_id=self._tenant_id
         )

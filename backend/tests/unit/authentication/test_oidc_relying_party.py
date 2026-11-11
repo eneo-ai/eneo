@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import jwt
 import pytest
+from fastapi import HTTPException
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import federation_router
@@ -33,6 +34,7 @@ from eneo.authentication.oidc.errors import (
 from eneo.authentication.oidc.profile import (
     OidcProviderError,
     build_profile,
+    check_config,
     load_profile,
 )
 from eneo.authentication.oidc.transaction import (
@@ -47,6 +49,7 @@ from eneo.authentication.oidc_resource_server import (
     JWKSFetchError,
     get_federation_signing_key,
 )
+from eneo.main.config import get_settings, set_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.users.user_service import UserService
 from tests.fake_oidc_provider import DROP, FakeOidcProvider, install
@@ -1400,3 +1403,188 @@ class TestHttpAnswers:
         assert _query(started.headers["location"])["detailCode"] == [
             "oidc_login_unavailable"
         ]
+
+
+@pytest.fixture
+def in_environment():
+    """Run in one ENVIRONMENT; only development lets a provider be on this
+    machine."""
+    original = get_settings()
+
+    def use(environment: str) -> None:
+        set_settings(original.model_copy(update={"environment": environment}))
+
+    yield use
+    set_settings(original)
+
+
+class TestEndpointHosts:
+    """The token and JWKS requests go to the discovery host or to a host the
+    operator listed, whoever wrote the endpoint: discovery or the stored
+    config."""
+
+    def _profile(self, discovery: dict[str, Any] | None = None, **config: Any):
+        provider = FakeOidcProvider()
+        # No stored copies, so discovery decides unless a test stores one.
+        stored = provider.federation_config(token_endpoint=None, jwks_uri=None)
+        return build_profile(
+            {**stored, **config}, {**provider.discovery(), **(discovery or {})}
+        )
+
+    @pytest.mark.parametrize("key", ["token_endpoint", "jwks_uri"])
+    def test_discovery_cannot_point_a_request_at_another_host(self, key):
+        with pytest.raises(OidcProviderError, match="keys.example.net"):
+            self._profile({key: "https://keys.example.net/x"})
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://idp.example.org.evil.example/token",
+            "https://token.idp.example.org/token",
+            "https://169.254.169.254/token",
+        ],
+    )
+    def test_any_other_name_is_another_host(self, url):
+        with pytest.raises(OidcProviderError):
+            self._profile({"token_endpoint": url})
+
+    def test_a_stored_endpoint_follows_the_same_rule(self):
+        with pytest.raises(OidcProviderError, match="keys.example.net"):
+            self._profile(token_endpoint="https://keys.example.net/token")
+
+    def test_a_listed_host_is_allowed(self):
+        profile = self._profile(
+            {
+                "token_endpoint": "https://Tokens.Example.net/token",
+                "jwks_uri": "https://keys.example.net/jwks",
+            },
+            allowed_endpoint_hosts=["tokens.example.net", "keys.example.net"],
+        )
+
+        assert profile.token_endpoint == "https://Tokens.Example.net/token"
+        assert profile.jwks_uri == "https://keys.example.net/jwks"
+
+    def test_an_endpoint_over_plain_http_is_refused(self):
+        with pytest.raises(OidcProviderError, match="https"):
+            self._profile({"token_endpoint": "http://idp.example.org/token"})
+
+    @pytest.mark.parametrize(
+        "issuer",
+        ["http://127.0.0.1:9134", "http://localhost:9134", "http://[::1]:9134"],
+    )
+    def test_a_provider_on_this_machine_is_only_for_development(
+        self, in_environment, issuer
+    ):
+        provider = FakeOidcProvider(issuer=issuer)
+
+        in_environment("development")
+        profile = build_profile(provider.federation_config(), provider.discovery())
+        assert profile.token_endpoint == f"{issuer}/token"
+
+        in_environment("production")
+        with pytest.raises(OidcProviderError, match="not allowed"):
+            build_profile(provider.federation_config(), provider.discovery())
+
+    async def test_no_code_reaches_a_token_endpoint_on_another_host(self, monkeypatch):
+        provider = FakeOidcProvider(endpoint_base="https://tokens.example.net")
+        login = Login(monkeypatch, provider)
+
+        with pytest.raises(HTTPException) as refused:
+            await login.sign_in()
+
+        assert refused.value.status_code == 500
+        assert provider.requests == [("GET", provider.discovery_url)]
+
+    async def test_a_listed_endpoint_host_signs_in(self, monkeypatch):
+        provider = FakeOidcProvider(endpoint_base="https://tokens.example.net")
+        login = Login(monkeypatch, provider)
+        login.tenant.federation_config["allowed_endpoint_hosts"] = [
+            "tokens.example.net"
+        ]
+
+        result = await login.sign_in()
+
+        assert login.signed_in_user(result)
+        assert ("POST", "https://tokens.example.net/token") in provider.requests
+
+
+class TestStoredEndpointHosts:
+    """A save that fetches nothing applies the rule to the endpoints the
+    config stores, so a provider that cannot sign in is never stored."""
+
+    def test_a_stored_token_endpoint_on_another_host_is_refused(self):
+        config = FakeOidcProvider().federation_config(
+            token_endpoint="https://tokens.example.net/token"
+        )
+
+        with pytest.raises(OidcProviderError, match="tokens.example.net"):
+            check_config(config)
+
+    def test_a_listed_host_is_accepted(self):
+        config = FakeOidcProvider().federation_config(
+            token_endpoint="https://tokens.example.net/token",
+            allowed_endpoint_hosts=["tokens.example.net"],
+        )
+
+        check_config(config)
+
+    def test_a_config_without_stored_endpoints_is_left_to_discovery(self):
+        config = FakeOidcProvider().federation_config(
+            token_endpoint=None, jwks_uri=None
+        )
+
+        check_config(config)
+
+    @pytest.mark.parametrize(
+        "hosts", ["tokens.example.net", ["https://tokens.example.net"], [""]]
+    )
+    def test_the_list_names_hosts(self, hosts):
+        config = FakeOidcProvider().federation_config(allowed_endpoint_hosts=hosts)
+
+        with pytest.raises(OidcProviderError, match="allowed_endpoint_hosts"):
+            check_config(config)
+
+    def test_a_discovery_endpoint_over_plain_http_is_refused(self):
+        config = FakeOidcProvider().federation_config(
+            discovery_endpoint="http://idp.example.org/.well-known/openid-configuration"
+        )
+
+        with pytest.raises(OidcProviderError, match="https"):
+            check_config(config)
+
+
+class TestUnusableProviderAnswer:
+    """A visitor who is not signed in learns that sign-in cannot be used, not
+    why: the reason names hosts and settings and goes to the log."""
+
+    FIXED = (
+        "Sign-in is not available for this organisation. Contact your administrator."
+    )
+
+    async def test_initiate_does_not_name_the_reason(self, monkeypatch):
+        provider = FakeOidcProvider(endpoint_base="https://tokens.example.net")
+        login = Login(monkeypatch, provider)
+
+        with pytest.raises(HTTPException) as refused:
+            await login.initiate()
+
+        assert refused.value.status_code == 500
+        assert refused.value.detail == self.FIXED
+
+    async def test_the_callback_does_not_name_the_reason(self, monkeypatch):
+        provider = FakeOidcProvider()
+        login = Login(monkeypatch, provider)
+        started = await login.initiate()
+        answer = provider.authorize(started.authorization_url)
+        login.tenant.federation_config["token_endpoint"] = (
+            "https://tokens.example.net/token"
+        )
+
+        with pytest.raises(HTTPException) as refused:
+            await federation_router.auth_callback(
+                CallbackRequest(code=answer.code, state=started.state),
+                login.container,
+            )
+
+        assert refused.value.status_code == 500
+        assert refused.value.detail == self.FIXED

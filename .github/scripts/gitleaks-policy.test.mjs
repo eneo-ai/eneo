@@ -115,6 +115,39 @@ test("an allowed value on the same line cannot hide a different key or another r
   assert.deepEqual(rules, ["generic-api-key", "github-pat"]);
 });
 
+// The multi-tenant guide's curl example, as CI reported it.
+const guide = "frontend/apps/docs-site/src/content/guides/oidc-federation/multi-tenant.mdx";
+const placeholder = ["your-super-admin", "-api-key"].join("");
+
+function writeCurl(root, path, key, rest = "") {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), [
+    'curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \\',
+    `  -H "${["X-API", "-Key"].join("")}: ${key}"${rest} \\`,
+    '  -H "Content-Type: application/json" \\',
+    `  -d '{"allowed_endpoint_hosts": ["oauth2.googleapis.com", "www.googleapis.com"]}'`,
+    "",
+  ].join("\n"));
+}
+
+test("the guide's placeholder key is allowed only as itself and only in the guide", (t) => {
+  const allowed = repository(t);
+  writeCurl(allowed, guide, placeholder);
+  scan(allowed);
+  for (const [path, key] of [[guide, `${placeholder}Zq`], [`other/${guide}`, placeholder]]) {
+    const root = repository(t);
+    writeCurl(root, path, key);
+    assert.deepEqual(scan(root, "dir", [], 1).map((finding) => finding.RuleID), ["curl-auth-header"]);
+  }
+});
+
+test("the guide's placeholder cannot hide a different key on its line", (t) => {
+  const root = repository(t);
+  const novel = ["sk-live-", "q8Z2mR7vL4nB6xT9"].join("");
+  writeCurl(root, guide, placeholder, `; other_key = "${novel}"`);
+  assert.deepEqual(scan(root, "dir", [], 1).map((finding) => finding.RuleID), ["generic-api-key"]);
+});
+
 test("Git scans accept reviewed examples after line moves and a squash commit", (t) => {
   const root = repository(t);
   git(root, "init", "--quiet");

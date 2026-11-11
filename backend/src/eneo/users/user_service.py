@@ -1075,16 +1075,15 @@ class UserService:
                 "Could not validate token credentials."
             ) from exc
 
-        allowed_domains = (
-            cast("list[str] | None", federation_config.get("allowed_domains"))
-            or settings.oidc_allowed_domains
-        )
-
         try:
             user, _created = await self.resolve_federated_user(
                 identity=identity,
                 tenant_id=tenant.id,
-                allowed_domains=allowed_domains,
+                # The selected config's list and nothing else, as at sign-in:
+                # an empty stored list never falls back to OIDC_ALLOWED_DOMAINS.
+                allowed_domains=cast(
+                    list[str], federation_config.get("allowed_domains") or []
+                ),
                 correlation_id=correlation_id,
             )
         except IdentityConflictError:

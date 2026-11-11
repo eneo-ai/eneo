@@ -81,6 +81,9 @@ class FederationInfo(BaseModel):
     masked_secret: str
     issuer: Optional[str] = None
     allowed_domains: list[str]
+    # Other hosts the token endpoint and JWKS may be on; empty: only the
+    # discovery host.
+    allowed_endpoint_hosts: list[str] = Field(default_factory=list)
     additional_redirect_uris: list[str]
     # Null when the key is not stored, so the built-in default applies.
     signing_algorithms: list[str] | None = None
@@ -257,6 +260,9 @@ async def get_tenant_federation(
         masked_secret=metadata["masked_secret"],
         issuer=metadata.get("issuer"),
         allowed_domains=metadata.get("allowed_domains", []),
+        allowed_endpoint_hosts=tenant.federation_config.get(
+            "allowed_endpoint_hosts", []
+        ),
         additional_redirect_uris=metadata.get("additional_redirect_uris", []),
         signing_algorithms=metadata.get("signing_algorithms"),
         email_verified_claims=metadata.get("email_verified_claims"),

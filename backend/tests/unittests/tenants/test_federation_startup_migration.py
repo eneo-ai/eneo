@@ -13,7 +13,10 @@ from eneo.tenants.federation_startup_migration import (
     FederationStartupMigrationService,
 )
 from eneo.tenants.tenant import TenantInDB
-from eneo.tenants.tenant_federation_service import TenantFederationService
+from eneo.tenants.tenant_federation_service import (
+    SetFederationRequest,
+    TenantFederationService,
+)
 from tests.fake_oidc_provider import FakeOidcProvider, install
 
 ENCRYPTION_KEY = Fernet.generate_key().decode()
@@ -171,6 +174,11 @@ def test_tenant_model_canonicalizes_legacy_redirect_path_on_read():
     [
         ("oidc_client_secret", "s3cr!", "client_secret"),
         ("oidc_allowed_domains", ["not_a_domain-q7x"], "allowed_domains"),
+        (
+            "oidc_discovery_endpoint",
+            "http://idp-q7x.example/.well-known/openid-configuration",
+            "discovery_endpoint",
+        ),
     ],
 )
 async def test_a_refused_value_stops_the_move_without_echoing_it(
@@ -188,6 +196,36 @@ async def test_a_refused_value_stops_the_move_without_echoing_it(
     assert refused.value.__suppress_context__ is True
     tenant_repo.update_federation_config.assert_not_awaited()
     assert provider.requests == []
+
+
+@pytest.mark.asyncio
+async def test_the_move_applies_the_rules_a_save_without_discovery_can(provider):
+    """Whatever builds the request, the move never stores a provider no
+    request may go to."""
+    service, tenant_repo, _ = _make_service()
+    request = SetFederationRequest.model_construct(
+        provider="default",
+        discovery_endpoint="http://idp.example.org/.well-known/openid-configuration",
+        client_id="client-id",
+        client_secret="super-secret-value",
+        allowed_domains=[],
+        subject_claim=None,
+        allowed_endpoint_hosts=None,
+        canonical_public_origin=None,
+        redirect_path=None,
+        additional_redirect_uris=None,
+        signing_algorithms=None,
+        email_verified_claims=None,
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        await service.federation_service.store_env_settings(
+            _make_tenant(), request, expected={}
+        )
+
+    assert refused.value.status_code == 400
+    assert "https" in refused.value.detail
+    tenant_repo.update_federation_config.assert_not_awaited()
 
 
 @pytest.mark.asyncio
