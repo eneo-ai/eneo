@@ -486,8 +486,8 @@ describe("suggestionText with the draft's steps", () => {
       "Modellen sätter mest ihop texten som steget får",
       "I 3 av de 4 senaste körningarna var 96\u00a0% av stegets svar hämtat ord för ord ur " +
         "underlaget, med bara lite egen text (cirka 180 byte). Behövs inte den egna delen " +
-        "kan det vara värt att pröva ett steg av typen ”Sätt ihop text”, som gör samma sak " +
-        "utan modell"
+        "kan ett steg av typen ”Sätt ihop text” vara värt att pröva och jämföra: det " +
+        "anropar ingen modell och kostar därför inga tokens."
     ],
     [
       suggestion("oversized_reasoning", ["step-2"], {

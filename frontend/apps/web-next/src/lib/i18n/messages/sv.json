@@ -10282,7 +10282,7 @@
   "flow_suggestion_overlapping_inputs_read": "svaret från {step} {reads}",
   "flow_suggestion_overlapping_inputs_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} hade {reads} {share, number, percent} av texten gemensamt, räknat på det kortare av dem, så modellen läste den delen två gånger. Behöver steget inte båda, låt det läsa det ena, så skickas texten bara en gång.",
   "flow_suggestion_deterministic_candidate_title": "Modellen sätter mest ihop texten som steget får",
-  "flow_suggestion_deterministic_candidate_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} var {share, number, percent} av stegets svar hämtat ord för ord ur underlaget, med bara lite egen text (cirka {own, number} byte). Behövs inte den egna delen kan det vara värt att pröva ett steg av typen ”{kind}”, som gör samma sak utan modell och då inte kostar några tokens.",
+  "flow_suggestion_deterministic_candidate_explanation": "{runs, plural, one {I den senaste körningen} other {I {held} av de # senaste körningarna}} var {share, number, percent} av stegets svar hämtat ord för ord ur underlaget, med bara lite egen text (cirka {own, number} byte). Behövs inte den egna delen kan ett steg av typen ”{kind}” vara värt att pröva och jämföra: det anropar ingen modell och kostar därför inga tokens.",
   "flow_suggestion_dismiss": "Ignorera",
   "flow_suggestion_dismiss_named": "Ignorera ”{title}”",
   "flow_suggestion_dismiss_hint": "Döljs för alla som redigerar flödet",
