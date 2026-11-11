@@ -1,4 +1,5 @@
 import json
+import re
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -1771,6 +1772,210 @@ def test_each_read_update_step_shows_is_saved_and_published(name):
     assert (
         publish_step_refusals(steps, metadata_json=None, prompt_templates=prompts) == []
     )
+
+
+# --- The examples the chat reads -------------------------------------------------
+
+# The assistant's own fields as add_step and update_step show them.
+_ASSISTANT_EXAMPLES = [
+    {"prompt": {"text": "..."}},
+    {"prompt": {"text": "Sammanfatta brevet."}},
+]
+# Shapes of a tool's arguments that hold no configuration, by why.
+_ARGUMENT_SHAPES = {
+    '{"old name": "new name"}': "form_field_renames maps the form's own names",
+    '{"step_id": ..., "changes": {...}': "update_steps' call shape",
+}
+
+
+async def test_every_example_the_chat_reads_is_one_the_rules_are_held_to():
+    from eneo.flows.api.flow_models import FlowAssistantUpdateRequest
+
+    texts = [
+        flow_authoring_chat.AUTHORING_INSTRUCTIONS,
+        *(await _descriptions()).values(),
+    ]
+    validated = [
+        *flow_authoring_chat.CONFIGURATION_EXAMPLES.values(),
+        *flows.INPUT_BINDINGS_EXAMPLES.values(),
+        *_ASSISTANT_EXAMPLES,
+    ]
+    for example in _ASSISTANT_EXAMPLES:
+        FlowAssistantUpdateRequest.model_validate(example)
+
+    decoder = json.JSONDecoder()
+    found = []
+    for text in texts:
+        flat = " ".join(text.split())
+        end = 0
+        for opener in re.finditer(r'[{\[]\s*"', flat):
+            if opener.start() < end:
+                continue  # inside the example just read
+            if any(
+                flat.startswith(shape, opener.start()) for shape in _ARGUMENT_SHAPES
+            ):
+                end = opener.end()
+                continue
+            try:
+                value, length = decoder.raw_decode(flat, opener.start())
+            except json.JSONDecodeError:
+                pytest.fail(
+                    f"Not an example the code can read: {flat[opener.start() :][:80]}"
+                )
+            end = length
+            found.append(value)
+            assert value in validated, value
+    # Every example kept as data is one the chat reads.
+    for example in validated:
+        assert example in found, example
+
+
+def _configured_flows(examples):
+    """Flows that put each configuration example where its rules run."""
+    from tests.unit.flows.application.test_flow_suggestion_service import _step
+
+    form = {
+        "fields": [
+            examples["form_field"],
+            {"name": "datum", "type": "date", "label": "Datum", "required": True},
+            {"name": "arende", "type": "text", "label": "Ärende", "required": True},
+        ]
+    }
+    upload = [
+        _step(
+            1,
+            input_type="document",
+            input_config={
+                "runtime_input": examples["runtime_input"],
+                "long_material": examples["long_material"],
+            },
+        ),
+        _step(
+            2,
+            output_mode="template_fill",
+            output_type="docx",
+            output_config={
+                "template_asset_id": str(uuid4()),
+                "placeholders": ["datum"],
+                "bindings": examples["word_bindings"],
+            },
+        ),
+    ]
+    speakers = [
+        _step(
+            1,
+            input_type="audio",
+            output_mode="transcribe_only",
+            input_config={
+                "runtime_input": {**examples["runtime_input"], "input_format": "audio"}
+            },
+        ),
+        _step(
+            2,
+            output_type="json",
+            output_mode="speaker_mapping",
+            review_policy=examples["review_edit"],
+            output_config=examples["speaker_mapping"],
+        ),
+    ]
+    request = examples["http_request"]
+    deliveries = [
+        [
+            _step(1, input_source="http_get", input_type="json", input_config=request),
+            _step(2),
+            _step(
+                3,
+                output_mode="http_post",
+                output_config={
+                    **request,
+                    "auth": examples[auth],
+                    "body": examples[body],
+                    "custom_headers": [examples["secret_header"]],
+                },
+            ),
+        ]
+        for auth in ("auth_none", "auth_bearer_token", "auth_api_key", "auth_basic")
+        for body in ("body_auto", "body_template", "body_none")
+    ]
+    return [
+        (upload, {"form_schema": form}),
+        (
+            speakers,
+            {
+                "form_schema": form,
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(uuid4())},
+                },
+            },
+        ),
+        *((steps, {"form_schema": form}) for steps in deliveries),
+    ]
+
+
+def _refusals(steps, metadata):
+    """What a draft save and a publish refuse ``steps`` for, by the step rules
+    and the run form's."""
+    from eneo.flows.flow_validators import draft_step_refusals, publish_step_refusals
+    from eneo.flows.flow_validators_form import validate_form_schema
+
+    validate_form_schema(metadata)
+    prompts = {
+        step.step_order: (
+            "Sammanfatta underlaget."
+            if step.output_mode in ("pass_through", "http_post")
+            else ""
+        )
+        for step in steps
+    }
+    return (
+        draft_step_refusals(steps, metadata_json=metadata),
+        publish_step_refusals(steps, metadata_json=metadata, prompt_templates=prompts),
+    )
+
+
+def test_each_configuration_example_is_saved_and_published():
+    for steps, metadata in _configured_flows(
+        flow_authoring_chat.CONFIGURATION_EXAMPLES
+    ):
+        draft, publish = _refusals(steps, metadata)
+
+        assert draft == []
+        # A declared auth mode waits only for the credential the person enters.
+        assert all("HTTP_MISSING_AUTH" in str(refusal) for refusal in publish), publish
+
+
+@pytest.mark.parametrize(
+    ("name", "broken"),
+    [
+        ("runtime_input", {"enabled": True, "input_format": "pdf"}),
+        ("long_material", {"mode": "summary"}),
+        ("word_bindings", {"datum": "{{ flow_input.datum }} och mer"}),
+        ("http_request", {"url": "...", "auth": {"mode": "none"}}),
+        ("review_edit", {"mode": "redigera"}),
+        ("speaker_mapping", {"speaker_mapping": {"participants_field": "saknas"}}),
+        ("form_field", {"name": "deltagare", "type": "lista", "label": "Deltagare"}),
+    ],
+)
+def test_an_example_the_rules_refuse_fails_the_check(name, broken):
+    from pydantic import ValidationError
+
+    examples = {**flow_authoring_chat.CONFIGURATION_EXAMPLES, name: broken}
+
+    def refused(steps, metadata):
+        try:
+            draft, publish = _refusals(steps, metadata)
+        except Exception:  # noqa: BLE001 - any refusal counts
+            return True
+        return bool(draft) or any(
+            "HTTP_MISSING_AUTH" not in str(refusal) for refusal in publish
+        )
+
+    try:
+        configured = _configured_flows(examples)
+    except ValidationError:
+        return  # the step model refuses it
+    assert any(refused(*flow) for flow in configured)
 
 
 def test_a_refused_read_names_the_shape_the_step_rules_take():

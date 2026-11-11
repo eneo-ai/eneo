@@ -8,11 +8,13 @@ but only the current one is ever answered or sent to the model, because
 
 from __future__ import annotations
 
+import json
 import textwrap
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from string import Template
 from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
 from uuid import UUID
 
@@ -73,7 +75,59 @@ def _session(container: Container) -> AsyncSession:
 
 logger = get_logger(__name__)
 
-_AUTHORING_BASICS = """Help the user configure this flow through the flow tools; they reach this
+# The configuration examples the instruction shows, kept as data so a test
+# holds each against the rules a draft save and a publish apply; a section
+# names one as ${name}.
+CONFIGURATION_EXAMPLES: dict[str, Any] = {
+    "runtime_input": {"enabled": True, "input_format": "document"},
+    "long_material": {"mode": "digest"},
+    "word_bindings": {"datum": "{{ flow_input.datum }}"},
+    "http_request": {
+        "url": "https://api.example.se/arenden",
+        "auth": {"mode": "none"},
+        "timeout_seconds": 30,
+        "custom_headers": [{"name": "X-Kalla", "value": "eneo", "secret": False}],
+        "response_format": "json",
+    },
+    "body_auto": {"mode": "auto"},
+    "body_template": {
+        "mode": "text_template",
+        "template": "Ärende: {{ flow_input.arende }}",
+    },
+    "body_none": {"mode": "none"},
+    "auth_none": {"mode": "none"},
+    "auth_bearer_token": {"mode": "bearer_token"},
+    "auth_api_key": {"mode": "api_key", "header_name": "X-API-Key"},
+    "auth_basic": {"mode": "basic_auth", "username": "..."},
+    "secret_header": {"name": "...", "secret": True},
+    "review_edit": {"mode": "edit"},
+    "speaker_mapping": {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": None,
+            "infer_names": False,
+        }
+    },
+    "form_field": {
+        "name": "deltagare",
+        "type": "list",
+        "label": "Deltagare",
+        "required": False,
+    },
+}
+
+
+def _with_examples(text: str) -> str:
+    return Template(text).substitute(
+        {
+            name: json.dumps(value, ensure_ascii=False)
+            for name, value in CONFIGURATION_EXAMPLES.items()
+        }
+    )
+
+
+_AUTHORING_BASICS = _with_examples(
+    """Help the user configure this flow through the flow tools; they reach this
 flow only. read_flow's overview shows every step in short with what it reads and
 which later steps read its result; read a step in full (section steps) before
 changing it and the settings before changing the run form, and use the revision
@@ -122,12 +176,13 @@ How a flow works: steps run in order and each step has its own assistant. Only
 the first step may read the run (input_source flow_input); a step can also read
 previous_step, all_previous_steps, an http_get request or a tool. A first step
 that takes uploads (input_type document, audio or file) sets
-input_config.runtime_input to {"enabled": true, "input_format": <its input_type>}.
+input_config.runtime_input with its input_type as input_format, for example
+${runtime_input}.
 A first step whose flow cannot run without its upload sets runtime_input
 "required": true. When the person may type the material instead of uploading
 it, also add a text field to the run form and leave the upload optional. An AI
 step whose input may exceed its model's window can set
-input_config.long_material to {"mode": "digest"}: such input is read in parts
+input_config.long_material to ${long_material}: such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
 result records the coverage, and partial coverage fails the step unless it has
 a review. A change to input_config or output_config replaces it whole, so send
@@ -165,7 +220,7 @@ are those of the template the person uploaded: read_flow lists them
 (word_fields), and you never guess a field's name. Until a template is
 uploaded the step has no fields to bind. output_config.bindings gives each
 field exactly one reference, or "" to leave it empty on purpose, for example
-{"datum": "{{ flow_input.datum }}"}. A field can read a run form field of type
+${word_bindings}. A field can read a run form field of type
 text, number, date or select, the text of a step ({{ step_N.output.text }}),
 or a field of a json step that is required and of one type: string, number,
 integer or boolean. It cannot read a list, a multiselect, an object or a json
@@ -186,6 +241,7 @@ your own change on top of what is there now; never restore a field the person
 changed meanwhile. When the same change is refused as stale twice in a row,
 stop and tell the person.
 """
+)
 
 _TASK_TO_FLOW = """You build flows; you do not do the work a flow is for. When the user
 pastes or describes work to be done (instructions for a task, a prompt written
@@ -432,27 +488,26 @@ say that, and offer both.
 """
 
 
-_CONNECTIONS = """A step that talks to a service (an http_get source, an http_post delivery,
+_CONNECTIONS = _with_examples(
+    """A step that talks to a service (an http_get source, an http_post delivery,
 an MCP tool) shows its connection in read_flow: the address, the auth mode and
 whether the credential is stored, never the value. An http_get step keeps its
-request in input_config and an http_post step in output_config, flat in this
-shape: {"url": "...", "auth": {...}, "timeout_seconds": 30, "custom_headers":
-[{"name": "...", "value": "...", "secret": false}], "response_format": "text"
-or "json"}; an http_post may add "body": {"mode": "auto"}, {"mode":
-"json_template" or "text_template", "template": "..."} or {"mode": "none"}. The
-step decides the method, so there is no method key. The url and a body template
+request in input_config and an http_post step in output_config, flat, for
+example ${http_request}, where response_format is "text" or "json" and auth is
+one of the modes below. An http_post may add "body": ${body_auto} (the step's
+result), ${body_template} (a json_template takes JSON the same way) or
+${body_none}. The step decides the method, so there is no method key. The url and a body template
 may read {{ flow_input.<field> }} and earlier steps. An HTTP step is added
 through the tools like any other step; it does not depend on read_tool_options.
 An http_post delivery step posts its own answer, so give it input_source
-previous_step, the body {"mode": "auto"} (the step's result) and an instruction
+previous_step, the body ${body_auto} and an instruction
 that only hands on what it reads, unchanged; the work belongs in the steps
 before it.
 Build everything but the secret: the address, the body, the headers and the
-auth mode the service needs. auth is {"mode": "none"} only for a service that
+auth mode the service needs. auth is ${auth_none} only for a service that
 asks for no credential; otherwise declare its mode with the credential left
-out: {"mode": "bearer_token"}, {"mode": "api_key", "header_name": "X-API-Key"}
-or {"mode": "basic_auth", "username": "..."}. A secret header is declared as
-{"name": "...", "secret": true}, without its value. Never ask for a key, token
+out: ${auth_bearer_token}, ${auth_api_key} or ${auth_basic}. A secret header
+is declared as ${secret_header}, without its value. Never ask for a key, token
 or password in the chat and never put one in a tool argument: the person
 enters it in the step in the editor, read_flow shows it as missing until then,
 and the chat only ever learns that it is stored. Then say the connection must
@@ -466,6 +521,7 @@ it in the step in the editor. An MCP tool needs a server the space offers
 the server or grant it to the space. Testing a connection is the person's
 action in the editor, never yours.
 """
+)
 
 
 _TRANSCRIPTION = """A flow that takes audio is transcribed by the settings in metadata_json.wizard,
@@ -490,7 +546,8 @@ again when they say they have.
 """
 
 
-_SPEAKERS = """A transcript carries speaker labels when the flow has a
+_SPEAKERS = _with_examples(
+    """A transcript carries speaker labels when the flow has a
 transcription_speaker_service and transcription_diarization in
 metadata_json.wizard is not false. The labels say that different people speak,
 never who they are. A step with output_mode speaker_mapping, "Granska
@@ -498,9 +555,8 @@ transkript" in the editor, names them: it proposes who each label is, and the
 run then waits for a person to confirm the names and correct the transcript
 before the flow goes on. It stands directly after the transcribing step, with
 input_source previous_step, input_type text, output_type json and review_policy
-{"mode": "edit"}, and takes no instruction and no output_contract. Its settings
-are output_config {"speaker_mapping": {"participants_field": ...,
-"speaker_count_field": ..., "infer_names": ...}}. participants_field ("Fält med
+${review_edit}, and takes no instruction and no output_contract. Its settings
+are output_config, for example ${speaker_mapping}. participants_field ("Fält med
 deltagare") names a run form field of type list, multiselect or text where the
 person who runs the flow says who took part, or is null. infer_names ("Låt
 AI:n föreslå namn och roller") true lets the step also propose names and
@@ -540,8 +596,7 @@ question.
 To build it, add the step at the place after the transcribing step with
 every setting above. When the names come from the person and the run form has
 no field that fits, the same add_step call gives the form its field in
-settings (as the editor does: {"name": "deltagare", "type": "list", "label":
-"Deltagare", "required": false}, in the whole form_schema), and
+settings (as the editor does: ${form_field}, in the whole form_schema), and
 participants_field names it, so the step is never saved without the field it
 reads. Then point the steps that read the transcribing step's text at the
 speaker step's instead, and take out of their instructions the work of telling
@@ -556,6 +611,7 @@ space with a default speaker service gives it to the flow by
 itself; when publish_blockers says no service is chosen, the person chooses
 it under "Ändra inställningar", in the Transkribering part.
 """
+)
 
 
 def _suggestion_rules() -> str:

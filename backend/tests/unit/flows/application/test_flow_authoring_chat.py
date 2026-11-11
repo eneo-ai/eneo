@@ -4,6 +4,7 @@ a chat left in edit mode returns to view mode after a pause."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +18,7 @@ from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.flows.application import flow_authoring_chat
 from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
+    CONFIGURATION_EXAMPLES,
     starts_in_edit_mode,
     tool_runtime_capabilities,
 )
@@ -402,11 +404,12 @@ def test_the_instructions_leave_a_stored_credentials_config_to_the_editor() -> N
 def test_the_instructions_describe_an_http_steps_whole_config() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
-    assert '"custom_headers": [{"name": "...", "value": "...", "secret": false}]' in (
-        instructions
-    )
-    assert '"response_format": "text" or "json"' in instructions
-    assert '"json_template" or "text_template", "template": "..."}' in instructions
+    examples = CONFIGURATION_EXAMPLES
+    # One whole config, with its headers, and the choices beside it.
+    assert json.dumps(examples["http_request"], ensure_ascii=False) in instructions
+    assert 'where response_format is "text" or "json"' in instructions
+    assert json.dumps(examples["body_template"], ensure_ascii=False) in instructions
+    assert "a json_template takes JSON the same way" in instructions
     assert '{"mode": "none"}. The step decides the method' in instructions
     assert "there is no method key" in instructions
     assert "the address, the method" not in instructions
