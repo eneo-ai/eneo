@@ -139,10 +139,23 @@ describe("resource types", () => {
       flows: "read",
       flow_evidence: "none"
     });
-    expect(withKeyType(withKeyType(draft, "pk_"), "sk_").resourcePermissions).toMatchObject({
+    const reset = withKeyType(withKeyType(draft, "pk_"), "sk_");
+    expect(reset.resourcePermissions).toMatchObject({ flows: "read", flow_evidence: "none" });
+    expect(createRequest({ ...reset, name: "Modul" }).resource_permissions).toMatchObject({
       flows: "read",
       flow_evidence: "none"
     });
+  });
+
+  it("send a secret key's Flows at write, and write as its permission", () => {
+    const draft = newApiKeyDraft();
+    const request = createRequest({
+      ...draft,
+      name: "Tal till text",
+      resourcePermissions: { ...draft.resourcePermissions, flows: "write" as const }
+    });
+    expect(request.resource_permissions?.flows).toBe("write");
+    expect(request.permission).toBe("write");
   });
 
   it("show Flows and Flow evidence for organization and space keys only", () => {
@@ -169,6 +182,10 @@ describe("resource types", () => {
     };
     expect(resourceLevel(granted, "flows")).toBe("read");
     expect(resourceLevel(granted, "flow_evidence")).toBe("none");
+    expect(
+      createRequest({ ...granted, name: "Widget", allowedOrigins: ["https://example.com"] })
+        .resource_permissions
+    ).toMatchObject({ flows: "read", flow_evidence: "none" });
   });
 });
 
