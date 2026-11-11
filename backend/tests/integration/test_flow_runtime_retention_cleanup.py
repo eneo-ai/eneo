@@ -16,6 +16,7 @@ from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
@@ -1092,7 +1093,10 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
 
     The organization's conversation time and the unused-upload grace both
     make old content due, and a chat and an unreferenced file are removed, so
-    the run did work. Mutant: a registered task that removes old Flow runs."""
+    the run did work. The Flow data is older than any retention time, and an
+    authoring chat has not been asked anything yet. Mutants: a registered task
+    that removes old Flow runs; one that removes live transcripts; the
+    empty-session sweep without its authoring-chat guard."""
     now = datetime.now(timezone.utc)
     async with db_container() as setup_container:
         session = setup_container.session()
@@ -1144,7 +1148,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             user=user,
             space=space,
             assistant=assistant,
-            days_old=10,
+            days_old=400,
             flow_retention_days=1,
         )
         outbox_id = await _add_flow_audit_outbox_row(
@@ -1159,7 +1163,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             tenant=tenant,
             user=user,
             space=space,
-            uploaded_at=now - timedelta(days=10),
+            uploaded_at=now - timedelta(days=400),
             size=321,
         )
         template = await _create_flow_template_asset_fixture(
@@ -1182,6 +1186,56 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         abandoned_file_id = abandoned.file.id
         template_asset_id = template.template_asset.id
         template_file_id = template.template_file.id
+        live_transcript = FlowLiveTranscripts(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            flow_id=flow_id,
+            flow_version=1,
+            step_id=runtime.step_id,
+            model_id=uuid4(),
+            recording_id="recording-1",
+            text="Hej.",
+            segments=None,
+            received_audio_seconds=1.0,
+            expires_at=now + timedelta(days=1),
+            bound_file_id=runtime_input_file_id,
+            bound_file_ids=[runtime_input_file_id],
+        )
+        session.add(live_transcript)
+        authoring_assistant = Assistants(
+            name="Flow chat",
+            user_id=user.id,
+            space_id=space.id,
+            logging_enabled=False,
+            is_default=False,
+            published=False,
+            hidden=True,
+        )
+        session.add(authoring_assistant)
+        await session.flush()
+        long_ago = now - timedelta(days=400)
+        authoring_session = Sessions(
+            name="Flow chat",
+            user_id=user.id,
+            assistant_id=authoring_assistant.id,
+            created_at=long_ago,
+            updated_at=long_ago,
+        )
+        session.add(authoring_session)
+        await session.flush()
+        session.add(
+            FlowAuthoringChats(
+                session_id=authoring_session.id,
+                assistant_id=authoring_assistant.id,
+                tenant_id=tenant.id,
+                space_id=space.id,
+                user_id=user.id,
+                flow_id=flow_id,
+            )
+        )
+        await session.flush()
+        live_transcript_id = live_transcript.id
+        authoring_session_id = authoring_session.id
 
         # Content outside Flows that the same run must remove.
         session.add(
@@ -1287,6 +1341,20 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         assert await session.get(FlowTemplateAssets, template_asset_id) is not None
         assert await session.get(Files, template_file_id) is not None
         assert await session.get(FlowRunAuditOutbox, outbox_id) is not None
+        for file_id in (generated_file_id, runtime_input_file_id, abandoned_file_id):
+            assert await session.scalar(
+                select(func.count())
+                .select_from(FileContentReferences)
+                .where(FileContentReferences.file_id == file_id)
+            ), file_id
+        assert await session.scalar(
+            select(func.count())
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+        )
+        assert await session.get(FlowLiveTranscripts, live_transcript_id) is not None
+        assert await session.get(Sessions, authoring_session_id) is not None
+        assert await session.get(FlowAuthoringChats, authoring_session_id) is not None
 
 
 @pytest.mark.asyncio
