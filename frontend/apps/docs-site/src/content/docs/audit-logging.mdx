@@ -157,6 +157,12 @@ than `RETENTION_EMPTY_SESSION_GRACE_HOURS` ago and have no question, unused uplo
 families and expired retention execution records. Each removal has this one scheduled
 path. Audit-log purging remains governed by the separate audit retention policy above.
 
+The daily run runs every registered task. A task registered to run often also runs
+every five minutes, through the same engine and lease, but only when its due probe
+finds something due; otherwise that run writes no execution record and no audit
+event. No task in this release runs often, so the five-minute job
+`run_retention_frequent` ends without touching the database.
+
 Work runs in bounded chunks. Each chunk is one database transaction with durable
 progress. Within a chunk, one question or App run and the files its last use released
 form an atomic unit: the engine rechecks the retention policy inside the deleting
@@ -281,7 +287,7 @@ stops the process at start with the reason.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | Daily start time in the worker's time zone (UTC in the shipped image) |
+| `RETENTION_CRON_HOUR` / `RETENTION_CRON_MINUTE` | `3` / `30` | Start time of the daily run in the worker's time zone (UTC in the shipped image) |
 | `RETENTION_CONVERSATIONS_HISTORY_ENABLED` / `RETENTION_DERIVED_COPIES_ENABLED` / `RETENTION_EMPTY_SESSIONS_ENABLED` / `RETENTION_UNUSED_FILES_ENABLED` / `RETENTION_JOB_HISTORY_ENABLED` | `true` | Per-task switches; a task turned off records a skipped execution and an audit event |
 | `RETENTION_MAX_ROWS_PER_RUN` | `50000` | Rows charged per execution of the session, file and job tasks; each task has its own budget |
 | `RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` | `250000` | Rows charged per execution of the conversation task |
@@ -296,7 +302,7 @@ stops the process at start with the reason.
 | `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS` / `RETENTION_CHUNK_LOCK_TIMEOUT_MS` | `30000` / `2000` | PostgreSQL statement and lock timeouts, set first in every retention transaction and in the preview command |
 | `RETENTION_LEASE_STALE_SECONDS` | `3600` | A running execution whose heartbeat is older is taken over by the next run and reads `abandoned` in health |
 | `RETENTION_OVERDUE_WINDOW_DAYS` / `RETENTION_OVERDUE_MAX_ROWS` | `1` / `1000` | Due rows older than the window are overdue, and so is a conversation whose name or feedback text is; the snapshot stops at this many overdue rows, or after a fixed number of pages per question or App-run stream (`RETENTION_CONVERSATIONS_MAX_ROWS_PER_RUN` in owner pages; a page full of rows continues inside its owner), and then reports itself incomplete. The read of names and feedback texts has no page bound and stops at `RETENTION_CHUNK_STATEMENT_TIMEOUT_MS`; health then reads `unknown` or `degraded`, never `healthy` |
-| `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read |
+| `RETENTION_HEALTH_TIMEOUT_SECONDS` / `RETENTION_HEALTH_CACHE_SECONDS` | `1.0` / `30` | Longest health read; how long `/api/healthz` reuses one read. Each statement of the read stops after half the time, for every task: a due probe that slow reads `unknown` for its own task, and any other read that slow makes the whole retention block `unknown` |
 
 When the row or file budget is spent, the task stops. A unit that does not fit the
 remaining budget is kept and resumed from the stored cursor on a later execution. A
@@ -381,21 +387,29 @@ unavailable.
 | Status | Meaning |
 | --- | --- |
 | `initializing` | No task has written an execution record yet, or this task's first execution is still running and has not written its overdue snapshot |
-| `healthy` | No stored execution contradicts it: the latest execution did not fail, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
-| `degraded` | The latest execution failed, no execution completed for two days, or overdue rows exist |
-| `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
+| `healthy` | No stored execution contradicts it: the latest finished execution did not fail and measured overdue work, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
+| `degraded` | The latest finished execution failed, no execution completed for two days, or overdue rows exist |
+| `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the latest finished execution did not measure overdue work; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
 | `disabled` | The operator turned the task off: the worker skipped its latest execution, or, before any execution, the API's own setting turns it off. The overall status leaves the task out |
 
 | Flag | Meaning |
 | --- | --- |
 | `disabled` | The latest execution was skipped because the task is turned off |
-| `failed` | The latest execution failed; `error_code` says why |
+| `failed` | The latest finished execution (`succeeded`, `partial` or `failed`) failed; a rerun still running does not clear it. `error_code` comes from the latest execution, so during a rerun it can be empty or name another execution's code; the execution record has the failed one's |
 | `stale` | No execution completed for two days |
 | `abandoned` | A running execution has a heartbeat older than `RETENTION_LEASE_STALE_SECONDS` |
 | `overdue` | The latest snapshot found due rows older than the window; `overdue_complete: false` means the count was capped |
 | `overdue_snapshot_stale` | The latest snapshot is older than two days |
 | `no_execution` | The task has no execution record |
 | `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
+| `overdue_not_measured` | The task reports overdue work, and its latest finished execution completed (`succeeded` or `partial`) without measuring it, so no snapshot says what is due. The task reads `unknown` until a later execution completes and measures it; a rerun still running does not clear it |
+
+A task that runs often has no overdue snapshot. Health asks its due probe instead,
+as if it were an hour earlier: the task reads `degraded` with `overdue` when something
+has been due for more than an hour, and `healthy` when nothing has, also before its
+first execution and when its latest execution timed out on its claim. A probe that
+fails reads `unknown` for that task alone. The two-day `stale` rule and `failed` apply
+as to any task.
 | `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
 | `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
 
@@ -407,7 +421,7 @@ unavailable.
 | `chunk_deadlock` | `partial` | PostgreSQL ended a chunk to break a deadlock; the next execution resumes |
 | `chunk_failed` | `failed` | A chunk failed for another reason; the log has the exception |
 | `contract_violation` | `failed` | A task reported a key it did not declare or charged work it did not report; a defect, not a data problem |
-| `claim_timeout` | `skipped` | The claim waited on another execution's lock past the lock timeout; nothing ran |
+| `claim_timeout` | `skipped` | The claim waited on another execution's lock past the lock timeout, or hit the statement timeout; nothing ran. A five-minute run whose claim waits past the lock timeout on another run's chunk records nothing: that run holds the task |
 | `finish_timeout` | `running` | The work was done but the outcome could not be written; the next execution records the row as superseded |
 | `disabled_by_deployment_setting` | `skipped` | The task is turned off |
 
@@ -448,7 +462,7 @@ docker compose --env-file .env --env-file release.env run --rm backend run-cron 
 
 Add your installation's Compose files and profiles to this command too. They go between `docker compose` and `run`; with the bundled store that is `--profile object-content -f docker-compose.yml -f docker-compose.object-content.yml` (see [Review network changes](/guides/deployment#review-network-changes)).
 
-The command runs the registered tasks in its own process, round after round, and
+The command runs every registered task, also one that runs often, in its own process, round after round, and
 prints each round's outcome and the number of rows removed. Every round runs
 against the time the command started, so rows that fall due while it runs are
 left to the scheduled run. Retention is complete
@@ -477,7 +491,8 @@ Exit code 0 means retention is complete and storage is confirmed or pending. Exi
 code 1 means it is not: the output names each task and reason, such as a missing
 report (the task raised; see the log), an execution held by another process (stop
 the workers), an outcome other than `succeeded` or `partial`, a blocked reason
-other than "no longer due" or "not old enough", a step that made no progress,
+the task does not declare as not due (the tasks in this release declare "no longer
+due" and "not old enough"), a step that made no progress,
 "still removing after 10000 rounds" (run the command again: it continues), or a
 storage line other than `confirmed` or `pending`. A task turned off by its setting
 also fails the readback, since nothing shows that its work is done. Resolve the

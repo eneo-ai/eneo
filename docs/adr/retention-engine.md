@@ -45,9 +45,10 @@ stays outside this record.
    name, three closed key sets for disposal facts, observations and blocked
    reasons, an ordered list of steps). The engine never imports an adopter; the
    composition root `eneo.main.retention_tasks` lists every task with its
-   enable switch and budget, and one cron on the general worker runs that list.
-   Each removal has that one scheduled path; no other cron deletes the same
-   data.
+   enable switch and budget, and one daily cron on the general worker runs that
+   list. A task registered to run often also runs every five minutes, through
+   the same runner and lease, when its due probe finds something due. Each
+   removal has that one scheduled path; no other cron deletes the same data.
 2. **Two different decisions, two names.** *Retention expiry* removes history
    past its effective period together with that history's links, and releases
    a File family only when no use of it remains. *Erasure of a File* is an
@@ -127,12 +128,15 @@ stays outside this record.
    reason. Deleting a row is not deleting bytes; marking content for deletion
    is not a tombstone; a tombstone says nothing about older object versions,
    previous destinations or backups. Health reads `healthy` only when the
-   stored executions contradict nothing: no failed latest execution, no two
-   days without a completed one, no running execution with a stale heartbeat
-   and no overdue work. Contradicting evidence reads `degraded` or `unknown`;
-   a task without evidence reads `initializing` or `unknown`. A task the
-   operator turned off reads `disabled` and leaves the overall status out, so
-   a deliberate pause is visible without reading as a fault.
+   stored executions contradict nothing: no failed latest finished execution,
+   no two days without a completed one, no running execution with a stale
+   heartbeat, no overdue work, and overdue work measured by the latest finished
+   execution. A task that runs often has no overdue snapshot; health asks its
+   due probe as if it were an hour earlier. Contradicting evidence reads
+   `degraded` or `unknown`; a task without evidence reads `initializing` or
+   `unknown`. A task the operator turned off reads `disabled` and leaves the
+   overall status out, so a deliberate pause is visible without reading as a
+   fault.
 7. **Deployment scope.** One tenant per deployment
    ([single-tenant-assumption](single-tenant-assumption.md)); deployment-level
    effects are audited in that tenant.
@@ -343,7 +347,7 @@ existed before this record (the `unused_file_cleanup` operator command,
 | disposal fact | a count of removed records; audited, for example `questions_deleted` | observation |
 | observation | a count of examined or kept records; on the execution record only, for example `files_in_use` | blocked reason |
 | blocked reason | a count of units kept with a typed cause; audited, for example `root_locked` | observation |
-| overdue | due records still stored past `RETENTION_OVERDUE_WINDOW_DAYS` | stale |
+| overdue | due records still stored past `RETENTION_OVERDUE_WINDOW_DAYS`; for a task that runs often, more than an hour past their time | stale |
 | stale | in health: no completed execution for two days; for the lease: a heartbeat older than `RETENTION_LEASE_STALE_SECONDS` | overdue |
 
 ## Stable vocabulary
@@ -359,7 +363,7 @@ release is a migration, not a cosmetic change. The foundation ships
 ## Settings
 
 All limits are operator settings with defaults (`eneo.main.config`), read at
-process start: the schedule (`RETENTION_CRON_HOUR`/`MINUTE`), per-task enable
+process start: the daily run's time (`RETENTION_CRON_HOUR`/`MINUTE`), per-task enable
 switches, rows, files and seconds per execution, the chunk size and gather
 window, the unit and family caps, the two grace periods (unused uploads and
 empty sessions, 24 hours each), statement and lock timeouts, the lease
@@ -394,7 +398,7 @@ task; the widget's own nightly job removes them.
 - Health reads `initializing` only until the first task has written a row; a
   registered task without a row after that is `unknown`, a running execution
   with a stale heartbeat is `unknown` with the flag `abandoned`, and a failed
-  run is `degraded`.
+  run is `degraded` until a rerun has finished.
 - The engine proves database work. Byte removal is proved by object content
   storage's own reconciliation and health; older object versions, previous
   storage destinations and backups need the operator procedures in the

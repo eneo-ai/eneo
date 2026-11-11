@@ -308,7 +308,9 @@ A migration clears icons that point across tenants. Deleting an icon in use answ
 
 ### One retention engine [#retention-engine]
 
-`cleanup_old_data`, `delete_unused_files` and `purge_old_conversations` are replaced by `run_retention` at `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 worker time by default, UTC in the image). Retention periods are unchanged.
+`cleanup_old_data`, `delete_unused_files` and `purge_old_conversations` are replaced by `run_retention` at `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 worker time by default, UTC in the image). Retention periods are unchanged. A second job, `run_retention_frequent`, starts every five minutes; no task in this release uses it, so it ends at once.
+
+`GET /api/healthz` reports each retention task. A failed run keeps its task `degraded` until a rerun has finished, while `error_code` follows the newest run. A task reads `unknown` with `overdue_not_measured` when its latest finished run could not measure overdue work. See [Health](/docs/audit-logging#health).
 
 **Do:** update scripts and alerts on the old job names.
 
