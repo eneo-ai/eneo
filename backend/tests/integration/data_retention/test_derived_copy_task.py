@@ -167,8 +167,14 @@ async def test_an_invalid_copy_goes_with_its_files_session_and_edges(
         bind = container.session().sync_session.bind
     assert bind is not None
 
+    # The whole copy in one chunk, however slow the runner: a chunk that ends
+    # after its first question reads the edges after the copy again, and the
+    # other copy, invalid by then if it sorts after this one, would go now.
+    one_chunk = get_settings().model_copy(
+        update={"retention_chunk_gather_seconds": 3600.0}
+    )
     with _question_deletes(bind.engine) as deletes:
-        report = await _run(retention_session)
+        report = await _run(retention_session, settings=one_chunk)
 
     assert len(deletes) == 4
     assert [sql for sql in deletes if "content_derivations" in sql] == []
