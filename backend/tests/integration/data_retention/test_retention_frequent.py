@@ -682,10 +682,15 @@ async def _runtime_error(session: AsyncSession) -> None:
     raise RuntimeError("probe is broken")
 
 
+async def _slow(session: AsyncSession) -> None:
+    # Longer than the whole health read's time limit (one second).
+    await session.execute(sa.text("SELECT pg_sleep(2)"))
+
+
 @pytest.mark.parametrize(
     "fail",
-    [_sql_error, _os_error, _runtime_error],
-    ids=["sql-error", "os-error", "runtime-error"],
+    [_sql_error, _os_error, _runtime_error, _slow],
+    ids=["sql-error", "os-error", "runtime-error", "statement-timeout"],
 )
 async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
     test_tenant,
@@ -693,12 +698,15 @@ async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
     fail: Callable[[AsyncSession], Awaitable[None]],
 ) -> None:
     """A probe's error, of any kind, is its own task's: that task reads
-    unknown and the next task's overdue work still degrades the block.
+    unknown and the next task's overdue work still degrades the block. A slow
+    probe meets the statement timeout, which ends before the read's own time
+    limit and leaves the next task the time to read.
 
     Mutants: an error escapes, so the whole block reads unknown and hides the
     other task's degraded, or the public read raises; the error aborts the
     shared transaction, so the next task's reads fail; the failing task reads
-    healthy."""
+    healthy; the statement timeout is as long as the read's time limit, so
+    the read is cancelled before the probe's statement ends."""
 
     class _Broken(_DueItems):
         async def has_due(self) -> bool:

@@ -236,8 +236,12 @@ async def _read_retention_health(settings: Settings) -> RetentionHealth:
     try:
         async with asyncio.timeout(settings.retention_health_timeout_seconds):
             async with sessionmanager.session() as session, session.begin():
+                # Half the read's time limit: a slow statement, such as a
+                # frequent task's due probe, then fails on the server while
+                # the read still has time for the other tasks. A timer as
+                # long as the limit never fires before the read is cancelled.
                 timeout_ms = max(
-                    1, int(settings.retention_health_timeout_seconds * 1000)
+                    1, int(settings.retention_health_timeout_seconds * 1000) // 2
                 )
                 await set_retention_timeouts(
                     session, statement_timeout_ms=timeout_ms, lock_timeout_ms=timeout_ms
