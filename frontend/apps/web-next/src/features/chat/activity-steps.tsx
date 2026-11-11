@@ -203,6 +203,7 @@ function StepDetails({
             files={activity.files}
             sessionId={sessionId}
             durations={durations}
+            stored={!activity.running}
           />
           {references.length > 0 && (
             <ul className="flex flex-col gap-1 text-[12.5px]">

@@ -4561,5 +4561,6 @@
   "flow_run_live_fallback_duration_mismatch": "Ljudfilerna är inte lika långa som ljudet livetexten skrevs från.",
   "flow_run_live_fallback_transcribed": "Ljudfilerna transkriberades med {model} i stället.",
   "flow_run_live_fallback_transcribing": "Ljudfilerna transkriberas med {model} i stället.",
-  "flow_run_live_fallback_planned": "Ljudfilerna skulle transkriberas med {model} i stället."
+  "flow_run_live_fallback_planned": "Ljudfilerna skulle transkriberas med {model} i stället.",
+  "chat_tool_result_after_answer": "Resultatet visas när svaret är klart."
 }
