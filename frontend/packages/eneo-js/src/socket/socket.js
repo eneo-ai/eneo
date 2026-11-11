@@ -8,6 +8,17 @@ const HEARTBEAT = {
 /** The server closes an open socket with this code when its session ended. */
 const SESSION_ENDED = 1008;
 
+/**
+ * Waits before opening a socket again after one closed: doubling from the first
+ * to the last, back to the first once a socket opens. A refused handshake looks
+ * like a dropped network (1006), so the client never gives up; it only asks
+ * less often.
+ */
+const RETRY = {
+  FIRST: 2 * 1000,
+  LAST: 5 * 60 * 1000
+};
+
 /** @typedef {import("./types").ServerMessages} ServerMessages*/
 /** @typedef {import("./types").ClientSubscribableMessageType} ClientSubscribableMessageType*/
 
@@ -40,19 +51,21 @@ export function createEneoSocket(args, options) {
     // In local dev we do not always have SSL
     url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
     url.pathname = "api/v1/ws";
+    // Each attempt starts from nothing: no heartbeat or retry of an earlier one.
+    stopTimers();
     socket = new WebSocket(url.toString(), ["eneo", `auth_${token}`]);
     socket.onmessage = dispatchToHandlers;
-    // Other closes are left to the heartbeat, which reconnects. A session that
-    // ended (signed out, expired) is final: the same token cannot open another
-    // socket, so stop the heartbeat instead of retrying with it.
     socket.onclose = (event) => {
-      if (event.code === SESSION_ENDED) {
-        clearTimeout(heartbeatReconnectTimeout);
-        clearInterval(heartbeatInterval);
-        socket = null;
-      }
+      stopTimers();
+      socket = null;
+      // A session that ended (signed out, expired) is final: the same token
+      // cannot open another socket.
+      if (event.code === SESSION_ENDED) return;
+      retryTimeout = setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY.LAST);
     };
     socket.onopen = () => {
+      retryDelay = RETRY.FIRST;
       startHeartbeat();
       initSubscriptions();
     };
@@ -82,8 +95,8 @@ export function createEneoSocket(args, options) {
     }
     currentSubscriptions.clear();
     handlers.clear();
-    clearTimeout(heartbeatReconnectTimeout);
-    clearInterval(heartbeatInterval);
+    stopTimers();
+    retryDelay = RETRY.FIRST;
     safelyCloseSocket();
   }
 
@@ -92,6 +105,10 @@ export function createEneoSocket(args, options) {
     try {
       /** @type {import("./types").WebsocketMessage} */
       const { type, data } = JSON.parse(event.data);
+      if (type === "pong") {
+        clearTimeout(heartbeatReconnectTimeout);
+        return;
+      }
       handlers.get(type)?.forEach((handler) => handler(data));
     } catch (error) {
       console.error("Failed to parse message: ", error);
@@ -155,23 +172,27 @@ export function createEneoSocket(args, options) {
   let heartbeatReconnectTimeout = undefined;
   /** @type { ReturnType<typeof setInterval> | undefined } Heartbeat ping interval  */
   let heartbeatInterval = undefined;
-  function startHeartbeat() {
-    // Reset any running intervals on start
+  /** @type { ReturnType<typeof setTimeout> | undefined } The next attempt after a close */
+  let retryTimeout = undefined;
+  let retryDelay = RETRY.FIRST;
+
+  function stopTimers() {
+    clearTimeout(retryTimeout);
     clearTimeout(heartbeatReconnectTimeout);
     clearInterval(heartbeatInterval);
+  }
+
+  function startHeartbeat() {
     heartbeatInterval = setInterval(() => {
-      // A socket the server closed takes no ping; the reconnect below heals it.
       sendMessage({ type: "ping" }).catch(() => {});
+      clearTimeout(heartbeatReconnectTimeout);
       heartbeatReconnectTimeout = setTimeout(() => {
-        // Try to reconnect, should also try to heal existing subscriptions
+        // No pong: the connection is gone without a close. Open a new one now,
+        // which also heals the subscriptions.
         safelyCloseSocket();
         connect();
       }, HEARTBEAT.TIMEOUT);
     }, HEARTBEAT.INTERVAL);
-
-    registerHandler("pong", () => {
-      clearTimeout(heartbeatReconnectTimeout);
-    });
   }
 
   /**
