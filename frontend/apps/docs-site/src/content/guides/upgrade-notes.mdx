@@ -56,6 +56,7 @@ flowchart TB
 - The discovery URL names your own directory (no `{tenantid}`). [Templated issuer](#templated-issuer-refused), [Reachability](#discovery-and-jwks-reachable)
 - Replace the frontend and all backend replicas together; sign-ins in progress start again. [Deploy together](#deploy-frontend-and-backend-together)
 - Accounts need nothing: each is bound by email at its next sign-in, and sessions stay valid. [Account binding](#account-binding)
+- Requests to the provider use https; a provider on the backend's own machine only with `ENVIRONMENT=development`. The token endpoint and `jwks_uri` are on the discovery host, or the host goes into `allowed_endpoint_hosts` right after the upgrade. [Provider requests](#provider-requests-on-its-host)
 
 **Providers that give each client its own `sub`** (Entra ID; any provider with pairwise subjects):
 
@@ -71,6 +72,7 @@ flowchart TB
 - `PUT` automation sends `subject_claim`. [Account binding](#account-binding)
 - Scripts accept `502`. [Saving settings](#provider-save-checks-sign-in)
 - Check the allowed domains if you used the move script with 2.3 or earlier. [Move script](#move-script-allowed-domains)
+- If access tokens create accounts, store the allowed domains on the provider: access tokens no longer read `OIDC_ALLOWED_DOMAINS`. [Access tokens](#resource-server-binding)
 
 **MobilityGuard settings** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): rename to the `OIDC_*` names. [MobilityGuard](#mobilityguard-sign-in-removed)
 
@@ -92,12 +94,13 @@ flowchart TB
 | [Every OIDC sign-in is verified strictly](#strict-relying-party) | Every OIDC installation | Check algorithm, `nonce`, `kid`, NTP |
 | [Redis is required for OIDC sign-in](#redis-required-for-sign-in) | Every OIDC installation | Redis 6.2+, `noeviction` |
 | [Discovery and signing keys must stay reachable](#discovery-and-jwks-reachable) | Backends behind egress rules or a proxy | Reach the provider within 5 s |
+| [Requests to the provider stay on its host, over https](#provider-requests-on-its-host) | Every OIDC installation | Compare the hosts in discovery; list other hosts after the upgrade |
 | [A templated issuer is refused](#templated-issuer-refused) | Multi-directory Entra ID endpoint | Use your own directory |
 | [Deploy frontend and backend together](#deploy-frontend-and-backend-together) | Operators, own callbacks | Deploy together, forward `iss` |
 | API clients may bind the code with `binding_challenge` and `binding_verifier`; a wrong `binding_verifier` answers `400` and logs `binding_mismatch`; replaying a used callback answers `400` | API clients | Nothing; binding is optional |
 | [MobilityGuard's own sign-in is removed](#mobilityguard-sign-in-removed) | `MOBILITYGUARD_*` installations | Rename the variables |
 | Zitadel sign-in in the Svelte app is deprecated; a later release removes it | Zitadel installations | [Migrate](/guides/oidc-federation#migrate-from-the-zitadel-settings) before that release |
-| SSO is offered only with a discovery URL, client ID and client secret | Everyone | Remove `OIDC_*` variables the warning names; keep `OIDC_ALLOWED_DOMAINS` if access tokens rely on it |
+| SSO is offered only with a discovery URL, client ID and client secret | Everyone | Remove `OIDC_*` variables the warning names; store the allowed domains on the provider if access tokens use them |
 | [The move script dropped the allowed domains](#move-script-allowed-domains) | Ran the move script with `OIDC_ALLOWED_DOMAINS` set | Check stored domains |
 | [Administrators can change the sign-in settings](#admins-change-sign-in-settings) | Stored settings | Review the administrator role |
 | SCIM accounts are bound at first sign-in | SCIM installations | Nothing |
@@ -124,6 +127,7 @@ flowchart TB
 |---|---|---|
 | [One error format](#error-envelope) | API consumers, generated clients | Read `code` and `message` |
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
+| The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -176,9 +180,14 @@ The first federated sign-in binds the account, per tenant, to issuer, client ID,
 
 ### Provider access tokens use the same binding [#resource-server-binding]
 
-With `OIDC_RESOURCE_SERVER_ENABLED=true`, access tokens are matched through the binding with `OIDC_ACCEPTED_ISSUER` and `OIDC_ACCEPTED_AUDIENCE`. Stored settings use the stored allowed domains, or `OIDC_ALLOWED_DOMAINS` when none are stored. A token without the subject claim answers `401`.
+With `OIDC_RESOURCE_SERVER_ENABLED=true`, access tokens are matched through the binding with `OIDC_ACCEPTED_ISSUER` and `OIDC_ACCEPTED_AUDIENCE`. A token without the subject claim answers `401`.
 
-**Do:** compare `iss` and subject of an ID token and an access token for the same person. With Entra ID, request v2 access tokens and set `OIDC_ACCEPTED_ISSUER` to the `v2.0` issuer. If they cannot match, an administrator opens a migration window.
+Access tokens admit the same people as browser sign-in: stored settings use only the stored allowed domains, environment settings use `OIDC_ALLOWED_DOMAINS`. With stored settings and no stored domains (or no provider stored at all), this works both ways:
+
+- an access token no longer creates accounts from `OIDC_ALLOWED_DOMAINS`;
+- an existing account outside `OIDC_ALLOWED_DOMAINS` is now admitted by token, as it already was in the browser.
+
+**Do:** compare `iss` and subject of an ID token and an access token for the same person. With Entra ID, request v2 access tokens and set `OIDC_ACCEPTED_ISSUER` to the `v2.0` issuer. If they cannot match, an administrator opens a migration window. If access tokens created accounts from `OIDC_ALLOWED_DOMAINS`, `PATCH` `allowed_domains` on the provider.
 
 ### A removed account keeps its identity [#removed-accounts-keep-identity]
 
@@ -209,6 +218,20 @@ Discovery is cached for `OIDC_JWKS_CACHE_TTL_SECONDS` (3600) with no stale fallb
 **Do:** every backend reaches the discovery URL, `jwks_uri` and the token endpoint. If not, nobody can sign in after the first hour, or at once after a restart.
 
 **Check:** `curl` the discovery URL from inside the backend container.
+
+### Requests to the provider stay on its host, over https [#provider-requests-on-its-host]
+
+Discovery, the token request and the signing keys, at sign-in and when settings are saved or tested:
+
+- use https. A provider on the backend's own machine (`localhost`, `127.0.0.1`, `::1`) is accepted only with `ENVIRONMENT=development`, and then over http too. Without it (unset means production), an installation whose provider runs on the backend's machine cannot sign in after the upgrade.
+- never go to link-local or cloud metadata addresses, never follow a redirect, and refuse an answer over 256 KiB or one that is not a JSON object.
+- reach the token endpoint and `jwks_uri` only on the discovery host or on a host in the new `allowed_endpoint_hosts`, which only the super API key sets (`PUT` or `PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`). Saving answers `400` and names the host. Environment settings have no list.
+
+A `discovery_endpoint` no request may go to answers `422`. When stored settings break these rules, `/api/v1/auth/initiate` and the callback answer `500` with a fixed message and the backend logs `OIDC provider configuration is unusable` with the reason. The list is new, so for such an organisation sign-in stops at the upgrade until the operator adds the host.
+
+**Do:** before the upgrade, run `curl -s <discovery URL> | jq -r '.issuer, .token_endpoint, .jwks_uri'` and compare the hosts. Right after it, `PATCH` `allowed_endpoint_hosts` with every other host. With environment settings and another host, [move the settings into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) and add the list. A provider on the backend's machine: set `ENVIRONMENT=development` (only in development) or give the provider a real host.
+
+**Check:** the backend logs no `OIDC provider configuration is unusable`.
 
 ### A templated issuer is refused [#templated-issuer-refused]
 
