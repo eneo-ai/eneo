@@ -11,6 +11,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.data_retention.domain.retention import RetentionKeyset
 from eneo.data_retention.infrastructure.retention_sql import outside_widgets, uuid_in
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -34,13 +35,27 @@ class EmptySessionRepository:
             ~sa.select(Questions.id).where(Questions.session_id == Sessions.id).exists()
         )
 
+    def _unbound(self) -> ColumnElement[bool]:
+        # A Flow authoring chat keeps its model and edit mode in a row the
+        # session's deletion cascades to, so its session is Flow data even
+        # before its first question.
+        return ~(
+            sa.select(FlowAuthoringChats.session_id)
+            .where(FlowAuthoringChats.session_id == Sessions.id)
+            .exists()
+        )
+
     def _releasable(self, ids: Sequence[UUID]) -> tuple[ColumnElement[bool], ...]:
-        """Which of these sessions are empty and due: one rule for the lock, the
-        count of what the lock skipped, and the delete."""
+        """Which of these sessions are empty, due and no Flow authoring chat's:
+        one rule for the lock, the count of what the lock skipped, and the
+        delete. Every release goes through it: the empty-session sweep, the
+        copy edges' release and the release of a session its last due question
+        left empty."""
         return (
             uuid_in(Sessions.id, ids),
             Sessions.created_at < self.now - self.grace,
             self._unreferenced(),
+            self._unbound(),
             outside_widgets(),
         )
 

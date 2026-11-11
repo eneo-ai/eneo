@@ -204,7 +204,8 @@ class ConversationUnitRepository:
 
         The empty-session owner's lock and DELETE apply, its no-question
         predicate repeated in the DELETE. A session a live chat holds, or that
-        still has a question, is left to that owner's sweep. The unit's proof
+        still has a question, is left to that owner's sweep; a Flow authoring
+        chat's session is never released. The unit's proof
         locked and charged the session row, which the lock and proof here read
         again; this charges the session and its UNIQUE helper row it deletes:
         at most `_RELEASE_ROWS`, which `delete_unit` reserves first.

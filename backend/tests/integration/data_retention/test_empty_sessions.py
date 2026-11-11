@@ -18,6 +18,8 @@ from eneo.data_retention.application.empty_session_retention_task import (
 from eneo.data_retention.application.retention_runner import RetentionBatch
 from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -293,3 +295,68 @@ async def test_history_leaves_a_held_session_to_the_sweep(
     assert "questions.sessions_deleted" not in report.counts
     assert await retention_session.get(Questions, question_id) is None
     assert await retention_session.get(Sessions, held_id) is not None
+
+
+async def _flow_authoring_chat(
+    session: AsyncSession, *, tenant_id: UUID, user_id: UUID, created_at: datetime
+) -> Sessions:
+    """A Flow authoring chat that has not been asked anything yet."""
+    space = await _space(session, tenant_id=tenant_id, user_id=user_id)
+    flow = Flows(
+        name="Authoring chat flow",
+        tenant_id=tenant_id,
+        space_id=space.id,
+        created_by_user_id=user_id,
+        owner_user_id=user_id,
+        metadata_json={},
+        draft_revision=0,
+    )
+    assistant = Assistants(
+        name="Flow chat",
+        user_id=user_id,
+        space_id=space.id,
+        logging_enabled=False,
+        is_default=False,
+        published=False,
+        hidden=True,
+    )
+    session.add_all([flow, assistant])
+    await session.flush()
+    conversation = await _session(session, user_id=user_id, created_at=created_at)
+    session.add(
+        FlowAuthoringChats(
+            session_id=conversation.id,
+            assistant_id=assistant.id,
+            tenant_id=tenant_id,
+            space_id=space.id,
+            user_id=user_id,
+            flow_id=flow.id,
+        )
+    )
+    await session.flush()
+    return conversation
+
+
+async def test_an_empty_flow_authoring_chat_is_kept(
+    retention_session: AsyncSession, test_tenant, admin_user
+):
+    """A Flow authoring chat keeps its conversation, model and edit mode in a
+    row the session's deletion cascades to; an empty one past the grace period
+    is Flow data, not an abandoned chat. Mutant: the chat guard is dropped, so
+    the sweep deletes the session and the chat with it."""
+    old = datetime.now(timezone.utc) - timedelta(days=3)
+    chat = await _flow_authoring_chat(
+        retention_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        created_at=old,
+    )
+    chat_id = chat.id
+
+    report = await run_registered_retention(
+        retention_session, task_name=EMPTY_SESSIONS_TASK
+    )
+
+    assert "sessions.sessions_deleted" not in report.counts
+    assert await retention_session.get(Sessions, chat_id) is not None
+    assert await retention_session.get(FlowAuthoringChats, chat_id) is not None
