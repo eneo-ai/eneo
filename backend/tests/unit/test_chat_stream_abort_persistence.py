@@ -34,6 +34,9 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.assistant_service import NonStreamingAnswer
+from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+    TenantModelAdapter,
+)
 from eneo.sessions import session_service as session_service_module
 from eneo.sessions.session_service import (
     SessionService,
@@ -1252,63 +1255,162 @@ async def test_streaming_abort_keeps_the_tool_calls_already_made_without_text():
     session_service_mock.complete_question_with_answer.assert_not_called()
 
 
-def _call(call_id: str, status: str, result: str | None = None) -> ToolCallMetadata:
+def _call(
+    call_id: str,
+    status: str,
+    result: str | None = None,
+    *,
+    approved: bool | None = None,
+) -> ToolCallMetadata:
     return ToolCallMetadata(
         server_name="flows",
         tool_name="read_flow",
         tool_call_id=call_id,
+        approved=approved,
         result_status=status,
         result=result,
         mcp_tool_name="flows__read_flow",
     )
 
 
+def _chunk(response_type: ResponseType, *calls: ToolCallMetadata) -> Completion:
+    return Completion(response_type=response_type, tool_calls_metadata=list(calls))
+
+
+def _text(text: str) -> Completion:
+    return Completion(response_type=ResponseType.TEXT, text=text)
+
+
+def _always_active_skill_step() -> ToolCallMetadata:
+    """The step the adapter opens every turn with for an always-active Skill."""
+    runtime = SimpleNamespace(
+        initially_active_skills=lambda: [("protokoll", "Protokoll")]
+    )
+    (step,) = TenantModelAdapter._always_active_skill_metadata(  # pyright: ignore[reportPrivateUsage]
+        runtime  # pyright: ignore[reportArgumentType]
+    )
+    return step
+
+
+_SKILL_STEP = _always_active_skill_step()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    ("chunks", "expected_ids"),
+    ("chunks", "expected"),
     [
         pytest.param(
-            [
-                Completion(
-                    response_type=ResponseType.TOOL_CALL,
-                    tool_calls_metadata=[_call("call-1", "pending")],
-                )
-            ],
+            [_chunk(ResponseType.TOOL_CALL, _call("call-1", "pending"))],
             None,
             id="only-pending",
         ),
         pytest.param(
-            [
-                Completion(
-                    response_type=ResponseType.TOOL_APPROVAL_REQUIRED,
-                    tool_calls_metadata=[_call("call-1", "pending")],
-                )
-            ],
+            [_chunk(ResponseType.TOOL_APPROVAL_REQUIRED, _call("call-1", "pending"))],
             None,
             id="awaiting-approval",
         ),
         pytest.param(
             [
-                Completion(
-                    response_type=ResponseType.TOOL_CALL,
-                    tool_calls_metadata=[_call("call-1", "succeeded", "ok")],
-                ),
-                Completion(
-                    response_type=ResponseType.TOOL_CALL,
-                    tool_calls_metadata=[_call("call-2", "pending")],
+                _chunk(ResponseType.TOOL_APPROVAL_REQUIRED, _call("call-1", "pending")),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-1", "approved", approved=True),
                 ),
             ],
-            ["call-1"],
+            None,
+            id="approved-not-yet-run",
+        ),
+        pytest.param(
+            [
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-1", "succeeded", "ok", approved=True),
+                ),
+                _chunk(ResponseType.TOOL_CALL, _call("call-2", "pending")),
+            ],
+            [("call-1", True, "succeeded")],
             id="finished-and-pending",
+        ),
+        pytest.param(
+            [
+                _chunk(ResponseType.TOOL_APPROVAL_REQUIRED, _call("call-1", "pending")),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-1", "denied", approved=False),
+                ),
+            ],
+            [("call-1", False, "denied")],
+            id="denied-before-its-result",
+        ),
+        pytest.param(
+            [
+                _text("Jag ändrar flödet."),
+                _chunk(
+                    ResponseType.TOOL_APPROVAL_REQUIRED,
+                    _call("call-a", "pending"),
+                    _call("call-b", "pending"),
+                ),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-a", "denied", approved=False),
+                    _call("call-b", "approved", approved=True),
+                ),
+            ],
+            [("call-a", False, "denied")],
+            id="text-one-denied-one-running",
+        ),
+        pytest.param(
+            [
+                _text("Jag ändrar flödet."),
+                _chunk(ResponseType.TOOL_APPROVAL_REQUIRED, _call("call-a", "pending")),
+                _chunk(
+                    ResponseType.TOOL_APPROVAL_TIMEOUT,
+                    _call("call-a", "timeout_denied", approved=False),
+                ),
+                _chunk(
+                    ResponseType.TOOL_CALL,
+                    _call("call-a", "timeout_denied", approved=False),
+                    _call("call-b", "approved", approved=True),
+                ),
+            ],
+            [("call-a", False, "timeout_denied")],
+            id="text-one-timed-out-one-running",
+        ),
+        pytest.param(
+            [
+                _chunk(ResponseType.TOOL_CALL, _SKILL_STEP),
+                _chunk(ResponseType.TOOL_CALL, _call("call-1", "pending")),
+            ],
+            None,
+            id="skill-step-then-pending",
+        ),
+        pytest.param(
+            [
+                _chunk(ResponseType.TOOL_CALL, _SKILL_STEP),
+                _chunk(ResponseType.TOOL_APPROVAL_REQUIRED, _call("call-1", "pending")),
+            ],
+            None,
+            id="skill-step-then-awaiting-approval",
+        ),
+        pytest.param(
+            [_chunk(ResponseType.TOOL_CALL, _SKILL_STEP), _text("Hej")],
+            [(_SKILL_STEP.tool_call_id, True, "completed")],
+            id="skill-step-with-text",
         ),
     ],
 )
-async def test_streaming_abort_saves_only_tool_calls_that_ran(
-    chunks: list[Completion], expected_ids: list[str] | None
+async def test_streaming_abort_saves_tool_calls_that_ran_or_were_refused(
+    chunks: list[Completion],
+    expected: list[tuple[str | None, bool | None, str | None]] | None,
 ):
-    """A stop saves only the calls that have a result. A call still being
-    written or waiting for approval never ran; saving it would show it as
-    failed or done after a reload and take away the turn's "Försök igen"."""
+    """A stop saves the calls a reload can show as they were: a call that
+    ran (it has its result) and a call that was refused, denied or timed out,
+    which the person has already seen though its result comes later. A call
+    still being written, waiting for approval or approved but not yet run is
+    left out; saved, it would show as done or failed after a reload. The
+    always-active Skill step opens every turn: it is saved with other content
+    but does not save a turn on its own, so a turn stopped before anything
+    else keeps its "Försök igen"."""
 
     async def stream():
         for chunk in chunks:
@@ -1346,13 +1448,15 @@ async def test_streaming_abort_saves_only_tool_calls_that_ran(
         await gen.aclose()
         await asyncio.sleep(0)
 
-    if expected_ids is None:
+    if expected is None:
         assert persist_calls == []
     else:
         assert len(persist_calls) == 1
         stored = persist_calls[0]["tool_calls"]
         assert isinstance(stored, list)
-        assert [call.tool_call_id for call in stored] == expected_ids
+        assert [
+            (call.tool_call_id, call.approved, call.result_status) for call in stored
+        ] == expected
 
 
 @pytest.mark.asyncio
