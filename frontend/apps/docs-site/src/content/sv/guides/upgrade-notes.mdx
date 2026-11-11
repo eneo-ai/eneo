@@ -224,7 +224,7 @@ Discovery cachas i `OIDC_JWKS_CACHE_TTL_SECONDS` (3600) utan reserv med gamla v�
 
 **Gör:** varje backend når discovery-adressen, `jwks_uri` och tokenadressen. Annars kan ingen logga in efter den första timmen, eller direkt efter en omstart.
 
-**Kontroll:** kör `curl` mot discovery-adressen inifrån backend-containern.
+**Kontroll:** kör `curl --noproxy '*'` mot discovery-adressen inifrån backend-containern. Eneo använder inte `HTTPS_PROXY` för sina anrop till leverantören, så en kontroll genom proxyn kan gå igenom medan inloggningen misslyckas.
 
 ### Anrop till leverantören stannar på dess värd, över https [#provider-requests-on-its-host]
 
@@ -238,7 +238,7 @@ En `discovery_endpoint` som inget anrop får gå till svarar `422`. Att spara el
 
 Med `OIDC_RESOURCE_SERVER_ENABLED=true` gäller samma regler för discovery-dokumentet för `OIDC_ACCEPTED_ISSUER` och för dess `jwks_uri`, som måste ligga på utfärdarens värd. `allowed_endpoint_hosts` gäller inte de här anropen, och att flytta inställningarna till Eneo ändrar inte det. En leverantör som bryter mot en regel får varje bearer-token att svara `401`, och backenden loggar `Failed to fetch JWKS for IdP token validation`.
 
-**Gör:** före uppgraderingen, kör `curl -s <discovery-adress> | jq -r '.issuer, .token_endpoint, .jwks_uri'` och jämför värdarna. Direkt efter uppgraderingen, gör `PATCH` på `allowed_endpoint_hosts` med varje annan värd. Med miljöinställningar och en annan värd: [flytta inställningarna till Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) och lägg till listan. En leverantör på backendens maskin: sätt `ENVIRONMENT=development` (bara i utveckling) eller ge leverantören en riktig värd. Med åtkomsttoken och en `jwks_uri` på en annan värd än `OIDC_ACCEPTED_ISSUER` finns inget i Eneo som tillåter det: servera nycklarna på utfärdarens värd eller sätt `OIDC_RESOURCE_SERVER_ENABLED=false`.
+**Gör:** före uppgraderingen, kör `curl --noproxy '*' -s <discovery-adress> | jq -r '.issuer, .token_endpoint, .jwks_uri'` och jämför värdarna. Direkt efter uppgraderingen, gör `PATCH` på `allowed_endpoint_hosts` med varje annan värd. Med miljöinställningar och en annan värd: [flytta inställningarna till Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) och lägg till listan. En leverantör på backendens maskin: sätt `ENVIRONMENT=development` (bara i utveckling) eller ge leverantören en riktig värd. Med åtkomsttoken och en `jwks_uri` på en annan värd än `OIDC_ACCEPTED_ISSUER` finns inget i Eneo som tillåter det: servera nycklarna på utfärdarens värd eller sätt `OIDC_RESOURCE_SERVER_ENABLED=false`.
 
 **Kontroll:** backenden loggar inget `OIDC provider configuration is unusable` och, med åtkomsttoken, inget `Failed to fetch JWKS for IdP token validation`.
 

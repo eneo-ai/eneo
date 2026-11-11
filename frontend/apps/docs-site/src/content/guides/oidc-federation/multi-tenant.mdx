@@ -359,7 +359,7 @@ curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
   -d '{"allowed_endpoint_hosts": ["oauth2.googleapis.com", "www.googleapis.com"]}'
 ```
 
-A save that answers `Failed to fetch discovery document: …` names why the request failed: for example a redirect, an answer that is not a JSON object, or an address that is not allowed. See [Eneo's requests to the provider](/guides/oidc-federation#provider-contract).
+A save that answers `Failed to fetch discovery document: …` names why the request failed: for example a redirect, an answer that is not a JSON object, or an address that is not allowed. When it says the provider could not be reached, run `curl --noproxy '*'` against the discovery URL from inside the backend container: Eneo does not use `HTTPS_PROXY` for its requests to the provider. See [Eneo's requests to the provider](/guides/oidc-federation#provider-contract).
 
 ### Debug mode
 
