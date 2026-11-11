@@ -68,7 +68,8 @@ flowchart TB
 
 - Remove the `OIDC_*` variables the startup warning names. [Sign-in table](#sign-in)
 - Check who holds the administrator role. [Administrators](#admins-change-sign-in-settings)
-- `PUT` automation sends `subject_claim`; scripts accept `502`. [Saving settings](#provider-save-checks-sign-in)
+- `PUT` automation sends `subject_claim`. [Account binding](#account-binding)
+- Scripts accept `502`. [Saving settings](#provider-save-checks-sign-in)
 - Check the allowed domains if you used the move script with 2.3 or earlier. [Move script](#move-script-allowed-domains)
 
 **MobilityGuard settings** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): rename to the `OIDC_*` names. [MobilityGuard](#mobilityguard-sign-in-removed)
@@ -167,7 +168,7 @@ flowchart TB
 
 The first federated sign-in binds the account, per tenant, to issuer, client ID, subject claim and subject value. Later sign-ins never match by email; a conflict answers `403 identity_conflict`. Keycloak, Okta, Auth0 and Zitadel use one `sub` for every client by default.
 
-**Do:** for per-client `sub` providers with stored settings, set `subject_claim` right after the upgrade (`PATCH /api/v1/admin/federation`). Open a migration window before a new issuer, a new client ID with per-client `sub`, or a new subject claim.
+**Do:** for per-client `sub` providers with stored settings, set `subject_claim` right after the upgrade (`PATCH /api/v1/admin/federation`). Open a migration window before a new issuer, a new client ID with per-client `sub`, or a new subject claim. Automation that replaces the settings with `PUT` must send `subject_claim`.
 
 **Check:** `GET /api/v1/admin/users/{user_id}/identity` lists one binding per provider and client.
 

@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@7f89d8058262
+translationSource: guides/upgrade-notes.mdx@e60996ecad41
 ---
 
 import { Callout } from "nextra/components";
@@ -73,7 +73,8 @@ flowchart TB
 
 - Ta bort de `OIDC_*`-variabler som varningen vid start nämner. [Inloggningstabellen](#sign-in)
 - Kontrollera vem som har administratörsrollen. [Administratörer](#admins-change-sign-in-settings)
-- Automatisering med `PUT` skickar `subject_claim`; skript godtar `502`. [Spara inställningar](#provider-save-checks-sign-in)
+- Automatisering med `PUT` skickar `subject_claim`. [Kontobindning](#account-binding)
+- Skript godtar `502`. [Spara inställningar](#provider-save-checks-sign-in)
 - Kontrollera de tillåtna domänerna om du använde flyttskriptet med 2.3 eller tidigare. [Flyttskriptet](#move-script-allowed-domains)
 
 **MobilityGuard-inställningar** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): döp om till `OIDC_*`-namnen. [MobilityGuard](#mobilityguard-sign-in-removed)
@@ -172,7 +173,7 @@ flowchart TB
 
 Den första federerade inloggningen binder kontot, per organisation, till utfärdare, klient-id, subjektsanspråk och subjektsvärde. Senare inloggningar matchar aldrig via e-post; en konflikt svarar `403 identity_conflict`. Keycloak, Okta, Auth0 och Zitadel använder som standard samma `sub` för alla klienter.
 
-**Gör:** för leverantörer med `sub` per klient och lagrade inställningar, sätt `subject_claim` direkt efter uppgraderingen (`PATCH /api/v1/admin/federation`). Öppna ett migreringsfönster före en ny utfärdare, ett nytt klient-id med `sub` per klient, eller ett nytt subjektsanspråk.
+**Gör:** för leverantörer med `sub` per klient och lagrade inställningar, sätt `subject_claim` direkt efter uppgraderingen (`PATCH /api/v1/admin/federation`). Öppna ett migreringsfönster före en ny utfärdare, ett nytt klient-id med `sub` per klient, eller ett nytt subjektsanspråk. Automatisering som ersätter inställningarna med `PUT` måste skicka `subject_claim`.
 
 **Kontroll:** `GET /api/v1/admin/users/{user_id}/identity` visar en bindning per leverantör och klient.
 
