@@ -103,9 +103,10 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "result with many fields."
     ),
     FlowSuggestionCode.UNREAD_CONTRACT_FIELDS: (
-        "Declare only the output fields that later steps read, except in the "
-        "last step, a step with a review, and a step that posts its result or "
-        "runs once per item, per source or per section."
+        "In a step that writes its result from its AI instruction, declare "
+        "only the output fields that later steps read, except in the last "
+        "step, a step with a review, and a step that posts its result or runs "
+        "once per item, per source or per section."
     ),
     FlowSuggestionCode.UNREAD_RESULT: (
         "Add an intermediate step only when a later step reads its result, "

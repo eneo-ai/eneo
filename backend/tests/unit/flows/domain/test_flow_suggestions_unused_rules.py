@@ -563,6 +563,22 @@ def _per_source_producer(**columns: Any) -> list[SuggestionStep]:
     return [_producer(input_type="document", **columns), _title_reader()]
 
 
+def _second_contract(**columns: Any) -> list[SuggestionStep]:
+    """Step 2 passes step 1's JSON on under a contract step 3 reads one
+    field of."""
+    return [
+        _step(1, output_type="json", output_contract=_CONTRACT),
+        _step(
+            2,
+            input_type="json",
+            output_type="json",
+            output_contract=_CONTRACT,
+            **columns,
+        ),
+        _step(3, input_source="flow_input", input_bindings=_STEP_2_TITLE),
+    ]
+
+
 @pytest.mark.parametrize(
     ("code", "concept", "steps"),
     [
@@ -582,6 +598,11 @@ def _per_source_producer(**columns: Any) -> list[SuggestionStep]:
             _mapped_producer(input_config={"item_map": {"enabled": True}}),
         ),
         (_FIELDS, "per source", _per_source_producer(input_config=_PER_SOURCE)),
+        (
+            _FIELDS,
+            "from its AI instruction",
+            _second_contract(output_mode="copy_input", prompt_text=None),
+        ),
         (
             _FIELDS,
             "per section",
@@ -625,6 +646,7 @@ def test_a_situation_the_engine_does_not_judge_is_named_in_its_rule(
     [
         (_FIELDS, _mapped_producer()),
         (_FIELDS, _per_source_producer()),
+        (_FIELDS, _second_contract()),
         (_UNREAD, [_step(1), _unreader()]),
     ],
 )
