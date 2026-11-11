@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@99e6ed62e29c
+translationSource: guides/upgrade-notes.mdx@9b256c0b4bab
 ---
 
 import { Callout } from "nextra/components";
@@ -120,7 +120,7 @@ flowchart TB
 | [`TRUSTED_PROXY_COUNT` räknar proxyer exakt](#trusted-proxy-count) | Mer än en proxy, eller nginx | Sätt den till antalet proxyer |
 | [React-webbappen körs på huvudvärden](#react-web-app-main-host) | Användare av referensfilen för Compose | Välj React eller Svelte |
 | [Härdning av HTTP](#http-hardening) | Proxyer som sätter HSTS eller CSP | Bestäm vem som äger HSTS och CSP |
-| Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500`; `422` listar bara `loc`, `type` och `msg`; ett oväntat fel svarar `500` med koden `login_unavailable` | API-klienter med lösenord | Hantera de två koderna; uppdatera tolkningen av `422` |
+| Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500`; `422` listar bara `loc`, `type` och `msg`; ett oväntat fel svarar `500` med koden `internal_error` och ett `error_id` | API-klienter med lösenord | Hantera de två koderna; uppdatera tolkningen av `422` |
 | [Lösenordens livscykel](#password-lifecycle) | Förinlagda användare, lösenordsintegrationer | Kontrollera `DEFAULT_USER_PASSWORD` |
 
 ### API-kontrakt [#api-contract]

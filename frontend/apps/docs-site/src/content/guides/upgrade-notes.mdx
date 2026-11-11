@@ -115,7 +115,7 @@ flowchart TB
 | [`TRUSTED_PROXY_COUNT` counts proxies exactly](#trusted-proxy-count) | More than one proxy, or nginx | Set it to the proxy count |
 | [The React web app runs on the main host](#react-web-app-main-host) | Reference Compose file users | Choose React or Svelte |
 | [HTTP hardening](#http-hardening) | Proxies that set HSTS or CSP | Decide who owns HSTS and CSP |
-| Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500`; `422` lists only `loc`, `type` and `msg`; an unexpected failure answers `500` with code `login_unavailable` | Password API clients | Handle the two codes; update `422` parsing |
+| Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500`; `422` lists only `loc`, `type` and `msg`; an unexpected failure answers `500` with code `internal_error` and an `error_id` | Password API clients | Handle the two codes; update `422` parsing |
 | [Password lifecycle](#password-lifecycle) | Seeded users, password integrations | Check `DEFAULT_USER_PASSWORD` |
 
 ### API contract [#api-contract]
