@@ -66,68 +66,82 @@ test("workflow, local action, scope and gate changes force full validation", () 
 
 test("apt has deadlines only on its network phase and installs nothing it did not download", () => {
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-playwright/action.yml"), "utf8");
+  const toolRuntime = fs.readFileSync(path.join(root, ".github/workflows/tool_runtime_image.yml"), "utf8");
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   assert.match(action, /playwright install-deps --dry-run chromium/);
   assert.match(action, /"\$GITHUB_WORKSPACE\/\.github\/scripts\/ci-apt-install\.sh" "\$\{missing\[@\]\}"/);
   assert.doesNotMatch(action, /^        bun run --bun playwright install-deps chromium$/m);
 
-  // Stubs record every apt-get call and whether it ran under `timeout`; FAIL_DOWNLOADS
-  // download attempts fail before one succeeds.
+  // Stubs record every apt-get call with its deadline and the mirror apt reads at that
+  // moment; FAIL lists the mirrors on which update or the download fails, and on which
+  // update fetches no index but exits 0 (stale).
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-apt-"));
   try {
     const log = path.join(dir, "apt.log");
     const stub = (name, body) => fs.writeFileSync(path.join(dir, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
-    // `sed -i` without a suffix is GNU syntax; on macOS the stub supplies BSD's empty one.
-    stub("sudo", [
-      '[ "$1" = tee ] && { cat >/dev/null; exit 0; }',
-      'if [ "$1" = sed ] && ! sed --version >/dev/null 2>&1; then shift 2; exec sed -i "" "$@"; fi',
-      'exec "$@"',
-    ].join("\n"));
-    stub("timeout", 'shift 2\nDEADLINE=1 exec "$@"');
+    stub("sudo", '[ "$1" = tee ] && [ "$2" != "$APT_MIRRORS" ] && { cat >/dev/null; exit 0; }\nexec "$@"');
+    stub("timeout", 'deadline=$2\nshift 2\nDEADLINE=$deadline exec "$@"');
     stub("apt-get", [
-      'echo "${DEADLINE:+deadline }$*" >> "$APT_LOG"',
-      'if [[ "$*" == *--download-only* ]]; then',
-      '  n=$(grep -c -- --download-only "$APT_LOG")',
-      '  [ "$n" -gt "${FAIL_DOWNLOADS:-0}" ]',
-      "fi",
+      'mirror=$(head -n1 "$APT_MIRRORS" | cut -f1)',
+      'echo "${DEADLINE:-none} $mirror $*" >> "$APT_LOG"',
+      'kind=install; [ "$2" = update ] && kind=update; [[ "$*" == *--download-only* ]] && kind=download',
+      '[ $kind = update ] && [[ " $FAIL " == *" stale@$mirror "* ]] && echo "W: Failed to fetch mirror+file:/etc/apt/apt-mirrors.txt/dists/noble/InRelease  Temporary failure resolving" >&2',
+      '[[ " $FAIL " != *" $kind@$mirror "* ]]',
     ].join("\n"));
     const mirrors = path.join(dir, "apt-mirrors.txt");
-    const hosted = "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://archive.ubuntu.com/ubuntu/\tpriority:2\n"
-      + "https://security.ubuntu.com/ubuntu/\tpriority:3\n";
-    const run = (args, failDownloads, mirrorList = hosted) => {
+    const azure = "http://azure.archive.ubuntu.com/ubuntu/";
+    const archive = "https://archive.ubuntu.com/ubuntu/";
+    const kernel = "http://mirrors.edge.kernel.org/ubuntu/";
+    const hosted = `${azure}\tpriority:1\n${archive}\tpriority:2\nhttps://security.ubuntu.com/ubuntu/\tpriority:3\n`;
+    const only = (mirror) => `${mirror}\tpriority:1\n`;
+    const run = (args, fail = [], mirrorList = hosted) => {
       fs.rmSync(log, { force: true });
       fs.writeFileSync(mirrors, mirrorList);
       const result = spawnSync("bash", [path.join(root, ".github/scripts/ci-apt-install.sh"), ...args], {
         encoding: "utf8", timeout: 10_000,
-        env: {
-          ...process.env, PATH: `${dir}:${process.env.PATH}`, APT_LOG: log, APT_MIRRORS: mirrors,
-          FAIL_DOWNLOADS: String(failDownloads),
-        },
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, APT_LOG: log, APT_MIRRORS: mirrors, FAIL: fail.join(" ") },
       });
       const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
       return { status: result.status, calls, mirrors: fs.readFileSync(mirrors, "utf8") };
     };
-    const update = "deadline -q update";
-    const download = "deadline -q install -y --no-install-recommends --download-only fonts-a fonts-b";
-    const install = "install -y -q --no-install-recommends --no-download fonts-a fonts-b";
+    const packages = ["fonts-a", "fonts-b"];
+    const update = (mirror) => `60s ${mirror} -q update`;
+    const download = (mirror) => `180s ${mirror} -q install -y --no-install-recommends --download-only fonts-a fonts-b`;
+    const install = (mirror) => `none ${mirror} install -y -q --no-install-recommends --no-download fonts-a fonts-b`;
 
-    const fallback = hosted.split("\n").slice(1).join("\n");
-    assert.deepEqual(run(["fonts-a", "fonts-b"], 0), { status: 0, calls: [update, download, install], mirrors: hosted });
-    // A failed download leaves the Azure mirror and resumes; dpkg still runs only after it.
-    assert.deepEqual(run(["fonts-a", "fonts-b"], 1),
-      { status: 0, calls: [update, download, download, install], mirrors: fallback });
-    // Three failed downloads stop the job without starting dpkg, and keep the other mirrors.
-    assert.deepEqual(run(["fonts-a", "fonts-b"], 3),
-      { status: 1, calls: [update, download, download, download], mirrors: fallback });
-    // A runner without the Azure mirror (an AWS-hosted one) retries on its own list.
-    assert.deepEqual(run(["fonts-a", "fonts-b"], 1, fallback),
-      { status: 0, calls: [update, download, download, install], mirrors: fallback });
-    assert.deepEqual(run([], 0), { status: 0, calls: [], mirrors: hosted });
+    assert.deepEqual(run(packages), { status: 0, calls: [update(azure), download(azure), install(azure)], mirrors: hosted });
+    // Update exits 0 when it fetched no index ("ignored, or old ones used", run 43049732281);
+    // that mirror gets no download, and the next one fetches its own index first.
+    assert.deepEqual(run(packages, [`stale@${azure}`]), {
+      status: 0, calls: [update(azure), update(archive), download(archive), install(archive)], mirrors: only(archive),
+    });
+    // A failed download also moves apt to the next mirror, which fetches its own index.
+    assert.deepEqual(run(packages, [`download@${azure}`]), {
+      status: 0, calls: [update(azure), download(azure), update(archive), download(archive), install(archive)], mirrors: only(archive),
+    });
+    // A mirror whose index cannot be fetched gets no download; the third mirror installs.
+    assert.deepEqual(run(packages, [`download@${azure}`, `update@${archive}`]), {
+      status: 0, calls: [update(azure), download(azure), update(archive), update(kernel), download(kernel), install(kernel)], mirrors: only(kernel),
+    });
+    // Three failed attempts use three different mirrors and never start dpkg.
+    assert.deepEqual(run(packages, [`download@${azure}`, `download@${archive}`, `download@${kernel}`]), {
+      status: 1, calls: [update(azure), download(azure), update(archive), download(archive), update(kernel), download(kernel)], mirrors: only(kernel),
+    });
+    // A runner without the Azure mirror (an AWS-hosted one) starts on its own list and
+    // keeps the same fixed order, so archive.ubuntu.com is tried twice.
+    const aws = hosted.split("\n").slice(1).join("\n");
+    assert.deepEqual(run(packages, [`download@${archive}`], aws), {
+      status: 0, calls: [update(archive), download(archive), update(archive), download(archive), update(kernel), download(kernel), install(kernel)], mirrors: only(kernel),
+    });
+    assert.deepEqual(run([]), { status: 0, calls: [], mirrors: hosted });
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+  // The PDF sidecar's libraries come through the same mirror fallback (run 43049725075).
+  assert.match(toolRuntime, /"\$GITHUB_WORKSPACE\/\.github\/scripts\/ci-apt-install\.sh" \\\n +libpango-1\.0-0 /);
+  assert.doesNotMatch(toolRuntime, /apt-get/);
 
-  // Three bounded attempts per phase still leave the rest of each Playwright job its time.
+  // The three bounded attempts (13.5 min at worst) still leave each Playwright job its time.
   const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/)
     .filter((block) => block.includes("uses: ./.github/actions/setup-playwright"));
   assert.ok(jobs.length > 0);

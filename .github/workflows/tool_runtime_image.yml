@@ -66,8 +66,7 @@ jobs:
       # The PDF tests need the WeasyPrint sidecar as the image installs it.
       - name: Install PDF sidecar
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE/.github/scripts/ci-apt-install.sh" \
             libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 fontconfig \
             fonts-dejavu-core fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
           sudo fc-cache -f
