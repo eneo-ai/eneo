@@ -26,12 +26,14 @@ from eneo.authentication import auth_service as auth_service_module
 from eneo.authentication import oidc_resource_server
 from eneo.authentication.auth_models import CredentialFacts
 from eneo.authentication.auth_service import AuthService
+from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.exceptions import AuthenticationException, UniqueException
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users import user_service as user_service_module
 from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.fake_oidc_provider import _Response as FakeResponse
 from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
 ISSUER = "https://idp.example.com"
@@ -78,21 +80,6 @@ def _make_idp_token(
     if email_verified is not None:
         payload["email_verified"] = email_verified
     return jwt.encode(payload, private_pem, algorithm=algorithm, headers={"kid": kid})
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status: int = 200):
-        self._payload = payload
-        self.status = status
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):  # noqa: ARG002
-        return False
-
-    async def json(self):
-        return self._payload
 
 
 class FakeHttpClient:
@@ -310,7 +297,7 @@ def setup(monkeypatch, idp_key):
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, tenant_repo, audit_service)
 
@@ -415,7 +402,7 @@ async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key)
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, TenantRepoStub(tenant), audit_service)
     token = _make_idp_token(private_pem, "kid-a", email="new@example.com")
@@ -445,7 +432,7 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, TenantRepoStub(tenant), audit_service)
     token = _make_idp_token(private_pem, "kid-a", email="new@example.com")

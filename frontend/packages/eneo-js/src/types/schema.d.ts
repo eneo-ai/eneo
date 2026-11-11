@@ -15594,6 +15594,8 @@ export interface components {
       issuer?: string | null;
       /** Allowed Domains */
       allowed_domains: string[];
+      /** Allowed Endpoint Hosts */
+      allowed_endpoint_hosts?: string[];
       /** Additional Redirect Uris */
       additional_redirect_uris: string[];
       /** Signing Algorithms */
@@ -20294,6 +20296,15 @@ export interface components {
        */
       allowed_domains?: string[] | null;
       /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names (no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
+      /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri
        * @example https://stockholm.eneo.se
@@ -21961,6 +21972,15 @@ export interface components {
        *     ]
        */
       allowed_domains?: string[];
+      /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names (no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
       /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri

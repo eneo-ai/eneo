@@ -1701,8 +1701,9 @@ async def test_initiate_refuses_a_templated_issuer_before_storing_anything(
     async with _http(container) as client:
         refused = await client.get("/auth/initiate", params={"tenant": SINGLE_USE_SLUG})
 
+    # The visitor is not signed in: the reason goes to the log only.
     assert refused.status_code == 500
-    assert "template" in refused.json()["detail"]
+    assert refused.json()["detail"] == federation_router.UNUSABLE_PROVIDER_DETAIL
     assert "authorization_url" not in refused.text
     assert redis_client._store == {}
 
