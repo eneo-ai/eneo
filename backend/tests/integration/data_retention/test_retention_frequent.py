@@ -536,11 +536,15 @@ async def test_overlapping_ticks_never_run_the_same_task_at_once(test_tenant) ->
 
     first = asyncio.create_task(tick())
     await inside.wait()
-    # A second tick that entered the chunk would wait on `release` forever.
-    async with asyncio.timeout(30):
-        second = await tick()
-    release.set()
-    first_reports = await first
+    # A second tick that entered the chunk would wait on `release` forever;
+    # the first tick is released also when the limit fires, so it ends and
+    # the cleanup does not wait on its chunk.
+    try:
+        async with asyncio.timeout(30):
+            second = await tick()
+    finally:
+        release.set()
+        first_reports = await first
 
     assert [(r.task, r.outcome) for r in second] == [("tests.slow", None)]  # type: ignore[attr-defined]
     assert [(r.task, r.outcome) for r in first_reports] == [  # type: ignore[attr-defined]
@@ -657,8 +661,8 @@ def _health_of(
     monkeypatch.setattr(retention_tasks, "retention_task_registrations", registrations)
 
 
-async def _health() -> RetentionHealth:
-    return await retention_tasks._read_retention_health(get_settings())
+async def _health(settings: Settings | None = None) -> RetentionHealth:
+    return await retention_tasks._read_retention_health(settings or get_settings())
 
 
 @pytest.mark.parametrize(
@@ -847,19 +851,28 @@ async def _runtime_error(session: AsyncSession) -> None:
 
 
 async def _slow(session: AsyncSession) -> None:
-    # Longer than the whole health read's time limit (one second).
-    await session.execute(sa.text("SELECT pg_sleep(2)"))
+    # Longer than the whole health read's time limit (two seconds in this
+    # case), so only the statement timeout (one second) can end it in time.
+    await session.execute(sa.text("SELECT pg_sleep(3)"))
 
 
 @pytest.mark.parametrize(
-    "fail",
-    [_sql_error, _os_error, _runtime_error, _slow],
+    "fail,limit_seconds",
+    [
+        (_sql_error, None),
+        (_os_error, None),
+        (_runtime_error, None),
+        # A two-second limit leaves the other task a second to read after the
+        # statement timeout, also on a busy parallel run.
+        (_slow, 2.0),
+    ],
     ids=["sql-error", "os-error", "runtime-error", "statement-timeout"],
 )
 async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
     test_tenant,
     monkeypatch: pytest.MonkeyPatch,
     fail: Callable[[AsyncSession], Awaitable[None]],
+    limit_seconds: float | None,
 ) -> None:
     """A probe's error, of any kind, is its own task's: that task reads
     unknown and the next task's overdue work still degrades the block. A slow
@@ -890,8 +903,13 @@ async def test_a_failing_probe_leaves_the_other_tasks_health_readable(
         )
 
     monkeypatch.setattr(retention_tasks, "retention_task_registrations", registrations)
+    settings = get_settings()
+    if limit_seconds is not None:
+        settings = settings.model_copy(
+            update={"retention_health_timeout_seconds": limit_seconds}
+        )
 
-    health = await _health()
+    health = await _health(settings)
 
     assert [(task.name, task.status) for task in health.tasks] == [
         ("tests.broken", RetentionHealthStatus.UNKNOWN),
