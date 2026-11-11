@@ -3413,14 +3413,15 @@ class AssistantService:
                     # error, network drop, etc. The placeholder row already captures
                     # the user's question, so nothing streamed means there is
                     # nothing further to persist — skip the redundant UPDATE.
-                    # Anything else (partial answer or reasoning streamed before
-                    # abort) must be saved via a fresh DB session because the
+                    # Anything else (partial answer, reasoning, or tool calls made
+                    # before abort) must be saved via a fresh DB session because the
                     # request-scoped AsyncSession may already be torn down and
                     # `await` across GeneratorExit is fragile.
                     if not completed and (
                         response_string
                         or reasoning_string
                         or generated_files
+                        or tool_calls
                         or skill_runtime.snapshot().changed
                     ):
                         from eneo.sessions.session_service import (

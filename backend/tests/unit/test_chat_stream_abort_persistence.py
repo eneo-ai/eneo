@@ -1183,6 +1183,76 @@ async def test_streaming_handle_response_skips_partial_save_when_no_content():
 
 
 @pytest.mark.asyncio
+async def test_streaming_abort_keeps_the_tool_calls_already_made_without_text():
+    """A turn stopped after its tools ran but before any answer text keeps those
+    calls and their results: the activity panel shows them and reads each
+    result from the stored question."""
+
+    async def tool_call_then_stop():
+        yield Completion(
+            response_type=ResponseType.TOOL_CALL,
+            tool_calls_metadata=[
+                ToolCallMetadata(
+                    server_name="flows",
+                    tool_name="read_flow",
+                    arguments={"section": "overview"},
+                    tool_call_id="call-1",
+                    approved=True,
+                    result_status="succeeded",
+                    result="Flödet har 1 steg.",
+                    mcp_tool_name="flows__read_flow",
+                )
+            ],
+        )
+
+    response = SimpleNamespace(
+        completion=tool_call_then_stop(),
+        total_token_count=5,
+        usage=None,
+        extended_logging=None,
+    )
+    session_service_mock = AsyncMock()
+    svc = _make_assistant_service_for_streaming(session_service_mock)
+    persist_calls: list[dict[str, object]] = []
+
+    async def tracking_persist(**kwargs: object) -> None:
+        persist_calls.append(kwargs)
+
+    with patch.object(
+        session_service_module,
+        "persist_partial_question_answer",
+        tracking_persist,
+    ):
+        from eneo.assistants.assistant_service import AssistantService
+
+        gen = await AssistantService._handle_response(  # pyright: ignore[reportPrivateUsage]
+            svc,  # pyright: ignore[reportArgumentType]
+            response=response,
+            datastore_result=SimpleNamespace(info_blobs=[], no_duplicate_chunks=[]),
+            question="hello?",
+            files=[],
+            completion_model=SimpleNamespace(id=uuid4(), name="gpt-4"),
+            session=_make_session_in_db(),
+            stream=True,
+            assistant_id=uuid4(),
+            question_id=uuid4(),
+            **_skill_runtime_args(),
+        )
+
+        await _drain_until(gen, 1)
+        await gen.aclose()
+        await asyncio.sleep(0)
+
+    assert len(persist_calls) == 1
+    stored = persist_calls[0]["tool_calls"]
+    assert isinstance(stored, list)
+    assert [(call.tool_call_id, call.result) for call in stored] == [
+        ("call-1", "Flödet har 1 steg.")
+    ]
+    session_service_mock.complete_question_with_answer.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_streaming_abort_links_files_a_tool_already_produced():
     """A file a tool produced before the model failed is linked to the question
     by the partial save, so it is never orphaned (invisible, never re-offered,
