@@ -1,7 +1,7 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { EneoApiError } from "@/lib/api/errors";
+import { testTranslator } from "@/test/i18n";
 import { FlowEditorError } from "./editor-api";
 import {
   anchorForPath,
@@ -12,7 +12,7 @@ import {
   type Translator
 } from "./field-problems";
 
-const t = createTranslator({ locale: "sv", messages }) as unknown as Translator;
+const t = testTranslator() as unknown as Translator;
 
 function refusal(code: string, context: Record<string, unknown> = {}, status = 400) {
   return new FlowEditorError(new EneoApiError("English text", { status, reason: code }), context);
@@ -61,11 +61,8 @@ describe("refusalAnchor", () => {
   });
 
   it("gives a refusal's sentence the values it names", () => {
-    const sentence = createTranslator({
-      locale: "sv",
-      messages: {
-        flow_validation_msg_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
-      }
+    const sentence = testTranslator("sv", {
+      flow_validation_msg_template_binding_not_scalar: "Fältet {placeholder} tar ett värde."
     }) as unknown as Translator;
     expect(
       refusalMessage("template_binding_not_scalar", sentence, { placeholder: "Deltagare" })

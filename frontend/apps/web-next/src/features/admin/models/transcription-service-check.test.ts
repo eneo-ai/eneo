@@ -1,10 +1,9 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import messages from "@/lib/i18n/messages/sv.json";
 import type { Schema } from "@/lib/api/models";
+import { testTranslator } from "@/test/i18n";
 import { describeCheck } from "./transcription-service-check";
 
-const t = createTranslator({ locale: "sv", messages }) as unknown as (
+const t = testTranslator() as unknown as (
   key: string,
   values?: Record<string, string | number>
 ) => string;

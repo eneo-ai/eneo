@@ -1,7 +1,5 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import en from "@/lib/i18n/messages/en.json";
-import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { makeStep } from "./flow-fixtures";
 import {
   dismissedByText,
@@ -22,10 +20,8 @@ import {
 } from "./flow-suggestions";
 
 /** The app's real catalogs, looked up by any key as the section does. */
-const translator = (locale: string, messages: Record<string, string>) =>
-  createTranslator({ locale, messages });
-const t = translator("sv", sv);
-const tEn = translator("en", en);
+const t = testTranslator("sv");
+const tEn = testTranslator("en");
 
 type Read = { channel: string; site: string; selector: string[] };
 

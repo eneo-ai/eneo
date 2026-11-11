@@ -1,11 +1,11 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import type { Translator } from "./field-problems";
 import { kindRefusalText, newStepUpdate, uniqueStepName } from "./step-kinds";
 import { makeFlow, makeKindOption, makeKindRefusal, makeStep } from "./testing/fixtures";
 
-const t = createTranslator({ locale: "sv", messages }) as unknown as Translator;
+const t = testTranslator() as unknown as Translator;
 
 const OPTIONS = {
   name: "  Nytt steg ",

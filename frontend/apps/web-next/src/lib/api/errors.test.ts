@@ -1,7 +1,7 @@
-import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import {
   apiErrorFromResponse,
   EneoApiError,
@@ -158,10 +158,6 @@ describe("orOn404", () => {
   });
 });
 
-/** The app's real catalog, looked up by any key as the error mapping does. */
-const translator = (locale: string, messages: Record<string, string>) =>
-  createTranslator({ locale, messages });
-
 describe("getErrorMessage", () => {
   const t = (key: string) => `t(${key})`;
 
@@ -181,7 +177,7 @@ describe("getErrorMessage", () => {
       ["sv", sv],
       ["en", en]
     ] as const) {
-      const t = translator(locale, messages);
+      const t = testTranslator(locale, messages);
       expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
     }
   });
@@ -191,7 +187,7 @@ describe("getErrorMessage", () => {
       message: "PDF extraction failed. Is this really a PDF?",
       eneo_error_code: 9027
     });
-    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+    expect(getErrorMessage(error, testTranslator("sv"))).toBe(
       "Filen går inte att läsa. Öppna den och spara den igen, eller välj en annan fil."
     );
   });
@@ -218,7 +214,7 @@ describe("getErrorMessage", () => {
       ["sv", sv],
       ["en", en]
     ] as const) {
-      const t = translator(locale, messages);
+      const t = testTranslator(locale, messages);
       expect(getErrorMessage(error, t)).toBe(t(key));
     }
   });
@@ -233,10 +229,10 @@ describe("getErrorMessage", () => {
       request_id: "req-1",
       detail: { code: "rate_limit_exceeded", message: "Too many requests", retry_after_seconds: 12 }
     });
-    expect(getErrorMessage(limited, translator("sv", sv))).toBe(
+    expect(getErrorMessage(limited, testTranslator("sv"))).toBe(
       "För många förfrågningar just nu. Vänta en stund och försök igen."
     );
-    expect(getErrorMessage(limited, translator("en", en))).toBe(
+    expect(getErrorMessage(limited, testTranslator("en"))).toBe(
       "Too many requests right now. Wait a moment and try again."
     );
 
@@ -245,8 +241,8 @@ describe("getErrorMessage", () => {
       message: "Quota exceeded",
       eneo_error_code: 9008
     });
-    expect(getErrorMessage(quota, translator("sv", sv))).toBe(sv.eneo_error_9008);
-    expect(getErrorMessage(quota, translator("en", en))).toBe(en.eneo_error_9008);
+    expect(getErrorMessage(quota, testTranslator("sv"))).toBe(sv.eneo_error_9008);
+    expect(getErrorMessage(quota, testTranslator("en"))).toBe(en.eneo_error_9008);
   });
 
   it("falls back to the backend message for unmapped codes", () => {
@@ -266,7 +262,7 @@ describe("getErrorMessage", () => {
       ["sv", sv],
       ["en", en]
     ] as const) {
-      expect(getErrorMessage(error, translator(locale, messages))).toBe(error.message);
+      expect(getErrorMessage(error, testTranslator(locale, messages))).toBe(error.message);
     }
   });
 
@@ -283,7 +279,7 @@ describe("getErrorMessage", () => {
           eneo_error_code: 9007,
           code: reason
         }),
-        translator("en", en)
+        testTranslator("en")
       );
 
     expect(refusal("sharepoint_credentials_invalid", "SharePoint credentials are invalid")).toBe(
@@ -302,7 +298,7 @@ describe("getErrorMessage", () => {
     expect(refusal("something_else", "Something else")).toBe(
       getErrorMessage(
         new EneoApiError("Something else", { status: 400, code: 9007 }),
-        translator("en", en)
+        testTranslator("en")
       )
     );
   });
@@ -318,14 +314,14 @@ describe("getErrorMessage", () => {
       code: 9069
     });
 
-    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+    expect(getErrorMessage(error, testTranslator("sv"))).toBe(
       "Prompten är aktiv i styrningen för personlig assistent. Avaktivera den där först, och ta sedan bort den."
     );
   });
 
   it("localizes the password refusals, as the SvelteKit app does", () => {
     const refused = (code: number) =>
-      getErrorMessage(new EneoApiError("Refused", { status: 400, code }), translator("sv", sv));
+      getErrorMessage(new EneoApiError("Refused", { status: 400, code }), testTranslator("sv"));
 
     expect(refused(9058)).toBe(
       "Det nya lösenordet måste skilja sig från det nuvarande lösenordet."
@@ -344,7 +340,7 @@ describe("getErrorMessage", () => {
         "An unexpected error occurred. Please try again or contact support with the error_id."
     });
 
-    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+    expect(getErrorMessage(error, testTranslator("sv"))).toBe(
       code === undefined
         ? "Vi upplever vissa svårigheter, försök igen senare."
         : "Ett internt fel uppstod. Försök igen senare."
@@ -359,10 +355,10 @@ describe("getErrorMessage", () => {
       code: 9017
     });
 
-    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+    expect(getErrorMessage(error, testTranslator("sv"))).toBe(
       "Namnet används redan. Välj ett annat namn."
     );
-    expect(getErrorMessage(error, translator("en", en))).toBe(
+    expect(getErrorMessage(error, testTranslator("en"))).toBe(
       "This name is already in use. Choose a different one."
     );
   });
@@ -394,9 +390,9 @@ describe("errorReference", () => {
     expect(
       errorReferenceLines(
         failure({ errorId: "8bc91e0a", traceId: "trace-1" }),
-        translator("sv", sv)
+        testTranslator("sv")
       )
     ).toEqual(["Fel-ID: 8bc91e0a", "Spårnings-ID: trace-1"]);
-    expect(errorReferenceLines(new Error("boom"), translator("sv", sv))).toEqual([]);
+    expect(errorReferenceLines(new Error("boom"), testTranslator("sv"))).toEqual([]);
   });
 });

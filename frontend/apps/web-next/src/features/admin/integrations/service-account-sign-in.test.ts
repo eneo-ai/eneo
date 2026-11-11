@@ -1,11 +1,10 @@
-import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import sv from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { followServiceAccountSignIn, SignInAddressError } from "./service-account-sign-in";
 
 vi.mock("@/lib/toast", () => ({ toast: { error: vi.fn() } }));
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 describe("followServiceAccountSignIn", () => {
   afterEach(() => vi.unstubAllGlobals());

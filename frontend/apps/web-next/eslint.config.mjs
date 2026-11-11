@@ -279,6 +279,33 @@ const eslintConfig = defineConfig([
     }
   },
   {
+    // Tests take their translator from testTranslator: createTranslator handed
+    // a catalog literal makes use-intl infer every key, minutes of type
+    // checking. The block above leaves tests out, so this rule is the only
+    // no-restricted-imports that applies to them.
+    files: ["src/**/*.test.{ts,tsx}", "src/test/**"],
+    ignores: ["src/test/i18n.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "use-intl",
+              importNames: ["createTranslator"],
+              message: "Use `testTranslator` from @/test/i18n: it keeps the catalog's types cheap."
+            },
+            {
+              name: "use-intl/core",
+              importNames: ["createTranslator"],
+              message: "Use `testTranslator` from @/test/i18n: it keeps the catalog's types cheap."
+            }
+          ]
+        }
+      ]
+    }
+  },
+  {
     // Visible focus (2.4.7, 1.4.11): no translucent focus rings (`ring-ring/50`
     // is about 2:1) and no `outline-none` without a focus-visible replacement
     // in the same class list. Class strings live in .ts files too.

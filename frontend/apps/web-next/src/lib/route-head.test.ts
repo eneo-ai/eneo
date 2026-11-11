@@ -1,9 +1,8 @@
-import { createTranslator } from "use-intl";
 import { expect, it } from "vitest";
-import messages from "@/lib/i18n/messages/sv.json";
+import { testTranslator } from "@/test/i18n";
 import { resourceTitle, rootHead, routeTitle, spaceName, spaceTitle, title } from "./route-head";
 
-const t = createTranslator({ locale: "sv", messages });
+const t = testTranslator();
 
 it("titles a route with its message and the app name", () => {
   expect(routeTitle("login")({ match: { context: { t } } })).toEqual({

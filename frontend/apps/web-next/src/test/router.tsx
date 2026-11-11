@@ -21,9 +21,8 @@ import {
 } from "@tanstack/react-router";
 import { act } from "@testing-library/react";
 import { createContext, use } from "react";
-import { createTranslator } from "use-intl";
-import messages from "@/lib/i18n/messages/sv.json";
 import { createAppRouter } from "@/router";
+import { testTranslator } from "@/test/i18n";
 import { renderInApp, testQueryClient, type RenderInAppOptions } from "./render";
 
 export type RenderWithRouterOptions = Omit<RenderInAppOptions, "route"> & {
@@ -73,7 +72,7 @@ export async function renderWithRouter(
       : Ui
   });
   const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
+    { queryClient, t: testTranslator() },
     {
       routeTree: routes ? root.addChildren(routes(root)) : root,
       history: history ?? createMemoryHistory({ initialEntries: [route] })

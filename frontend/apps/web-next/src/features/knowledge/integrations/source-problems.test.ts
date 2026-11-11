@@ -1,11 +1,10 @@
+import { testTranslator } from "@/test/i18n";
 import type { IntegrationKnowledge } from "../knowledge";
 import { describe, expect, it } from "vitest";
-import { createTranslator } from "use-intl";
-import sv from "@/lib/i18n/messages/sv.json";
 import { buildSourceProblems, isCredentialsError, type SkippedDocuments } from "./source-problems";
 import type { SkipReasonCode } from "./skip-reasons";
 
-const t = createTranslator({ locale: "sv", messages: sv as Record<string, string> });
+const t = testTranslator();
 
 type Metadata = NonNullable<IntegrationKnowledge["metadata"]>;
 

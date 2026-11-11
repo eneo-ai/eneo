@@ -2,11 +2,11 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { createTranslator } from "use-intl";
 import { BootContext } from "@/boot-context";
 import { makeQueryClient } from "@/lib/api/query";
 import messages from "@/lib/i18n/messages/sv.json";
 import { createAppRouter } from "@/router";
+import { testTranslator } from "@/test/i18n";
 
 // Conversation behavior has component coverage; here the real public routes,
 // boot providers and visitor transport must work without an app session.
@@ -45,7 +45,7 @@ async function open(path: string, response: Response | Promise<Response>) {
   vi.stubGlobal("fetch", fetcher);
   const queryClient = makeQueryClient();
   const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
+    { queryClient, t: testTranslator() },
     { history: createMemoryHistory({ initialEntries: [path] }) }
   );
   render(

@@ -2,10 +2,10 @@
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode } from "react";
-import { createTranslator } from "use-intl";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
+import { testTranslator } from "@/test/i18n";
 
 vi.unmock("@/lib/link");
 
@@ -135,7 +135,7 @@ async function renderRoute(path: string, staleGovernance = false) {
   const { createAppRouter } = await import("@/router");
   const { BootContext } = await import("@/boot-context");
   const router = createAppRouter(
-    { queryClient, t: createTranslator({ locale: "sv", messages }) },
+    { queryClient, t: testTranslator() },
     { history: createMemoryHistory({ initialEntries: [path] }) }
   );
   render(
