@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -11,11 +10,11 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.infrastructure import (
-    data_retention_worker,
-)
+from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
@@ -40,6 +39,8 @@ from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContents,
 )
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
@@ -76,8 +77,10 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
-from eneo.main.container.container import Container
+from eneo.main.config import get_settings
+from eneo.main.retention_tasks import retention_task_registrations
 from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
+from tests.integration.data_retention.retention_support import run_registered_retention
 
 
 @dataclass(frozen=True)
@@ -1085,6 +1088,11 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
     db_session,
     completion_model_factory,
 ) -> None:
+    """Every registered retention task runs and leaves Flow data in place.
+
+    The organization's conversation time and the unused-upload grace both
+    make old content due, and a chat and an unreferenced file are removed, so
+    the run did work. Mutant: a registered task that removes old Flow runs."""
     now = datetime.now(timezone.utc)
     async with db_container() as setup_container:
         session = setup_container.session()
@@ -1175,13 +1183,71 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         template_asset_id = template.template_asset.id
         template_file_id = template.template_file.id
 
-    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
-    result = await cleanup_old_data(container=Container())
+        # Content outside Flows that the same run must remove.
+        session.add(
+            AuditRetentionPolicy(
+                tenant_id=tenant.id,
+                retention_days=365,
+                conversation_retention_enabled=True,
+                conversation_retention_days=1,
+            )
+        )
+        old = now - timedelta(days=10)
+        chat = Sessions(
+            name="Old chat",
+            user_id=user.id,
+            assistant_id=assistant.id,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(chat)
+        await session.flush()
+        question = Questions(
+            question="An old question",
+            answer="An old answer",
+            num_tokens_question=1,
+            num_tokens_answer=1,
+            tenant_id=tenant.id,
+            assistant_id=assistant.id,
+            session_id=chat.id,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(question)
+        unreferenced = await _create_durable_file(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            name=f"unreferenced-{uuid4()}.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+            payload=b"unused",
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            created_at=now,
+        )
+        await session.flush()
+        question_id = question.id
+        unreferenced_file_id = unreferenced.id
 
-    assert result["success"] is True
-    assert not any(key.startswith("flow_") for key in result["deleted"])
+    # Past the unused-upload grace, so every upload nothing refers to is due.
+    later = now + timedelta(days=2)
+    settings = get_settings()
+    async with sessionmanager.session() as session:
+        reports = [
+            await run_registered_retention(
+                session, task_name=registration.name, settings=settings, now=later
+            )
+            for registration in retention_task_registrations(settings, now=later)
+        ]
+
+    for report in reports:
+        assert report.job_run_id is not None, report
+        assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
+        assert not [key for key in report.counts if "flow" in key], report
 
     async with db_session() as session:
+        assert await session.get(Questions, question_id) is None
+        assert await session.get(Files, unreferenced_file_id) is None
         assert await session.get(FlowRuns, run_id) is not None
         step_result = await session.get(FlowStepResults, step_result_id)
         assert step_result is not None

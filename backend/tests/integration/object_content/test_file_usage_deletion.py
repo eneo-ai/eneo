@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -1233,8 +1233,10 @@ async def test_unused_sweep_preserves_runtime_uploads(
             )
         )
 
+    # Past the unused-upload grace, so both files are old enough to remove.
+    later = datetime.now(timezone.utc) + timedelta(days=2)
     async with object_content_database.session() as session:
-        await sweep_unused_files(session, dry_run=False, older_than=timedelta(0))
+        await run_registered_retention(session, task_name="files.unused", now=later)
 
     async with object_content_database.session() as session, session.begin():
         assert await session.get(Files, unused_id) is None
