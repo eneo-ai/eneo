@@ -614,3 +614,25 @@ def test_settings_saved_with_the_step_keep_transcription_on() -> None:
     assert update.definition.metadata_json == {
         "wizard": {"transcription_language": "sv", "transcription_enabled": True}
     }
+
+
+def test_a_word_step_takes_a_template_the_flow_has_or_waits_for_one() -> None:
+    from eneo.flows.domain.step_kinds import step_kind_configuration
+
+    template_id = uuid4()
+
+    waiting = step_kind_configuration(FlowStepKind.TEMPLATE, previous_output_type=None)
+    filled = step_kind_configuration(
+        FlowStepKind.TEMPLATE,
+        previous_output_type=None,
+        values=StepKindValues(
+            template_asset_id=template_id,
+            bindings={"datum": "{{ flow_input.datum }}"},
+        ),
+    )
+
+    assert waiting["output_config"] is None
+    assert filled["output_config"] == {
+        "template_asset_id": str(template_id),
+        "bindings": {"datum": "{{ flow_input.datum }}"},
+    }
