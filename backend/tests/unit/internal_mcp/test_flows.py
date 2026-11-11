@@ -880,6 +880,73 @@ async def test_unreadable_publish_blockers_still_save_and_report_nothing(
     assert "unreadable" not in caplog.text
 
 
+_SPEAKER_STEP = {
+    "input_source": "previous_step",
+    "input_type": "text",
+    "output_mode": "speaker_mapping",
+    "output_type": "json",
+    "output_config": {
+        "speaker_mapping": {"participants_field": "deltagare", "infer_names": True}
+    },
+    "review_policy": {"mode": "edit"},
+}
+_PARTICIPANTS_FORM = {
+    "fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]
+}
+
+
+async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    kept = {"transcription_enabled": True, "transcription_language": "sv"}
+    monkeypatch.setattr(
+        flow_authoring_operations,
+        "get_flow",
+        AsyncMock(
+            return_value=SimpleNamespace(steps=[], metadata_json={"wizard": kept})
+        ),
+    )
+
+    result = await flows.add_step(
+        MagicMock(),
+        expected_revision=4,
+        name="Granska transkript",
+        configuration=_SPEAKER_STEP,
+        settings={"metadata_json": {"form_schema": _PARTICIPANTS_FORM}},
+    )
+
+    assert result.isError is not True, result.content[0].text
+    # One revision holds the step and the field; the saved settings are kept.
+    save.assert_awaited_once()
+    update = save.await_args.args[2]
+    assert update.definition.metadata_json == {
+        "wizard": kept,
+        "form_schema": _PARTICIPANTS_FORM,
+    }
+    (step,) = update.new_steps
+    assert step.name == "Granska transkript"
+    assert step.configuration.output_config == _SPEAKER_STEP["output_config"]
+
+
+async def test_a_step_added_with_a_setting_the_flow_lacks_is_refused_unsaved(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.add_step(
+        MagicMock(),
+        expected_revision=4,
+        name="Granska transkript",
+        configuration=_SPEAKER_STEP,
+        settings={"steps": []},
+    )
+
+    assert result.isError is True
+    assert "can be changed in settings" in json.loads(result.content[0].text)["message"]
+    save.assert_not_awaited()
+
+
 def test_every_draft_changing_tool_reports_introduced_suggestions():
     import inspect
 
@@ -1279,6 +1346,36 @@ async def test_the_settings_section_leaves_the_steps_out(monkeypatch):
     assert "steps" not in content
     assert content["permissions"] == public.permissions.model_dump(mode="json")
     assert content["draft_revision"] == public.draft_revision
+
+
+_OFFER = {
+    "transcription_models": [{"name": "Filer", "streams_live": False, "default": True}],
+    "speaker_services": [],
+}
+
+
+@pytest.mark.parametrize("section", ["overview", "settings"])
+async def test_a_read_says_what_the_space_offers_for_transcription(
+    monkeypatch, section
+):
+    _reading_chat(monkeypatch)
+    monkeypatch.setattr(flows, "_transcription_offer", AsyncMock(return_value=_OFFER))
+
+    _page, content = await _read(section=section)
+
+    assert content["transcription_offer"] == _OFFER
+
+
+async def test_a_space_that_cannot_be_read_leaves_the_offer_out_of_the_read(caplog):
+    container = _transaction_container([])
+    container.space_service.return_value.get_space = AsyncMock(
+        side_effect=RuntimeError("unreadable")
+    )
+
+    assert await flows._transcription_offer(container, uuid4()) is None
+    # Logged by its kind, without the content it read.
+    assert "transcription offer could not be read" in caplog.text
+    assert "unreadable" not in caplog.text
 
 
 async def test_the_all_section_is_the_whole_definition(monkeypatch):

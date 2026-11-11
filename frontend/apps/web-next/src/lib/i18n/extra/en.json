@@ -2570,6 +2570,7 @@
   "flow_editor_tools_check_template_orphaned": "Remove the choices for fields the Word template no longer has.",
   "flow_editor_tools_check_template_structured": "A field of the Word template is connected to a whole structured answer. Connect it to a single field.",
   "flow_editor_tools_check_speaker_participants_missing": "Choose a form field with the participants, or let AI guess the names.",
+  "flow_editor_tools_check_speaker_transcript_missing": "Add a step that transcribes audio before this step. Speakers can only be named in a transcript the flow makes itself.",
   "flow_editor_tools_check_model_missing": "Choose an AI model for the step.",
   "flow_editor_tools_check_reference": "{tokens} {site, select, prompt {in the instruction} bindings {in the input} tool {in the tool values} other {in the call to the service}} cannot be read.",
   "flow_editor_tools_check_http_credential_missing": "Enter the credentials the service requires in the step.",

@@ -47,6 +47,7 @@ import {
   liveModelState,
   speakerServiceState,
   speakersRequired,
+  speakerStepLacksTranscript,
   transcriptionModelMissing,
   transcriptionSettingsOf,
   type TranscriptionResources
@@ -74,6 +75,8 @@ export type StepProblem =
   | { code: "template_orphaned" }
   | { code: "template_structured" }
   | { code: "speaker_participants_missing" }
+  /** No step transcribes audio before the step that names the speakers. */
+  | { code: "speaker_transcript_missing" }
   | { code: "model_missing" }
   /** Every reference in one field of the step that reads nothing the run has. */
   | { code: "reference"; anchor: FieldAnchor; reads: UnreadReference[] }
@@ -128,6 +131,8 @@ export function problemAnchor(problem: StepProblem): FieldAnchor | null {
       return "output_config.template.fields";
     case "speaker_participants_missing":
       return "output_config.speaker_mapping";
+    case "speaker_transcript_missing":
+      return null;
     case "model_missing":
       return "completion_model";
     case "classification":
@@ -374,6 +379,9 @@ function stepProblems(
   }
 
   if (step.output_mode === "speaker_mapping") {
+    if (speakerStepLacksTranscript(step, ordered)) {
+      problems.push({ code: "speaker_transcript_missing" });
+    }
     const mapping = readSpeakerMapping(step.output_config);
     if (mapping.participantsField === null && !mapping.inferNames) {
       problems.push({ code: "speaker_participants_missing" });

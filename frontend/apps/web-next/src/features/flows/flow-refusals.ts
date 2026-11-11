@@ -8,6 +8,7 @@ import { refusalAnchor, refusalMessage, type FieldAnchor } from "./editor/field-
 import { readTemplateFill } from "./editor/step-configs";
 import type { FlowStep } from "./flows-api";
 import { stepLabel } from "./flow-labels";
+import { speakerStepLacksTranscript } from "./flow-transcription";
 
 /** next-intl's translator, as far as the refusals use it. */
 type Translator = {
@@ -70,9 +71,14 @@ function stepAt(steps: readonly FlowStep[], order: unknown, id?: unknown): FlowS
 function draftCheckSentence(
   code: string | null | undefined,
   step: FlowStep | null,
+  steps: readonly FlowStep[],
   t: Translator
 ): string | null {
-  if (code !== "flow_step_invalid" || step?.output_mode !== "template_fill") return null;
+  if (code !== "flow_step_invalid" || !step) return null;
+  if (speakerStepLacksTranscript(step, steps)) {
+    return t("flow_editor_tools_check_speaker_transcript_missing");
+  }
+  if (step.output_mode !== "template_fill") return null;
   return readTemplateFill(step.output_config).templateAssetId
     ? null
     : t("flow_editor_tools_check_template_missing");
@@ -167,7 +173,7 @@ export function flowRefusalMessage(
   const message =
     (named ? t(named, values) : null) ??
     refusalMessage(issue, t, values) ??
-    draftCheckSentence(code, stepAt(steps, context.step_order, context.step_id), t) ??
+    draftCheckSentence(code, stepAt(steps, context.step_order, context.step_id), steps, t) ??
     refusalMessage(code, t, values) ??
     getErrorMessageForReason(code, t) ??
     getErrorMessageForCode(error.code, t);

@@ -460,11 +460,15 @@ When streamed text cannot be used, the transcription model transcribes the
 recording. transcription_speaker_service gets the audio and the finished text,
 times the words and labels the speakers; it writes no text of its own. A flow
 that should stream needs both: a transcription model for files, and a live
-model (or a transcription model that streams). You cannot see which models and
-services the space offers, so never write their ids: build the rest of the
-flow first, then say that the person chooses them in the editor under
-"Ändra inställningar", in the Transkribering part, and read the settings again
-when they say they have.
+model (or a transcription model that streams). read_flow says by name what the
+flow's space offers (transcription_offer: its transcription_models, with
+those that stream, and its speaker_services); the one marked default a flow
+gets by itself. Offer only what is listed there, and when something the flow
+needs is not listed, say that an administrator adds it to the space. The
+choice among several is the person's, so never write their ids: build the
+rest of the flow first, then say that the person chooses them in the editor
+under "Ändra inställningar", in the Transkribering part, and read the settings
+again when they say they have.
 """
 
 
@@ -498,7 +502,13 @@ or a finished transcript, ask that first, with those two as the choices.
 A flow built for a recorded conversation between several people (a meeting,
 an interview, a talk between a manager and an employee) depends on who said
 what, so settle the speakers before you build it, asking only what the
-person's text leaves open, one question at a time. First, whether the speakers
+person's text leaves open, one question at a time. Read the flow first: when
+transcription_offer lists no speaker service, the space cannot label
+speakers, so do not offer to name them as if it could. Say in one sentence
+that the space has no service for speaker identification and that an
+administrator adds one, and ask whether to build the flow without named
+speakers, or with the speaker step in place, waiting for the service. First,
+whether the speakers
 are named and confirmed by a person before the rest of the flow runs, or the
 transcript is used with its labels as they are. Then, when they are named,
 where the names come from: the person who runs the flow lists the participants,
@@ -509,11 +519,13 @@ and "utifrån innehållet" or "utifrån samtalet" for infer_names true. Then bui
 it without asking and say in a sentence what you chose. A recording of one
 voice, or a flow that needs only what was said, gets no speaker step and no
 question.
-To build it, first give the run form its field when the names come from the
-person and the form has none that fits (as the editor does: {"name":
-"deltagare", "type": "list", "label": "Deltagare", "required": false}), then
-add the step at the place after the transcribing step with every setting
-above. Then point the steps that read the transcribing step's text at the
+To build it, add the step at the place after the transcribing step with
+every setting above. When the names come from the person and the run form has
+no field that fits, the same add_step call gives the form its field in
+settings (as the editor does: {"name": "deltagare", "type": "list", "label":
+"Deltagare", "required": false}, in the whole form_schema), and
+participants_field names it, so the step is never saved without the field it
+reads. Then point the steps that read the transcribing step's text at the
 speaker step's instead, and take out of their instructions the work of telling
 the speakers apart, which the speaker step and its reviewer now do. When the
 request fixes how many speak (a talk between two), set

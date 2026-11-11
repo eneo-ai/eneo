@@ -9,6 +9,7 @@ from eneo.flows.domain.flow_step_validation import (
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_infer_names,
     speaker_mapping_participants_field,
+    speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
 )
 from eneo.flows.enums import (
@@ -203,3 +204,17 @@ def test_a_field_name_with_spaces_around_it_that_publish_accepts_is_the_field_th
         ["Anna Berg", "Bo Ek"],
         True,
     )
+
+
+def test_a_speaker_step_needs_a_step_that_transcribes_before_it() -> None:
+    assert speaker_mapping_without_transcript(2, ["transcribe_only"]) is None
+    # A step between the two keeps the transcript the labels came from.
+    assert (
+        speaker_mapping_without_transcript(3, ["transcribe_only", "compose_text"])
+        is None
+    )
+    refusal = speaker_mapping_without_transcript(2, ["pass_through"])
+    assert refusal is not None
+    assert refusal.startswith("Step 2: ")
+    assert "'transcribe_only' must come before it" in refusal
+    assert speaker_mapping_without_transcript(1, []) is not None

@@ -184,6 +184,10 @@ def test_the_instructions_explain_transcription_but_leave_its_choices() -> None:
     assert "that text is the run's text, so the recording is not" in instructions
     assert "it writes no text of its own" in instructions
     assert "never write their ids" in instructions
+    # What the space offers is read by name, and only that is offered.
+    assert "read_flow says by name what the flow's space offers" in instructions
+    assert "Offer only what is listed there" in instructions
+    assert "say that an administrator adds it to the space" in instructions
     assert '"Ändra inställningar", in the Transkribering part' in instructions
 
 
@@ -222,6 +226,13 @@ def test_the_instructions_settle_the_speakers_of_a_recorded_conversation() -> No
         instructions
     )
     assert "whether a run brings the recording or a finished transcript" in (
+        instructions
+    )
+    # A space without a speaker service is not offered named speakers.
+    assert "when transcription_offer lists no speaker service" in instructions
+    assert "do not offer to name them as if it could" in instructions
+    # The step is never saved without the run form field it reads.
+    assert "the same add_step call gives the form its field in settings" in (
         instructions
     )
     # A wizard key is added without dropping the transcription choices.

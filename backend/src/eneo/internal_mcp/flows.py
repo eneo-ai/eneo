@@ -451,6 +451,25 @@ def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolRe
 
 FlowSection = Literal["overview", "steps", "settings", "all"]
 
+
+async def _transcription_offer(container, space_id: UUID) -> dict[str, Any] | None:
+    """What the flow's space offers for transcription
+    (``flow_authoring_reads.transcription_offer``); None when it cannot be
+    read, which is logged by its kind only and never fails the read."""
+    from eneo.flows.application.flow_authoring_reads import transcription_offer
+
+    try:
+        async with cast(AsyncSession, container.session()).begin_nested():
+            space = await container.space_service().get_space(space_id)
+        return transcription_offer(space)
+    except Exception as exc:  # noqa: BLE001 - the flow is read either way
+        logger.warning(
+            "The space's transcription offer could not be read for the flow chat",
+            extra={"space_id": str(space_id), "error_type": type(exc).__name__},
+        )
+        return None
+
+
 # What the overview says of a step besides its reads.
 _OVERVIEW_STEP_FIELDS = frozenset(
     {
@@ -483,7 +502,9 @@ async def read_flow(
     the steps in full with their assistants' prompts and the same reads;
     section "settings" the flow without its steps (description,
     metadata_json with the run form, retention, permissions); section "all"
-    everything, paged. steps=[5, 8] limits the overview or the steps section
+    everything, paged. The overview and the settings also say what the
+    flow's space offers for transcription, by name (transcription_offer:
+    transcription_models, speaker_services). steps=[5, 8] limits the overview or the steps section
     to those step numbers (1 is first). A step marked unreadable has a
     configuration the flow cannot read; read it in full and fix it. Follow
     next_offset until it is null."""
@@ -502,6 +523,9 @@ async def read_flow(
             value: Any = flow.model_dump(mode="json")
         elif section == "settings":
             value = flow.model_dump(mode="json", exclude={"steps"})
+            offer = await _transcription_offer(container, chat.space_id)
+            if offer is not None:
+                value["transcription_offer"] = offer
         else:
             orders = {step.step_order for step in flow.steps}
             if steps is not None and (missing := sorted(set(steps) - orders)):
@@ -542,6 +566,9 @@ async def read_flow(
             if section == "overview":
                 value["description"] = flow.description
                 value["run_form_fields"] = run_form_fields(flow.metadata_json)
+                offer = await _transcription_offer(container, chat.space_id)
+                if offer is not None:
+                    value["transcription_offer"] = offer
         return page_result(
             value, flow_id=flow.id, offset=offset, revision=flow.draft_revision
         )
@@ -1130,9 +1157,14 @@ async def add_step(
     configuration: dict[str, Any],
     assistant_changes: dict[str, Any] | None = None,
     position: int | None = None,
+    settings: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Add a step with a new managed assistant, atomically: last, or at `position`
-    (1 is first). Reads of the steps after it move with them. configuration
+    (1 is first). Reads of the steps after it move with them. settings takes
+    what update_flow_settings takes and is saved in the same revision, so a
+    step that reads a run form field is added together with the field (the
+    whole form_schema in metadata_json); everything is saved or nothing.
+    configuration
     takes a step's own fields and no other: input_source, input_type,
     output_mode and output_type, and where the step needs them input_config,
     output_config, input_bindings, output_contract and review_policy. A step
@@ -1150,21 +1182,30 @@ async def add_step(
         )
 
         require_safe_model_configuration(configuration, {})
+        if settings and set(settings) - _SETTINGS_FIELDS:
+            raise BadRequestException(
+                "Only name, description, metadata_json and form_field_renames "
+                "can be changed in settings."
+            )
         step_order = None
-        if position is not None:
+        definition = settings or {}
+        if position is not None or isinstance(definition.get("metadata_json"), dict):
             flow = await get_flow(chat.flow_id, request, container)
-            slots: list[dict[str, Any]] = [
-                {"step_id": str(step.id)} for step in flow.steps
-            ]
-            slots.insert(_index_at(position, len(slots) + 1), {"new_step": 0})
-            step_order = slots
+            if position is not None:
+                slots: list[dict[str, Any]] = [
+                    {"step_id": str(step.id)} for step in flow.steps
+                ]
+                slots.insert(_index_at(position, len(slots) + 1), {"new_step": 0})
+                step_order = slots
+            if isinstance(definition.get("metadata_json"), dict):
+                definition = _merged_settings(definition, flow.metadata_json)
         updated = await apply_editor_update(
             chat.flow_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {
                     "expected_revision": expected_revision,
-                    "definition": {},
+                    "definition": definition,
                     "new_steps": [
                         {
                             "name": name,

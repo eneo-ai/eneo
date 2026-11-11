@@ -2570,6 +2570,7 @@
   "flow_editor_tools_check_template_orphaned": "Ta bort valen för fält som Word-mallen inte längre har.",
   "flow_editor_tools_check_template_structured": "Ett fält i Word-mallen är kopplat till ett helt strukturerat svar. Koppla det till ett enskilt fält.",
   "flow_editor_tools_check_speaker_participants_missing": "Välj ett formulärfält med deltagarna, eller låt AI gissa namnen.",
+  "flow_editor_tools_check_speaker_transcript_missing": "Lägg till ett steg som transkriberar ljud före det här steget. Talarna kan bara namnges i ett transkript som flödet gör självt.",
   "flow_editor_tools_check_model_missing": "Välj en AI-modell för steget.",
   "flow_editor_tools_check_reference": "{tokens} {site, select, prompt {i instruktionen} bindings {i underlaget} tool {i verktygets värden} other {i anropet till tjänsten}} går inte att läsa.",
   "flow_editor_tools_check_http_credential_missing": "Ange inloggningsuppgifterna som tjänsten kräver i steget.",

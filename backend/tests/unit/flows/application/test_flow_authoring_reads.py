@@ -14,9 +14,11 @@ from eneo.flows.application.flow_authoring_reads import (
     step_changes,
     step_connections,
     step_reads_summary,
+    transcription_offer,
 )
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
 from eneo.flows.step_lineage import StepRead
+from eneo.transcription_models.domain.realtime import REALTIME_PROVIDER_TYPE
 
 
 def _step(order: int, name: str, **config):
@@ -143,6 +145,64 @@ def test_run_form_fields_in_short_and_empty_when_unreadable():
     ]
     assert run_form_fields(None) == []
     assert run_form_fields({"form_schema": {"fields": "nonsense"}}) == []
+
+
+def _model(name: str, *, realtime: bool = False, can_access: bool = True):
+    return SimpleNamespace(
+        id=uuid4(),
+        nickname=name,
+        name=name.lower(),
+        can_access=can_access,
+        supports_realtime=realtime,
+        provider_type=REALTIME_PROVIDER_TYPE,
+    )
+
+
+def test_the_transcription_offer_names_what_the_space_has_and_marks_the_defaults():
+    files, live, withheld = (
+        _model("Filer"),
+        _model("Direkt", realtime=True),
+        _model("Spärrad", can_access=False),
+    )
+    first, marked = (
+        SimpleNamespace(id=uuid4(), name="Talare A"),
+        SimpleNamespace(id=uuid4(), name="Talare B"),
+    )
+    space = SimpleNamespace(
+        transcription_models=[files, live, withheld],
+        get_marked_default_transcription_model=lambda: files,
+        usable_transcription_services=[first, marked],
+        default_transcription_service=marked,
+    )
+
+    offer = transcription_offer(space)
+
+    assert offer == {
+        "transcription_models": [
+            {"name": "Filer", "streams_live": False, "default": True},
+            {"name": "Direkt", "streams_live": True, "default": False},
+        ],
+        "speaker_services": [
+            {"name": "Talare A", "default": False},
+            {"name": "Talare B", "default": True},
+        ],
+    }
+    # Names only: the chat never learns an id it could write.
+    assert str(files.id) not in str(offer) and str(marked.id) not in str(offer)
+
+
+def test_a_space_that_offers_nothing_for_transcription_says_so_with_empty_lists():
+    space = SimpleNamespace(
+        transcription_models=[],
+        get_marked_default_transcription_model=lambda: None,
+        usable_transcription_services=[],
+        default_transcription_service=None,
+    )
+
+    assert transcription_offer(space) == {
+        "transcription_models": [],
+        "speaker_services": [],
+    }
 
 
 def test_output_fields_names_the_contracts_top_level_fields():
