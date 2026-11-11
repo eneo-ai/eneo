@@ -19,6 +19,7 @@ export type FederationState =
 export type SaveFailure =
   | { code: "conflict" | "not_configured" | "disabled" | "encryption_unavailable" }
   | { code: "request_failed" }
+  | { code: "endpoint_host"; host: string }
   | { code: "fields"; fields: Partial<Record<FederationField, "refused" | "secret_masked">> };
 
 function eneo(event: Pick<RequestEvent, "fetch" | "locals">) {
@@ -52,6 +53,24 @@ function refusedFields(error: EneoError): SaveFailure | undefined {
   return Object.keys(fields).length ? { code: "fields", fields } : undefined;
 }
 
+/**
+ * The provider's token endpoint or signing keys are on a host the operator has
+ * not listed (a name or an IPv6 literal). The text is the backend's
+ * (`check_endpoint_hosts` in `authentication/oidc/profile.py`); only the host
+ * is taken from it, so no other text of a refusal is shown.
+ */
+const ENDPOINT_HOST =
+  /^The (?:token endpoint|JWKS URI) is on ([A-Za-z0-9.:-]+), which is neither the discovery host nor in allowed_endpoint_hosts$/;
+
+function refusedHost(error: EneoError): SaveFailure | undefined {
+  const body = error.response as { message?: unknown; detail?: unknown } | undefined;
+  for (const text of [body?.message, body?.detail]) {
+    const host = typeof text === "string" ? ENDPOINT_HOST.exec(text)?.[1] : undefined;
+    if (host) return { code: "endpoint_host", host };
+  }
+  return undefined;
+}
+
 const REASONS: Record<string, SaveFailure> = {
   federation_config_revision_conflict: { code: "conflict" },
   federation_not_configured: { code: "not_configured" },
@@ -65,6 +84,9 @@ function saveFailure(error: unknown): SaveFailure {
   if (known) return known;
   if (error instanceof EneoError && error.status === 422) {
     return refusedFields(error) ?? { code: "request_failed" };
+  }
+  if (error instanceof EneoError && error.status === 400) {
+    return refusedHost(error) ?? { code: "request_failed" };
   }
   return { code: "request_failed" };
 }

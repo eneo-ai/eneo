@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from pydantic import ValidationError
 
-from eneo.main.config import Settings
+from eneo.main.config import Settings, get_settings, set_settings
 from eneo.tenants.masking import looks_masked
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.tenants.tenant_federation_service import (
@@ -17,6 +17,7 @@ from eneo.tenants.tenant_federation_service import (
     TenantAdminFederationPatch,
     _build_full_federation_config,
     _merge_federation_config,
+    _usable,
     build_admin_view,
     federation_changes,
     federation_revision,
@@ -456,3 +457,192 @@ class TestSubjectClaim:
         assert build_admin_view(_tenant(_config()), settings).subject_claim == "sub"
         configured = _config(claims_mapping={"email": "upn", "subject": "oid"})
         assert build_admin_view(_tenant(configured), settings).subject_claim == "oid"
+
+
+@pytest.fixture
+def in_environment():
+    """Run in one ENVIRONMENT; only development lets a provider be on this
+    machine."""
+    original = get_settings()
+
+    def use(environment: str) -> None:
+        set_settings(original.model_copy(update={"environment": environment}))
+
+    yield use
+    set_settings(original)
+
+
+class TestProviderEndpoints:
+    """The operator's door refuses a provider the backend must not send
+    requests to: plain http, this machine outside development, and endpoints
+    on a host that is neither the discovery host nor one the operator
+    listed."""
+
+    BODY = TestOperatorProviderKeys.BODY
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://idp.example/.well-known/openid-configuration",
+            "https://user:secret@idp.example/.well-known/openid-configuration",
+            "https://169.254.169.254/.well-known/openid-configuration",
+            # Full-width dots: aiohttp would connect to 169.254.169.254.
+            "https://169\u3002254\u3002169\u3002254/.well-known/openid-configuration",
+        ],
+    )
+    def test_a_discovery_endpoint_no_request_may_go_to_is_refused(self, url: str):
+        with pytest.raises(ValidationError):
+            SetFederationRequest.model_validate(
+                {**self.BODY, "discovery_endpoint": url}
+            )
+        with pytest.raises(ValidationError):
+            PatchFederationRequest.model_validate({"discovery_endpoint": url})
+
+    def test_a_provider_on_this_machine_is_for_development_only(self, in_environment):
+        url = "http://127.0.0.1:9134/.well-known/openid-configuration"
+
+        in_environment("development")
+        request = SetFederationRequest.model_validate(
+            {**self.BODY, "discovery_endpoint": url}
+        )
+        assert request.discovery_endpoint == url
+
+        in_environment("production")
+        with pytest.raises(ValidationError):
+            SetFederationRequest.model_validate(
+                {**self.BODY, "discovery_endpoint": url}
+            )
+
+    @pytest.mark.parametrize(
+        "hosts",
+        [
+            ["https://keys.example"],
+            ["*.example"],
+            ["keys.example/jwks"],
+            ["keys.example:443"],
+            [""],
+            ["keys example"],
+            ["[2001:db8::5"],
+            ["2001:db8::zz"],
+            ["[keys.example]"],
+        ],
+    )
+    def test_allowed_endpoint_hosts_are_host_names(self, hosts: list[str]):
+        with pytest.raises(ValidationError) as refused:
+            SetFederationRequest.model_validate(
+                {**self.BODY, "allowed_endpoint_hosts": hosts}
+            )
+        assert "host names or IP addresses" in str(refused.value)
+
+    def test_listed_hosts_are_stored_lower_case_and_absent_ones_not_at_all(self):
+        def put(**keys: object) -> dict[str, object]:
+            return _build_full_federation_config(
+                SetFederationRequest.model_validate({**self.BODY, **keys}),
+                encrypted_secret=CIPHERTEXT,
+            )
+
+        assert "allowed_endpoint_hosts" not in put()
+        assert put(allowed_endpoint_hosts=["Keys.Example"])[
+            "allowed_endpoint_hosts"
+        ] == ["keys.example"]
+
+    def test_patch_sets_and_null_clears_the_hosts(self):
+        stored = _config(allowed_endpoint_hosts=["keys.example"])
+
+        def patch(**keys: object) -> dict[str, object]:
+            return _merge_federation_config(
+                stored,
+                PatchFederationRequest.model_validate(keys).model_dump(
+                    exclude_unset=True
+                ),
+                encrypted_secret=None,
+            )
+
+        assert patch(allowed_endpoint_hosts=["other.example"])[
+            "allowed_endpoint_hosts"
+        ] == ["other.example"]
+        assert "allowed_endpoint_hosts" not in patch(allowed_endpoint_hosts=None)
+        assert patch(client_id="x")["allowed_endpoint_hosts"] == ["keys.example"]
+
+    @pytest.mark.parametrize("key", ["token_endpoint", "jwks_uri"])
+    def test_a_stored_endpoint_on_another_host_needs_the_host_listed(self, key: str):
+        """A save that fetches nothing (an admin's edit, a PATCH without a new
+        discovery endpoint) names the host to list."""
+        config = _config(**{key: "https://keys.example.net/x"})
+
+        with pytest.raises(HTTPException) as refused:
+            _usable(config)
+        assert refused.value.status_code == 400
+        # The Svelte admin page reads the host out of this exact sentence
+        # (ENDPOINT_HOST in routes/(app)/admin/federation/+page.server.ts);
+        # change both together.
+        assert refused.value.detail == (
+            f"The {'token endpoint' if key == 'token_endpoint' else 'JWKS URI'} "
+            "is on keys.example.net, which is neither the discovery host nor in "
+            "allowed_endpoint_hosts"
+        )
+
+        _usable({**config, "allowed_endpoint_hosts": ["keys.example.net"]})
+
+    @pytest.mark.parametrize(
+        ("endpoint", "listed"),
+        [
+            ("https://[2001:db8:0::5]/token", ["[2001:DB8::5]"]),
+            ("https://[2001:DB8::5]/token", ["2001:db8:0:0::5"]),
+            ("https://10.0.0.5/token", ["10.0.0.5"]),
+        ],
+    )
+    def test_a_listed_address_matches_however_it_is_written(
+        self, endpoint: str, listed: list[str]
+    ):
+        config = _config(token_endpoint=endpoint)
+        with pytest.raises(HTTPException):
+            _usable(config)
+
+        request = SetFederationRequest.model_validate(
+            {**self.BODY, "allowed_endpoint_hosts": listed}
+        )
+        _usable({**config, "allowed_endpoint_hosts": request.allowed_endpoint_hosts})
+
+    @pytest.mark.parametrize(
+        ("listed", "endpoint"),
+        [
+            ("169.254.169.254", "https://169.254.169.254/token"),
+            ("[::ffff:169.254.169.254]", "https://[::ffff:169.254.169.254]/token"),
+            ("[fe80::1]", "https://[fe80::1]/token"),
+            ("127.0.0.1", "https://127.0.0.1/token"),
+        ],
+    )
+    def test_a_listed_address_no_request_may_go_to_is_still_refused(
+        self, in_environment, listed: str, endpoint: str
+    ):
+        """The list moves the host rule, never the address rules."""
+        in_environment("production")
+        request = SetFederationRequest.model_validate(
+            {**self.BODY, "allowed_endpoint_hosts": [listed]}
+        )
+        config = _config(
+            token_endpoint=endpoint,
+            allowed_endpoint_hosts=request.allowed_endpoint_hosts,
+        )
+
+        with pytest.raises(HTTPException) as refused:
+            _usable(config)
+        assert refused.value.status_code == 400
+        assert "the provider's address is not allowed" in refused.value.detail
+
+    @pytest.mark.parametrize(
+        "endpoint",
+        [
+            "https://idp.example:bad/token",
+            "https://idp.example:99999/token",
+            "https://[invalid/token",
+        ],
+    )
+    def test_a_stored_endpoint_no_request_can_be_sent_to_is_refused(
+        self, endpoint: str
+    ):
+        """A 400 before anything is stored, not an error from the URL parser."""
+        with pytest.raises(HTTPException) as refused:
+            _usable(_config(token_endpoint=endpoint))
+        assert refused.value.status_code == 400

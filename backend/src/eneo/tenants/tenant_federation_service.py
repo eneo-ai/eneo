@@ -28,7 +28,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.oidc import sign_in_source
+from eneo.authentication.oidc import outbound, sign_in_source
 from eneo.authentication.oidc.profile import (
     DEFAULT_SCOPES,
     SIGNING_ALGORITHM_ALLOWLIST,
@@ -37,6 +37,7 @@ from eneo.authentication.oidc.profile import (
     build_profile,
     check_config,
     download_discovery,
+    endpoint_host_names,
     subject_claim,
 )
 from eneo.main.config import (
@@ -155,6 +156,16 @@ class FederationRequestBase(BaseModel):
         description="Email domains allowed for this tenant (e.g., ['stockholm.se'])",
         examples=[["stockholm.se", "stockholm.gov.se"]],
     )
+    allowed_endpoint_hosts: list[str] | None = Field(
+        None,
+        description=(
+            "Hosts other than the discovery endpoint's that the provider's "
+            "token endpoint and JWKS may be on, as host names or IP addresses "
+            "(IPv6 with or without brackets; no scheme, port or path). Omitted: "
+            "only the discovery host."
+        ),
+        examples=[["oauth2.googleapis.com", "www.googleapis.com"]],
+    )
     canonical_public_origin: str | None = Field(
         None,
         description=(
@@ -219,6 +230,28 @@ class FederationRequestBase(BaseModel):
     def validate_allowed_domains(cls, v: list[str] | None) -> list[str] | None:
         """Validate domain format."""
         return _validate_domains(v)
+
+    @field_validator("allowed_endpoint_hosts")
+    @classmethod
+    def validate_allowed_endpoint_hosts(
+        cls, value: list[str] | None
+    ) -> list[str] | None:
+        if value is None:
+            return None
+        try:
+            return list(endpoint_host_names(value))
+        except OidcProviderError as exc:
+            raise ValueError(str(exc)) from exc
+
+    @field_validator("discovery_endpoint")
+    @classmethod
+    def validate_discovery_endpoint(cls, value: str | None) -> str | None:
+        if value is not None:
+            try:
+                outbound.check_url(value)
+            except outbound.OidcFetchError as exc:
+                raise ValueError(f"discovery_endpoint: {exc.reason}") from exc
+        return value
 
     @field_validator("canonical_public_origin")
     @classmethod
@@ -658,6 +691,9 @@ def _build_full_federation_config(
         federation_config["additional_redirect_uris"] = request.additional_redirect_uris
 
     # Stored only when given: an absent key keeps the built-in default.
+    if request.allowed_endpoint_hosts is not None:
+        federation_config["allowed_endpoint_hosts"] = request.allowed_endpoint_hosts
+
     if request.signing_algorithms is not None:
         federation_config["signing_algorithms"] = request.signing_algorithms
 
@@ -687,6 +723,7 @@ def _merge_federation_config(
         "canonical_public_origin",
         "redirect_path",
         "additional_redirect_uris",
+        "allowed_endpoint_hosts",
         "signing_algorithms",
         "email_verified_claims",
     ):
@@ -872,6 +909,10 @@ class TenantFederationService:
             request,
             encrypted_secret=self.encryption_service.encrypt(request.client_secret),
         )
+        # The rules a save without discovery can apply. The endpoints come from
+        # discovery at sign-in, so whether they are on the discovery host is
+        # checked there and by the operator's test.
+        _usable(federation_config)
 
         current = await self._lock(tenant)
         if federation_revision(current) != federation_revision(expected):

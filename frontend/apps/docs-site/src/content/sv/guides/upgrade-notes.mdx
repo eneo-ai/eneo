@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@faa3a54e1c8c
+translationSource: guides/upgrade-notes.mdx@943fc45e23e6
 ---
 
 import { Callout } from "nextra/components";
@@ -61,6 +61,7 @@ flowchart TB
 - Discovery-adressen anger din egen katalog (ingen `{tenantid}`). [Platshållare](#templated-issuer-refused), [Nåbarhet](#discovery-and-jwks-reachable)
 - Byt ut frontend och alla backend-repliker samtidigt; pågående inloggningar startas om. [Driftsätt tillsammans](#deploy-frontend-and-backend-together)
 - Konton behöver inget: varje konto binds via e-post vid nästa inloggning, och sessioner förblir giltiga. [Kontobindning](#account-binding)
+- Anrop till leverantören går över https; en leverantör på backendens egen maskin bara med `ENVIRONMENT=development`. Tokenadressen och `jwks_uri` ligger på discovery-värden, annars läggs värden i `allowed_endpoint_hosts` direkt efter uppgraderingen. [Anrop till leverantören](#provider-requests-on-its-host)
 
 **Leverantörer som ger varje klient ett eget `sub`** (Entra ID; alla leverantörer med parvisa subjekt):
 
@@ -76,6 +77,7 @@ flowchart TB
 - Automatisering med `PUT` skickar `subject_claim`. [Kontobindning](#account-binding)
 - Skript godtar `502`. [Spara inställningar](#provider-save-checks-sign-in)
 - Kontrollera de tillåtna domänerna om du använde flyttskriptet med 2.3 eller tidigare. [Flyttskriptet](#move-script-allowed-domains)
+- Om åtkomsttoken skapar konton: lagra de tillåtna domänerna på leverantören, eftersom åtkomsttoken inte längre läser `OIDC_ALLOWED_DOMAINS`. [Åtkomsttoken](#resource-server-binding)
 
 **MobilityGuard-inställningar** (`MOBILITYGUARD_*`, `MOBILITY_GUARD_AUTH`): döp om till `OIDC_*`-namnen. [MobilityGuard](#mobilityguard-sign-in-removed)
 
@@ -97,12 +99,13 @@ flowchart TB
 | [Varje OIDC-inloggning verifieras strikt](#strict-relying-party) | Varje OIDC-installation | Kontrollera algoritm, `nonce`, `kid`, NTP |
 | [Redis krävs för OIDC-inloggning](#redis-required-for-sign-in) | Varje OIDC-installation | Redis 6.2+, `noeviction` |
 | [Discovery och signeringsnycklar måste förbli nåbara](#discovery-and-jwks-reachable) | Backend bakom utgående regler eller proxy | Nå leverantören inom 5 s |
+| [Anrop till leverantören stannar på dess värd, över https](#provider-requests-on-its-host) | Varje OIDC-installation | Jämför värdarna i discovery; lägg till andra värdar efter uppgraderingen |
 | [En utfärdare med platshållare nekas](#templated-issuer-refused) | Entra ID-adress för flera kataloger | Använd din egen katalog |
 | [Driftsätt frontend och backend tillsammans](#deploy-frontend-and-backend-together) | Driftansvariga, egna callbacks | Driftsätt tillsammans, skicka vidare `iss` |
 | API-klienter kan binda koden med `binding_challenge` och `binding_verifier`; en felaktig `binding_verifier` svarar `400` och loggar `binding_mismatch`; en återanvänd callback svarar `400` | API-klienter | Inget; bindningen är frivillig |
 | [MobilityGuards egen inloggning är borttagen](#mobilityguard-sign-in-removed) | Installationer med `MOBILITYGUARD_*` | Döp om variablerna |
 | Zitadel-inloggningen i Svelte-appen är föråldrad; en senare version tar bort den | Zitadel-installationer | [Flytta](/guides/oidc-federation#migrate-from-the-zitadel-settings) före den versionen |
-| SSO erbjuds bara med discovery-adress, klient-id och klienthemlighet | Alla | Ta bort `OIDC_*`-variabler som varningen nämner; behåll `OIDC_ALLOWED_DOMAINS` om åtkomsttoken är beroende av den |
+| SSO erbjuds bara med discovery-adress, klient-id och klienthemlighet | Alla | Ta bort `OIDC_*`-variabler som varningen nämner; lagra de tillåtna domänerna på leverantören om åtkomsttoken använder dem |
 | [Flyttskriptet tappade de tillåtna domänerna](#move-script-allowed-domains) | Körde flyttskriptet med `OIDC_ALLOWED_DOMAINS` satt | Kontrollera lagrade domäner |
 | [Administratörer kan ändra inloggningsinställningarna](#admins-change-sign-in-settings) | Lagrade inställningar | Granska administratörsrollen |
 | SCIM-konton binds vid första inloggningen | SCIM-installationer | Inget |
@@ -129,6 +132,7 @@ flowchart TB
 |---|---|---|
 | [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
+| Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]
 
@@ -181,9 +185,16 @@ Den första federerade inloggningen binder kontot, per organisation, till utfär
 
 ### Åtkomsttoken från leverantören använder samma bindning [#resource-server-binding]
 
-Med `OIDC_RESOURCE_SERVER_ENABLED=true` matchas åtkomsttoken via bindningen med `OIDC_ACCEPTED_ISSUER` och `OIDC_ACCEPTED_AUDIENCE`. Lagrade inställningar använder de lagrade tillåtna domänerna, eller `OIDC_ALLOWED_DOMAINS` när inga är lagrade. En token utan subjektsanspråket svarar `401`.
+Med `OIDC_RESOURCE_SERVER_ENABLED=true` matchas åtkomsttoken via bindningen med `OIDC_ACCEPTED_ISSUER` och `OIDC_ACCEPTED_AUDIENCE`. En token utan subjektsanspråket svarar `401`.
 
-**Gör:** jämför `iss` och subjekt i en ID-token och en åtkomsttoken för samma person. Med Entra ID, begär åtkomsttoken av version 2 och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`. Om de inte kan bli lika öppnar en administratör ett migreringsfönster.
+Åtkomsttoken använder de tillåtna domänerna i de valda inställningarna: med `FEDERATION_ENABLED=true` bara domänerna som är lagrade hos leverantören, annars `OIDC_ALLOWED_DOMAINS`. Med `FEDERATION_ENABLED=true` och inga lagrade domäner, eller ingen lagrad leverantör alls:
+
+- en åtkomsttoken skapar inte längre konton utifrån `OIDC_ALLOWED_DOMAINS`;
+- en åtkomsttoken släpper in varje befintligt konto i organisationen vars e-post stämmer, också utanför `OIDC_ALLOWED_DOMAINS`. Med en lagrad leverantör släppte inloggningen i webbläsaren redan in dem; utan lagrad leverantör finns ingen inloggning i webbläsaren att jämföra med.
+
+Nycklarna som kontrollerar åtkomsttoken följer [reglerna för anrop till leverantören](#provider-requests-on-its-host), utan lista över andra värdar.
+
+**Gör:** jämför `iss` och subjekt i en ID-token och en åtkomsttoken för samma person. Med Entra ID, begär åtkomsttoken av version 2 och sätt `OIDC_ACCEPTED_ISSUER` till utfärdaren för `v2.0`. Om de inte kan bli lika öppnar en administratör ett migreringsfönster. Om åtkomsttoken skapade konton utifrån `OIDC_ALLOWED_DOMAINS`: med en lagrad leverantör, gör `PATCH` på `allowed_domains` hos den; utan lagrad leverantör (en `PATCH` svarar `404`), lagra en med `PUT /api/v1/sysadmin/tenants/{tenant_id}/federation` eller sätt `FEDERATION_ENABLED=false`.
 
 ### Ett borttaget konto behåller sin identitet [#removed-accounts-keep-identity]
 
@@ -213,7 +224,23 @@ Discovery cachas i `OIDC_JWKS_CACHE_TTL_SECONDS` (3600) utan reserv med gamla v�
 
 **Gör:** varje backend når discovery-adressen, `jwks_uri` och tokenadressen. Annars kan ingen logga in efter den första timmen, eller direkt efter en omstart.
 
-**Kontroll:** kör `curl` mot discovery-adressen inifrån backend-containern.
+**Kontroll:** kör `curl --noproxy '*'` mot discovery-adressen inifrån backend-containern. Eneo använder inte `HTTPS_PROXY` för sina anrop till leverantören, så en kontroll genom proxyn kan gå igenom medan inloggningen misslyckas.
+
+### Anrop till leverantören stannar på dess värd, över https [#provider-requests-on-its-host]
+
+Discovery, tokenanropet och signeringsnycklarna, vid inloggning och när inställningar sparas eller testas:
+
+- går över https. En leverantör på backendens egen maskin (`localhost`, `127.0.0.1`, `::1`) godtas bara med `ENVIRONMENT=development`, och då även över http. Utan den inställningen (osatt betyder produktion) kan en installation vars leverantör körs på backendens maskin inte logga in efter uppgraderingen.
+- går aldrig till länklokala adresser eller molnets metadataadresser, följer aldrig en omdirigering och nekar ett svar över 256 KiB eller ett svar som inte är ett JSON-objekt.
+- når tokenadressen och `jwks_uri` bara på discovery-värden eller på en värd i det nya fältet `allowed_endpoint_hosts`, som bara super-API-nyckeln sätter (`PUT` eller `PATCH /api/v1/sysadmin/tenants/{tenant_id}/federation`). Att spara svarar `400` och namnger värden. Miljöinställningar har ingen lista.
+
+En `discovery_endpoint` som inget anrop får gå till svarar `422`. Att spara eller testa svarar `502` när discovery omdirigerar, är större än 256 KiB eller inte är ett JSON-objekt; 2.3 följde omdirigeringen, läste vilken storlek som helst och svarade `400` för ett dokument som inte var ett objekt. När lagrade inställningar bryter mot reglerna svarar `/api/v1/auth/initiate` och callbacken `500` med ett fast meddelande, och backenden loggar `OIDC provider configuration is unusable` med skälet. Listan är ny, så för en sådan organisation slutar inloggningen fungera vid uppgraderingen tills driftansvarig lägger till värden.
+
+Med `OIDC_RESOURCE_SERVER_ENABLED=true` gäller samma regler för discovery-dokumentet för `OIDC_ACCEPTED_ISSUER` och för dess `jwks_uri`, som måste ligga på utfärdarens värd. `allowed_endpoint_hosts` gäller inte de här anropen, och att flytta inställningarna till Eneo ändrar inte det. En leverantör som bryter mot en regel får varje bearer-token att svara `401`, och backenden loggar `Failed to fetch JWKS for IdP token validation`.
+
+**Gör:** före uppgraderingen, kör `curl --noproxy '*' -s <discovery-adress> | jq -r '.issuer, .token_endpoint, .jwks_uri'` och jämför värdarna. Direkt efter uppgraderingen, gör `PATCH` på `allowed_endpoint_hosts` med varje annan värd. Med miljöinställningar och en annan värd: [flytta inställningarna till Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) och lägg till listan. En leverantör på backendens maskin: sätt `ENVIRONMENT=development` (bara i utveckling) eller ge leverantören en riktig värd. Med åtkomsttoken och en `jwks_uri` på en annan värd än `OIDC_ACCEPTED_ISSUER` finns inget i Eneo som tillåter det: servera nycklarna på utfärdarens värd eller sätt `OIDC_RESOURCE_SERVER_ENABLED=false`.
+
+**Kontroll:** backenden loggar inget `OIDC provider configuration is unusable` och, med åtkomsttoken, inget `Failed to fetch JWKS for IdP token validation`.
 
 ### En utfärdare med platshållare nekas [#templated-issuer-refused]
 

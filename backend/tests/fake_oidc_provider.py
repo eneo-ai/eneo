@@ -21,6 +21,7 @@ import hashlib
 import json
 import secrets
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from functools import cache
 from typing import Any, Literal
@@ -92,10 +93,26 @@ class _Grant:
     claims: dict[str, Any]
 
 
+class _Body:
+    """The body as a stream, as Eneo reads a provider's answer."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    async def iter_chunked(self, size: int) -> AsyncIterator[bytes]:
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
+
+
 class _Response:
     def __init__(self, payload: dict[str, Any], status: int = 200):
         self._payload = payload
         self.status = status
+        self.content_length: int | None = None
+
+    @property
+    def content(self) -> _Body:
+        return _Body(json.dumps(self._payload).encode())
 
     async def __aenter__(self) -> "_Response":
         return self
@@ -135,6 +152,8 @@ class FakeOidcProvider:
     # "ES256-under-rsa-kid" an EC key under the kid of the published RSA key.
     signing_override: str | None = None
     discovery_overrides: dict[str, Any] = field(default_factory=dict)
+    # Where the token endpoint and the JWKS are; None means the issuer.
+    endpoint_base: str | None = None
     # The JWK's ``use``; None leaves it out.
     key_use: str | None = "sig"
     # Discovery and JWKS answer 503, as during an outage.
@@ -160,11 +179,11 @@ class FakeOidcProvider:
 
     @property
     def token_endpoint(self) -> str:
-        return f"{self.issuer}/token"
+        return f"{self.endpoint_base or self.issuer}/token"
 
     @property
     def jwks_uri(self) -> str:
-        return f"{self.issuer}/jwks"
+        return f"{self.endpoint_base or self.issuer}/jwks"
 
     @property
     def kid(self) -> str:
@@ -382,7 +401,8 @@ class _ProviderHttp:
 
     def _owner(self, url: str) -> FakeOidcProvider:
         for provider in self._providers:
-            if url.startswith(provider.issuer + "/"):
+            bases = (provider.issuer, provider.endpoint_base or provider.issuer)
+            if any(url.startswith(base + "/") for base in bases):
                 return provider
         raise AssertionError(f"No fake provider serves {url}")
 

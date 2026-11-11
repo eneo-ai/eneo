@@ -140,6 +140,7 @@ async def test_put_get_patch_test_delete_answer_as_before(
         "masked_secret": "...cret",
         "issuer": idp["issuer"],
         "allowed_domains": [f"{slug}.gov"],
+        "allowed_endpoint_hosts": [],
         "additional_redirect_uris": [],
         "signing_algorithms": None,
         "email_verified_claims": None,
@@ -547,3 +548,66 @@ async def test_a_put_stores_the_auth_method_the_provider_lists(
     stored = await _stored(tenant["id"])
     assert stored["token_endpoint_auth_method"] == methods[0]
     assert stored["token_endpoint_auth_methods_supported"] == methods
+
+
+async def test_endpoints_on_another_host_need_the_host_listed(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    """A discovery document cannot send the token request elsewhere: saving
+    names the host to list, and emptying the list again is refused."""
+    slug = f"fed-hosts-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = {**_idp(slug), "token_endpoint": "https://tokens.example.net/token"}
+    oidc_mock(discovery=_discovery(idp))
+    headers = {"X-API-Key": super_admin_token}
+    url = f"/api/v1/sysadmin/tenants/{tenant['id']}/federation"
+
+    refused = await client.put(url, json=_put_body(slug, idp), headers=headers)
+    assert refused.status_code == 400, refused.text
+    assert "tokens.example.net" in refused.json()["detail"]
+    assert await _stored(tenant["id"]) == {}
+
+    listed = await client.put(
+        url,
+        json={**_put_body(slug, idp), "allowed_endpoint_hosts": ["Tokens.Example.net"]},
+        headers=headers,
+    )
+    assert listed.status_code == 200, listed.text
+    got = await client.get(url, headers=headers)
+    assert got.json()["allowed_endpoint_hosts"] == ["tokens.example.net"]
+
+    emptied = await client.patch(
+        url, json={"allowed_endpoint_hosts": []}, headers=headers
+    )
+    assert emptied.status_code == 400, emptied.text
+    assert "tokens.example.net" in emptied.json()["detail"]
+    assert (await _stored(tenant["id"]))["allowed_endpoint_hosts"] == [
+        "tokens.example.net"
+    ]
+
+
+async def test_a_discovery_endpoint_over_plain_http_is_refused(
+    client: AsyncClient,
+    super_admin_token: str,
+    oidc_mock,
+    mock_transcription_models,
+):
+    slug = f"fed-http-{uuid4().hex[:6]}"
+    tenant = await _tenant(client, super_admin_token, slug)
+    idp = _idp(slug)
+    oidc_mock(discovery={})
+    body = {
+        **_put_body(slug, idp),
+        "discovery_endpoint": f"http://idp.{slug}.local/.well-known/openid-configuration",
+    }
+
+    refused = await client.put(
+        f"/api/v1/sysadmin/tenants/{tenant['id']}/federation",
+        json=body,
+        headers={"X-API-Key": super_admin_token},
+    )
+
+    assert refused.status_code == 422, refused.text
