@@ -528,10 +528,11 @@ class TestProviderEndpoints:
         ],
     )
     def test_allowed_endpoint_hosts_are_host_names(self, hosts: list[str]):
-        with pytest.raises(ValidationError):
+        with pytest.raises(ValidationError) as refused:
             SetFederationRequest.model_validate(
                 {**self.BODY, "allowed_endpoint_hosts": hosts}
             )
+        assert "host names or IP addresses" in str(refused.value)
 
     def test_listed_hosts_are_stored_lower_case_and_absent_ones_not_at_all(self):
         def put(**keys: object) -> dict[str, object]:

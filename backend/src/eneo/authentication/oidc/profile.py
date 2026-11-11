@@ -294,7 +294,7 @@ def endpoint_host_names(hosts: object) -> tuple[str, ...]:
         for host in cast(list[object], hosts)
     ):
         raise OidcProviderError(
-            "allowed_endpoint_hosts must list host names, without scheme, port or path"
+            "allowed_endpoint_hosts must list host names or IP addresses, without scheme, port or path"
         )
     return tuple(_host_key(host) for host in cast(list[str], hosts))
 
