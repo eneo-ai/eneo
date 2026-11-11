@@ -119,7 +119,8 @@ async def load_retention_health(
 
     A frequent task has no overdue snapshot: its due probe, on tasks the
     caller built an hour back, says whether anything is overdue, and with
-    nothing overdue it reads healthy also before its first job row. Without a
+    nothing overdue it reads healthy also before its first job row and after
+    a claim timeout (the nightly run met a tick's chunk). Without a
     probe, or when its probe raises any error, it reads unknown; the probe
     runs in a savepoint, so the other tasks still read.
     Any other failed read is the caller's.
@@ -236,7 +237,9 @@ async def _task_health(
     elif (
         abandoned
         or latest.outcome is RetentionJobOutcome.SUPERSEDED
-        or error_code is RetentionErrorCode.CLAIM_TIMEOUT
+        # A frequent task's probe already says whether work is overdue; the
+        # nightly run's claim timeout only met a tick's chunk.
+        or (error_code is RetentionErrorCode.CLAIM_TIMEOUT and probe is None)
     ):
         status = RetentionHealthStatus.UNKNOWN
     elif no_overdue_snapshot:

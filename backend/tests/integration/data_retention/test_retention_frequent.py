@@ -36,6 +36,7 @@ from eneo.data_retention.application.retention_runner import (
 )
 from eneo.data_retention.domain.retention import (
     RetentionBudget,
+    RetentionErrorCode,
     RetentionJobOutcome,
 )
 from eneo.data_retention.infrastructure import retention_worker
@@ -629,6 +630,37 @@ async def test_a_frequent_task_reads_overdue_an_hour_past_its_time(
     assert (health.status, task.status) == (expected, expected)
     assert task.overdue is (expected is RetentionHealthStatus.DEGRADED)
     assert task.no_execution
+
+
+async def test_a_claim_timeout_with_nothing_overdue_reads_healthy(
+    test_tenant, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The nightly run writes a claim timeout row when a tick's chunk holds
+    the task; for a frequent task the probe, not that row, says whether work
+    is overdue.
+
+    Mutant: a claim timeout reads unknown also when the probe answers, so a
+    frequent task reads unknown until something next falls due."""
+    now = await _database_now()
+    async with _committed() as session:
+        session.add(
+            RetentionJobRuns(
+                task="tests.health",
+                outcome=RetentionJobOutcome.SKIPPED.value,
+                started_at=now,
+                heartbeat_at=now,
+                finished_at=now,
+                error_code=RetentionErrorCode.CLAIM_TIMEOUT.value,
+            )
+        )
+    _health_of(monkeypatch, lambda s, at: _DueItems(s, "tests.health", now=at))
+
+    [task] = (await _health()).tasks
+
+    assert (task.status, task.error_code) == (
+        RetentionHealthStatus.HEALTHY,
+        RetentionErrorCode.CLAIM_TIMEOUT,
+    )
 
 
 async def test_a_failed_frequent_run_degrades_health(
