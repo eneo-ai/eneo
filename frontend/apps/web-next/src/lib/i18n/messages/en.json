@@ -963,6 +963,8 @@
   "audit_action_identity_rebinding_updated_description": "Logs when an administrator allows or withdraws linking an account to a new sign-in",
   "audit_action_identity_migration_window_updated": "Sign-in Migration Window Changed",
   "audit_action_identity_migration_window_updated_description": "Logs when an administrator opens or closes a window for linking accounts to a new sign-in",
+  "audit_action_user_access_token_issued": "Access Token Issued by Operator",
+  "audit_action_user_access_token_issued_description": "Logs when the operator takes a token to act as a user, with the server's super API key",
   "change_password": "Change password",
   "change_password_description": "Update the password used for password login.",
   "changing_password": "Changing password…",

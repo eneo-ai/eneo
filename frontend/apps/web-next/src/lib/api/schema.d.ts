@@ -10339,6 +10339,7 @@ export interface components {
       | "identity_conflict"
       | "identity_rebinding_updated"
       | "identity_migration_window_updated"
+      | "user_access_token_issued"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"

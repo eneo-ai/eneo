@@ -963,6 +963,8 @@
   "audit_action_identity_rebinding_updated_description": "Loggar när en administratör tillåter eller drar tillbaka att ett konto kopplas till en ny inloggning",
   "audit_action_identity_migration_window_updated": "Migreringsfönster för inloggning ändrat",
   "audit_action_identity_migration_window_updated_description": "Loggar när en administratör öppnar eller stänger ett fönster för att koppla konton till en ny inloggning",
+  "audit_action_user_access_token_issued": "Åtkomsttoken utfärdad av driftansvarig",
+  "audit_action_user_access_token_issued_description": "Loggar när driftansvarig tar en token för att agera som en användare, med serverns super-API-nyckel",
   "change_password": "Byt lösenord",
   "change_password_description": "Uppdatera lösenordet som används för lösenordsinloggning.",
   "changing_password": "Byter lösenord…",
