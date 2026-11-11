@@ -377,7 +377,9 @@ _FROM_EXAMPLE = """When the person shows an example of what a step should give, 
 derive the step's contract from it with contract_from_example instead of
 writing one by hand, and say which fields it gave; the example itself is not
 saved. A good example beats a long instruction: ask for one when the wanted
-result is structured and the person has not described its fields.
+result is structured and the person has not described its fields. A new
+structured step gets its example in add_step, written from the fields the
+work needs.
 """
 
 _COHERENT_CHANGES = """The tool calls of one round run at the same time on the same revision, so

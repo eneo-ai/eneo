@@ -636,3 +636,19 @@ def test_a_word_step_takes_a_template_the_flow_has_or_waits_for_one() -> None:
         "template_asset_id": str(template_id),
         "bindings": {"datum": "{{ flow_input.datum }}"},
     }
+
+
+def test_an_example_is_read_as_text_or_as_an_object() -> None:
+    from eneo.flows.domain.step_kinds import step_kind_configuration
+
+    as_text, as_object = (
+        step_kind_configuration(
+            FlowStepKind.STRUCTURED,
+            previous_output_type=None,
+            values=StepKindValues.model_validate({"example": example}),
+        )
+        for example in (_FACTS, {"beslut": "Bifall", "datum": "2026-11-11"})
+    )
+
+    assert as_text["output_contract"] == as_object["output_contract"]
+    assert as_text["output_contract"] is not None

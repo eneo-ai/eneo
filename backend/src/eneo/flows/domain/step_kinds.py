@@ -11,6 +11,7 @@ own rules decide it (see ``flows.application.flow_step_kinds``).
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from enum import StrEnum
 from typing import Any, Final, Literal, cast
@@ -94,20 +95,20 @@ class StepKindUpload(BaseModel):
 
 
 class StepKindValues(BaseModel):
-    """What the author enters for a kind. Each kind takes only the values
-    ``STEP_KIND_VALUES`` names for it; a value it does not use is refused
-    (``check_step_kind_values``), never ignored."""
+    """What a new step of a kind needs. Each kind takes only its own values;
+    a value it does not use is refused, never ignored."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     instruction: str | None = Field(
         default=None, description="What the step's model is told to do."
     )
-    example: str | None = Field(
+    example: str | dict[str, Any] | None = Field(
         default=None,
         description=(
-            "One example of the result as a JSON object; its keys become the "
-            "required fields of the step's output contract, typed by their values."
+            "One example of the result as a JSON object (or its text); its keys "
+            "become the required fields of the step's output contract, typed "
+            "by their values."
         ),
     )
     input_bindings: dict[str, Any] | None = Field(
@@ -265,7 +266,8 @@ def step_kind_configuration(
             }
         }
     if (example := given("example")) is not None:
-        configuration["output_contract"] = contract_from_example(example).contract
+        text = example if isinstance(example, str) else json.dumps(example)
+        configuration["output_contract"] = contract_from_example(text).contract
     if given("format") == "pdf":
         configuration["output_type"] = FlowOutputType.PDF
     template_asset_id, template_bindings = (
