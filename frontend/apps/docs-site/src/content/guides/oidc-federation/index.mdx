@@ -112,7 +112,7 @@ The provider-bound Zitadel login in the Svelte frontend is deprecated and is rem
 |-------|---------|---------|
 | `signing_algorithms` | The provider's `id_token_signing_alg_values_supported`, else `["RS256"]` | ID token algorithms to accept. Only `RS256`/`384`/`512`, `PS256`/`384`/`512`, `ES256`/`384`/`512` and `EdDSA` (Ed25519 keys) are allowed |
 | `email_verified_claims` | `["email_verified", "xms_edov"]` | Claims that say the email is verified, in order. The first one present decides, so an explicit `false` is never overridden by a later claim |
-| `allowed_endpoint_hosts` | None: only the discovery host | Other hosts the token endpoint and the JWKS may be on, as host names (no scheme, port or path). Google needs `["oauth2.googleapis.com", "www.googleapis.com"]` |
+| `allowed_endpoint_hosts` | None: only the discovery host | Other hosts the token endpoint and the JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Google needs `["oauth2.googleapis.com", "www.googleapis.com"]` |
 
 ### Upgrading
 
@@ -124,7 +124,7 @@ The provider-bound Zitadel login in the Svelte frontend is deprecated and is rem
 - The provider's discovery document must stay reachable. Each backend process caches it for `oidc_jwks_cache_ttl_seconds` (default one hour) with no stale copy to fall back on: when the cache has expired and the document cannot be fetched, sign-in answers `500`.
 - A sign-in started before the upgrade must be started again: its state is refused with `400 Invalid state parameter`, or its transaction with `oidc_transaction_invalid`. In a rolling deploy, replace all backend instances together, or accept that sign-ins which cross versions fail until the switch is done; people only need to start the sign-in again.
 - Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter. Any other client that calls `POST /api/v1/auth/callback`, through eneo-js or directly, must forward the redirect's `iss` query parameter whenever the provider sends one: Eneo requires it when the provider's discovery announced it, and refuses one that differs.
-- With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted by the same rules as at sign-in, to the tenant `OIDC_TENANT_ID` names, else to the first active tenant.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted to the tenant `OIDC_TENANT_ID` names, else to the first active tenant. Access tokens use the allowed domains of the selected settings: with `FEDERATION_ENABLED=true` only the domains stored on the provider. With no provider stored there is no browser sign-in, and a token creates no account but admits every existing account in the tenant whose email matches. The `jwks_uri` must be on the issuer's host; see [Eneo's requests to the provider](#provider-contract).
 
 ### Migrate from the MobilityGuard settings
 
