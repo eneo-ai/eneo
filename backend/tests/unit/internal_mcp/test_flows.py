@@ -976,18 +976,24 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         MagicMock(),
         expected_revision=4,
         step_id=_DRAFT_IDS[1],
-        example='{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null}',
+        example=(
+            '{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null,'
+            ' "sak": {"nr": "1"}}'
+        ),
     )
 
     assert result.isError is not True
     page = json.loads(result.content[0].text)
     body = json.loads(page["content"])
     assert body["saved"] is True
+    # word: whether a Word field may read the field (publish's rule): a list,
+    # an object and a field that may be null cannot be.
     assert body["fields"] == [
-        {"name": "beslut", "type": "string", "variable": True},
-        {"name": "belopp", "type": "number", "variable": True},
-        {"name": "a.b", "type": "array", "variable": False},
-        {"name": "n", "type": ["string", "null"], "variable": True},
+        {"name": "beslut", "type": "string", "variable": True, "word": True},
+        {"name": "belopp", "type": "number", "variable": True, "word": True},
+        {"name": "a.b", "type": "array", "variable": False, "word": False},
+        {"name": "n", "type": ["string", "null"], "variable": True, "word": False},
+        {"name": "sak", "type": "object", "variable": True, "word": False},
     ]
     assert body["notes"] == ["empty_list", "null_value"]
     request = save.await_args.args[2]
@@ -998,6 +1004,7 @@ async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatc
         "belopp",
         "a.b",
         "n",
+        "sak",
     ]
     # The contract carries the fields' types, never the example's values.
     assert "Bifall" not in json.dumps(request.model_dump(mode="json"))
@@ -1576,6 +1583,45 @@ def test_the_tools_that_describe_a_step_name_no_kind_of_step():
     assert "A step has no kind field" in " ".join(
         (flows.add_step.__doc__ or "").split()
     )
+
+
+# --- A Word step keeps its template ------------------------------------------
+
+
+_WORD_STEP = {
+    "output_mode": "template_fill",
+    "output_config": {
+        "template_asset_id": "7b0e2f0a-8d4c-4c3e-9f51-2b6a1f0c9d11",
+        "template_name": "Beslut.docx",
+        "placeholders": ["namn"],
+        "bindings": {},
+    },
+}
+
+
+def test_a_change_that_would_drop_a_word_steps_template_is_refused():
+    with pytest.raises(BadRequestException) as refused:
+        flows.require_kept_template(
+            {"output_config": {"bindings": {"namn": "{{ flow_input.namn }}"}}},
+            _WORD_STEP,
+        )
+    assert "template_asset_id, template_name" in str(refused.value)
+
+    # The whole config with the bindings changed is a change like any other,
+    # and the placeholders follow the uploaded template on their own.
+    kept = {
+        key: value
+        for key, value in _WORD_STEP["output_config"].items()
+        if key != "placeholders"
+    }
+    flows.require_kept_template(
+        {"output_config": {**kept, "bindings": {"namn": ""}}}, _WORD_STEP
+    )
+    # A step that stops filling a template takes its template with it.
+    flows.require_kept_template(
+        {"output_mode": "pass_through", "output_config": None}, _WORD_STEP
+    )
+    flows.require_kept_template({"user_description": "Beslut"}, _WORD_STEP)
 
 
 # --- What a step reads ---------------------------------------------------------

@@ -1638,3 +1638,88 @@ async def test_a_read_the_step_rules_refuse_comes_back_with_their_shape(
         {"input_bindings": flows.INPUT_BINDINGS_EXAMPLES["fields"]},
     )
     assert not saved.isError, saved.content[0].text
+
+
+# --- A Word step through the chat's tools --------------------------------------
+
+
+async def _word_flow(client, enabled_flow, db_container, admin_user):
+    """A flow whose step 2 fills an uploaded template with one field,
+    case_id, that nothing reads yet; the chat's context in edit mode."""
+    from tests.integration.flows.test_flow_template_attachment_persistence import (
+        DOCX_MIME,
+        _template_bytes,
+    )
+
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    upload = await client.post(
+        base + "/template-files/",
+        files={"upload_file": ("mall.docx", _template_bytes("case_id"), DOCX_MIME)},
+        headers=headers,
+    )
+    assert upload.status_code == 201, upload.text
+    word = _new_step("Beslut", "", input_source="previous_step")
+    word["configuration"].update(
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"template_asset_id": upload.json()["id"], "bindings": {}},
+    )
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Fakta", "Ta fram fakta.", input_source="flow_input"),
+                word,
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    return base, headers, ctx, created.json()["steps"][1], revision
+
+
+async def test_a_word_steps_fields_are_read_and_its_template_kept(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    saved_config = word["output_config"]
+
+    overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
+    (step,) = overview["steps"]
+    assert step["word_fields"] == {"fields": [{"name": "case_id", "reads": None}]}
+
+    # Only the bindings: the template the person uploaded would be lost.
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"bindings": {"case_id": "{{ step_1.output.text }}"}}},
+    )
+    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
+    assert refused.isError, after["output_config"]
+    assert "template_asset_id" in _page(refused)["message"]
+    assert after["output_config"] == saved_config
+
+    bound = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {
+            "output_config": {
+                **saved_config,
+                "bindings": {"case_id": "{{ step_1.output.text }}"},
+            }
+        },
+    )
+    assert not bound.isError, bound.content[0].text
+    overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
+    assert overview["steps"][0]["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }

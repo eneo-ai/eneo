@@ -583,7 +583,9 @@ async def read_flow(
     declares (output_fields), whether a person reviews it, what it reads
     (reads: each earlier result as the reference the flow resolves and
     where the read is written), which later steps read its result (readers,
-    the same way) and the run form fields it reads. Section "steps" gives
+    the same way), the run form fields it reads and, for a Word step, its
+    template's fields (word_fields: each field and what it reads, null when
+    nothing does, and bindings_without_field). Section "steps" gives
     the steps in full with their assistants' prompts and the same reads;
     section "settings" the flow without its steps (description,
     metadata_json with the run form, retention, permissions); section "all"
@@ -601,6 +603,7 @@ async def read_flow(
             run_form_fields,
             step_connections,
             step_reads_summary,
+            word_fields,
         )
 
         flow = await get_flow(chat.flow_id, request, container)
@@ -641,6 +644,8 @@ async def read_flow(
                     item["prompt"] = prompt.text if prompt is not None else None
                 # The services the step talks to, never their secrets.
                 item["connections"] = step_connections(dump)
+                if step.output_mode == "template_fill":
+                    item["word_fields"] = word_fields(step.output_config)
                 item.update(reads.get(step.step_order, {}))
                 items.append(item)
             value = {
@@ -985,6 +990,32 @@ class _StepEdit:
         self.card_fields = card_fields
 
 
+def require_kept_template(changes: dict[str, Any], saved: dict[str, Any]) -> None:
+    """Refuse a change that would drop a Word step's template. A change
+    replaces output_config whole, and only the person uploads a template, so
+    an output_config sent with its bindings alone would lose the upload
+    without a word."""
+    if (changes.get("output_mode") or saved.get("output_mode")) != "template_fill":
+        return
+    if "output_config" not in changes:
+        return
+    before = saved.get("output_config") or {}
+    after = (
+        changes["output_config"] if isinstance(changes["output_config"], dict) else {}
+    )
+    lost = sorted(
+        key for key in before if key.startswith("template_") and key not in after
+    )
+    if lost:
+        raise BadRequestException(
+            "output_config is replaced whole, and this one leaves out "
+            + ", ".join(lost)
+            + ", which link the Word step to the template the person uploaded."
+            " Send output_config as the step's full read gives it, with only"
+            " what you change changed."
+        )
+
+
 def _step_edit(
     step: Any,
     changes: dict[str, Any] | None,
@@ -1006,6 +1037,7 @@ def _step_edit(
         mode="json", include=set(FlowStepUpdateRequest.model_fields)
     )
     require_safe_model_configuration(changes, saved)
+    require_kept_template(changes, saved)
     return _StepEdit(
         step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
         fields=step_changes(saved, changes, assistant_before, assistant_changes),
@@ -1173,8 +1205,10 @@ async def contract_from_example(
     become required fields typed by their values (numbers as number, lists by
     their first element). Saves output_type json and the contract on the step;
     the example itself is not kept. The result lists the fields, marks a name a
-    later step cannot read as a reference, and notes what one example could
-    not decide (an empty list, a null, a list of mixed elements)."""
+    later step cannot read as a reference (variable false) and a field a Word
+    field cannot read (word false: a list, an object or a null), and notes what
+    one example could not decide (an empty list, a null, a list of mixed
+    elements)."""
 
     async def operation(container, chat, request):
         from eneo.flows.api.flow_models import FlowEditorUpdateRequest
@@ -1188,6 +1222,7 @@ async def contract_from_example(
         from eneo.flows.domain.contract_from_example import (
             contract_from_example as read_example,
         )
+        from eneo.flows.flow_validators import template_bound_path_ok
 
         try:
             reading = read_example(example)
@@ -1222,6 +1257,8 @@ async def contract_from_example(
                         "name": item.name,
                         "type": item.schema.get("type"),
                         "variable": item.variable,
+                        # Publish's rule for what a Word field may read.
+                        "word": template_bound_path_ok(reading.contract, (item.name,)),
                     }
                     for item in reading.fields
                 ],

@@ -130,7 +130,8 @@ step whose input may exceed its model's window can set
 input_config.long_material to {"mode": "digest"}: such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
 result records the coverage, and partial coverage fails the step unless it has
-a review. A change to input_config replaces it whole, so keep its other keys.
+a review. A change to input_config or output_config replaces it whole, so send
+it as you read it with only your change made.
 Run form fields are declared in metadata_json.form_schema.fields. output_mode is
 what the step delivers (pass_through returns the answer; http_post only on the
 last step; template_fill fills a Word template), output_type its form (text,
@@ -158,12 +159,20 @@ lose its source and ask what it should read instead, then change it as they
 answer.
 When two steps share an assistant, update_step with assistant_changes gives the
 edited step its own copy and leaves the other step's assistant as it was.
-A Word step (template_fill) has no AI: each Word field
-(output_config.bindings.<name>) gets the value it reads as it is, word for
-word, and the step's instruction is never used. When a field should hold a
-part of a text (the participants, a date, a decision), add an AI step before
-it that gives json with that part in its output_contract, and let the field
-read {{ step_N.output.structured.<field> }}. A file attached in the chat
+A Word step (template_fill) has no AI: each Word field gets the value it reads
+as it is, word for word, and the step's instruction is never used. Its fields
+are those of the template the person uploaded: read_flow lists them
+(word_fields), and you never guess a field's name. Until a template is
+uploaded the step has no fields to bind. output_config.bindings gives each
+field exactly one reference, or "" to leave it empty on purpose, for example
+{"datum": "{{ flow_input.datum }}"}. A field can read a run form field of type
+text, number, date or select, the text of a step ({{ step_N.output.text }}),
+or a field of a json step that is required and of one type: string, number,
+integer or boolean. It cannot read a list, a multiselect, an object or a json
+field that may be null. When a field should hold a part of a text or a list
+(the participants, a date, a decision), add an AI step before it that gives
+json with that part as one text field in its output_contract, and let the
+field read {{ step_N.output.structured.<field> }}. A file attached in the chat
 cannot become a Word step's template: no tool can attach it. Build the Word
 step and say that the person uploads the template in that step ("Ladda upp
 en Word-mall"); never say that a step uses a file attached in the chat.

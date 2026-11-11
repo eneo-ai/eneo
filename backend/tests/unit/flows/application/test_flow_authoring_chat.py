@@ -162,6 +162,13 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
         instructions
     )
     assert '("Ladda upp en Word-mall")' in instructions
+    # A Word field's name is read, never guessed, and each binding is one
+    # reference to a value publish lets it read.
+    assert "read_flow lists them (word_fields)" in instructions
+    assert "you never guess a field's name" in instructions
+    assert 'exactly one reference, or "" to leave it empty on purpose' in (instructions)
+    assert "It cannot read a list, a multiselect, an object" in instructions
+    assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
     assert 'runtime_input "required": true' in instructions
 
@@ -449,7 +456,9 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
     assert "follow next_offset until it is null" in instructions
     assert 'input_config.long_material to {"mode": "digest"}' in instructions
     assert "partial coverage fails the step unless it has a review" in instructions
-    assert "A change to input_config replaces it whole" in instructions
+    assert "A change to input_config or output_config replaces it whole" in (
+        instructions
+    )
     assert "Name a step as @[<user_description>](step:<id>)" in instructions
     assert "the person's messages use the same forms" in instructions
     assert "or a change is refused because edit mode is off" in instructions
