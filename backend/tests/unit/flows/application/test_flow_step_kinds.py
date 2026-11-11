@@ -29,6 +29,9 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionOff,
 )
 from eneo.flows.domain.step_kinds import (
+    STEP_KIND_DESCRIPTIONS,
+    STEP_KIND_REQUIRED_VALUES,
+    STEP_KIND_VALUES,
     FlowStepKind,
     StepKindValues,
     check_step_kind_values,
@@ -437,6 +440,8 @@ async def _added(
 
 
 _FACTS = '{"beslut": "Bifall", "datum": "2026-11-11"}'
+_READ = {"question": "Läs {{ step_1.output.text }}"}
+_TOOL = {"mcp_server_id": str(uuid4()), "tool_id": str(uuid4()), "arguments": {}}
 
 
 @pytest.mark.parametrize(
@@ -464,6 +469,39 @@ _FACTS = '{"beslut": "Bifall", "datum": "2026-11-11"}'
                     "required": ["beslut", "datum"],
                 },
             },
+        ),
+        (
+            FlowStepKind.AI,
+            {"instruction": "Läs.", "input_bindings": _READ},
+            {"input_bindings": _READ, "input_type": "text"},
+        ),
+        (
+            FlowStepKind.STRUCTURED,
+            {
+                "instruction": "Ta fram fakta.",
+                "example": _FACTS,
+                "input_bindings": _READ,
+                "review": {"mode": "edit"},
+            },
+            {
+                "input_bindings": _READ,
+                "review_policy": {"mode": "edit", "expires_after_seconds": None},
+            },
+        ),
+        (
+            FlowStepKind.DOCUMENT,
+            {"input_bindings": _READ},
+            {"output_mode": "render_verbatim", "input_bindings": _READ},
+        ),
+        (
+            FlowStepKind.REVIEW,
+            {"review": {"mode": "view"}},
+            {"review_policy": {"mode": "view", "expires_after_seconds": None}},
+        ),
+        (
+            FlowStepKind.TOOL,
+            {"tool": _TOOL},
+            {"input_source": "tool", "input_config": {"tool": _TOOL}},
         ),
         (
             FlowStepKind.COMPOSE,
@@ -533,14 +571,18 @@ async def test_a_speaker_step_is_saved_with_its_choices_and_a_review(
     step = await _added(
         flow,
         FlowStepKind.SPEAKERS,
-        {"participants_field": "deltagare", "infer_names": True},
+        {
+            "participants_field": "deltagare",
+            "speaker_count_field": "antal",
+            "infer_names": True,
+        },
         monkeypatch,
     )
 
     assert step.output_config == {
         "speaker_mapping": {
             "participants_field": "deltagare",
-            "speaker_count_field": None,
+            "speaker_count_field": "antal",
             "infer_names": True,
         }
     }
@@ -589,8 +631,33 @@ def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
 @pytest.mark.parametrize(
     ("kind", "values", "message"),
     [
-        (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),
+        (FlowStepKind.AI, {"instruction": "Läs.", "format": "pdf"}, "not use format"),
+        (
+            FlowStepKind.STRUCTURED,
+            {"instruction": "Ta fram.", "example": _FACTS, "url": _URL},
+            "not use url",
+        ),
         (FlowStepKind.COMPOSE, {"review": {"mode": "edit"}}, "not use review"),
+        (FlowStepKind.DOCUMENT, {"instruction": "Skriv."}, "not use instruction"),
+        (FlowStepKind.TEMPLATE, {"instruction": "Fyll i."}, "not use instruction"),
+        (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),
+        (
+            FlowStepKind.SPEAKERS,
+            {"review": {"mode": "edit"}},
+            "not use review",
+        ),
+        (FlowStepKind.REVIEW, {"instruction": "Granska."}, "not use instruction"),
+        (
+            FlowStepKind.FETCH_HTTP,
+            {"url": _URL, "instruction": "Hämta."},
+            "not use instruction",
+        ),
+        (FlowStepKind.TOOL, {"tool": _TOOL, "url": _URL}, "not use url"),
+        (
+            FlowStepKind.SEND_HTTP,
+            {"url": _URL, "review": {"mode": "edit"}},
+            "not use review",
+        ),
         (FlowStepKind.STRUCTURED, {"instruction": "Ta fram."}, "needs example"),
         (FlowStepKind.SEND_HTTP, {}, "needs url"),
     ],
@@ -603,6 +670,16 @@ def test_a_value_the_kind_does_not_use_or_lacks_is_refused(
 
     assert message in str(refused.value)
     assert refused.value.code == "flow_step_kind_values_invalid"
+
+
+def test_the_value_tables_cover_every_kind_with_fields_the_values_have() -> None:
+    kinds = set(FlowStepKind)
+    assert set(STEP_KIND_DESCRIPTIONS) == kinds
+    assert set(STEP_KIND_VALUES) == kinds
+    assert set(STEP_KIND_REQUIRED_VALUES) <= kinds
+    for kind, takes in STEP_KIND_VALUES.items():
+        assert set(takes) <= set(StepKindValues.model_fields), kind
+        assert set(STEP_KIND_REQUIRED_VALUES.get(kind, ())) <= set(takes), kind
 
 
 def test_a_value_no_kind_has_is_refused_by_the_values_shape() -> None:

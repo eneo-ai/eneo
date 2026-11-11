@@ -1063,6 +1063,34 @@ async def test_a_step_is_added_by_its_kind_in_one_revision_at_its_place(monkeypa
     assert "publish_blockers" in page
 
 
+@pytest.mark.parametrize(
+    ("kind", "values", "prompt"),
+    [
+        ("ai", {"instruction": "Sammanfatta."}, "Sammanfatta."),
+        (
+            "send_http",
+            {"url": "https://example.org/hook", "instruction": "Lämna det vidare."},
+            "Lämna det vidare.",
+        ),
+        ("compose", {"input_bindings": {"question": "{{ step_1.output.text }}"}}, None),
+    ],
+)
+async def test_an_added_step_gets_the_instruction_as_its_prompt(
+    monkeypatch, kind, values, prompt
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(name="Nytt", kind=kind, values=values)
+
+    assert result.isError is not True, page
+    (new_step,) = save.await_args.args[2].new_steps
+    assistant = new_step.assistant
+    given = assistant.prompt if assistant is not None else None
+    assert (given.text if given is not None else None) == prompt
+
+
 async def test_a_large_addition_answers_whole_in_one_page(monkeypatch):
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
