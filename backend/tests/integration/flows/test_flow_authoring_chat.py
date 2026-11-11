@@ -2140,7 +2140,7 @@ async def test_an_added_word_step_answers_with_what_its_fields_read(
 
 
 async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
-    client, enabled_flow, db_container, admin_user
+    client, enabled_flow, db_container, admin_user, monkeypatch
 ):
     flow, headers = enabled_flow
     base = f"/api/v1/flows/{flow['id']}"
@@ -2152,6 +2152,17 @@ async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
     assert not first.isError, first.content[0].text
     revision += 1
     assistants = await _flow_assistant_count(db_container, flow["id"])
+    from eneo.flows.application.flow_service import FlowService
+
+    made: list[UUID] = []
+    create = FlowService.create_flow_assistant
+
+    async def recorded(self, *args, **kwargs):
+        result = await create(self, *args, **kwargs)
+        made.append(result[0].id)
+        return result
+
+    monkeypatch.setattr(FlowService, "create_flow_assistant", recorded)
 
     # The values pass their own check; the save makes the new step's assistant
     # and then refuses an upload on step 2.
@@ -2168,4 +2179,6 @@ async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
     current = (await client.get(base + "/", headers=headers)).json()
     assert current["draft_revision"] == revision
     assert [step["user_description"] for step in current["steps"]] == ["Sammanfatta"]
+    # The assistant was made before the refusal, and is gone with it.
+    assert len(made) == 1
     assert await _flow_assistant_count(db_container, flow["id"]) == assistants

@@ -1325,6 +1325,39 @@ async def test_a_wrongly_shaped_argument_is_refused_without_its_value(
     save.assert_not_awaited()
 
 
+async def test_a_well_formed_call_goes_through_the_servers_check(monkeypatch):
+    save = _adding_chat(monkeypatch, [])
+
+    refused, text = await _through_the_server(
+        "add_step",
+        expected_revision=4,
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Läs."},
+    )
+
+    assert not refused, text
+    assert json.loads(json.loads(text)["content"])["saved"] is True
+    save.assert_awaited_once()
+
+
+async def test_a_tool_that_is_not_closed_still_runs_through_the_servers_check(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_steps",
+        expected_revision=4,
+        edits=[
+            {"step_id": str(_DRAFT_IDS[1]), "changes": {"user_description": "Steg 2"}}
+        ],
+    )
+
+    assert not refused, text
+    save.assert_awaited_once()
+
+
 async def test_an_unknown_key_in_http_is_refused_without_its_value(monkeypatch):
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
