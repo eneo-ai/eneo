@@ -1174,6 +1174,20 @@ async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
         ),
         ({"values": {"url": "https://example.org/"}}, "It does not use url"),
         ({"values": {}}, "It needs instruction"),
+        (
+            {
+                "kind": "structured",
+                "values": {"instruction": "Ta fram.", "example": "inte json"},
+            },
+            "The example is not valid JSON.",
+        ),
+        (
+            {
+                "kind": "structured",
+                "values": {"instruction": "Ta fram.", "example": "[1, 2]"},
+            },
+            "The example must be a JSON object",
+        ),
     ],
 )
 async def test_a_step_that_cannot_be_added_as_asked_is_refused_unsaved(
@@ -1181,7 +1195,7 @@ async def test_a_step_that_cannot_be_added_as_asked_is_refused_unsaved(
 ):
     save = _adding_chat(monkeypatch, [])
 
-    result, page = await _add(name="Sammanfatta", kind="ai", **arguments)
+    result, page = await _add(**{"name": "Sammanfatta", "kind": "ai", **arguments})
 
     assert result.isError is True
     assert message in page["message"]

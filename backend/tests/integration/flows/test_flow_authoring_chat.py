@@ -1963,8 +1963,18 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
         assert not added.isError, added.content[0].text
         revision += 1
     page = _page(added)
-    # A Word step without its template is saved and waits for it.
-    assert page["publish_blocker_count"] >= 1
+    # A Word step without its template is saved and waits for it: publish
+    # names that step's missing template configuration.
+    (waiting,) = [
+        blocker
+        for blocker in page["publish_blockers"]
+        if blocker.get("step", {}).get("step_order") == 3
+    ]
+    assert waiting["code"] == "flow_step_invalid"
+    assert (
+        "output_config must be an object for output_mode 'template_fill'"
+        in (waiting["message"])
+    )
 
     steps = (await client.get(base + "/", headers=headers)).json()["steps"]
     facts, text, word = steps
