@@ -1695,6 +1695,18 @@ async def _descriptions() -> dict[str, str]:
     }
 
 
+async def test_a_step_that_mostly_copies_its_input_is_worth_trying_without_a_model():
+    description = (await _descriptions())["read_flow_suggestions"]
+
+    # What the check measured, not a verdict that the step only copies.
+    assert "only copies its inputs" not in description
+    assert "most of the step's output was its input copied" in description
+    assert (
+        "a step without a model is worth trying when the step's own part is not "
+        "needed" in description
+    )
+
+
 async def test_update_step_states_the_shape_of_what_a_step_reads():
     from eneo.flows.input_binding_contract_rules import (
         SOURCE_REF_KEYS,

@@ -1519,8 +1519,9 @@ async def read_flow_suggestions(
     overlapping_inputs (two inputs of a step share much of their text; when
     a duplicate_read or broad_all_previous_steps names the same two reads,
     the overlap is in its params.measured_overlaps instead) and
-    deterministic_candidate (a model step only copies its inputs, which a
-    compose_text step does without a model), and oversized_reasoning (a step
+    deterministic_candidate (the runs show that most of the step's output was
+    its input copied; a step without a model is worth trying when the step's
+    own part is not needed), and oversized_reasoning (a step
     asks for high reasoning effort for a small extraction into JSON);
     runs.counted and runs.left_out say how many runs were measured. Only
     numbers come from the runs, never their content, and the read is
