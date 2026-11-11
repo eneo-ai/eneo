@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@e47fa79b01f7
+translationSource: guides/upgrade-notes.mdx@faa3a54e1c8c
 ---
 
 import { Callout } from "nextra/components";
@@ -315,7 +315,7 @@ En migrering tömmer ikoner som pekar över organisationsgränser. Att ta bort e
 
 `cleanup_old_data`, `delete_unused_files` och `purge_old_conversations` ersätts av `run_retention` vid `RETENTION_CRON_HOUR`:`RETENTION_CRON_MINUTE` (03:30 i workerns tid som förval, UTC i avbilden). Gallringstiderna är oförändrade. Ett andra jobb, `run_retention_frequent`, startar var femte minut; ingen uppgift i den här versionen använder det, så det slutar direkt.
 
-`GET /api/healthz` rapporterar varje gallringsuppgift. En misslyckad körning håller uppgiften `degraded` tills en ny körning är avslutad, medan `error_code` följer den senaste körningen. En uppgift visar `unknown` med `overdue_not_measured` när dess senaste avslutade körning inte kunde mäta vad som är försenat. Se [Health](/docs/audit-logging#health).
+`GET /api/healthz` rapporterar varje gallringsuppgift. En misslyckad körning håller uppgiften `degraded` tills en ny körning är avslutad, medan `error_code` följer den senaste körningen. En uppgift som inte är `degraded` visar `unknown` med `overdue_not_measured` när dess senaste avslutade körning inte kunde mäta vad som är försenat. Se [Health](/docs/audit-logging#health).
 
 **Gör:** uppdatera skript och larm på de gamla jobbnamnen.
 

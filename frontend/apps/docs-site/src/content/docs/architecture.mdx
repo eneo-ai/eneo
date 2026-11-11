@@ -410,7 +410,7 @@ async def run_retention(container: Container) -> list[RetentionRunReport]:
 
 `run_retention` runs every registered task once a day. `run_retention_frequent`,
 in the same file, starts every five minutes and runs only the tasks registered to
-run often whose due probe finds something due.
+run often whose due probe finds something due or fails.
 
 **Web Crawling:**
 

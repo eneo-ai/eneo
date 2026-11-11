@@ -159,8 +159,9 @@ path. Audit-log purging remains governed by the separate audit retention policy 
 
 The daily run runs every registered task. A task registered to run often also runs
 every five minutes, through the same engine and lease, but only when its due probe
-finds something due; otherwise that run writes no execution record and no audit
-event. No task in this release runs often, so the five-minute job
+finds something due, or when the probe itself fails or times out (the failure is
+logged and the task runs); when the probe finds nothing due, that run writes no
+execution record and no audit event. No task in this release runs often, so the five-minute job
 `run_retention_frequent` ends without touching the database.
 
 Work runs in bounded chunks. Each chunk is one database transaction with durable
@@ -387,7 +388,7 @@ unavailable.
 | Status | Meaning |
 | --- | --- |
 | `initializing` | No task has written an execution record yet, or this task's first execution is still running and has not written its overdue snapshot |
-| `healthy` | No stored execution contradicts it: the latest finished execution did not fail and measured overdue work, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
+| `healthy` | No stored execution contradicts it: the latest finished execution did not fail and, for a task that reports overdue work, measured it, the task is not stale, nothing is overdue, and no running execution has a stale heartbeat |
 | `degraded` | The latest finished execution failed, no execution completed for two days, or overdue rows exist |
 | `unknown` | The latest execution was superseded, timed out on its claim or has a stale heartbeat; the task has no execution although another task has; the latest finished execution did not measure overdue work; the overdue snapshot is missing, stale, or was cut off before it found any overdue row; or the health read failed |
 | `disabled` | The operator turned the task off: the worker skipped its latest execution, or, before any execution, the API's own setting turns it off. The overall status leaves the task out |
@@ -402,7 +403,9 @@ unavailable.
 | `overdue_snapshot_stale` | The latest snapshot is older than two days |
 | `no_execution` | The task has no execution record |
 | `no_overdue_snapshot` | The task reports overdue work but no execution has written a snapshot |
-| `overdue_not_measured` | The task reports overdue work, and its latest finished execution completed (`succeeded` or `partial`) without measuring it, so no snapshot says what is due. The task reads `unknown` until a later execution completes and measures it; a rerun still running does not clear it |
+| `overdue_not_measured` | The task reports overdue work, and its latest finished execution completed (`succeeded` or `partial`) without measuring it, so no snapshot says what is due. The task reads `unknown` until a later execution completes and measures it, unless it is `degraded` (stale, or an older snapshot still found overdue rows); a rerun still running does not clear it |
+| `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
+| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
 
 A task that runs often has no overdue snapshot. Health asks its due probe instead,
 as if it were an hour earlier: the task reads `degraded` with `overdue` when something
@@ -410,8 +413,6 @@ has been due for more than an hour, and `healthy` when nothing has, also before 
 first execution and when its latest execution timed out on its claim. A probe that
 fails reads `unknown` for that task alone. The two-day `stale` rule and `failed` apply
 as to any task.
-| `latest_outcome`, `error_code`, `blocked_reasons` | From the latest execution; blocked reasons read `<step>.<reason>` |
-| `limiting_settings` | Settings whose limit kept due data in the latest execution, for example `retention_conversations_max_unit_rows` for `unit_exceeds_budget`; raising the named settings lets a later execution remove the data |
 
 `error_code` names why an execution did not succeed:
 

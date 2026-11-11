@@ -47,7 +47,8 @@ stays outside this record.
    composition root `eneo.main.retention_tasks` lists every task with its
    enable switch and budget, and one daily cron on the general worker runs that
    list. A task registered to run often also runs every five minutes, through
-   the same runner and lease, when its due probe finds something due. Each
+   the same runner and lease, when its due probe finds something due or
+   itself fails or times out (the failure is logged and the task runs). Each
    removal has that one scheduled path; no other cron deletes the same data.
 2. **Two different decisions, two names.** *Retention expiry* removes history
    past its effective period together with that history's links, and releases
@@ -130,8 +131,8 @@ stays outside this record.
    previous destinations or backups. Health reads `healthy` only when the
    stored executions contradict nothing: no failed latest finished execution,
    no two days without a completed one, no running execution with a stale
-   heartbeat, no overdue work, and overdue work measured by the latest finished
-   execution. A task that runs often has no overdue snapshot; health asks its
+   heartbeat, no overdue work, and, for a task that reports overdue work, that
+   work measured by the latest finished execution. A task that runs often has no overdue snapshot; health asks its
    due probe as if it were an hour earlier. Contradicting evidence reads
    `degraded` or `unknown`; a task without evidence reads `initializing` or
    `unknown`. A task the operator turned off reads `disabled` and leaves the
