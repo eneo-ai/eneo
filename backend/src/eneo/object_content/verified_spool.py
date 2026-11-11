@@ -6,6 +6,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile, SpooledTemporaryFile
 from typing import BinaryIO, TypeVar, cast
 
+from eneo.main import process_scratch
 from eneo.object_content.content import (
     ByteRange,
     ContentRead,
@@ -64,7 +65,9 @@ class VerifiedSpool:
     ) -> AsyncGenerator["VerifiedSpool"]:
         try:
             file = (
-                NamedTemporaryFile(mode="w+b", delete=False)
+                NamedTemporaryFile(
+                    mode="w+b", delete=False, dir=process_scratch.directory()
+                )
                 if memory_bytes is None
                 else SpooledTemporaryFile(max_size=memory_bytes, mode="w+b")
             )
