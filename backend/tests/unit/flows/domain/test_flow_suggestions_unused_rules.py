@@ -457,6 +457,35 @@ def test_no_form_suggestion_while_a_step_takes_the_whole_run_input() -> None:
     assert _of(_FORM, [_question("{{ flow_input }}")], _METADATA) == []
 
 
+def test_a_field_that_names_or_dates_the_run_is_used_without_a_reader() -> None:
+    label = {"name": "rubrik", "type": "text", "role": "run_label"}
+    day = {"name": "datum", "type": "date", "role": "run_date"}
+    metadata = {
+        "form_schema": {
+            "fields": [
+                {"name": "kommun", "type": "text"},
+                label,
+                day,
+                {"name": "ärende", "type": "text"},
+            ]
+        }
+    }
+
+    (suggestion,) = _of(_FORM, [_question("{{ flow_input.kommun }}")], metadata)
+
+    assert suggestion.params == {"field": "ärende"}
+    assert suggestion.fix.kind == "patch"
+    assert suggestion.fix.patch == {
+        "definition": {
+            "metadata_json": {
+                "form_schema": {
+                    "fields": [{"name": "kommun", "type": "text"}, label, day]
+                }
+            }
+        }
+    }
+
+
 def test_the_form_fingerprint_is_the_field() -> None:
     (before,) = _of(_FORM, [_question("{{ kommun }}")], _METADATA)
     (renamed,) = _of(

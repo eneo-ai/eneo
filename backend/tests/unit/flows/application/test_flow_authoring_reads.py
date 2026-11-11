@@ -147,6 +147,21 @@ def test_run_form_fields_in_short_and_empty_when_unreadable():
     assert run_form_fields({"form_schema": {"fields": "nonsense"}}) == []
 
 
+def test_run_form_fields_name_the_role_a_field_has():
+    fields = run_form_fields(
+        {
+            "form_schema": {
+                "fields": [
+                    {"name": "title", "type": "text", "role": "run_label"},
+                    {"name": "day", "type": "date", "role": "run_date"},
+                    {"name": "note", "type": "text"},
+                ]
+            }
+        }
+    )
+    assert [field.get("role") for field in fields] == ["run_label", "run_date", None]
+
+
 def _model(name: str, *, realtime: bool = False, can_access: bool = True):
     return SimpleNamespace(
         id=uuid4(),
