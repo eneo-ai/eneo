@@ -1160,8 +1160,13 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     schema = tool.inputSchema
     kinds = schema["$defs"]["FlowStepKind"]["enum"]
     assert kinds == [kind.value for kind in FlowStepKind]
-    values = schema["$defs"]["StepKindValues"]
+    (values, _null) = schema["properties"]["values"]["anyOf"]
     assert values["additionalProperties"] is False
+    assert "instruction" in values["properties"]
+    # Its parts are inline, so the shape reads without references.
+    upload = values["properties"]["upload"]["anyOf"][0]
+    assert upload["properties"]["format"]["enum"] == ["document", "file"]
+    assert "$ref" not in json.dumps(values)
     assert "configuration" not in schema["properties"]
     assert "assistant_changes" not in schema["properties"]
     description = " ".join((tool.description or "").split())
@@ -1169,21 +1174,18 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
         assert f"{kind.value} ({text})" in description
 
 
-async def test_a_value_no_kind_has_is_refused_before_the_tool_runs(monkeypatch):
-    from mcp.server.fastmcp.exceptions import ToolError
-
+async def test_a_value_no_kind_has_is_refused_without_its_value(monkeypatch):
     save = _adding_chat(monkeypatch, [])
 
-    with pytest.raises(ToolError, match="input_source"):
-        await flows.mcp.call_tool(
-            "add_step",
-            {
-                "expected_revision": 4,
-                "name": "Sammanfatta",
-                "kind": "ai",
-                "values": {"instruction": "Läs.", "input_source": "flow_input"},
-            },
-        )
+    result, page = await _add(
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Läs.", "api_token": "hemligt"},
+    )
+
+    assert result.isError is True
+    assert "It names api_token, which is not a field here" in page["message"]
+    assert "hemligt" not in result.content[0].text
     save.assert_not_awaited()
 
 
@@ -1826,29 +1828,27 @@ async def test_update_steps_refuses_a_bad_batch_without_saving(
 
 async def test_update_steps_states_the_shape_of_an_edit_in_its_schema():
     (tool,) = [t for t in await flows.mcp.list_tools() if t.name == "update_steps"]
-    items = tool.inputSchema["properties"]["edits"]["items"]
-    edit = tool.inputSchema["$defs"][items["$ref"].rsplit("/", 1)[-1]]
+    edit = tool.inputSchema["properties"]["edits"]["items"]
 
     assert set(edit["properties"]) == {"step_id", "changes", "assistant_changes"}
     assert edit["required"] == ["step_id"]
     assert edit["additionalProperties"] is False
 
 
-async def test_an_edit_of_another_shape_is_refused_before_anything_runs(
-    monkeypatch,
-):
-    from mcp.server.fastmcp.exceptions import ToolError
-
+async def test_an_edit_of_another_shape_is_refused_without_its_value(monkeypatch):
     save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
 
-    with pytest.raises(ToolError, match="edits.0.edits"):
-        await flows.mcp.call_tool(
-            "update_steps",
-            {
-                "expected_revision": 4,
-                "edits": [{"step_id": str(_DRAFT_IDS[1]), "edits": {}}],
-            },
-        )
+    result = await flows.update_steps(
+        MagicMock(),
+        expected_revision=4,
+        edits=[{"step_id": str(_DRAFT_IDS[1]), "token": "hemligt"}],
+    )
+
+    assert result.isError is True
+    assert "An edit has step_id, changes and assistant_changes only" in (
+        result.content[0].text
+    )
+    assert "hemligt" not in result.content[0].text
     save.assert_not_awaited()
 
 

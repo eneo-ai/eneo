@@ -12,7 +12,14 @@ from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import ConfigDict, Field, ValidationError, with_config
+from pydantic import (
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    ValidationError,
+    WithJsonSchema,
+    with_config,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import Annotated, Required, TypedDict
 
@@ -100,6 +107,26 @@ JSON_READ_EXAMPLE: dict[str, Any] = {
         "required": ["beslut", "datum"],
     },
 }
+
+
+def _closed_schema(shape: Any) -> dict[str, Any]:
+    """The JSON schema of ``shape`` with its definitions inlined, for an
+    argument the tool validates itself: the model reads the closed shape in
+    the tool's schema, and a refusal names a wrong key without repeating the
+    value sent with it, as the arguments' own validation would."""
+    schema = TypeAdapter(shape).json_schema()
+    definitions = schema.pop("$defs", {})
+
+    def inline(node: Any) -> Any:
+        if isinstance(node, dict):
+            if "$ref" in node:
+                return inline(definitions[node["$ref"].rsplit("/", 1)[-1]])
+            return {key: inline(value) for key, value in node.items()}
+        if isinstance(node, list):
+            return [inline(value) for value in node]
+        return node
+
+    return inline(schema)
 
 
 def _example(value: Any) -> str:
@@ -1193,7 +1220,10 @@ class StepEdit(TypedDict, total=False):
 async def update_steps(
     ctx: Context,
     expected_revision: int,
-    edits: list[StepEdit],
+    edits: Annotated[
+        list[dict[str, Any]],
+        WithJsonSchema({"type": "array", "items": _closed_schema(StepEdit)}),
+    ],
     settings: dict[str, Any] | None = None,
 ) -> CallToolResult:
     """Change several saved steps, and optionally the flow's settings, in one
@@ -1409,7 +1439,10 @@ async def add_step(
     expected_revision: int,
     name: str,
     kind: FlowStepKind,
-    values: StepKindValues | None = None,
+    values: Annotated[
+        dict[str, Any] | None,
+        WithJsonSchema({"anyOf": [_closed_schema(StepKindValues), {"type": "null"}]}),
+    ] = None,
     position: int | None = None,
     settings: dict[str, Any] | None = None,
 ) -> CallToolResult:
