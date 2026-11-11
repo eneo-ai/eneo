@@ -148,12 +148,13 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "Give a step a text or a result that quotes it at length, not both."
     ),
     FlowSuggestionCode.DETERMINISTIC_CANDIDATE: (
-        "Use a compose_text step, not a model, for a step that only puts "
-        "earlier results together with a little fixed text."
+        "Consider a compose_text step rather than a model for a step that only "
+        "puts earlier results together with a little fixed text, unless the "
+        "model's own words matter."
     ),
     FlowSuggestionCode.OVERSIZED_REASONING: (
-        "Ask for high reasoning effort only for a step that has to reason, "
-        "not for a small extraction into a JSON result."
+        "Ask for high reasoning effort only for a step that has to reason; for "
+        "a small extraction into a JSON result, try a lower effort and compare."
     ),
 }
 
