@@ -206,9 +206,10 @@ describe("WidgetStatusBar external MCP tools", () => {
     }
   );
 
-  test("an acknowledgement that fails keeps focus in the dialog, on its button", async () => {
+  test("an acknowledgement that fails gives focus back to its button in the dialog", async () => {
+    let fail!: (error: Error) => void;
     renderBar(widget(), {
-      onAcknowledgeExternalTools: vi.fn(async () => Promise.reject(new Error("offline")))
+      onAcknowledgeExternalTools: vi.fn(() => new Promise<void>((_, reject) => (fail = reject)))
     });
     click(page.getByRole("button", { name: "widget_admin_activate" }));
     const dialog = page.getByRole("alertdialog");
@@ -216,8 +217,30 @@ describe("WidgetStatusBar external MCP tools", () => {
     const confirm = dialog.getByRole("button", { name: "widget_admin_activate" });
     press(confirm);
 
+    // Busy, the button is disabled, which drops its focus.
+    await vi.waitFor(() => expect(document.activeElement).not.toBe(confirm.element()));
+    fail(new Error("offline"));
     await vi.waitFor(() => expect(document.activeElement).toBe(confirm.element()));
     await expect.element(dialog).toBeVisible();
+  });
+
+  test("a refusal that comes back at once moves focus to the checkbox, not the page", async () => {
+    renderBar(widget(), {
+      onAcknowledgeExternalTools: vi.fn(async () => {
+        throw refused(409, "external_tools_changed", [casefiles, booking]);
+      })
+    });
+    click(page.getByRole("button", { name: "widget_admin_activate" }));
+    const dialog = page.getByRole("alertdialog");
+    await userEvent.click(dialog.getByRole("checkbox"));
+    press(dialog.getByRole("button", { name: "widget_admin_activate" }));
+
+    await expect.element(dialog.getByText("Bokningen")).toBeVisible();
+    const checkbox = dialog.getByRole("checkbox").element();
+    await vi.waitFor(() => expect(document.activeElement).toBe(checkbox));
+    // Still there once the browser has dropped focus from the disabled button.
+    await new Promise((settled) => requestAnimationFrame(() => requestAnimationFrame(settled)));
+    expect(document.activeElement).toBe(checkbox);
   });
 
   test("Escape leaves the dialog open while the acknowledgement is saved", async () => {

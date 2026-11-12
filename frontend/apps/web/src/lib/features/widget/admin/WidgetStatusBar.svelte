@@ -92,8 +92,9 @@
   ) {
     await tick();
     const active = document.activeElement;
-    // Focus the user has moved on stays where it is.
-    if (active && active !== document.body) return;
+    // Focus the user has moved on stays where it is. Focus still on a button
+    // the action left disabled is not: browsers drop it, or strand it there.
+    if (active && active !== document.body && !active.matches(":disabled")) return;
     (usable(button) ? button : fallback())?.focus();
   }
 
