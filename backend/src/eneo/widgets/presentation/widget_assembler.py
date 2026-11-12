@@ -6,6 +6,7 @@
 from eneo.widgets.application.widget_service import WidgetView
 from eneo.widgets.domain.widget_policy import WidgetPolicy
 from eneo.widgets.presentation.widget_models import (
+    WidgetExternalToolPublic,
     WidgetExternalToolServerPublic,
     WidgetPolicyPublic,
     WidgetPublic,
@@ -51,7 +52,12 @@ class WidgetAssembler:
             template=template,
             external_tools=[
                 WidgetExternalToolServerPublic(
-                    id=server.id, name=server.name, tools=list(server.tools)
+                    id=server.id,
+                    name=server.name,
+                    tools=[
+                        WidgetExternalToolPublic(id=tool.id, name=tool.name)
+                        for tool in server.tools
+                    ],
                 )
                 for server in view.external_tools
             ],

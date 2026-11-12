@@ -713,6 +713,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_widget_preview_token_minted,
     description: m.audit_action_widget_preview_token_minted_description
   },
+  widget_external_tools_acknowledged: {
+    name: m.audit_action_widget_external_tools_acknowledged,
+    description: m.audit_action_widget_external_tools_acknowledged_description
+  },
   widget_external_tool_called: {
     name: m.audit_action_widget_external_tool_called,
     description: m.audit_action_widget_external_tool_called_description

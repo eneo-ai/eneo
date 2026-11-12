@@ -38,6 +38,7 @@ CATEGORY_MAPPINGS = {
     ActionType.WIDGET_POLICY_UPDATED.value: "admin_actions",
     ActionType.WIDGET_BUDGET_EXHAUSTED.value: "admin_actions",
     ActionType.WIDGET_PREVIEW_TOKEN_MINTED.value: "admin_actions",
+    ActionType.WIDGET_EXTERNAL_TOOLS_ACKNOWLEDGED.value: "admin_actions",
     ActionType.WIDGET_EXTERNAL_TOOL_CALLED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_CREATED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_UPDATED.value: "admin_actions",

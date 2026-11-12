@@ -29,8 +29,8 @@ export function blockerLabel(code: string): string {
       return m.widget_admin_blocker_bot_protection();
     case "external_tools_not_allowed":
       return m.widget_admin_blocker_external_tools_not_allowed();
-    case "external_tools_changed_since_activation":
-      return m.widget_admin_blocker_external_tools_changed();
+    case "external_tools_unacknowledged":
+      return m.widget_admin_blocker_external_tools_unacknowledged();
     case "allowed_origin_too_broad":
       return m.widget_admin_blocker_origin_too_broad();
     default:

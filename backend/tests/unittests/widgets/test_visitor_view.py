@@ -19,7 +19,11 @@ from eneo.assistants.api import assistant_protocol
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.reference_tags import strip_inline_references
 from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
-from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
+from eneo.info_blobs.info_blob import (
+    InfoBlobInDB,
+    InfoBlobInDBWithScore,
+    SourceMetadataEntry,
+)
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -950,3 +954,46 @@ def test_a_restored_knowledge_reference_names_only_the_document():
             "references"
         ][0]
     )
+
+
+def test_a_streamed_knowledge_reference_names_only_the_document():
+    blob = _blob(
+        group_id=uuid4(),
+        website_id=uuid4(),
+        sharepoint_item_id="01ABC",
+        integration_knowledge_id=uuid4(),
+        source_metadata=[
+            SourceMetadataEntry(name="Handlaggare", label="Handläggare", value="Kim")
+        ],
+    )
+    chunk = Completion(
+        text="10–18.", response_type=ResponseType.TEXT, reference_chunks=[blob]
+    )
+
+    [event] = VisitorView(_widget(show_sources=True)).events(chunk)
+    serialised = assistant_protocol.to_sse_response(event, uuid4()).data
+    [reference] = json.loads(serialised)["references"]
+
+    assert reference["id"] == str(blob.id)
+    assert reference["metadata"]["title"] == blob.title
+    assert reference["metadata"]["url"] == blob.url
+    # As on restore: the inventory and the retrieval score stay on the server.
+    assert reference["group_id"] is None and reference["website_id"] is None
+    assert reference["metadata"]["embedding_model_id"] == str(UUID(int=0))
+    assert reference["metadata"]["size"] == 0
+    assert reference["original_available"] is False
+    assert reference["source_metadata"] == []
+    assert reference["score"] == 0
+    for secret in (
+        blob.group_id,
+        blob.website_id,
+        blob.embedding_model_id,
+        blob.integration_knowledge_id,
+        blob.user_id,
+    ):
+        assert str(secret) not in serialised
+    assert "01ABC" not in serialised and "Kim" not in serialised
+    # The visitor stream and the signed-in stream stay on one shape.
+    assert set(reference) == set(_sse(chunk)["references"][0])
+    # The pipeline's own event is not touched: persistence reads it.
+    assert chunk.reference_chunks == [blob]

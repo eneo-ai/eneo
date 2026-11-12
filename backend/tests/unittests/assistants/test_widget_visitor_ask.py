@@ -2,12 +2,14 @@
 
 A visitor is a synthetic principal without a users row. The assistant serves
 it as configured, knowledge tool included under the visitor's own scoped
-token, less what needs a users row: generated files and the built-in image
-provider.
+token, less what needs a users row (generated files and the built-in image
+provider) and less every tool outside Eneo an admin has not acknowledged.
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
+
+import pytest
 
 from eneo.ai_models.completion_models.completion_model import GeneratedFile
 from eneo.assistants.api.assistant_models import KnowledgeMode
@@ -19,6 +21,7 @@ from eneo.mcp_servers.application.capability_resolver import CapabilityResolutio
 from eneo.mcp_servers.domain.entities.mcp_server import (
     INTERNAL_AUTH_TYPE,
     MCPServer,
+    MCPServerTool,
 )
 from eneo.widgets.application.visitor_user import build_visitor_user
 from eneo.widgets.domain.widget import Widget
@@ -31,19 +34,29 @@ from tests.unittests.assistants.test_governance_policy_runtime import (
 TOOL_MODEL = TEST_MODEL_CHATGPT.model_copy(update={"supports_tool_calling": True})
 
 
-def _visitor():
+def _visitor(acknowledged=None, *, widget_policy=None):
     widget = Widget.create(
         tenant_id=TEST_TENANT.id, space_id=uuid4(), target_id=uuid4(), name="w"
     ).model_copy(update={"id": uuid4()})
-    return build_visitor_user(widget, uuid4(), TEST_TENANT)
+    if acknowledged:
+        widget.acknowledge_external_tools(acknowledged, by=uuid4())
+    tenant = TEST_TENANT.model_copy(update={"widget_policy": widget_policy or {}})
+    return build_visitor_user(widget, uuid4(), tenant)
 
 
-def _server(name: str, **kwargs) -> MCPServer:
+def _server(name: str, *tools: str, **kwargs) -> MCPServer:
+    server_id = uuid4()
     return MCPServer(
-        id=uuid4(),
+        id=server_id,
         tenant_id=TEST_TENANT.id,
         name=name,
         http_url=f"https://{name}.example.test/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=server_id, name=tool, id=uuid4(), enabled_override=True
+            )
+            for tool in tools
+        ],
         **kwargs,
     )
 
@@ -87,15 +100,56 @@ async def test_visitor_gets_the_knowledge_tool_under_its_own_identity():
     )
 
 
-async def test_visitor_is_offered_the_assistants_own_mcp_servers():
-    casefiles = _server("casefiles", forward_identity=True)
-    service, assistant = _service(_visitor(), mcp_servers=[casefiles])
+async def test_visitor_reaches_only_the_external_tools_an_admin_acknowledged():
+    casefiles = _server(
+        "casefiles", "search_cases", "create_case", forward_identity=True
+    )
+    booking = _server("booking", "book_slot")
+    search, create = casefiles.tools
+    visitor = _visitor({casefiles.id: [search.id]})
+    service, assistant = _service(visitor, mcp_servers=[casefiles, booking])
 
     await service.ask(question="hello", assistant_id=assistant.id)
 
     kwargs = assistant.ask.await_args.kwargs
-    assert kwargs["mcp_servers_override"] == [casefiles]
+    (offered,) = kwargs["mcp_servers_override"]
+    assert offered.id == casefiles.id and offered.forward_identity
+    # A tool added after the acknowledgement stays listed but switched off:
+    # the proxy would stage a missing one as newly discovered.
+    assert [(tool.name, tool.is_enabled) for tool in offered.tools] == [
+        ("search_cases", True),
+        ("create_case", False),
+    ]
+    # Narrowed on copies: the assistant's own entities keep their tools.
+    assert create.is_enabled and assistant.mcp_servers[0].tools == [search, create]
     assert kwargs["capability_mcp_servers"] == []
+
+
+@pytest.mark.parametrize(
+    ("acknowledged", "switched_on", "widget_policy"),
+    [
+        pytest.param(False, True, None, id="not acknowledged"),
+        pytest.param(
+            True, True, {"allow_external_tools": False}, id="forbidden by the policy"
+        ),
+        pytest.param(True, False, None, id="the acknowledged tool switched off since"),
+    ],
+)
+async def test_visitor_reaches_no_external_server_without_a_tool_to_call(
+    acknowledged, switched_on, widget_policy
+):
+    casefiles = _server("casefiles", "create_case")
+    (create,) = casefiles.tools
+    create.enabled_override = switched_on
+    visitor = _visitor(
+        {casefiles.id: [create.id]} if acknowledged else None,
+        widget_policy=widget_policy,
+    )
+    service, assistant = _service(visitor, mcp_servers=[casefiles])
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == []
 
 
 async def test_visitor_capabilities_are_web_search_from_an_external_provider():

@@ -4,7 +4,7 @@
 
 
 from dataclasses import replace
-from typing import Any, Optional
+from typing import Any, Optional, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -20,7 +20,7 @@ from eneo.assistants.reference_tags import (
     strip_inline_references,
 )
 from eneo.completion_models.domain.skill_activation import SKILL_ACTIVATION_TOOL_NAME
-from eneo.info_blobs.info_blob import InfoBlobInDB
+from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
 from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 from eneo.questions.question import (
     McpToolReferencePublic,
@@ -156,6 +156,16 @@ class VisitorView:
                     chunk,
                     text=self._citations.strip(chunk.text or ""),
                     reference_chunks=None,
+                )
+            elif chunk.reference_chunks:
+                # Text events carry the documents the answer drew on, as
+                # InfoBlobInDBWithScore rows whatever Completion's annotation says.
+                drawn_on = cast("list[InfoBlobInDBWithScore]", chunk.reference_chunks)
+                chunk = replace(
+                    chunk,
+                    reference_chunks=[
+                        self._visible_drawn_on(blob) for blob in drawn_on
+                    ],
                 )
             return [*cited, chunk]
         if chunk.response_type == ResponseType.TOOL_CALL:
@@ -312,6 +322,12 @@ class VisitorView:
             original_available=False,
             text="",
         )
+
+    @classmethod
+    def _visible_drawn_on(cls, blob: InfoBlobInDBWithScore) -> InfoBlobInDBWithScore:
+        """A document a streamed answer drew on, as ``_visible_blob`` shows it;
+        its retrieval score stays on the server too."""
+        return InfoBlobInDBWithScore(**cls._visible_blob(blob).model_dump(), score=0.0)
 
     # --- shared -------------------------------------------------------------
 

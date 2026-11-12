@@ -3,7 +3,7 @@
 # Licensed under the MIT License.
 
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID, uuid4
@@ -26,6 +26,7 @@ from eneo.users.user import UserInDB
 from eneo.widgets.application.visitor_token_service import VisitorTokenService
 from eneo.widgets.domain.exceptions import (
     WidgetAdminRequiredError,
+    WidgetExternalToolsChangedError,
     WidgetExternalToolsUnacknowledgedError,
     WidgetFieldLockedError,
     WidgetPolicyViolationError,
@@ -61,16 +62,35 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class ExternalTool:
+    id: UUID
+    name: str
+
+
+@dataclass(frozen=True)
 class ExternalToolServer:
     """An MCP server outside Eneo that a visitor turn of the target reaches,
-    with the tools it exposes. What the admin acknowledges at activation."""
+    with its tools the assistant has switched on. What the admin
+    acknowledges."""
 
     id: UUID
     name: str
-    tools: list[str]
+    tools: list[ExternalTool]
 
     def public(self) -> dict[str, Any]:
-        return {"id": str(self.id), "name": self.name, "tools": list(self.tools)}
+        return {
+            "id": str(self.id),
+            "name": self.name,
+            "tools": [{"id": str(tool.id), "name": tool.name} for tool in self.tools],
+        }
+
+
+def external_tool_ids(
+    servers: Iterable[ExternalToolServer],
+) -> dict[UUID, frozenset[UUID]]:
+    return {
+        server.id: frozenset(tool.id for tool in server.tools) for server in servers
+    }
 
 
 @dataclass(frozen=True)
@@ -78,7 +98,7 @@ class WidgetView:
     widget: Widget
     activation_blockers: list[str]
     # The target's MCP servers outside Eneo, and whether the admin's stored
-    # acknowledgement covers exactly that set (true when there are none).
+    # acknowledgement covers every one of their tools (true when there are none).
     external_tools: list[ExternalToolServer]
     external_tools_acknowledged: bool
     # The template the widget follows, when any; carries the lock groups the
@@ -242,7 +262,9 @@ class WidgetService:
         space's security classification, as AssistantService hands them to a
         turn. Capability providers (web search) are left out: the tenant
         chose them, they only read, and a visitor never gets any other
-        capability. Eneo's own loopback servers are not external.
+        capability. Eneo's own loopback servers are not external, and a
+        server where the assistant has no tool switched on is left out, as
+        the turn leaves it out (WidgetVisitorContext.reachable_servers).
         """
         if target is None:
             return []
@@ -250,15 +272,16 @@ class WidgetService:
         servers = general_servers_for_space(attached, space.security_classification)
         external: list[ExternalToolServer] = []
         for server in servers:
-            if server.is_internal or not server.is_enabled:
+            if server.is_internal or not server.is_enabled or not server.tools_loaded:
                 continue
-            tools = (
-                sorted(
-                    tool.title or tool.name for tool in server.tools if tool.is_enabled
-                )
-                if server.tools_loaded
-                else []
-            )
+            tools = [
+                ExternalTool(tool.id, tool.display_name or tool.title or tool.name)
+                for tool in server.tools
+                if tool.is_enabled
+            ]
+            if not tools:
+                continue
+            tools.sort(key=lambda tool: tool.name.casefold())
             external.append(ExternalToolServer(server.id, server.name, tools))
         return sorted(external, key=lambda server: server.name.casefold())
 
@@ -280,12 +303,12 @@ class WidgetService:
         if external and not self.get_policy().allow_external_tools:
             blockers.append("external_tools_not_allowed")
         if widget.is_serving and not widget.external_tools_acknowledged(
-            server.id for server in external
+            external_tool_ids(external)
         ):
-            # Live, but the assistant's external servers are not the ones the
-            # admin acknowledged: pausing and activating again asks for a
-            # new acknowledgement.
-            blockers.append("external_tools_changed_since_activation")
+            # Live, and the assistant has external tools no admin acknowledged:
+            # visitor turns go without them until one does. On a widget that
+            # is not live, activation asks instead.
+            blockers.append("external_tools_unacknowledged")
         # Widget visitors are viewers. Organization spaces grant viewers no
         # assistant read permission, so a widget there could never answer.
         if space.is_organization():
@@ -316,7 +339,7 @@ class WidgetService:
             template=template,
             external_tools=external,
             external_tools_acknowledged=widget.external_tools_acknowledged(
-                server.id for server in external
+                external_tool_ids(external)
             ),
             previous=previous,
         )
@@ -474,6 +497,10 @@ class WidgetService:
         # against the publication's lock on the follower rows.
         template = await self._template_to_follow(template_id)
         widget, space = await self._widget_for_change(widget_id, revision)
+        # Switching templates drops the locks the old one held, as detaching
+        # does. Following a first template, or the same one again, only adds.
+        if widget.template_id is not None and widget.template_id != template.id:
+            self._require_admin_while_active(widget, ["template"])
         before = widget.model_copy(deep=True)
         self._link(widget, template)
         self._hold_to_rules(before, widget)
@@ -483,7 +510,7 @@ class WidgetService:
         await self.icon_repo.release_replaced(
             before.persona.avatar_icon_id, widget.persona.avatar_icon_id
         )
-        return self._view(space, widget, template)
+        return self._view(space, widget, template, previous=before)
 
     def _require_admin_while_active(
         self, widget: Widget, changed: Iterable[str]
@@ -547,16 +574,12 @@ class WidgetService:
         )
         return self._view(space, widget, template, previous=before)
 
-    async def activate_widget(
-        self, widget_id: UUID, *, external_tools_acknowledged: bool = False
-    ) -> WidgetView:
+    async def activate_widget(self, widget_id: UUID) -> WidgetView:
         """Put the widget online. Tenant admins only.
 
-        When the assistant reaches MCP servers outside Eneo, the admin must
-        acknowledge that anonymous visitors can make it call their tools
-        (``external_tools_acknowledged``), unless the stored acknowledgement
-        already covers exactly those servers. The acknowledgement is recorded
-        with the server ids, so a changed set asks again.
+        When the assistant reaches MCP servers outside Eneo, an admin must
+        have acknowledged every tool on them first
+        (``acknowledge_external_tools``).
         """
         validate_permission(self.user, Permission.ADMIN)
         widget = await self._owned_widget(widget_id)
@@ -568,18 +591,42 @@ class WidgetService:
         blockers = self._activation_blockers(space, widget, external=external)
         if blockers:
             raise WidgetServingBlockedError(blockers)
-        server_ids = [server.id for server in external]
-        if not widget.external_tools_acknowledged(server_ids):
-            if not external_tools_acknowledged:
-                raise WidgetExternalToolsUnacknowledgedError(
-                    [server.public() for server in external]
-                )
-            widget.acknowledge_external_tools(server_ids, by=self.user.id)
-        elif not external:
-            widget.external_tools_acknowledgement = None
+        if not widget.external_tools_acknowledged(external_tool_ids(external)):
+            raise WidgetExternalToolsUnacknowledgedError(
+                [server.public() for server in external]
+            )
         widget.activate(by=self.user.id)
         widget = await self.repo.update(widget)
         return await self._view_with_template(space, widget)
+
+    async def acknowledge_external_tools(
+        self, widget_id: UUID, shown: Mapping[UUID, Iterable[UUID]]
+    ) -> WidgetView:
+        """Record a tenant admin's acknowledgement that anonymous visitors can
+        make the assistant call its tools outside Eneo.
+
+        ``shown`` is what the admin was shown (server id to tool ids); it must
+        be the current set, so nothing added while they read is acknowledged
+        unseen. It replaces any earlier acknowledgement. On an active widget
+        the tools reach visitors at once, without a pause.
+        """
+        validate_permission(self.user, Permission.ADMIN)
+        widget = await self._owned_widget(widget_id, for_update=True)
+        if widget.status == WidgetStatus.ARCHIVED:
+            raise BadRequestException("Archived widgets cannot be changed.")
+        space = await self._space_as_admin(widget.space_id)
+        external = self._external_tools(space, self._target(space, widget))
+        current = external_tool_ids(external)
+        if {key: frozenset(value) for key, value in shown.items()} != current:
+            raise WidgetExternalToolsChangedError(
+                [server.public() for server in external]
+            )
+        before = widget.model_copy(deep=True)
+        widget.acknowledge_external_tools(current, by=self.user.id)
+        widget = await self.repo.update(
+            widget, check_revision=False, only={"external_tools_acknowledgement"}
+        )
+        return await self._view_with_template(space, widget, previous=before)
 
     async def preview_token(self, widget_id: UUID) -> tuple[str, int]:
         """A visitor token for the editor's live preview.

@@ -127,16 +127,23 @@
     }
     if (originsTouched && emptiedWhileActive) return blockerLabel("allowed_origins_empty");
     if (autosave.refusals["allowed_origins"]) return autosave.refusals["allowed_origins"];
+    // Saved before the rule was tightened; the API keeps it but never serves it.
+    if (blockers.includes("allowed_origin_too_broad")) {
+      return blockerLabel("allowed_origin_too_broad");
+    }
     if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
     return undefined;
   });
   // Lines that cannot be sent yet hold back the valid ones with them, and a
-  // valid list typed but not yet committed (blur) is an edit too.
+  // valid list typed but not yet committed (blur) is an edit too. The saved
+  // list as it stands is no edit, even with a line the API no longer accepts.
   $effect(() => {
+    const saved = (widget.allowed_origins ?? []).join("\n");
     const held =
-      parsedOrigins.invalid.length > 0 ||
-      parsedOrigins.tooMany ||
-      parsedOrigins.origins.join("\n") !== (widget.allowed_origins ?? []).join("\n");
+      origins.text !== saved &&
+      (parsedOrigins.invalid.length > 0 ||
+        parsedOrigins.tooMany ||
+        parsedOrigins.origins.join("\n") !== saved);
     autosave.markDraft("allowed_origins", held);
     return () => autosave.markDraft("allowed_origins", false);
   });

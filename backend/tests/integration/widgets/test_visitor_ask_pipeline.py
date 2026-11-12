@@ -37,6 +37,7 @@ from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
+    AssistantMCPServerTools,
     Assistants,
     AssistantsGroups,
 )
@@ -146,7 +147,8 @@ async def visitor_pipeline(
 ) -> dict[str, Any]:
     """The widget's assistant with everything a visitor could reach:
     injected knowledge on a tool-calling model, an MCP server that forwards
-    identity, and web search and image generation from external providers."""
+    identity with its tool acknowledged for the widget, and web search and
+    image generation from external providers."""
     assistant_id = UUID(active_widget["target_id"])
     space_id = UUID(active_widget["space_id"])
     resp = await client.post(
@@ -190,6 +192,18 @@ async def visitor_pipeline(
         db.add(
             AssistantMCPServers(assistant_id=assistant_id, mcp_server_id=casefiles_id)
         )
+        casefiles_tool_id = await db.scalar(
+            sa.select(MCPServerTools.id).where(
+                MCPServerTools.mcp_server_id == casefiles_id
+            )
+        )
+        db.add(
+            AssistantMCPServerTools(
+                assistant_id=assistant_id,
+                mcp_server_tool_id=casefiles_tool_id,
+                is_enabled=True,
+            )
+        )
         web_search_id = await _add_server(db, tenant_id, "Sok", purpose="web_search")
         images_id = await _add_server(
             db, tenant_id, "Bilder", purpose="image_generation"
@@ -197,6 +211,24 @@ async def visitor_pipeline(
         for purpose in ("web_search", "image_generation"):
             db.add(SpaceCapabilities(space_id=space_id, purpose=purpose))
             db.add(AssistantCapabilities(assistant_id=assistant_id, purpose=purpose))
+
+    widget_url = f"/api/v1/widgets/{active_widget['id']}/"
+    resp = await client.get(widget_url, headers=_auth(admin_token))
+    listed = resp.json()["external_tools"]
+    assert [
+        (server["id"], [t["name"] for t in server["tools"]]) for server in listed
+    ] == [(str(casefiles_id), ["run"])]
+    resp = await client.post(
+        f"{widget_url}acknowledge-external-tools/",
+        json={
+            "servers": [
+                {"id": server["id"], "tool_ids": [t["id"] for t in server["tools"]]}
+                for server in listed
+            ]
+        },
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
 
     seen = _Pipeline()
     blob_with_score = InfoBlobInDBWithScore(

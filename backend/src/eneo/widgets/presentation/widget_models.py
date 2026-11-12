@@ -53,28 +53,48 @@ class WidgetDetachTemplate(BaseModel):
     revision: int = Field(ge=0)
 
 
-class WidgetActivate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    external_tools_acknowledged: bool = Field(
-        default=False,
-        description=(
-            "Required true when the assistant reaches MCP servers outside Eneo"
-            " (`external_tools` on the widget) and no earlier acknowledgement"
-            " covers exactly those servers: the admin acknowledges that anonymous"
-            " visitors can make the assistant call their tools, with no approval"
-            " step. Refused with `external_tools_unacknowledged` otherwise."
-        ),
-    )
+class WidgetExternalToolPublic(BaseModel):
+    id: UUID
+    name: str
 
 
 class WidgetExternalToolServerPublic(BaseModel):
     """An MCP server outside Eneo that the widget's assistant reaches, with
-    the tools visitors can make it call."""
+    the tools the assistant has switched on there."""
 
     id: UUID
     name: str
-    tools: list[str]
+    tools: list[WidgetExternalToolPublic]
+
+
+class WidgetAcknowledgedServer(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    tool_ids: list[UUID] = Field(max_length=1000)
+
+
+class WidgetExternalToolsAcknowledge(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    servers: list[WidgetAcknowledgedServer] = Field(
+        max_length=100,
+        description=(
+            "The servers and tools the admin was shown, as `external_tools` on"
+            " the widget lists them. Refused with `external_tools_changed`"
+            " (listing the current `servers`) when they are not the current set."
+        ),
+    )
+
+
+class WidgetExternalToolsChangedDetail(BaseModel):
+    code: Literal["external_tools_changed"]
+    message: str
+    servers: list[WidgetExternalToolServerPublic]
+
+
+class WidgetExternalToolsChangedResponse(BaseModel):
+    detail: WidgetExternalToolsChangedDetail
 
 
 class WidgetTemplateLinkPublic(BaseModel):
@@ -139,15 +159,17 @@ class WidgetPublic(BaseModel):
     )
     external_tools: list[WidgetExternalToolServerPublic] = Field(
         description=(
-            "The assistant's MCP servers outside Eneo, as a visitor turn reaches"
-            " them. Activation needs the admin's acknowledgement of this list."
+            "The assistant's MCP servers outside Eneo and its tools there."
+            " Visitor turns reach only the ones a tenant admin has acknowledged"
+            " (`POST /widgets/{id}/acknowledge-external-tools/`), and activation"
+            " needs all of them acknowledged."
         ),
     )
     external_tools_acknowledged: bool = Field(
         description=(
-            "Whether the stored acknowledgement covers exactly `external_tools`;"
-            " true when there are none. False on an active widget means the"
-            " assistant's external servers changed since activation."
+            "Whether the stored acknowledgement covers every tool in"
+            " `external_tools`; true when there are none. False on an active"
+            " widget means visitor turns run without the tools not covered."
         )
     )
     created_by_user_id: Optional[UUID] = None
@@ -271,12 +293,14 @@ class WidgetOverviewItem(BaseModel):
         ),
     )
     external_tools: list[str] = Field(
-        description="Names of the assistant's MCP servers outside Eneo.",
+        description=(
+            "Names of the assistant's MCP servers outside Eneo with a tool switched on."
+        ),
     )
     external_tools_acknowledged: bool = Field(
         description=(
-            "Whether the admin's acknowledgement covers the current"
-            " `external_tools`; true when there are none."
+            "Whether the admin's acknowledgement covers every tool on the"
+            " current `external_tools`; true when there are none."
         ),
     )
 
@@ -335,9 +359,10 @@ class WidgetPolicyPublic(BaseModel):
     max_retention_days: int
     allow_external_tools: bool = Field(
         description=(
-            "Whether widgets may publish assistants whose MCP servers run outside"
-            " Eneo. Default true; off, such widgets cannot be activated and live"
-            " ones are flagged in the overview."
+            "Whether widgets may publish assistants with tools switched on at MCP"
+            " servers outside Eneo. Default true; off, such widgets cannot be"
+            " activated, and live ones serve visitors without those tools and are"
+            " flagged in the overview."
         )
     )
 

@@ -97,6 +97,25 @@ describe("WidgetLiveTest", () => {
     expect(document.querySelectorAll("eneo-widget")).toHaveLength(0);
   });
 
+  test("a running test ends when the widget is paused", async () => {
+    state.page.data.release = { version: "2.0.0", channel: "v7", integrity: "sha384-abc" };
+    captureScripts();
+    for (const stale of document.querySelectorAll("eneo-widget")) stale.remove();
+    const live = { ...widget, status: "active" } as Widget;
+    const screen = render(WidgetLiveTest, { widget: live, eneo });
+    await start().click();
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_live_test_stop" }))
+      .toBeVisible();
+    expect(document.querySelectorAll("eneo-widget")).toHaveLength(1);
+
+    // The pause invalidated the token the mounted widget was given.
+    await screen.rerender({ widget: { ...live, status: "paused" } as Widget, eneo });
+
+    expect(document.querySelectorAll("eneo-widget")).toHaveLength(0);
+    await expect.element(start()).toHaveAccessibleDescription("widget_admin_live_test_paused");
+  });
+
   test("says why it cannot start when the installation has no loader", async () => {
     state.page.data.release = null;
     const scripts = captureScripts();

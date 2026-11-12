@@ -28,10 +28,11 @@ from eneo.widgets.application.widget_target_lifecycle import audit_snapshot
 from eneo.widgets.domain.widget import WidgetStatus
 from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.presentation.widget_models import (
-    WidgetActivate,
     WidgetConflictResponse,
     WidgetCreate,
     WidgetDetachTemplate,
+    WidgetExternalToolsAcknowledge,
+    WidgetExternalToolsChangedResponse,
     WidgetLinkTemplate,
     WidgetOverviewItem,
     WidgetOverviewPublic,
@@ -194,7 +195,9 @@ async def create_space_widget(
         " and language are copied now; the release's locked groups are then"
         " written onto the widget with every publication and cannot be edited"
         " on the widget. Refused with `widget_serving_blocked` when the"
-        " release would leave an active widget unable to serve."
+        " release would leave an active widget unable to serve. Switching an"
+        " active widget to another template is for tenant admins"
+        " (`admin_required_while_active`); editors pause the widget first."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -217,7 +220,7 @@ async def link_widget_template(
         description=(
             f"Linked widget '{view.widget.name}' to template '{view.template.name}'"
         ),
-        changes={"new": _widget_snapshot(view)},
+        changes=_old_and_new(view),
     )
     return assembler.from_view(view)
 
@@ -227,7 +230,9 @@ async def link_widget_template(
     response_model=WidgetPublic,
     description=(
         "Stop following the template. The widget keeps its current texts,"
-        " appearance and language and every part becomes editable again."
+        " appearance and language and every part becomes editable again. On"
+        " an active widget this is for tenant admins"
+        " (`admin_required_while_active`); editors pause the widget first."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -390,8 +395,8 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
         " are outside the tenant's widget policy, with"
         " `widget_serving_blocked` (listing `blockers`) when the configuration"
         " is incomplete, and with `external_tools_unacknowledged` (listing"
-        " `servers`) when the assistant reaches MCP servers outside Eneo and"
-        " the body does not acknowledge them."
+        " `servers`) when the assistant reaches tools on MCP servers outside"
+        " Eneo that no admin has acknowledged."
     ),
     responses={**responses.get_responses([400, 403, 404]), 409: _CONFLICT_RESPONSE},
 )
@@ -400,25 +405,63 @@ async def create_widget_preview_token(id: UUID, container: _ContainerWithUser):
     authorization=Permission.ADMIN,
     reason=_EDITOR_REASON,
 )
-async def activate_widget(
-    id: UUID, container: _ContainerWithUser, body: WidgetActivate | None = None
-):
+async def activate_widget(id: UUID, container: _ContainerWithUser):
     service = container.widget_service()
     assembler = container.widget_assembler()
-    acknowledged = body is not None and body.external_tools_acknowledged
-    view = await service.activate_widget(id, external_tools_acknowledged=acknowledged)
+    view = await service.activate_widget(id)
     await _audit(
         container,
         action=ActionType.WIDGET_ACTIVATED,
         view=view,
         description=f"Activated widget '{view.widget.name}'",
         changes={"new": _widget_snapshot(view)},
-        # What the admin took online: the external servers a visitor can make
-        # the assistant call, and that they acknowledged it in this request.
-        extra={
-            "external_tools": [server.public() for server in view.external_tools],
-            "external_tools_acknowledged": acknowledged,
+        # What the admin took online: the tools outside Eneo a visitor can
+        # make the assistant call.
+        extra={"external_tools": [server.public() for server in view.external_tools]},
+    )
+    return assembler.from_view(view)
+
+
+@router.post(
+    "/{id}/acknowledge-external-tools/",
+    response_model=WidgetPublic,
+    description=(
+        "Acknowledge that anonymous visitors can make the widget's assistant"
+        " call its tools on MCP servers outside Eneo, as `external_tools` on"
+        " the widget lists them. Tenant admins only. Visitor turns reach only"
+        " acknowledged tools, so on an active widget newly added tools reach"
+        " visitors from here, without a pause. Replaces any earlier"
+        " acknowledgement. Fails with `external_tools_changed` (listing the"
+        " current `servers`) when the body is not the current set."
+    ),
+    responses={
+        **responses.get_responses([400, 403, 404]),
+        409: {
+            "model": WidgetExternalToolsChangedResponse,
+            "description": "The assistant's external tools changed. Review the current list.",
         },
+    },
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_EDITOR_REASON,
+)
+async def acknowledge_widget_external_tools(
+    id: UUID, body: WidgetExternalToolsAcknowledge, container: _ContainerWithUser
+):
+    service = container.widget_service()
+    assembler = container.widget_assembler()
+    view = await service.acknowledge_external_tools(
+        id, {server.id: server.tool_ids for server in body.servers}
+    )
+    await _audit(
+        container,
+        action=ActionType.WIDGET_EXTERNAL_TOOLS_ACKNOWLEDGED,
+        view=view,
+        description=f"Acknowledged the external tools of widget '{view.widget.name}'",
+        changes=_old_and_new(view),
+        extra={"external_tools": [server.public() for server in view.external_tools]},
     )
     return assembler.from_view(view)
 

@@ -312,25 +312,36 @@ def test_a_wildcard_over_a_top_level_domain_is_refused_when_saved_but_read_back(
     assert widget.blockers_introduced_since(fixed) == ["allowed_origin_too_broad"]
 
 
-def test_the_acknowledgement_covers_exactly_the_servers_it_was_given():
+def test_the_acknowledgement_covers_the_tools_it_was_given_and_grants_only_them():
     widget = Widget.create(
         tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="w"
     )
-    first, second = uuid4(), uuid4()
-    assert widget.external_tools_acknowledged([]) is True
-    assert widget.external_tools_acknowledged([first]) is False
+    server, other = uuid4(), uuid4()
+    search, create = uuid4(), uuid4()
+    assert widget.external_tools_acknowledged({}) is True
+    assert widget.external_tools_acknowledged({server: [search]}) is False
+    assert widget.external_tool_grant() == {}
 
     by = uuid4()
-    widget.acknowledge_external_tools([first, second], by=by)
+    widget.acknowledge_external_tools({server: [search, create]}, by=by)
     ack = widget.external_tools_acknowledgement
     assert ack is not None
     assert ack.acknowledged_by_user_id == by and ack.acknowledged_at is not None
-    assert widget.external_tools_acknowledged([second, first]) is True
-    assert widget.external_tools_acknowledged([first]) is False
-    assert widget.external_tools_acknowledged([first, second, uuid4()]) is False
+    assert widget.external_tool_grant() == {server: frozenset({search, create})}
 
-    widget.acknowledge_external_tools([], by=by)
+    # A tool switched off or a server detached since asks nothing; anything
+    # new does.
+    assert widget.external_tools_acknowledged({server: [create, search]}) is True
+    assert widget.external_tools_acknowledged({server: [search]}) is True
+    assert widget.external_tools_acknowledged({server: []}) is True
+    assert widget.external_tools_acknowledged({server: [search, uuid4()]}) is False
+    assert widget.external_tools_acknowledged({other: []}) is False
+
+    # A new acknowledgement replaces the old one rather than adding to it.
+    widget.acknowledge_external_tools({other: []}, by=by)
+    assert widget.external_tool_grant() == {other: frozenset()}
+    widget.acknowledge_external_tools({}, by=by)
     assert widget.external_tools_acknowledgement is None
-    # Only activation writes it; a plain update cannot.
+    # Only the acknowledgement command writes it; a plain update cannot.
     with pytest.raises(BadRequestException, match="cannot be updated"):
         widget.apply_update({"external_tools_acknowledgement": None})

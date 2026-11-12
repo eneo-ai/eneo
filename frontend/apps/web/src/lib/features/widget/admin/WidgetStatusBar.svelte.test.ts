@@ -36,6 +36,7 @@ function renderBar(autosave: WidgetAutosave, isAdmin = true) {
     autosave,
     isAdmin,
     onActivate: noop,
+    onAcknowledgeExternalTools: noop,
     onPause: noop,
     onArchive: noop,
     onReload: noop
@@ -86,6 +87,30 @@ describe("WidgetStatusBar", () => {
     await expect
       .element(page.getByRole("button", { name: "widget_admin_activate" }))
       .toHaveAccessibleDescription(/widget_admin_blocker_subtitle_empty/);
+  });
+
+  test("pausing leaves focus on the status heading, not the page", async () => {
+    const autosave = new WidgetAutosave(widget(), vi.fn());
+    const noop = vi.fn(async () => {});
+    render(WidgetStatusBar, {
+      autosave,
+      isAdmin: true,
+      onActivate: noop,
+      onAcknowledgeExternalTools: noop,
+      onPause: vi.fn(async () => autosave.replace(widget({ status: "paused" }))),
+      onArchive: noop,
+      onReload: noop
+    });
+    const pause = page.getByRole("button", { name: "widget_admin_pause" }).element() as HTMLElement;
+    pause.focus();
+    pause.click();
+
+    await expect.element(page.getByRole("button", { name: "widget_admin_resume" })).toBeVisible();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        page.getByRole("heading", { name: "widget_admin_status" }).element()
+      )
+    );
   });
 
   test("lists what the server refused so it can be found on any tab", async () => {

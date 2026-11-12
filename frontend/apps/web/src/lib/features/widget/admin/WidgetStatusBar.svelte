@@ -1,10 +1,13 @@
 <!--
   Lifecycle of one widget: status, save state, why it cannot be activated
   yet (or, once active, what keeps it from serving properly), and the
-  activate / pause / archive actions. Activation and archiving are for tenant
-  admins; pausing is the kill switch every editor has.
+  activate / pause / archive actions. Activation, archiving and acknowledging
+  tools outside Eneo are for tenant admins; pausing is the kill switch every
+  editor has.
 -->
 <script lang="ts">
+  import type { Widget } from "@eneo/eneo-js";
+  import { tick } from "svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -15,69 +18,146 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { blockerLabel } from "./blockers";
-  import { toastWidgetError, widgetErrorMessage } from "./errors";
+  import { currentExternalTools, toastWidgetError, widgetErrorMessage } from "./errors";
   import type { WidgetAutosave } from "./widgetAutosave.svelte";
 
   type Props = {
     autosave: WidgetAutosave;
     isAdmin: boolean;
-    /**
-     * `externalToolsAcknowledged` is true only when the admin has just
-     * confirmed, in the dialog here, that anonymous visitors can make the
-     * assistant call its MCP servers outside Eneo.
-     */
-    onActivate: (options: { externalToolsAcknowledged: boolean }) => Promise<void>;
+    onActivate: () => Promise<void>;
+    /** Acknowledges exactly the servers and tools the admin was shown. */
+    onAcknowledgeExternalTools: (servers: Widget["external_tools"]) => Promise<void>;
     onPause: () => Promise<void>;
     onArchive: () => Promise<void>;
     onReload: () => Promise<void>;
   };
 
-  let { autosave, isAdmin, onActivate, onPause, onArchive, onReload }: Props = $props();
+  let {
+    autosave,
+    isAdmin,
+    onActivate,
+    onAcknowledgeExternalTools,
+    onPause,
+    onArchive,
+    onReload
+  }: Props = $props();
 
   const widget = $derived(autosave.widget);
   const blockers = $derived(widget.activation_blockers ?? []);
   const refusals = $derived([...new Set(Object.values(autosave.refusals))]);
   const canActivate = $derived(isAdmin && blockers.length === 0 && !autosave.hasPending);
-  // The assistant's MCP servers outside Eneo, as the backend lists them, and
-  // whether the stored acknowledgement covers them. Activation stops at a
-  // dialog until the admin has read the list and said yes.
+  // The assistant's tools at MCP servers outside Eneo, as the backend lists
+  // them, and whether an admin's acknowledgement covers them all. Visitors
+  // reach only acknowledged tools, so activation stops at a dialog until the
+  // admin has read the list and said yes, and a live widget with newer tools
+  // offers the same dialog without pausing.
   const externalTools = $derived(widget.external_tools ?? []);
   const needsAcknowledgement = $derived(
     externalTools.length > 0 && !(widget.external_tools_acknowledged ?? true)
+  );
+  const canAcknowledgeLive = $derived(
+    isAdmin && widget.status === "active" && needsAcknowledgement
   );
 
   let archiveOpen = $state(false);
   let consentOpen = $state(false);
   let acknowledged = $state(false);
+  // What the dialog lists is what gets acknowledged; the API refuses any
+  // other list, so one that changed meanwhile is shown again in its place.
+  let shown = $state<Widget["external_tools"]>([]);
+  const ACK_CHECKBOX_ID = "widget-external-tools-ack";
+  let shownChanged = $state(false);
+  let activatesAfter = $state(false);
+  // The button the dialog was opened from, taken when it was pressed: a busy
+  // button is disabled, which drops focus to the page before the dialog
+  // opens. Activating swaps Activate for Pause and pausing the reverse, and an
+  // acknowledgement on a live widget takes away the button with the blocker
+  // it answered; focus then goes to the status heading.
+  let opener: HTMLElement | null = null;
+  let heading = $state<HTMLElement>();
+  const pressed = () =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
+  async function focusIfRemoved(button: HTMLElement | null) {
+    await tick();
+    if (button && !button.isConnected) heading?.focus();
+  }
+
+  function review(servers: Widget["external_tools"], changed: boolean) {
+    const reopened = consentOpen;
+    shown = $state.snapshot(servers);
+    shownChanged = changed;
+    acknowledged = false;
+    consentOpen = true;
+    // A refusal inside the open dialog disables its confirming button, which
+    // would drop focus out of the dialog; it moves to the checkbox instead.
+    if (reopened) void tick().then(() => document.getElementById(ACK_CHECKBOX_ID)?.focus());
+  }
+
+  // Activates, or shows the current list again when it changed under the admin.
+  async function activateOrReview() {
+    try {
+      await onActivate();
+      consentOpen = false;
+    } catch (error) {
+      const servers = currentExternalTools(error);
+      if (!servers) throw error;
+      activatesAfter = true;
+      review(servers, true);
+    }
+  }
 
   const activate = createAsyncState(async () => {
+    const button = pressed();
+    opener = button;
     try {
       await autosave.flush();
       if (autosave.hasPending) return;
       if (needsAcknowledgement) {
-        acknowledged = false;
-        consentOpen = true;
+        activatesAfter = true;
+        review(externalTools, false);
         return;
       }
-      await onActivate({ externalToolsAcknowledged: false });
+      await activateOrReview();
     } catch (error) {
       toastWidgetError(error, m.widget_admin_could_not_activate());
+    } finally {
+      // An open dialog hands focus back when it closes.
+      if (!consentOpen) {
+        opener = null;
+        await focusIfRemoved(button);
+      }
     }
   });
-  const activateAcknowledged = createAsyncState(async () => {
+  const acknowledge = createAsyncState(async () => {
     try {
-      await onActivate({ externalToolsAcknowledged: true });
-      consentOpen = false;
+      await onAcknowledgeExternalTools(shown);
     } catch (error) {
+      const servers = currentExternalTools(error);
+      if (servers) review(servers, true);
+      else toastWidgetError(error, m.widget_admin_external_tools_could_not_acknowledge());
+      return;
+    }
+    if (!activatesAfter) {
+      consentOpen = false;
+      return;
+    }
+    try {
+      await activateOrReview();
+    } catch (error) {
+      // The acknowledgement holds; activation failed for another reason.
+      consentOpen = false;
       toastWidgetError(error, m.widget_admin_could_not_activate());
     }
   });
   const pause = createAsyncState(async () => {
+    const button = pressed();
     try {
       await onPause();
     } catch (error) {
       toastError(error, m.widget_admin_could_not_pause());
     }
+    await focusIfRemoved(button);
   });
   const archive = createAsyncState(async () => {
     try {
@@ -160,7 +240,14 @@
 >
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex flex-wrap items-center gap-3">
-      <h2 id="widget-status-title" class="text-base font-semibold">{m.widget_admin_status()}</h2>
+      <h2
+        id="widget-status-title"
+        tabindex="-1"
+        bind:this={heading}
+        class="text-base font-semibold"
+      >
+        {m.widget_admin_status()}
+      </h2>
       <Badge
         variant={widget.status === "active"
           ? "default"
@@ -221,6 +308,7 @@
             variant="default"
             onclick={activate}
             disabled={!canActivate || activate.isLoading}
+            aria-describedby={activateReasonId ?? undefined}
           >
             {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
           </Button>
@@ -246,7 +334,8 @@
   {/if}
   {#if blockers.length > 0}
     <!-- An active widget with blockers is live but not serving as configured
-         (an unpublished assistant, no allowed website, no AI disclosure). -->
+         (an unpublished assistant, no allowed website, no AI disclosure,
+         tools no admin has acknowledged). -->
     <div
       id="widget-status-blockers"
       class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm"
@@ -261,6 +350,18 @@
           <li>{blockerLabel(blocker)}</li>
         {/each}
       </ul>
+      {#if canAcknowledgeLive}
+        <Button
+          class="mt-2"
+          variant="outline"
+          size="sm"
+          onclick={() => {
+            opener = pressed();
+            activatesAfter = false;
+            review(externalTools, false);
+          }}>{m.widget_admin_external_tools_review()}</Button
+        >
+      {/if}
     </div>
   {:else if adminOnlyNote}
     <p id="widget-status-admin-only" class="text-secondary text-sm">{adminOnlyNote}</p>
@@ -270,52 +371,72 @@
 </section>
 
 <AlertDialog.Root bind:open={consentOpen}>
-  <AlertDialog.Content>
+  <AlertDialog.Content
+    onCloseAutoFocus={(event) => {
+      event.preventDefault();
+      const button = opener;
+      opener = null;
+      void tick().then(() => (button?.isConnected ? button : heading)?.focus());
+    }}
+  >
     <AlertDialog.Header>
       <AlertDialog.Title>{m.widget_admin_external_tools_title()}</AlertDialog.Title>
       <AlertDialog.Description
         >{m.widget_admin_external_tools_description()}</AlertDialog.Description
       >
     </AlertDialog.Header>
-    <ul class="flex flex-col gap-2 text-sm" aria-label={m.widget_admin_external_tools_servers()}>
-      {#each externalTools as server (server.id)}
-        <li class="border-default rounded-md border px-3 py-2">
-          <p class="font-medium">{server.name}</p>
-          <p class="text-secondary">
-            {server.tools.length > 0
-              ? m.widget_admin_external_tools_tools({ tools: server.tools.join(", ") })
-              : m.widget_admin_external_tools_no_tools()}
+    {#if shownChanged}
+      <p role="alert" class="bg-warning-dimmer text-warning-stronger rounded-md px-3 py-2 text-sm">
+        {m.widget_admin_external_tools_changed()}
+      </p>
+    {/if}
+    {#if shown.length > 0}
+      <ul class="flex flex-col gap-2 text-sm" aria-label={m.widget_admin_external_tools_servers()}>
+        {#each shown as server (server.id)}
+          <li class="border-default rounded-md border px-3 py-2">
+            <p class="font-medium">{server.name}</p>
+            <p class="text-secondary">
+              {m.widget_admin_external_tools_tools({
+                tools: server.tools.map((tool) => tool.name).join(", ")
+              })}
+            </p>
+          </li>
+        {/each}
+      </ul>
+      <div class="flex items-start gap-3">
+        <Checkbox
+          id={ACK_CHECKBOX_ID}
+          class="mt-0.5"
+          bind:checked={acknowledged}
+          aria-describedby="widget-external-tools-ack-help"
+        />
+        <div class="flex flex-col gap-1">
+          <Label for={ACK_CHECKBOX_ID} class="leading-snug"
+            >{m.widget_admin_external_tools_acknowledge()}</Label
+          >
+          <p id="widget-external-tools-ack-help" class="text-secondary text-sm">
+            {m.widget_admin_external_tools_acknowledge_help()}
           </p>
-        </li>
-      {/each}
-    </ul>
-    <div class="flex items-start gap-3">
-      <Checkbox
-        id="widget-external-tools-ack"
-        class="mt-0.5"
-        bind:checked={acknowledged}
-        aria-describedby="widget-external-tools-ack-help"
-      />
-      <div class="flex flex-col gap-1">
-        <Label for="widget-external-tools-ack" class="leading-snug"
-          >{m.widget_admin_external_tools_acknowledge()}</Label
-        >
-        <p id="widget-external-tools-ack-help" class="text-secondary text-sm">
-          {m.widget_admin_external_tools_acknowledge_help()}
-        </p>
+        </div>
       </div>
-    </div>
+    {:else}
+      <!-- Every tool was switched off meanwhile: nothing is left to accept. -->
+      <p class="text-secondary text-sm">{m.widget_admin_external_tools_none_left()}</p>
+    {/if}
     <AlertDialog.Footer>
-      <AlertDialog.Cancel disabled={activateAcknowledged.isLoading}>{m.cancel()}</AlertDialog.Cancel
-      >
+      <AlertDialog.Cancel disabled={acknowledge.isLoading}>{m.cancel()}</AlertDialog.Cancel>
       <AlertDialog.Action
-        disabled={!acknowledged || activateAcknowledged.isLoading}
+        disabled={(shown.length > 0 && !acknowledged) || acknowledge.isLoading}
         onclick={(event) => {
           event.preventDefault();
-          void activateAcknowledged();
+          void acknowledge();
         }}
       >
-        {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
+        {!activatesAfter
+          ? m.widget_admin_external_tools_confirm()
+          : widget.status === "paused"
+            ? m.widget_admin_resume()
+            : m.widget_admin_activate()}
       </AlertDialog.Action>
     </AlertDialog.Footer>
   </AlertDialog.Content>

@@ -123,6 +123,30 @@ describe("WidgetRulesFields origins", () => {
     expect(autosave.stranded).toBe(false);
   });
 
+  test("a saved wildcard the API no longer accepts is explained, and is no edit until changed", async () => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    const { autosave } = setup(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      }),
+      save
+    );
+    await expect.element(origins()).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(origins())
+      .toHaveAccessibleDescription(/widget_admin_blocker_origin_too_broad/);
+    // Leaving the page asks nothing: nothing was typed.
+    expect(autosave.stranded).toBe(false);
+
+    await userEvent.fill(origins(), "https://*.kommun.se");
+    await userEvent.tab();
+    await vi.waitFor(() =>
+      expect(save).toHaveBeenCalledWith({ allowed_origins: ["https://*.kommun.se"], revision: 0 })
+    );
+    await expect.element(origins()).toHaveAttribute("aria-invalid", "false");
+  });
+
   test("follows the saved list after a reload instead of keeping a stale copy", async () => {
     const { autosave } = setup(widget());
     await expect.element(origins()).toHaveValue("https://www.kommun.se");

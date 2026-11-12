@@ -68,7 +68,9 @@ LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
 
 # The settings a tenant admin reviewed at activation: where the widget may be
 # framed, what it keeps and how visitors are admitted. On an active widget
-# only an admin changes them; an editor pauses first (WidgetService).
+# only an admin changes them; an editor pauses first (WidgetService). The
+# limits stay with the editor: each has a hard maximum, and the policy caps
+# the token budget on every visitor request (WidgetPolicy.serving).
 GOVERNED_FIELDS = frozenset({"allowed_origins", "privacy", "bot_protection"})
 
 
@@ -311,23 +313,39 @@ class WidgetPrivacy(BaseModel):
         return self.retention_days == 0
 
 
-class ExternalToolsAcknowledgement(BaseModel):
-    """A tenant admin's acknowledgement, given at activation, that the
-    assistant's MCP servers outside Eneo run on anonymous visitor input.
+class AcknowledgedExternalServer(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    Bound to the servers it was given for: when the assistant's set of
-    external servers changes, the acknowledgement no longer covers it and
-    the next activation asks again.
+    id: UUID
+    tool_ids: list[UUID]
+
+
+class ExternalToolsAcknowledgement(BaseModel):
+    """A tenant admin's acknowledgement that anonymous visitor input may make
+    the assistant call these tools on MCP servers outside Eneo.
+
+    It is also the limit of what a visitor turn reaches (``grant``): a server
+    or tool added to the assistant afterwards stays out of visitor turns
+    until an admin acknowledges the new set.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    server_ids: list[UUID]
+    servers: list[AcknowledgedExternalServer]
     acknowledged_at: datetime
     acknowledged_by_user_id: Optional[UUID] = None
 
-    def covers(self, server_ids: Iterable[UUID]) -> bool:
-        return set(self.server_ids) == set(server_ids)
+    def grant(self) -> dict[UUID, frozenset[UUID]]:
+        return {server.id: frozenset(server.tool_ids) for server in self.servers}
+
+    def covers(self, servers: Mapping[UUID, Iterable[UUID]]) -> bool:
+        """Every server and tool in ``servers`` was acknowledged. A server or
+        tool since removed or switched off does not ask again."""
+        granted = self.grant()
+        return all(
+            server_id in granted and set(tool_ids) <= granted[server_id]
+            for server_id, tool_ids in servers.items()
+        )
 
 
 def normalize_allowed_origins(
@@ -460,8 +478,8 @@ class Widget(BaseModel):
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
-    # Set by activation when the assistant has external MCP servers; None
-    # when it has none or the widget was never activated with any.
+    # Set only by a tenant admin's acknowledgement (WidgetService); None until
+    # one is given. Visitor turns reach no external tool outside it.
     external_tools_acknowledgement: Optional[ExternalToolsAcknowledgement] = None
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
@@ -568,30 +586,42 @@ class Widget(BaseModel):
             if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
         ]
 
-    def external_tools_acknowledged(self, server_ids: Iterable[UUID]) -> bool:
-        """Whether the stored acknowledgement covers exactly these servers.
-        True when there are none: nothing is left unacknowledged."""
-        ids = list(server_ids)
-        if not ids:
+    def external_tools_acknowledged(
+        self, servers: Mapping[UUID, Iterable[UUID]]
+    ) -> bool:
+        """Whether the stored acknowledgement covers these servers (server id
+        to enabled tool ids). True when there are none."""
+        if not servers:
             return True
         ack = self.external_tools_acknowledgement
-        return ack is not None and ack.covers(ids)
+        return ack is not None and ack.covers(servers)
+
+    def external_tool_grant(self) -> dict[UUID, frozenset[UUID]]:
+        """The external servers and tools a visitor turn may reach, before
+        the tenant policy has its say; empty without an acknowledgement."""
+        ack = self.external_tools_acknowledgement
+        return ack.grant() if ack is not None else {}
 
     def acknowledge_external_tools(
         self,
-        server_ids: Iterable[UUID],
+        servers: Mapping[UUID, Iterable[UUID]],
         *,
         by: Optional[UUID],
         now: Optional[datetime] = None,
     ) -> None:
-        ids = list(server_ids)
+        """Replace the acknowledgement with one for exactly ``servers``."""
         self.external_tools_acknowledgement = (
             ExternalToolsAcknowledgement(
-                server_ids=ids,
+                servers=[
+                    AcknowledgedExternalServer(
+                        id=server_id, tool_ids=sorted(set(servers[server_id]))
+                    )
+                    for server_id in sorted(servers)
+                ],
                 acknowledged_at=now or datetime.now(timezone.utc),
                 acknowledged_by_user_id=by,
             )
-            if ids
+            if servers
             else None
         )
 

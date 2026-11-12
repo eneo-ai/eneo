@@ -3,12 +3,24 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from uuid import uuid4
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.audit.application import audit_service as audit_service_module
+from eneo.database.tables.assistant_table import (
+    AssistantMCPServers,
+    AssistantMCPServerTools,
+)
+from eneo.database.tables.mcp_server_table import (
+    MCPServers,
+    MCPServerTools,
+    SpacesMCPServers,
+)
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import ModelId
+from eneo.mcp_servers.application.capability_resolver import general_servers_for_space
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
@@ -1036,58 +1048,195 @@ async def test_a_preview_token_is_minted_for_drafts_and_active_widgets_only(
     assert resp.json()["detail"]["code"] == "preview_unavailable_while_paused"
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_activation_takes_an_acknowledgement_and_reports_external_servers(
-    client, admin_token, space_with_assistant
-):
-    space_id, assistant_id = space_with_assistant
+async def _attach_external_server(db_container, space_id, assistant_id):
+    """An MCP server outside Eneo on the assistant, as an admin sets one up:
+    two tools on the server, only the first switched on for the assistant."""
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email("test@example.com")
+        session = container.session()
+        server = MCPServers(
+            tenant_id=admin.tenant_id,
+            name=f"Ärendesystemet {uuid4().hex[:6]}",
+            description="Kommunens ärenden",
+            http_url="https://cases.example.test/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+            forward_identity=False,
+        )
+        session.add(server)
+        await session.flush()
+        search, create = (
+            MCPServerTools(
+                mcp_server_id=server.id,
+                name=name,
+                title=title,
+                description=title,
+                input_schema={"type": "object", "properties": {}},
+                is_enabled_by_default=True,
+                requires_approval=False,
+                removed_from_remote=False,
+            )
+            for name, title in (
+                ("search_cases", "Sök ärende"),
+                ("create_case", "Skapa ärende"),
+            )
+        )
+        session.add_all([search, create])
+        await session.flush()
+        session.add_all(
+            [
+                SpacesMCPServers(space_id=space_id, mcp_server_id=server.id),
+                AssistantMCPServers(assistant_id=assistant_id, mcp_server_id=server.id),
+                AssistantMCPServerTools(
+                    assistant_id=assistant_id,
+                    mcp_server_tool_id=search.id,
+                    is_enabled=True,
+                ),
+            ]
+        )
+        return SimpleNamespace(
+            id=str(server.id),
+            name=server.name,
+            search=str(search.id),
+            create=str(create.id),
+        )
+
+
+async def _switch_on(db_container, assistant_id, tool_id):
+    async with db_container() as container:
+        container.session().add(
+            AssistantMCPServerTools(
+                assistant_id=assistant_id, mcp_server_tool_id=tool_id, is_enabled=True
+            )
+        )
+
+
+async def _draft_for(client, token, space_id, assistant_id):
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/widgets/",
         json={"target_id": assistant_id, "name": "Webbchatt"},
-        headers=_auth(admin_token),
+        headers=_auth(token),
     )
-    widget_id = resp.json()["id"]
-    resp = await client.patch(
-        f"/api/v1/widgets/{widget_id}/",
-        json={
-            "revision": await _revision(client, admin_token, widget_id),
-            "allowed_origins": ["https://www.kommun.se"],
-        },
-        headers=_auth(admin_token),
+    widget = resp.json()
+    resp = await _patch(
+        client, token, widget, allowed_origins=["https://www.kommun.se"]
     )
     assert resp.status_code == 200, resp.text
-    await _publish(client, admin_token, assistant_id)
+    await _publish(client, token, assistant_id)
+    resp = await client.get(f"/api/v1/widgets/{widget['id']}/", headers=_auth(token))
+    return resp.json()
 
-    stored = (
-        await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token))
-    ).json()
-    # An assistant without MCP servers outside Eneo: nothing to acknowledge.
-    assert stored["external_tools"] == []
-    assert stored["external_tools_acknowledged"] is True
 
-    # The body is a closed shape: a misspelt acknowledgement is refused, not ignored.
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_external_tools_are_acknowledged_against_the_assistants_servers(
+    client, admin_token, space_with_assistant, db_container, monkeypatch
+):
+    space_id, assistant_id = space_with_assistant
+    server = await _attach_external_server(db_container, space_id, assistant_id)
+    widget = await _draft_for(client, admin_token, space_id, assistant_id)
+    widget_id = widget["id"]
+    audit = AsyncMock()
+    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", audit)
+
+    listed = {
+        "id": server.id,
+        "name": server.name,
+        "tools": [{"id": server.search, "name": "Sök ärende"}],
+    }
+    assert widget["external_tools"] == [listed]
+    assert widget["external_tools_acknowledged"] is False
+    assert widget["activation_blockers"] == []
+
     resp = await client.post(
-        f"/api/v1/widgets/{widget_id}/activate/",
-        json={"acknowledged": True},
-        headers=_auth(admin_token),
+        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
     )
-    assert resp.status_code == 422, resp.text
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["detail"]["code"] == "external_tools_unacknowledged"
+    assert resp.json()["detail"]["servers"] == [listed]
+
+    # Only what the dialog showed is acknowledged: a stale list is refused.
+    url = f"/api/v1/widgets/{widget_id}/acknowledge-external-tools/"
+    resp = await client.post(url, json={"servers": []}, headers=_auth(admin_token))
+    assert resp.status_code == 409, resp.text
+    assert resp.json()["detail"]["code"] == "external_tools_changed"
+    assert resp.json()["detail"]["servers"] == [listed]
+
+    shown = {"servers": [{"id": server.id, "tool_ids": [server.search]}]}
+    resp = await client.post(url, json=shown, headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["external_tools_acknowledged"] is True
+    entry = audit.await_args.args[2]
+    assert entry["action"] == "widget_external_tools_acknowledged"
+    assert entry["entity_id"] == widget_id
+    assert entry["metadata"]["extra"]["external_tools"] == [listed]
+
     resp = await client.post(
-        f"/api/v1/widgets/{widget_id}/activate/",
-        json={"external_tools_acknowledged": True},
-        headers=_auth(admin_token),
+        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["status"] == "active"
-    assert resp.json()["external_tools"] == []
-    assert resp.json()["external_tools_acknowledged"] is True
 
+    # A tool switched on after the acknowledgement waits for a new one; the
+    # widget keeps serving meanwhile.
+    await _switch_on(db_container, assistant_id, server.create)
+    live = (
+        await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token))
+    ).json()
+    assert live["status"] == "active"
+    assert live["external_tools_acknowledged"] is False
+    assert live["activation_blockers"] == ["external_tools_unacknowledged"]
     resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
-    assert resp.status_code == 200, resp.text
     [item] = [i for i in resp.json()["items"] if i["id"] == widget_id]
-    assert item["external_tools"] == []
-    assert item["external_tools_acknowledged"] is True
+    assert item["external_tools"] == [server.name]
+    assert item["external_tools_acknowledged"] is False
+
+    shown = {"servers": [{"id": server.id, "tool_ids": [server.create, server.search]}]}
+    resp = await client.post(url, json=shown, headers=_auth(admin_token))
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "active"
+    assert resp.json()["activation_blockers"] == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_visitor_reaches_only_the_acknowledged_tools_of_the_servers(
+    client, admin_token, space_with_assistant, db_container
+):
+    space_id, assistant_id = space_with_assistant
+    server = await _attach_external_server(db_container, space_id, assistant_id)
+    widget = await _draft_for(client, admin_token, space_id, assistant_id)
+    resp = await client.post(
+        f"/api/v1/widgets/{widget['id']}/acknowledge-external-tools/",
+        json={"servers": [{"id": server.id, "tool_ids": [server.search]}]},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code == 200, resp.text
+    await _switch_on(db_container, assistant_id, server.create)
+
+    async with db_container() as container:
+        stored = await container.widget_repo().get(UUID(widget["id"]))
+        assert stored is not None
+        visitor = await container.widget_authentication_service().resolve_user(
+            stored, uuid4(), preview=True
+        )
+        # The servers a turn of the assistant is handed, read as it reads them.
+        space = await container.space_service().get_space(UUID(space_id))
+        attached = space.get_assistant(UUID(assistant_id)).mcp_servers
+        servers = general_servers_for_space(attached, space.security_classification)
+
+    assert visitor.active_widget is not None
+    (reached,) = visitor.active_widget.reachable_servers(servers)
+    assert {tool.name: tool.is_enabled for tool in reached.tools} == {
+        "search_cases": True,
+        "create_case": False,
+    }
+    # The assistant's own entities keep the tool switched on for staff.
+    (own,) = [s for s in attached if str(s.id) == server.id]
+    assert {tool.name: tool.is_enabled for tool in own.tools} == {
+        "search_cases": True,
+        "create_case": True,
+    }
 
 
 @pytest.mark.integration
@@ -1213,3 +1362,92 @@ async def test_an_editor_changes_governed_settings_only_while_the_widget_is_paus
     resp = await patch(editor, allowed_origins=["https://a.kommun.se"])
     assert resp.status_code == 200, resp.text
     assert resp.json()["allowed_origins"] == ["https://a.kommun.se"]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_an_editor_switches_a_live_widgets_template_only_while_it_is_paused(
+    client, admin_token, widget_editor, space_with_assistant
+):
+    space_id, assistant_id = space_with_assistant
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": str(widget_editor.id), "role": "editor"},
+        headers=_auth(admin_token),
+    )
+    assert resp.status_code in (200, 201), resp.text
+    editor = _auth(widget_editor.token)
+    admin = _auth(admin_token)
+
+    async def template(name, locked_groups):
+        resp = await client.post(
+            "/api/v1/admin/widget-templates/",
+            json={"name": f"{name} {uuid4().hex[:6]}"},
+            headers=admin,
+        )
+        assert resp.status_code == 201, resp.text
+        template_id = resp.json()["id"]
+        resp = await client.patch(
+            f"/api/v1/admin/widget-templates/{template_id}/",
+            json={"locked_groups": locked_groups},
+            headers=admin,
+        )
+        assert resp.status_code == 200, resp.text
+        resp = await client.post(
+            f"/api/v1/admin/widget-templates/{template_id}/publish/", headers=admin
+        )
+        assert resp.status_code == 200, resp.text
+        return template_id
+
+    locking = await template("Låst juridik", ["legal_texts"])
+    unlocked = await template("Fri", [])
+
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/widgets/",
+        json={"target_id": assistant_id, "name": "Webbchatt", "template_id": locking},
+        headers=editor,
+    )
+    assert resp.status_code == 201, resp.text
+    widget_id = resp.json()["id"]
+
+    async def link(headers, template_id):
+        return await client.post(
+            f"/api/v1/widgets/{widget_id}/link-template/",
+            json={
+                "template_id": template_id,
+                "revision": await _revision(client, admin_token, widget_id),
+            },
+            headers=headers,
+        )
+
+    resp = await client.patch(
+        f"/api/v1/widgets/{widget_id}/",
+        json={
+            "revision": await _revision(client, admin_token, widget_id),
+            "allowed_origins": ["https://www.kommun.se"],
+        },
+        headers=editor,
+    )
+    assert resp.status_code == 200, resp.text
+    await _publish(client, admin_token, assistant_id)
+    resp = await client.post(f"/api/v1/widgets/{widget_id}/activate/", headers=admin)
+    assert resp.status_code == 200, resp.text
+
+    # Live, leaving the template would drop its lock on the legal texts.
+    resp = await link(editor, unlocked)
+    assert resp.status_code == 403, resp.text
+    assert resp.json()["detail"]["code"] == "admin_required_while_active"
+    assert resp.json()["detail"]["fields"] == ["template"]
+    # Applying the same template again only adds; the admin switches.
+    resp = await link(editor, locking)
+    assert resp.status_code == 200, resp.text
+    resp = await link(admin, unlocked)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["template"]["id"] == unlocked
+
+    # Paused, the template is the editor's again.
+    resp = await client.post(f"/api/v1/widgets/{widget_id}/pause/", headers=editor)
+    assert resp.status_code == 200, resp.text
+    resp = await link(editor, locking)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["template"]["id"] == locking

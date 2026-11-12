@@ -68,8 +68,9 @@ def _widget(**overrides) -> Widget:
     return widget.model_copy(update={"id": uuid4(), **overrides})
 
 
-def _principal(widget: Widget) -> WidgetPrincipal:
+def _principal(widget: Widget, *, preview: bool = False) -> WidgetPrincipal:
     claims = MagicMock(spec=VisitorClaims)
+    claims.preview = preview
     return WidgetPrincipal(widget=widget, visitor_id=uuid4(), claims=claims)
 
 
@@ -806,9 +807,11 @@ def _external_event(*calls: ToolCallMetadata) -> Completion:
 
 
 async def _external_turn():
-    # The model asks for the tool (pending), the server runs it, the round is
-    # reported again, then the answer.
-    yield _external_event(_external_call(result_status=None))
+    # The model asks for the tool (pending), it is sent to the server
+    # (approved, without asking anyone on a visitor turn), the server runs it,
+    # the round is reported again, then the answer.
+    yield _external_event(_external_call(result_status="pending"))
+    yield _external_event(_external_call(result_status="approved"))
     yield _external_event(
         _external_call(),
         _external_call(
@@ -857,6 +860,7 @@ async def test_every_external_tool_call_of_a_visitor_turn_is_audited_once():
     assert metadata["visitor_id"] == str(principal.visitor_id)
     assert metadata["session_id"] == str(response.session.id)
     assert metadata["question_id"] == str(response.question_id)
+    assert metadata["preview"] is False
     assert (
         metadata["tool_call_id"],
         metadata["server_name"],
@@ -873,6 +877,7 @@ async def test_every_external_tool_call_of_a_visitor_turn_is_audited_once():
 
 async def test_a_failed_external_tool_call_is_audited_too():
     async def turn():
+        yield _external_event(_external_call(result_status="approved"))
         yield _external_event(_external_call(result_status="failed"))
         yield Completion(text="Det gick inte.", response_type=ResponseType.TEXT)
 
@@ -888,12 +893,99 @@ async def test_a_failed_external_tool_call_is_audited_too():
     )
 
 
-async def test_a_lost_audit_entry_does_not_cut_the_visitors_answer():
+async def test_a_call_refused_at_the_round_limit_is_not_audited():
+    # The last round's calls are refused without being sent, so they fail
+    # without ever being approved. Only the call that reached its server counts.
+    async def turn():
+        yield _external_event(_external_call(result_status="approved"))
+        yield _external_event(_external_call())
+        yield _external_event(
+            _external_call(tool_call_id="call_10", result_status="failed"),
+            _external_call(tool_call_id=None, result_status="failed"),
+        )
+        yield Completion(
+            text="Ärendet är registrerat.", response_type=ResponseType.TEXT
+        )
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    deps.audit.log_async.assert_awaited_once()
+    metadata = deps.audit.log_async.await_args.kwargs["metadata"]
+    assert (metadata["tool_call_id"], metadata["result_status"]) == (
+        "call_9",
+        "succeeded",
+    )
+
+
+async def test_a_call_id_reused_in_a_later_round_is_audited_per_call():
+    # Some providers number their calls per round, so one id can name two calls.
+    async def turn():
+        for status in ("succeeded", "failed"):
+            yield _external_event(_external_call(result_status="approved"))
+            yield _external_event(_external_call(result_status=status))
+        yield Completion(text="Klart.", response_type=ResponseType.TEXT)
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    assert [
+        (
+            call.kwargs["metadata"]["tool_call_id"],
+            call.kwargs["metadata"]["result_status"],
+        )
+        for call in deps.audit.log_async.await_args_list
+    ] == [("call_9", "succeeded"), ("call_9", "failed")]
+
+
+async def test_a_call_the_turn_never_saw_end_is_audited_as_unknown():
+    async def turn():
+        yield _external_event(_external_call(result_status="approved"))
+        yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+        yield _external_event(_external_call())
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget, preview=True), question="q", session_id=None, client_ip=None
+    )
+    # The visitor leaves while the server runs the call.
+    await anext(response.answer)
+    deps.audit.log_async.assert_not_awaited()
+    await response.answer.aclose()
+
+    deps.audit.log_async.assert_awaited_once()
+    metadata = deps.audit.log_async.await_args.kwargs["metadata"]
+    assert (metadata["tool_call_id"], metadata["result_status"]) == (
+        "call_9",
+        "unknown",
+    )
+    assert metadata["preview"] is True
+
+
+@pytest.mark.parametrize(
+    "lost",
+    [
+        pytest.param(AsyncMock(side_effect=RuntimeError("bug")), id="raised"),
+        pytest.param(AsyncMock(return_value=None), id="not enqueued"),
+    ],
+)
+async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
+    lost, monkeypatch
+):
     widget = _widget()
     service, deps = _service(
         ask_result=_ask_result(_stored_session(0), _external_turn())
     )
-    deps.audit.log_async = AsyncMock(side_effect=RuntimeError("queue down"))
+    deps.audit.log_async = lost
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
     response = await service.ask(
         _principal(widget), question="q", session_id=None, client_ip=None
     )
@@ -902,6 +994,10 @@ async def test_a_lost_audit_entry_does_not_cut_the_visitors_answer():
     ]
     deps.audit.log_async.assert_awaited_once()
     deps.budget.settle.assert_awaited_once()
+    # The log keeps what the trail lost, without the visitor's input.
+    (record,) = logger.exception.call_args_list + logger.error.call_args_list
+    assert record.kwargs["extra"]["tool_call_id"] == "call_9"
+    assert record.kwargs["extra"]["argument_names"] == ["body", "title"]
 
 
 async def test_a_turn_without_an_audit_service_still_answers():

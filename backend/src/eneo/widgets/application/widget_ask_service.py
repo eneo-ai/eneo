@@ -65,24 +65,31 @@ class _AsyncClosable(Protocol):
     def aclose(self) -> Awaitable[None]: ...
 
 
-class WidgetAnswer(AsyncIterator[Completion]):
-    """Visitor stream whose settlement also works before its first read.
+class AnswerObserver(Protocol):
+    """Sees every pipeline event of a turn before the visitor filter, for
+    records the organisation keeps of it (the external tool calls)."""
 
-    ``observe`` sees every pipeline event before the visitor filter, for
-    records the organisation keeps of the turn (the external tool calls).
-    """
+    async def observe(self, chunk: Completion) -> None: ...
+
+    async def settle(self) -> None:
+        """The answer has ended, read to the end or not."""
+        ...
+
+
+class WidgetAnswer(AsyncIterator[Completion]):
+    """Visitor stream whose settlement also works before its first read."""
 
     def __init__(
         self,
         answer: AsyncIterator[Completion],
         view: VisitorView,
         finish: Callable[[bool], Awaitable[None]],
-        observe: Optional[Callable[[Completion], Awaitable[None]]] = None,
+        observer: Optional[AnswerObserver] = None,
     ) -> None:
         self._answer = answer
         self._view = view
         self._finish = finish
-        self._observe = observe
+        self._observer = observer
         self._stream = self._visible()
         self._closed = False
 
@@ -96,8 +103,8 @@ class WidgetAnswer(AsyncIterator[Completion]):
         completed = False
         try:
             async for chunk in self._answer:
-                if self._observe is not None:
-                    await self._observe(chunk)
+                if self._observer is not None:
+                    await self._observer.observe(chunk)
                 for visible in self._view.events(chunk):
                     yield visible
             for visible in self._view.finish():
@@ -122,7 +129,11 @@ class WidgetAnswer(AsyncIterator[Completion]):
                 if isinstance(self._answer, _AsyncClosable):
                     await self._answer.aclose()
             finally:
-                await self._finish(completed)
+                try:
+                    if self._observer is not None:
+                        await self._observer.settle()
+                finally:
+                    await self._finish(completed)
 
 
 # Appended to the assistant's prompt for widget turns only: the answer lands
@@ -154,9 +165,15 @@ def widget_prompt_addendum(widget: Widget) -> str:
     )
 
 
-# The statuses a call ends in once its server has run it. Pending and approval
-# events are not the call; a denied call never reached the server.
-EXECUTED_STATUSES = frozenset({"succeeded", "failed"})
+# A call is sent to its server once it is approved, which on a visitor turn
+# happens without asking anyone, and ends succeeded or failed. A denied call
+# never reached the server.
+DISPATCHED_STATUS = "approved"
+ENDED_STATUSES = frozenset({"succeeded", "failed"})
+DENIED_STATUSES = frozenset({"denied", "timeout_denied"})
+# Recorded for a call that was sent but whose end the turn never reported:
+# the visitor left, or the turn failed, while the server was running it.
+UNKNOWN_STATUS = "unknown"
 
 
 def is_external_tool_call(call: ToolCallMetadata) -> bool:
@@ -172,7 +189,7 @@ def is_external_tool_call(call: ToolCallMetadata) -> bool:
 
 
 class ExternalToolCallAudit:
-    """One audit entry per external tool call a visitor turn ran.
+    """One audit entry per external tool call a visitor turn made.
 
     Written whatever the widget's retention: the call's effect on the external
     system outlives the conversation, and with retention 0 nothing else of
@@ -180,6 +197,11 @@ class ExternalToolCallAudit:
     the conversation and the tool. The arguments' values stay out: they are
     the visitor's input and may carry personal data, and the external system
     has its own record of what it received; their names go in.
+
+    Only a call sent to its server is recorded: once it ends, or, when the
+    answer stops before it does, with status ``unknown`` once the answer has
+    settled, since the server may have acted on it either way. A call the
+    round limit refused fails without ever being sent, and stays out.
     """
 
     def __init__(
@@ -190,69 +212,92 @@ class ExternalToolCallAudit:
         visitor_id: UUID,
         session_id: UUID,
         question_id: Optional[UUID],
+        preview: bool,
     ) -> None:
         self.audit_service = audit_service
         self.widget = widget
         self.visitor_id = visitor_id
         self.session_id = session_id
         self.question_id = question_id
-        self._logged: set[str] = set()
+        self.preview = preview
+        self._in_flight: dict[str, ToolCallMetadata] = {}
 
     async def observe(self, chunk: Completion) -> None:
-        if chunk.response_type != ResponseType.TOOL_CALL:
+        if chunk.response_type not in (
+            ResponseType.TOOL_CALL,
+            ResponseType.TOOL_APPROVAL_TIMEOUT,
+        ):
             return
         for call in chunk.tool_calls_metadata or []:
-            if call.result_status not in EXECUTED_STATUSES:
+            call_id = call.tool_call_id
+            # A round with a call missing its id is refused before anything
+            # is sent, so every call a server received has one.
+            if not call_id or not is_external_tool_call(call):
                 continue
-            if not is_external_tool_call(call):
-                continue
-            # A call can be reported more than once (per round, on retry).
-            if call.tool_call_id is not None:
-                if call.tool_call_id in self._logged:
-                    continue
-                self._logged.add(call.tool_call_id)
-            try:
-                await self._log(call)
-            except Exception:
-                # The answer is already under way and the call has happened;
-                # the missing entry is the operator's problem, not the visitor's.
-                logger.exception(
-                    "Widget external tool call audit failed",
-                    extra={
-                        "widget_id": str(self.widget.id),
-                        "tool": call.mcp_tool_name or call.tool_name,
-                    },
-                )
+            status = call.result_status
+            if status == DISPATCHED_STATUS:
+                self._in_flight[call_id] = call
+            elif status in DENIED_STATUSES:
+                self._in_flight.pop(call_id, None)
+            elif status in ENDED_STATUSES:
+                # Pairing each end with its dispatch keeps out a call refused
+                # at the round limit (never dispatched) and a repeated report
+                # of one that already ended, while a provider reusing an id in
+                # a later round still gets an entry per call.
+                if self._in_flight.pop(call_id, None) is not None:
+                    await self._record(call, status)
 
-    async def _log(self, call: ToolCallMetadata) -> None:
+    async def settle(self) -> None:
+        unresolved = list(self._in_flight.values())
+        self._in_flight.clear()
+        for call in unresolved:
+            await self._record(call, UNKNOWN_STATUS)
+
+    async def _record(self, call: ToolCallMetadata, status: str) -> None:
         assert self.widget.id is not None
-        await self.audit_service.log_async(
-            tenant_id=self.widget.tenant_id,
-            actor_id=None,
-            actor_type=ActorType.WIDGET_VISITOR,
-            action=ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
-            entity_type=EntityType.WIDGET,
-            entity_id=self.widget.id,
-            description=(
-                f"Widget '{self.widget.name}': an anonymous visitor's turn ran"
-                f" tool '{call.tool_name}' on external server '{call.server_name}'"
-            ),
-            metadata={
-                "public_id": self.widget.public_id,
-                "visitor_id": str(self.visitor_id),
-                "session_id": str(self.session_id),
-                "question_id": str(self.question_id) if self.question_id else None,
-                "tool_call_id": call.tool_call_id,
-                "server_name": call.server_name,
-                "tool_name": call.tool_name,
-                "mcp_tool_name": call.mcp_tool_name,
-                "result_status": call.result_status,
-                "argument_names": sorted(call.arguments or {}),
-            },
-            # The visitor's address and browser stay out of the trail, as for
-            # every widget entry; the pseudonymous visitor id is the actor.
-            record_client=False,
-        )
+        metadata = {
+            "public_id": self.widget.public_id,
+            "visitor_id": str(self.visitor_id),
+            "session_id": str(self.session_id),
+            "question_id": str(self.question_id) if self.question_id else None,
+            "preview": self.preview,
+            "tool_call_id": call.tool_call_id,
+            "server_name": call.server_name,
+            "tool_name": call.tool_name,
+            "mcp_tool_name": call.mcp_tool_name,
+            "result_status": status,
+            "argument_names": sorted(call.arguments or {}),
+        }
+        try:
+            job = await self.audit_service.log_async(
+                tenant_id=self.widget.tenant_id,
+                actor_id=None,
+                actor_type=ActorType.WIDGET_VISITOR,
+                action=ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
+                entity_type=EntityType.WIDGET,
+                entity_id=self.widget.id,
+                description=(
+                    f"Widget '{self.widget.name}': a visitor's turn called tool"
+                    f" '{call.tool_name}' on external server '{call.server_name}'"
+                ),
+                metadata=metadata,
+                # The visitor's address and browser stay out of the trail, as
+                # for every widget entry; the pseudonymous visitor id is the actor.
+                record_client=False,
+            )
+        except Exception:
+            # The answer is already under way and the call has happened; the
+            # visitor is not the one to tell. The log keeps what the trail lost.
+            logger.exception(
+                "Widget external tool call audit failed",
+                extra={"widget_id": str(self.widget.id), **metadata},
+            )
+            return
+        if job is None:
+            logger.error(
+                "Widget external tool call missing from the audit trail",
+                extra={"widget_id": str(self.widget.id), **metadata},
+            )
 
 
 class WidgetAskService:
@@ -449,6 +494,7 @@ class WidgetAskService:
                 visitor_id=principal.visitor_id,
                 session_id=response.session.id,
                 question_id=response.question_id,
+                preview=principal.claims.preview,
             )
             if self.audit_service is not None
             else None
@@ -465,7 +511,7 @@ class WidgetAskService:
                 asked_in=session_id,
                 hold=hold,
             ),
-            observe=audit.observe if audit is not None else None,
+            observer=audit,
         )
         return visible
 

@@ -57,6 +57,22 @@ def test_visitor_user_is_synthetic_and_flagged():
     assert user.email.endswith("@widget-visitor.eneo")
 
 
+def test_the_tool_grant_stays_in_the_request_and_spares_eneos_own_servers():
+    widget = _widget()
+    server_id, tool_id = uuid4(), uuid4()
+    widget.acknowledge_external_tools({server_id: [tool_id]}, by=uuid4())
+    visitor = build_visitor_user(widget, uuid4(), _tenant(widget.tenant_id))  # type: ignore[arg-type]
+    scope = visitor.active_widget
+    assert scope is not None
+    assert scope.external_tools == {server_id: frozenset({tool_id})}
+    # The delegated MCP token carries the scope; the grant is re-read per request.
+    assert "external_tools" not in scope.model_dump(mode="json")
+
+    own = SimpleNamespace(id=uuid4(), is_internal=True, tools_loaded=False)
+    unread = SimpleNamespace(id=server_id, is_internal=False, tools_loaded=False)
+    assert scope.reachable_servers([own, unread]) == [own]  # type: ignore[list-item]
+
+
 def test_session_principal_is_widget_plus_visitor():
     widget = _widget()
     visitor_id = uuid4()

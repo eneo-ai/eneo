@@ -17,6 +17,7 @@ from eneo.roles.permissions import Permission
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.domain.exceptions import (
     WidgetAdminRequiredError,
+    WidgetExternalToolsChangedError,
     WidgetExternalToolsUnacknowledgedError,
     WidgetPolicyViolationError,
     WidgetPreviewUnavailableError,
@@ -1035,6 +1036,12 @@ async def test_blockers_of_many_widgets_load_each_space_once(assistant):
 # --- MCP servers outside Eneo (security audit M1) -----------------------------
 
 
+def _tool(name, *, enabled=True):
+    return SimpleNamespace(
+        id=uuid4(), name=name, title=None, display_name=None, is_enabled=enabled
+    )
+
+
 def _external_server(
     name, tools=(), *, purpose="general", is_internal=False, enabled=True
 ):
@@ -1047,10 +1054,16 @@ def _external_server(
         is_internal=is_internal,
         http_auth_type="none",
         tools_loaded=True,
-        tools=[
-            SimpleNamespace(name=tool, title=None, is_enabled=True) for tool in tools
-        ],
+        tools=[_tool(tool) for tool in tools],
     )
+
+
+def _shown(*servers):
+    """What the admin's dialog sends back: each server with the tools shown."""
+    return {
+        server.id: [tool.id for tool in server.tools if tool.is_enabled]
+        for server in servers
+    }
 
 
 async def _activatable(service, space, assistant):
@@ -1065,8 +1078,10 @@ async def _activatable(service, space, assistant):
     )
 
 
-async def test_activation_asks_the_admin_to_acknowledge_external_servers(assistant):
-    server = _external_server("Ärendesystemet", ["create_case", "search_cases"])
+async def test_activation_needs_every_external_tool_acknowledged_first(assistant):
+    server = _external_server("Ärendesystemet", ["search_cases", "create_case"])
+    server.tools[0].display_name = "Sök ärende"
+    server.tools.append(_tool("delete_case", enabled=False))
     assistant.mcp_servers = [server]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
@@ -1074,38 +1089,82 @@ async def test_activation_asks_the_admin_to_acknowledge_external_servers(assista
     admin = _service(admin_user, space, repo=repo)
     view = await _activatable(admin, space, assistant)
     widget_id = view.widget.id
+    create, search = server.tools[1], server.tools[0]
 
-    assert [(s.name, s.tools) for s in view.external_tools] == [
-        ("Ärendesystemet", ["create_case", "search_cases"])
-    ]
+    # The tools the assistant has switched on, by their admin display name.
+    assert view.external_tools[0].public() == {
+        "id": str(server.id),
+        "name": "Ärendesystemet",
+        "tools": [
+            {"id": str(create.id), "name": "create_case"},
+            {"id": str(search.id), "name": "Sök ärende"},
+        ],
+    }
     assert view.external_tools_acknowledged is False
     # On a draft the missing acknowledgement is not a blocker: activation asks.
     assert view.activation_blockers == []
 
     with pytest.raises(WidgetExternalToolsUnacknowledgedError) as exc:
         await admin.activate_widget(widget_id)
-    assert exc.value.details() == {
-        "servers": [
-            {
-                "id": str(server.id),
-                "name": "Ärendesystemet",
-                "tools": ["create_case", "search_cases"],
-            }
-        ]
-    }
+    assert exc.value.details() == {"servers": [view.external_tools[0].public()]}
     assert repo.rows[widget_id].status == WidgetStatus.DRAFT
 
-    activated = await admin.activate_widget(widget_id, external_tools_acknowledged=True)
+    acknowledged = await admin.acknowledge_external_tools(widget_id, _shown(server))
+    ack = acknowledged.widget.external_tools_acknowledgement
+    assert ack is not None and ack.acknowledged_by_user_id == admin_user.id
+    assert acknowledged.widget.external_tool_grant() == {
+        server.id: frozenset({create.id, search.id})
+    }
+    assert acknowledged.previous is not None
+    assert acknowledged.previous.external_tools_acknowledgement is None
+    assert repo.locked_reads[-1] == widget_id
+    assert repo.last_update == {
+        "check_revision": False,
+        "only": {"external_tools_acknowledgement"},
+    }
+
+    activated = await admin.activate_widget(widget_id)
     assert activated.widget.status == WidgetStatus.ACTIVE
-    ack = activated.widget.external_tools_acknowledgement
-    assert ack is not None
-    assert ack.server_ids == [server.id]
-    assert ack.acknowledged_by_user_id == admin_user.id
     assert activated.external_tools_acknowledged is True
     assert activated.activation_blockers == []
 
 
-async def test_a_changed_set_of_external_servers_is_flagged_and_asked_again(assistant):
+@pytest.mark.parametrize(
+    "shown",
+    [
+        pytest.param(lambda server, tool: {}, id="nothing"),
+        pytest.param(lambda server, tool: {server.id: []}, id="a tool left out"),
+        pytest.param(
+            lambda server, tool: {server.id: [tool.id, uuid4()]}, id="an unknown tool"
+        ),
+        pytest.param(
+            lambda server, tool: {server.id: [tool.id], uuid4(): []},
+            id="an unknown server",
+        ),
+    ],
+)
+async def test_an_acknowledgement_of_anything_but_the_current_tools_is_refused(
+    assistant, shown
+):
+    server = _external_server("Ärendesystemet", ["create_case"])
+    assistant.mcp_servers = [server]
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
+    view = await _activatable(admin, space, assistant)
+
+    with pytest.raises(WidgetExternalToolsChangedError) as exc:
+        await admin.acknowledge_external_tools(
+            view.widget.id, shown(server, server.tools[0])
+        )
+    assert exc.value.status_code == 409
+    assert exc.value.details() == {"servers": [view.external_tools[0].public()]}
+    assert repo.rows[view.widget.id].external_tools_acknowledgement is None
+
+
+async def test_new_tools_on_a_live_widget_wait_for_an_acknowledgement_in_place(
+    assistant,
+):
     first = _external_server("Ärendesystemet", ["create_case"])
     assistant.mcp_servers = [first]
     space, _ = _space(uuid4(), assistant)
@@ -1113,58 +1172,81 @@ async def test_a_changed_set_of_external_servers_is_flagged_and_asked_again(assi
     admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
     view = await _activatable(admin, space, assistant)
     widget_id = view.widget.id
-    await admin.activate_widget(widget_id, external_tools_acknowledged=True)
+    await admin.acknowledge_external_tools(widget_id, _shown(first))
+    await admin.activate_widget(widget_id)
 
+    first.tools.append(_tool("close_case"))
     second = _external_server("Bokningen", ["book_slot"])
     assistant.mcp_servers = [first, second]
     live = await admin.get_widget(widget_id)
     assert live.external_tools_acknowledged is False
-    assert live.activation_blockers == ["external_tools_changed_since_activation"]
+    assert live.activation_blockers == ["external_tools_unacknowledged"]
     assert [s.name for s in live.external_tools] == ["Bokningen", "Ärendesystemet"]
+    # Visitors keep what was acknowledged meanwhile.
+    assert live.widget.external_tool_grant() == {
+        first.id: frozenset({first.tools[0].id})
+    }
 
-    paused = await admin.pause_widget(widget_id)
-    # Not serving: nothing to flag, the next activation asks instead.
-    assert paused.activation_blockers == []
-    with pytest.raises(WidgetExternalToolsUnacknowledgedError) as exc:
-        await admin.activate_widget(widget_id)
-    assert [s["name"] for s in exc.value.servers] == ["Bokningen", "Ärendesystemet"]
-    resumed = await admin.activate_widget(widget_id, external_tools_acknowledged=True)
-    ack = resumed.widget.external_tools_acknowledgement
-    assert ack is not None and set(ack.server_ids) == {first.id, second.id}
+    acknowledged = await admin.acknowledge_external_tools(
+        widget_id, _shown(first, second)
+    )
+    assert acknowledged.widget.status == WidgetStatus.ACTIVE
+    assert acknowledged.activation_blockers == []
+    assert set(acknowledged.widget.external_tool_grant()) == {first.id, second.id}
 
 
-async def test_resuming_with_the_same_servers_needs_no_new_acknowledgement(assistant):
-    assistant.mcp_servers = [_external_server("Ärendesystemet")]
+async def test_fewer_external_tools_ask_for_nothing_new(assistant):
+    server = _external_server("Ärendesystemet", ["create_case", "search_cases"])
+    other = _external_server("Bokningen", ["book_slot"])
+    assistant.mcp_servers = [server, other]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
     admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
     view = await _activatable(admin, space, assistant)
-    await admin.activate_widget(view.widget.id, external_tools_acknowledged=True)
+    await admin.acknowledge_external_tools(view.widget.id, _shown(server, other))
+    await admin.activate_widget(view.widget.id)
     await admin.pause_widget(view.widget.id)
 
+    server.tools[1].is_enabled = False
+    assistant.mcp_servers = [server]
     resumed = await admin.activate_widget(view.widget.id)
     assert resumed.widget.status == WidgetStatus.ACTIVE
     assert resumed.external_tools_acknowledged is True
 
 
-async def test_losing_every_external_server_clears_the_acknowledgement(assistant):
-    assistant.mcp_servers = [_external_server("Ärendesystemet")]
+@pytest.mark.parametrize(
+    ("permissions", "status", "error"),
+    [
+        ((Permission.WIDGETS,), WidgetStatus.DRAFT, UnauthorizedException),
+        (
+            (Permission.WIDGETS, Permission.ADMIN),
+            WidgetStatus.ARCHIVED,
+            BadRequestException,
+        ),
+    ],
+    ids=["an editor", "an archived widget"],
+)
+async def test_external_tools_are_acknowledged_by_admins_on_live_or_coming_widgets(
+    assistant, permissions, status, error
+):
+    server = _external_server("Ärendesystemet", ["create_case"])
+    assistant.mcp_servers = [server]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
-    admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
-    view = await _activatable(admin, space, assistant)
-    await admin.activate_widget(view.widget.id, external_tools_acknowledged=True)
+    service = _service(_user(*permissions), space, repo=repo)
+    view = await _activatable(service, space, assistant)
+    repo.rows[view.widget.id] = repo.rows[view.widget.id].model_copy(
+        update={"status": status}
+    )
 
-    assistant.mcp_servers = []
-    assert (await admin.get_widget(view.widget.id)).activation_blockers == []
-    await admin.pause_widget(view.widget.id)
-    resumed = await admin.activate_widget(view.widget.id)
-    assert resumed.widget.external_tools_acknowledgement is None
-    assert resumed.external_tools == [] and resumed.external_tools_acknowledged is True
+    with pytest.raises(error):
+        await service.acknowledge_external_tools(view.widget.id, _shown(server))
+    assert repo.rows[view.widget.id].external_tools_acknowledgement is None
 
 
 async def test_the_policy_can_forbid_external_servers(assistant):
-    assistant.mcp_servers = [_external_server("Ärendesystemet")]
+    server = _external_server("Ärendesystemet", ["create_case"])
+    assistant.mcp_servers = [server]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
     admin = _service(
@@ -1180,8 +1262,9 @@ async def test_the_policy_can_forbid_external_servers(assistant):
     assert view.activation_blockers == ["external_tools_not_allowed"]
 
     # Not even an acknowledgement gets past the policy.
+    await admin.acknowledge_external_tools(view.widget.id, _shown(server))
     with pytest.raises(WidgetServingBlockedError) as exc:
-        await admin.activate_widget(view.widget.id, external_tools_acknowledged=True)
+        await admin.activate_widget(view.widget.id)
     assert exc.value.blockers == ["external_tools_not_allowed"]
     assert repo.rows[view.widget.id].status == WidgetStatus.DRAFT
 
@@ -1189,13 +1272,15 @@ async def test_the_policy_can_forbid_external_servers(assistant):
 async def test_a_live_widget_is_flagged_when_the_policy_turns_external_servers_off(
     assistant,
 ):
-    assistant.mcp_servers = [_external_server("Ärendesystemet")]
+    server = _external_server("Ärendesystemet", ["create_case"])
+    assistant.mcp_servers = [server]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
     admin_user = _user(Permission.WIDGETS, Permission.ADMIN)
     admin = _service(admin_user, space, repo=repo)
     view = await _activatable(admin, space, assistant)
-    await admin.activate_widget(view.widget.id, external_tools_acknowledged=True)
+    await admin.acknowledge_external_tools(view.widget.id, _shown(server))
+    await admin.activate_widget(view.widget.id)
 
     await admin.update_policy({"allow_external_tools": False})
     admin_user.tenant.widget_policy = admin.tenant_service.stored["widget_policy"]
@@ -1209,11 +1294,16 @@ async def test_a_live_widget_is_flagged_when_the_policy_turns_external_servers_o
     ]
 
 
-async def test_only_general_servers_outside_eneo_count_as_external(assistant):
+async def test_only_tools_switched_on_at_general_servers_outside_eneo_count(
+    assistant,
+):
+    nothing_on = _external_server("Bokningen")
+    nothing_on.tools = [_tool("book_slot", enabled=False)]
     assistant.mcp_servers = [
-        _external_server("Sökleverantören", purpose="web_search"),
-        _external_server("Kunskap", is_internal=True),
-        _external_server("Avstängd", enabled=False),
+        _external_server("Sökleverantören", ["search"], purpose="web_search"),
+        _external_server("Kunskap", ["search"], is_internal=True),
+        _external_server("Avstängd", ["create_case"], enabled=False),
+        nothing_on,
     ]
     space, _ = _space(uuid4(), assistant)
     repo = _InMemoryRepo()
@@ -1326,6 +1416,50 @@ async def test_detaching_a_template_from_an_active_widget_is_the_admins(assistan
     await editor.pause_widget(widget_id)
     await editor.detach_template(widget_id, revision=repo.rows[widget_id].revision)
     assert repo.rows[widget_id].template_id is None
+
+
+async def test_switching_an_active_widgets_template_is_the_admins(assistant):
+    from eneo.widgets.domain.widget_template import WidgetTemplate
+
+    space, _ = _space(uuid4(), assistant)
+    repo = _InMemoryRepo()
+    template_repo = _InMemoryTemplateRepo()
+    editor_user = _user(Permission.WIDGETS)
+    editor = _service(editor_user, space, repo=repo, template_repo=template_repo)
+    admin_user = _user(Permission.WIDGETS, Permission.ADMIN)
+    admin_user.tenant_id = editor_user.tenant_id
+    admin = _service(admin_user, space, repo=repo, template_repo=template_repo)
+    templates = []
+    for name in ("Kommunblå", "Kontrast"):
+        template = WidgetTemplate.create(tenant_id=editor_user.tenant_id, name=name)
+        template.publish(by=admin_user.id)
+        templates.append(await template_repo.add(template))
+    first, second = templates
+    view = await _activatable(editor, space, assistant)
+    widget_id = view.widget.id
+    await admin.activate_widget(widget_id)
+
+    def revision():
+        return repo.rows[widget_id].revision
+
+    # A first template, and the same one again, only add locks.
+    await editor.link_template(widget_id, first.id, revision=revision())
+    relinked = await editor.link_template(widget_id, first.id, revision=revision())
+    assert relinked.previous is not None
+    assert relinked.previous.template_id == first.id
+
+    with pytest.raises(WidgetAdminRequiredError) as exc:
+        await editor.link_template(widget_id, second.id, revision=revision())
+    assert exc.value.details() == {"fields": ["template"]}
+    assert repo.rows[widget_id].template_id == first.id
+
+    switched = await admin.link_template(widget_id, second.id, revision=revision())
+    assert switched.widget.template_id == second.id
+
+    # Paused, an editor switches.
+    await editor.pause_widget(widget_id)
+    await editor.link_template(widget_id, first.id, revision=revision())
+    assert repo.rows[widget_id].template_id == first.id
 
 
 # --- preview tokens (L4) ------------------------------------------------------

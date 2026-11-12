@@ -6,7 +6,7 @@
 <script lang="ts">
   import type { Eneo, Widget } from "@eneo/eneo-js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { onDestroy } from "svelte";
+  import { onDestroy, untrack } from "svelte";
   import { page } from "$app/state";
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
@@ -90,6 +90,12 @@
     element?.remove();
     element = null;
   }
+
+  // Pausing invalidates the preview token, so a test started before it could
+  // only answer that the widget is unavailable: it ends with the pause.
+  $effect(() => {
+    if (paused) untrack(stop);
+  });
 
   onDestroy(() => {
     destroyed = true;

@@ -475,11 +475,13 @@ describe("WidgetEditor", () => {
   });
 
   test("visitor access lists what visitors get and what they never get", async () => {
-    // The servers come from the widget as the API lists them (the same list the
-    // activation dialog asks the admin to acknowledge), with their tools.
+    // The servers come from the widget as the API lists them (what an admin
+    // acknowledges), with the tools switched on there.
     renderEditor(
       widget({
-        external_tools: [{ id: "m1", name: "Kommunens ärenden", tools: ["Sök ärende"] }],
+        external_tools: [
+          { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+        ],
         external_tools_acknowledged: true
       } as unknown as Partial<Widget>),
       {

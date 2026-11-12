@@ -1,4 +1,4 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type Widget } from "@eneo/eneo-js";
 import { toast } from "$lib/components/toast";
 import { toastError } from "$lib/core/errors";
 import { m } from "$lib/paraglide/messages";
@@ -109,6 +109,19 @@ export function widgetFieldErrors(error: unknown): Record<string, string> {
   return fields;
 }
 
+/**
+ * The assistant's current servers and tools outside Eneo, when an
+ * acknowledgement or an activation was refused because the admin saw another
+ * list; null for any other error.
+ */
+export function currentExternalTools(error: unknown): Widget["external_tools"] | null {
+  const body = detail(error);
+  if (body?.code !== "external_tools_changed" && body?.code !== "external_tools_unacknowledged") {
+    return null;
+  }
+  return Array.isArray(body.servers) ? (body.servers as Widget["external_tools"]) : null;
+}
+
 export function widgetErrorMessage(error: unknown): string | null {
   switch (widgetErrorCode(error)) {
     case "field_locked_by_template":
@@ -132,9 +145,14 @@ export function widgetErrorMessage(error: unknown): string | null {
         reasons: refusalCodes(error).map(blockerLabel).join(" ")
       });
     case "admin_required_while_active":
-      return m.widget_admin_error_admin_required_while_active();
+      // Leaving a template drops the locks it held on the live widget.
+      return codes(detail(error)?.fields).includes("template")
+        ? m.widget_admin_template_detach_admin_only()
+        : m.widget_admin_error_admin_required_while_active();
     case "external_tools_unacknowledged":
       return m.widget_admin_error_external_tools_unacknowledged();
+    case "external_tools_changed":
+      return m.widget_admin_external_tools_changed();
     case "preview_unavailable_while_paused":
       return m.widget_admin_preview_paused();
   }

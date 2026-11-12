@@ -30,6 +30,20 @@ describe("path parameters", () => {
     ]);
   });
 
+  for (const value of [".", ".."]) {
+    it(`refuses ${JSON.stringify(value)}, a dot segment however it is encoded`, async () => {
+      const { client, requested } = recordingClient();
+      await assert.rejects(
+        client.fetch("/api/v1/widgets/{public_id}/config/", {
+          method: "get",
+          params: { path: { public_id: value } }
+        }),
+        new RegExp(`Path parameter "public_id" .* cannot be "${value.replaceAll(".", "\\.")}"`)
+      );
+      assert.deepStrictEqual(requested, []);
+    });
+  }
+
   it("leaves an ordinary identifier as it is", async () => {
     const { client, requested } = recordingClient();
     await client.fetch("/api/v1/widgets/{public_id}/config/", {

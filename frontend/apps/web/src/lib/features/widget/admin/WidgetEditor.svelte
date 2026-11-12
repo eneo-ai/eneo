@@ -219,8 +219,8 @@
 
   const blockers = $derived(current.activation_blockers ?? []);
   // What an active widget exposes besides knowledge, as the backend serves
-  // visitors: the assistant's MCP servers outside Eneo as the API lists them
-  // (the same list the activation dialog asks the admin to acknowledge), and
+  // visitors: the assistant's tools at MCP servers outside Eneo as the API
+  // lists them (what an admin acknowledges; visitors reach no other), and
   // web search only through an external provider (VISITOR_CAPABILITY_PURPOSES
   // in assistant_service.py). Image generation never.
   const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
@@ -252,14 +252,11 @@
       autosave.reload(saved);
       completed(saved);
     }}
-    onActivate={async ({ externalToolsAcknowledged }) => {
-      await autosave.exclusive(() =>
-        eneo.widgets.activate({
-          id: widget.id,
-          external_tools_acknowledged: externalToolsAcknowledged
-        })
-      );
-    }}
+    onActivate={lifecycle(eneo.widgets.activate)}
+    onAcknowledgeExternalTools={(servers) =>
+      autosave.exclusive(() =>
+        eneo.widgets.acknowledgeExternalTools({ widget: { id: widget.id }, servers })
+      )}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {
       const completed = onArchived;
@@ -590,12 +587,10 @@
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
                   {#each visitorServers as server (server.id)}
                     <li>
-                      {server.tools.length > 0
-                        ? m.widget_admin_visitor_access_server_tools({
-                            name: server.name,
-                            tools: server.tools.join(", ")
-                          })
-                        : server.name}
+                      {m.widget_admin_visitor_access_server_tools({
+                        name: server.name,
+                        tools: server.tools.map((tool) => tool.name).join(", ")
+                      })}
                     </li>
                   {/each}
                   {#each visitorCapabilities as capability (capability)}
