@@ -126,21 +126,21 @@ class WidgetAnswer(AsyncIterator[Completion]):
             return
         self._closed = True
         with finalizing("widget answer settlement"):
+            # The audit settles last: a stalled audit queue must not spend
+            # the shared budget that retention and the turn hold need.
             try:
-                if isinstance(self._answer, _AsyncClosable):
-                    await self._answer.aclose()
-            finally:
-                # The audit settles last: a stalled audit queue must not spend
-                # the shared budget that retention and the turn hold need.
                 try:
+                    if isinstance(self._answer, _AsyncClosable):
+                        await self._answer.aclose()
+                finally:
                     await self._finish(completed)
-                except BaseException:
-                    # A failure to finish rolls back the chat write, so an
-                    # audit cut off after it must not take its place.
-                    with contextlib.suppress(BaseException):
-                        await self._settle_audit()
-                    raise
-                await self._settle_audit()
+            except BaseException:
+                # A failure to close or finish rolls back the chat write, so
+                # an audit cut off after it must not take its place.
+                with contextlib.suppress(BaseException):
+                    await self._settle_audit()
+                raise
+            await self._settle_audit()
 
     async def _settle_audit(self) -> None:
         if self._observer is not None:

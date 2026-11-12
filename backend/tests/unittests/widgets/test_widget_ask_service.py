@@ -1028,17 +1028,21 @@ async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
 
 
 async def _left_with_a_stalled_audit_queue(
-    monkeypatch, widget, *, follow_up=False, delete=None
+    monkeypatch, widget, *, follow_up=False, delete=None, close_failure=None
 ):
     """The visitor leaves while two external calls run, and the audit queue
     then hangs past the cleanup budget."""
 
     async def turn():
-        yield _external_event(
-            _external_call(result_status="approved"),
-            _external_call(tool_call_id="call_10", result_status="approved"),
-        )
-        yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+        try:
+            yield _external_event(
+                _external_call(result_status="approved"),
+                _external_call(tool_call_id="call_10", result_status="approved"),
+            )
+            yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+        finally:
+            if close_failure is not None:
+                raise close_failure
 
     async def stalled(**_kwargs):
         await anyio.sleep_forever()
@@ -1104,6 +1108,28 @@ async def test_a_stalled_audit_queue_does_not_hide_a_failed_deletion(monkeypatch
             _widget(privacy=WidgetPrivacy(retention_days=0)),
             delete=failed,
         )
+    assert [
+        record.kwargs["extra"]["tool_call_id"]
+        for record in module.logger.error.call_args_list
+    ] == ["call_9", "call_10"]
+
+
+async def test_a_stalled_audit_queue_does_not_hide_a_failed_close(monkeypatch):
+    deleted: list[bool] = []
+
+    async def delete(*_args):
+        await asyncio.sleep(0.001)
+        deleted.append(True)
+
+    # The pipeline's own cleanup failed, which must reach the caller as well.
+    with pytest.raises(RuntimeError, match="close failed"):
+        await _left_with_a_stalled_audit_queue(
+            monkeypatch,
+            _widget(privacy=WidgetPrivacy(retention_days=0)),
+            delete=delete,
+            close_failure=RuntimeError("close failed"),
+        )
+    assert deleted == [True]
     assert [
         record.kwargs["extra"]["tool_call_id"]
         for record in module.logger.error.call_args_list
