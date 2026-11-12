@@ -1027,7 +1027,9 @@ async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
     assert record.kwargs["extra"]["argument_names"] == ["body", "title"]
 
 
-async def _left_with_a_stalled_audit_queue(monkeypatch, widget, *, follow_up=False):
+async def _left_with_a_stalled_audit_queue(
+    monkeypatch, widget, *, follow_up=False, delete=None
+):
     """The visitor leaves while two external calls run, and the audit queue
     then hangs past the cleanup budget."""
 
@@ -1057,7 +1059,7 @@ async def _left_with_a_stalled_audit_queue(monkeypatch, widget, *, follow_up=Fal
     monkeypatch.setattr(module, "logger", logger)
     service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
     deps.audit.log_async = AsyncMock(side_effect=stalled)
-    deps.usage.delete_session = AsyncMock(side_effect=write("delete"))
+    deps.usage.delete_session = AsyncMock(side_effect=delete or write("delete"))
     deps.limiter.hold_turn = AsyncMock(return_value="owner-1")
     deps.limiter.release_turn = AsyncMock(side_effect=write("release"))
     response = await service.ask(
@@ -1088,6 +1090,24 @@ async def test_a_stalled_audit_queue_does_not_hold_the_conversation(monkeypatch)
     deps.limiter.release_turn.assert_awaited_once_with(
         widget, deps.session.id, "owner-1"
     )
+
+
+async def test_a_stalled_audit_queue_does_not_hide_a_failed_deletion(monkeypatch):
+    async def failed(*_args):
+        await asyncio.sleep(0.001)
+        raise RuntimeError("delete failed")
+
+    # The failure rolls back the chat write, so it must reach the caller.
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await _left_with_a_stalled_audit_queue(
+            monkeypatch,
+            _widget(privacy=WidgetPrivacy(retention_days=0)),
+            delete=failed,
+        )
+    assert [
+        record.kwargs["extra"]["tool_call_id"]
+        for record in module.logger.error.call_args_list
+    ] == ["call_9", "call_10"]
 
 
 async def test_calls_a_stalled_audit_queue_never_recorded_reach_the_log(monkeypatch):

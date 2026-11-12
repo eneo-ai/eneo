@@ -79,7 +79,6 @@ class WidgetExternalToolsAcknowledge(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     servers: list[WidgetAcknowledgedServer] = Field(
-        max_length=100,
         description=(
             "The servers and tools the admin was shown, as `external_tools` on"
             " the widget lists them. Refused with `external_tools_changed`"

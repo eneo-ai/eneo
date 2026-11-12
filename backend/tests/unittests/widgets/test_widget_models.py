@@ -42,6 +42,13 @@ def test_an_update_schema_offers_no_null_the_api_refuses():
     assert WidgetUpdate(revision=1).model_dump(exclude_unset=True) == {"revision": 1}
 
 
+def test_an_acknowledgement_holds_every_server_the_widget_lists():
+    # Nothing caps the servers an assistant reaches, so neither may the body.
+    servers = [{"id": str(uuid4()), "tool_ids": [str(uuid4())]} for _ in range(250)]
+    acknowledged = WidgetExternalToolsAcknowledge.model_validate({"servers": servers})
+    assert len(acknowledged.servers) == 250
+
+
 def test_an_acknowledgement_holds_every_tool_a_server_can_list():
     def body(count: int) -> dict[str, object]:
         return {

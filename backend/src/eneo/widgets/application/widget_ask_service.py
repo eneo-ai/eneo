@@ -3,6 +3,7 @@
 # Licensed under the MIT License.
 
 
+import contextlib
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, AsyncIterator, Optional, Protocol, runtime_checkable
@@ -133,9 +134,17 @@ class WidgetAnswer(AsyncIterator[Completion]):
                 # the shared budget that retention and the turn hold need.
                 try:
                     await self._finish(completed)
-                finally:
-                    if self._observer is not None:
-                        await self._observer.settle()
+                except BaseException:
+                    # A failure to finish rolls back the chat write, so an
+                    # audit cut off after it must not take its place.
+                    with contextlib.suppress(BaseException):
+                        await self._settle_audit()
+                    raise
+                await self._settle_audit()
+
+    async def _settle_audit(self) -> None:
+        if self._observer is not None:
+            await self._observer.settle()
 
 
 # Appended to the assistant's prompt for widget turns only: the answer lands
