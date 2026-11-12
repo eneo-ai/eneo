@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import logging
 import os
@@ -22,7 +23,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType
+from eneo.main.models import ChannelType, Status
 from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
@@ -421,6 +422,7 @@ class Worker:
                 assert job_id is not None
                 user_id = params.user_id if with_user else None
 
+                task_manager: TaskManager | None = None
                 try:
                     async with sessionmanager.session() as session, session.begin():
                         container = await self._create_container(
@@ -441,12 +443,16 @@ class Worker:
                             )
 
                         success = task_manager.successful()
-                except Exception as exc:
+                except (Exception, asyncio.CancelledError) as exc:
                     # Task errors are already turned into a FAILED job inside the
-                    # transaction; what reaches here is the commit itself failing
-                    # (e.g. a before_commit guard such as the storage quota), which
-                    # rolled that status back together with the work.
-                    await self._fail_job_after_commit_error(job_id, user_id, exc)
+                    # transaction; what reaches here is either the commit itself
+                    # failing (e.g. a before_commit guard such as the storage
+                    # quota) or cancellation re-raised from
+                    # set_status_on_exception, both of which rolled that status
+                    # back together with the work.
+                    await self._fail_job_after_commit_error(
+                        job_id, user_id, exc, task_manager=task_manager
+                    )
                     raise
 
                 return success
@@ -462,7 +468,12 @@ class Worker:
         return decorator
 
     async def _fail_job_after_commit_error(
-        self, job_id: UUID, user_id: UUID | None, exc: BaseException
+        self,
+        job_id: UUID,
+        user_id: UUID | None,
+        exc: BaseException,
+        *,
+        task_manager: TaskManager | None = None,
     ) -> None:
         """Record the failure in a fresh session so the job is not left pending
         until the reaper finds it.
@@ -475,6 +486,8 @@ class Worker:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
                 await container.job_service().fail_job(job_id, failure_code=code)
+            if task_manager is not None:
+                await task_manager.publish_status(Status.FAILED)
         except Exception as error:
             log_error(
                 logger,
