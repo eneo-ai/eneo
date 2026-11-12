@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Order of the retention work</title>
+  <desc id="d">First the engine goes into the Flows branch and, on develop, the error code and preview, the first part of the conversation cap; then leftover cleanup, authoring chats and the flow run period, which needs both first items. The step period, the recording and the module's local stores (which also need the module's MFA work) follow in order; merging Flows into develop needs leftover cleanup, authoring chats and the module's local stores, and through them the recording, plus the entrance check and flows that follow the space from the MFA epic; the final test needs the merge and the provider check. Space caps for assistants and apps with the organisation's page, and attachment names out of app audit rows, land on develop at any time.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+
+  <!-- first -->
+  <text class="h" x="24" y="36">First</text>
+  <rect class="box" x="24" y="48" width="164" height="72" rx="8"/><text class="h" x="106" y="78" text-anchor="middle">Engine</text><text class="s" x="106" y="99" text-anchor="middle">into the Flows branch</text>
+  <rect class="box" x="208" y="48" width="168" height="72" rx="8"/><text class="h" x="292" y="70" text-anchor="middle">Error code</text><text class="s" x="292" y="90" text-anchor="middle">and preview; first part</text><text class="s" x="292" y="109" text-anchor="middle">of the conversation cap</text>
+  <text class="m" x="376" y="36" text-anchor="end">on develop</text>
+
+  <!-- then side by side -->
+  <path class="line" d="M106,120 V140 M76,140 H300"/><circle class="dot" cx="106" cy="140" r="3.5"/>
+  <path class="edge" d="M76,140 V158 M200,140 V158 M300,140 V158"/>
+  <path class="edge" d="M348,120 V158"/>
+  <rect class="box" x="24" y="160" width="104" height="60" rx="8"/><text class="h" x="76" y="185" text-anchor="middle">Leftover</text><text class="h" x="76" y="205" text-anchor="middle">cleanup</text>
+  <rect class="box" x="148" y="160" width="104" height="60" rx="8"/><text class="h" x="200" y="185" text-anchor="middle">Authoring</text><text class="h" x="200" y="205" text-anchor="middle">chats</text>
+  <rect class="box" x="272" y="160" width="104" height="60" rx="8"/><text class="h" x="324" y="185" text-anchor="middle">Flow run</text><text class="h" x="324" y="205" text-anchor="middle">period</text>
+
+  <!-- beside the chain -->
+  <text class="m" x="24" y="276">Beside the chain, on develop, any time</text>
+  <rect class="box" x="24" y="288" width="168" height="88" rx="8"/><text class="h" x="108" y="314" text-anchor="middle">Space caps</text><text class="s" x="108" y="335" text-anchor="middle">assistants and apps;</text><text class="s" x="108" y="354" text-anchor="middle">organisation's page</text>
+  <rect class="box" x="208" y="288" width="168" height="88" rx="8"/><text class="h" x="292" y="314" text-anchor="middle">Attachment names</text><text class="s" x="292" y="335" text-anchor="middle">out of app</text><text class="s" x="292" y="354" text-anchor="middle">audit rows</text>
+
+  <!-- into the chain -->
+  <path class="edge" d="M376,190 H392 V72 H426"/>
+  <path class="line" d="M76,220 V242 H200"/><path class="line" d="M200,220 V242"/><circle class="dot" cx="200" cy="242" r="3.5"/>
+  <path class="edge" d="M200,242 H408 V282 H426"/>
+
+  <!-- then in order -->
+  <text class="h" x="428" y="36">Then in order</text>
+  <rect class="box" x="428" y="48" width="192" height="48" rx="8"/><text class="h" x="524" y="78" text-anchor="middle">Step period</text>
+  <path class="edge" d="M524,96 V116"/>
+  <rect class="box" x="428" y="118" width="192" height="48" rx="8"/><text class="h" x="524" y="148" text-anchor="middle">Recording</text>
+  <path class="edge" d="M524,166 V186"/>
+  <rect class="box" x="428" y="188" width="192" height="48" rx="8"/><text class="h" x="524" y="208" text-anchor="middle">Module's local stores</text><text class="s" x="524" y="227" text-anchor="middle">and the module's MFA work</text>
+  <path class="edge" d="M524,236 V256"/>
+  <rect class="box" x="428" y="258" width="192" height="48" rx="8"/><text class="h" x="524" y="278" text-anchor="middle">Merge Flows</text><text class="s" x="524" y="297" text-anchor="middle">into develop</text>
+  <path class="edge" d="M524,306 V326"/>
+  <rect class="key" x="428" y="328" width="192" height="48" rx="8"/><text class="h" x="524" y="358" text-anchor="middle">Final test</text>
+
+  <!-- needed from outside this work -->
+  <rect class="box" x="660" y="210" width="176" height="96" rx="8"/><text class="h" x="748" y="236" text-anchor="middle">MFA epic</text><text class="s" x="748" y="257" text-anchor="middle">entrance check;</text><text class="s" x="748" y="276" text-anchor="middle">flows that follow</text><text class="s" x="748" y="295" text-anchor="middle">the space</text>
+  <path class="edge" d="M660,282 H622"/>
+  <rect class="box" x="660" y="328" width="176" height="48" rx="8"/><text class="h" x="748" y="358" text-anchor="middle">Provider check</text>
+  <path class="edge" d="M660,352 H622"/>
+</svg>

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Retention period by level</title>
+  <desc id="d">A retention period is chosen per level (organisation, space, assistant, app or flow, step, recording) or not at all, and a level without one inherits the one above; the space's period, chosen there or inherited from the organisation, is the cap, so a level below may shorten it but never extend it. In the example the organisation has no period, the space has 7 days, the flow has none and so gets 7 days, the transcription step has 24 hours and the recording 0 hours, removed when the run ends; with no retention period on any level nothing is removed.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+
+  <text class="s" x="24" y="44">A retention period is chosen per level or not at all; a level without one inherits the one above.</text>
+  <text class="m" x="24" y="74">Level</text><text class="m" x="340" y="74">Example</text>
+
+  <rect class="box" x="24" y="86" width="292" height="42" rx="8"/><text class="h" x="40" y="113">Organisation</text><text class="s" x="300" y="113" text-anchor="end">days</text>
+  <rect class="key" x="24" y="138" width="292" height="42" rx="8"/><text class="h" x="40" y="165">Space</text><text class="s" x="300" y="165" text-anchor="end">days</text>
+  <rect class="box" x="24" y="190" width="292" height="42" rx="8"/><text class="h" x="40" y="217">Assistant, app or flow</text><text class="s" x="300" y="217" text-anchor="end">days</text>
+  <rect class="box" x="24" y="242" width="292" height="42" rx="8"/><text class="h" x="40" y="269">Step</text><text class="s" x="300" y="269" text-anchor="end">hours</text>
+  <rect class="box" x="24" y="294" width="292" height="42" rx="8"/><text class="h" x="40" y="321">Recording</text><text class="s" x="300" y="321" text-anchor="end">hours</text>
+
+  <rect class="box" x="340" y="86" width="300" height="42" rx="8"/><text class="m" x="356" y="112">no retention period</text>
+  <rect class="box" x="340" y="138" width="300" height="42" rx="8"/><text class="h" x="356" y="165">7 days</text><text class="s" x="624" y="165" text-anchor="end">the cap</text>
+  <rect class="box" x="340" y="190" width="300" height="42" rx="8"/><text class="t" x="356" y="216">flow: no period, so 7 days</text>
+  <rect class="box" x="340" y="242" width="300" height="42" rx="8"/><text class="t" x="356" y="268">transcription step: 24 hours</text>
+  <rect class="box" x="340" y="294" width="300" height="42" rx="8"/><text class="t" x="356" y="320">0 hours: removed when the run ends</text>
+
+  <!-- the cap -->
+  <path class="line" d="M656,190 H664 V336 H656"/>
+  <text class="h" x="680" y="244">Below the cap</text><text class="s" x="680" y="266">may shorten,</text><text class="s" x="680" y="285">never extend</text>
+
+  <path class="lane" d="M24,350 H836"/>
+  <text class="s" x="430" y="376" text-anchor="middle">No retention period on any level means nothing is removed.</text>
+</svg>

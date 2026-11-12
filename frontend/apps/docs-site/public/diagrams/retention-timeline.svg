@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="342" viewBox="0 0 860 342" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">One meeting from day 0 to day 7</title>
+  <desc id="d">With a space period of 7 days, a transcription step period of 24 hours and a recording period of 0 hours, the recording is removed when the run ends, the transcript and every copy of it after 24 hours, and the summary, the run and its output files after 7 days; a run under a hold keeps everything.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="341" rx="12"/>
+  <g transform="translate(0,-24)">
+
+  <!-- one meeting, the example from the levels figure: space 7 days, step 24 hours, recording 0 hours -->
+  <text class="h" x="24" y="86">Recording</text>
+  <path class="line" d="M240,64 V96"/>
+  <rect class="gone" x="246" y="64" width="566" height="32" rx="8"/><text class="m" x="262" y="86">removed when the run ends</text>
+
+  <text class="h" x="24" y="150">Transcript</text><text class="s" x="24" y="170">and every copy</text>
+  <rect class="box" x="240" y="140" width="76" height="32" rx="8"/><text class="s" x="278" y="161" text-anchor="middle">kept</text>
+  <rect class="gone" x="322" y="140" width="490" height="32" rx="8"/><text class="m" x="338" y="161">removed after 24 hours</text>
+
+  <text class="h" x="24" y="226">Summary</text><text class="s" x="24" y="246">run and output files</text>
+  <rect class="box" x="240" y="216" width="532" height="32" rx="8"/><text class="s" x="256" y="237">kept, then removed after 7 days</text>
+  <rect class="gone" x="778" y="216" width="34" height="32" rx="8"/>
+
+  <!-- axis, in scale -->
+  <path class="line" d="M240,280 H812"/>
+  <path class="line" d="M240,274 V286 M316,274 V286 M392,274 V286 M468,274 V286 M544,274 V286 M620,274 V286 M696,274 V286 M772,274 V286"/>
+  <text class="m" x="216" y="306" text-anchor="end">day</text>
+  <text class="s" x="240" y="306" text-anchor="middle">0</text><text class="s" x="316" y="306" text-anchor="middle">1</text><text class="s" x="392" y="306" text-anchor="middle">2</text><text class="s" x="468" y="306" text-anchor="middle">3</text><text class="s" x="544" y="306" text-anchor="middle">4</text><text class="s" x="620" y="306" text-anchor="middle">5</text><text class="s" x="696" y="306" text-anchor="middle">6</text><text class="s" x="772" y="306" text-anchor="middle">7</text>
+
+  <text class="s" x="24" y="342">A run under a hold keeps everything.</text>
+  </g>
+</svg>
