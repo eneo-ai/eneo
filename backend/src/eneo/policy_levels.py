@@ -2,7 +2,8 @@
 
 Pure and shared by every domain that lets an organisation, a space or an
 Assistant choose a policy. A domain supplies what "stricter" means for its
-values and which levels bound the levels inside them; authorization to write,
+values and which levels bound the levels inside them. A bounding level caps
+with the value that applies there, also one it inherits. Authorization to write,
 confirmation, persistence and SQL stay with the domain. Retention passes
 "fewer days" with no bounding level, so the nearest choice wins. A
 requirement passes "required" with every level bounding, which makes the
@@ -40,8 +41,9 @@ class Resolved(Generic[T]):
     # None: nothing is chosen anywhere in the chain.
     value: T | None
     origin: PolicyLevel | None
-    # The strictest value chosen on a bounding level, and the outermost level
-    # that chose it: the level an inner choice cannot loosen.
+    # The strictest value that applies on a bounding level, chosen there or
+    # inherited, and the outermost level that chose it: the level an inner
+    # choice cannot loosen.
     bound: T | None
     bound_origin: PolicyLevel | None
 
@@ -54,9 +56,10 @@ def resolve(
 ) -> Resolved[T]:
     """Resolve a chain ordered from the outermost level to the innermost.
 
-    The nearest chosen value is inherited. A value chosen on a bounding level
-    is a bound that no inner value loosens, so the result is the stricter of
-    the nearest value and the bound. On a tie the nearest level is the origin.
+    The nearest chosen value is inherited. The value that applies on a
+    bounding level, chosen there or inherited from outside it, is a bound that
+    no inner value loosens, so the result is the stricter of the nearest value
+    and the bound. On a tie the nearest level is the origin.
     """
     levels = [setting.level for setting in chain]
     if len(set(levels)) != len(levels):
@@ -65,11 +68,14 @@ def resolve(
     nearest: tuple[PolicyLevel, T] | None = None
     bound: tuple[PolicyLevel, T] | None = None
     for setting in chain:
-        if setting.value is None:
-            continue
-        nearest = (setting.level, setting.value)
-        if setting.level in bounding and (
-            bound is None or stricter(setting.value, bound[1])
+        if setting.value is not None:
+            nearest = (setting.level, setting.value)
+        # A bounding level caps with the value that applies there, chosen or
+        # inherited; only a strictly stricter one replaces an outer bound.
+        if (
+            setting.level in bounding
+            and nearest is not None
+            and (bound is None or stricter(nearest[1], bound[1]))
         ):
             bound = nearest
 

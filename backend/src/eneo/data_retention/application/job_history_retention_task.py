@@ -23,6 +23,7 @@ class JobHistoryRetentionTask:
     count_keys = frozenset({"job_runs_deleted"})
     observation_keys = frozenset({"job_runs_examined"})
     blocked_keys: frozenset[str] = frozenset()
+    not_due_keys: frozenset[str] = frozenset()
 
     def __init__(self, session: AsyncSession, *, now: datetime | None = None) -> None:
         self.repository = RetentionJobRunRepository(session)

@@ -2,10 +2,15 @@
 
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass, field
+from typing import Literal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.data_retention.application.retention_runner import RetentionTask
+from eneo.data_retention.application.retention_runner import (
+    RetentionTask,
+    due_probe,
+    overdue_reporter,
+)
 from eneo.data_retention.domain.retention import RetentionBudget
 from eneo.data_retention.domain.rules import RuleExemption, RuleTask
 
@@ -21,6 +26,9 @@ class RetentionTaskRegistration:
     )
     """A blocked reason, without its step, mapped to the deployment settings
     whose limits can keep a root for that reason."""
+    every: Literal["daily", "frequent"] = "daily"
+    """When the task runs. Every task runs in the nightly run; a frequent task
+    also runs every five minutes, but only when its due probe finds work."""
 
 
 def retention_registration_violations(
@@ -87,3 +95,28 @@ def retention_registration_violations(
             if switch not in settings
         ),
     ]
+
+
+def retention_cadence_violations(
+    registrations: Iterable[RetentionTaskRegistration], session: AsyncSession
+) -> list[str]:
+    """Every frequent registration whose task cannot run frequently: without a
+    due probe the five-minute run would claim it on every tick, and health
+    asks the probe of a frequent task, so it reports no overdue work.
+
+    Builds each frequent task with `session` and runs nothing."""
+    violations: list[str] = []
+    for registration in registrations:
+        if registration.every != "frequent":
+            continue
+        task = registration.build(session)
+        if due_probe(task) is None:
+            violations.append(
+                f"Task {registration.name} runs frequently without a due probe."
+            )
+        if overdue_reporter(task) is not None:
+            violations.append(
+                f"Task {registration.name} runs frequently and reports overdue "
+                "work; health asks its due probe instead."
+            )
+    return violations

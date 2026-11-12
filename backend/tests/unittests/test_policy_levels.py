@@ -108,6 +108,38 @@ def test_on_a_tie_the_nearest_level_is_the_origin_and_the_outermost_bound_binds(
 
 
 @pytest.mark.parametrize(
+    "org,space,own,expected",
+    [
+        pytest.param(30, None, 90, Resolved(30, ORG, 30, ORG), id="inherited cap"),
+        pytest.param(30, 7, 90, Resolved(7, SPACE, 7, SPACE), id="chosen cap"),
+        pytest.param(30, None, 7, Resolved(7, OWN, 30, ORG), id="inner tightens"),
+        pytest.param(30, None, 30, Resolved(30, OWN, 30, ORG), id="tie"),
+        pytest.param(None, None, 90, Resolved(90, OWN, None, None), id="no cap"),
+        pytest.param(None, None, None, Resolved(None, None, None, None), id="none"),
+    ],
+)
+def test_a_bounding_level_caps_with_the_value_it_inherits(
+    org: int | None, space: int | None, own: int | None, expected: Resolved[int]
+):
+    """Mutants: only a value chosen on the bounding level caps, so a space
+    that inherits its organisation's period lets an inner level lengthen it;
+    the bound names the bounding level instead of the level that chose the
+    value."""
+    assert (
+        resolve(
+            [
+                LevelSetting(ORG, org),
+                LevelSetting(SPACE, space),
+                LevelSetting(OWN, own),
+            ],
+            stricter=fewer_days,
+            bounding=frozenset({SPACE}),
+        )
+        == expected
+    )
+
+
+@pytest.mark.parametrize(
     "org,space,expected",
     [
         (None, None, Resolved(None, None, None, None)),

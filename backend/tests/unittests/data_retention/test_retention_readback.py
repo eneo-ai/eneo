@@ -30,6 +30,10 @@ PARTIAL = RetentionJobOutcome.PARTIAL
 HISTORY = "conversations.history"
 SESSIONS = "sessions.empty"
 STEPS = {HISTORY: ("questions", "app_runs"), SESSIONS: ("sessions",)}
+NOT_DUE = {
+    HISTORY: frozenset({"no_longer_due"}),
+    SESSIONS: frozenset({"no_longer_due"}),
+}
 
 FINISHED = RetentionStepPass(started_at=None, ended_at=None, finished=True)
 NOT_REACHED = None
@@ -67,6 +71,7 @@ def run(
         error_code=error_code,
         disposed={f"{STEPS[task][0]}.deleted": disposed} if disposed else {},
         steps=passes if outcome is not None else {},
+        not_due=NOT_DUE[task],
     )
 
 
@@ -250,12 +255,22 @@ def test_blocked_work_fails(blocked: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "not_due", ["questions.no_longer_due", "files.files_not_old_enough"]
+    "task,not_due",
+    [(HISTORY, "questions.no_longer_due"), (SESSIONS, "sessions.no_longer_due")],
 )
-def test_work_that_is_not_due_does_not_fail(not_due: str) -> None:
+def test_work_that_is_not_due_does_not_fail(task: str, not_due: str) -> None:
+    readback = RetentionReadback([task])
+
+    assert readback.add_round([run(task, blocked={not_due: 3})]) is True
+
+
+def test_a_reason_another_task_declares_as_not_due_still_fails() -> None:
+    """Mutant: the readback accepts a not-due reason by name across tasks, so
+    one task's declaration excuses another task's blocked work."""
     readback = RetentionReadback([HISTORY])
 
-    assert readback.add_round([run(blocked={not_due: 3})]) is True
+    with pytest.raises(RetentionReadbackFailed, match="files_not_old_enough"):
+        readback.add_round([run(blocked={"questions.files_not_old_enough": 1})])
 
 
 def test_every_failure_of_a_round_is_named() -> None:
@@ -267,3 +282,26 @@ def test_every_failure_of_a_round_is_named() -> None:
         HISTORY,
         SESSIONS,
     ]
+
+
+def test_each_task_keeps_its_own_not_due_reasons() -> None:
+    """Which blocked reasons of each registered task the readback accepts as
+    work that is not due. Pinned per task, so moving the declaration does not
+    change the readback's verdict.
+
+    Mutant: a task accepts a reason it never reports as not due, or loses one."""
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.main.config import get_settings
+    from eneo.main.retention_tasks import retention_task_registrations
+
+    assert {
+        registration.name: registration.build(AsyncSession()).not_due_keys
+        for registration in retention_task_registrations(get_settings())
+    } == {
+        "conversations.history": {"no_longer_due"},
+        "conversations.derived_copies": {"no_longer_due"},
+        "sessions.empty": {"no_longer_due"},
+        "files.unused": {"files_not_old_enough"},
+        "retention.jobs": set(),
+    }

@@ -39,6 +39,7 @@ class UnusedFileRetentionTask:
     blocked_keys = frozenset(
         reason.key for reason in FileRetentionReason if reason.is_refusal
     )
+    not_due_keys = frozenset({FileRetentionReason.NOT_OLD_ENOUGH.key})
 
     def __init__(
         self,

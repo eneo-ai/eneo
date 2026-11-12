@@ -1,6 +1,6 @@
 ---
 title: Gallring
-translationSource: guides/data-retention.mdx@073e868a371a
+translationSource: guides/data-retention.mdx@36510ed6d3d3
 ---
 
 # Gallring
@@ -226,10 +226,13 @@ workerns logg.
 
 `GET /api/healthz` rapporterar varje gallringsuppgift som `healthy`,
 `degraded`, `unknown`, `initializing` eller `disabled`. En uppgift är
-`degraded` när dess senaste körning misslyckades, när ingen körning blivit klar
-på två dygn, eller när den senaste körningen hittade innehåll som varit
-aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`).
-`limiting_settings` anger den inställning vars gräns höll kvar aktuellt
+`degraded` när dess senaste avslutade körning misslyckades, när ingen körning
+blivit klar på två dygn, eller när den senaste körningen hittade innehåll som
+varit aktuellt i mer än ett dygn (`RETENTION_OVERDUE_WINDOW_DAYS`). En
+misslyckad körning håller uppgiften `degraded` tills en ny körning är avslutad.
+En uppgift som inte är `degraded` visar `unknown` med `overdue_not_measured` när dess senaste avslutade
+körning inte kunde mäta vad som är försenat, tills en senare körning har mätt
+det. `limiting_settings` anger den inställning vars gräns höll kvar aktuellt
 innehåll. Problem med gallringen gör aldrig ett i övrigt redo API
 otillgängligt. Se [Health](/docs/audit-logging#health) och
 [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits)
