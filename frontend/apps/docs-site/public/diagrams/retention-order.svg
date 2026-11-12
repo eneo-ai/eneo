@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="398" viewBox="0 0 860 398" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">The order of the retention work</title>
-  <desc id="d">On develop the error code and preview answer come before the space caps, and attachment names can land at any time; on the Flows branch the engine comes first, then leftover cleanup, authoring chats and the flow run period, which also needs the error code, followed by the step period and the recording, and then, in the speech-to-text module, its local stores together with its MFA work. The normal route then merges Flows into develop once the whole Flows lane and, from the MFA epic, the entrance check and flows that follow the space are done, and the final test follows with the provider check, or can instead run on a named version of the Flows branch that holds the same prerequisites.</desc>
+  <desc id="d">On develop the error code and preview answer come before the space caps, and attachment names can land at any time; on the Flows branch the engine comes first, then leftover cleanup, authoring chats and the flow run period, which also needs the error code, followed by the step period and the recording, and then, in the speech-to-text module, its local stores together with its MFA work. The normal route then merges Flows into develop once the whole Flows lane and, from the MFA epic, the entrance check and flows that follow the space are done, and the final test follows with the provider check, on a version that also holds the two develop tasks, or can instead run on a named version of the Flows branch that holds the same prerequisites.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -81,7 +81,7 @@
   <path class="edge" d="M640,200 H664"/><circle class="dot" cx="640" cy="200" r="3.5"/>
   <rect class="box" x="664" y="170" width="172" height="60" rx="8"/><text class="h" x="750" y="195" text-anchor="middle">Merge Flows</text><text class="s" x="750" y="216" text-anchor="middle">into develop</text>
   <path class="edge" d="M750,230 V254"/>
-  <rect class="key" x="664" y="254" width="172" height="48" rx="8"/><text class="h" x="750" y="284" text-anchor="middle">Final test</text>
+  <rect class="key" x="664" y="254" width="172" height="48" rx="8"/><text class="h" x="750" y="274" text-anchor="middle">Final test</text><text class="s" x="750" y="293" text-anchor="middle">with both lanes done</text>
   <path class="edge" d="M750,326 V302"/>
   <rect class="box" x="664" y="326" width="172" height="48" rx="8"/><text class="h" x="750" y="356" text-anchor="middle">Provider check</text>
 </svg>
