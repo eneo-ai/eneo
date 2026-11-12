@@ -75,6 +75,7 @@ class _FakeTask:
     count_keys = frozenset({"deleted"})
     observation_keys = frozenset({"examined"})
     blocked_keys: frozenset[str] = frozenset()
+    not_due_keys: frozenset[str] = frozenset()
     name = _TASK
 
     def __init__(
@@ -692,7 +693,17 @@ async def _no_overdue() -> RetentionOverdue:
         ),
         # A crashed worker: its running row stopped renewing hours ago.
         (0.5, _RUNNING, None, None, True, False, "unknown", {"abandoned"}, False),
-        (0, _OK, None, None, True, True, "unknown", {"no_overdue_snapshot"}, False),
+        (
+            0,
+            _OK,
+            None,
+            None,
+            True,
+            True,
+            "unknown",
+            {"no_overdue_snapshot", "overdue_not_measured"},
+            False,
+        ),
         (3, _OK, None, (0, 0, True), True, True, "degraded", {"stale"}, False),
         (0, _OK, None, (0, 7, False), True, True, "degraded", {"overdue"}, False),
         (
@@ -845,6 +856,7 @@ async def test_retention_health_reports_observation_gaps(
             "overdue_snapshot_stale",
             "abandoned",
             "failed",
+            "overdue_not_measured",
         )
         if getattr(task, flag)
     } == flags
@@ -1139,3 +1151,190 @@ async def test_the_execution_ends_with_one_audit_event_in_its_finish(
         "actor": {"type": "system", "via": "data_retention_run"},
     }
     assert event.description == ("Retention tests.fake finished: partial; deleted 2")
+
+
+async def _measured_health() -> tuple[RetentionHealthStatus, bool]:
+    """The fake overdue task's health status and overdue_not_measured flag."""
+    registration = RetentionTaskRegistration(
+        name=_TASK,
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=10),
+        build=lambda session: _OverdueTask(session, _no_overdue),
+    )
+    async with _committed() as session:
+        health = await load_retention_health(
+            RetentionJobRunRepository(session),
+            (registration,),
+            now=datetime.now(timezone.utc),
+            lease_stale_after=timedelta(hours=1),
+        )
+    [task] = health.tasks
+    return task.status, task.overdue_not_measured
+
+
+async def _run_overdue_task(
+    snapshot: Callable[[], Awaitable[RetentionOverdue]],
+    *steps: RetentionStep,
+) -> RetentionRunReport:
+    async with sessionmanager.session() as session:
+        return await _runner(session, chunk_rows=1).run(
+            _OverdueTask(session, snapshot, extra_steps=steps)
+        )
+
+
+async def _snapshot_raises() -> RetentionOverdue:
+    raise RuntimeError("the overdue read failed")
+
+
+async def _running_row(*, at: datetime) -> None:
+    """Another execution that claimed the task and renews its lease."""
+    async with _committed() as session:
+        session.add(
+            RetentionJobRuns(
+                task=_TASK, outcome=_RUNNING.value, started_at=at, heartbeat_at=at
+            )
+        )
+
+
+def _timed_out_step(session_of: Callable[[], AsyncSession]) -> RetentionStep:
+    async def time_out(batch: RetentionBatch) -> RetentionStepResult:
+        session = session_of()
+        await session.execute(sa.text("SET LOCAL statement_timeout = 1"))
+        await session.execute(sa.text("SELECT pg_sleep(0.2)"))
+        return RetentionStepResult(exhausted=True)
+
+    return RetentionStep(name="slow", run=time_out)
+
+
+async def test_a_run_whose_overdue_read_failed_is_not_healthy(test_tenant) -> None:
+    """The run succeeds and writes no snapshot, so the older complete one of
+    nothing overdue would still read healthy.
+
+    Mutant: health reads the newest snapshot whatever the latest completed
+    run measured."""
+    await _run_overdue_task(_no_overdue)
+    assert await _measured_health() == (RetentionHealthStatus.HEALTHY, False)
+
+    report = await _run_overdue_task(_snapshot_raises)
+
+    assert (report.outcome, report.error_code) == (_OK, None)
+    assert await _measured_health() == (RetentionHealthStatus.UNKNOWN, True)
+
+
+@pytest.mark.parametrize("measured", [True, False], ids=["measured", "not-measured"])
+async def test_a_timed_out_chunk_reads_healthy_only_when_the_read_measured(
+    test_tenant, measured: bool
+) -> None:
+    """A chunk timeout alone leaves a fresh snapshot. When the overdue read
+    after it times out too, the run ends partial without one.
+
+    Mutant: a partial run without a snapshot reads healthy from the older
+    one."""
+    await _run_overdue_task(_no_overdue)
+
+    async with sessionmanager.session() as session:
+
+        async def read_times_out() -> RetentionOverdue:
+            await session.execute(sa.text("SET LOCAL statement_timeout = 1"))
+            await session.execute(sa.text("SELECT pg_sleep(0.2)"))
+            raise AssertionError("The statement timeout did not stop the read.")
+
+        report = await _runner(session, chunk_rows=1).run(
+            _OverdueTask(
+                session,
+                _no_overdue if measured else read_times_out,
+                extra_steps=(_timed_out_step(lambda: session),),
+            )
+        )
+
+    assert (report.outcome, report.error_code) == (
+        RetentionJobOutcome.PARTIAL,
+        RetentionErrorCode.CHUNK_TIMEOUT,
+    )
+    assert await _measured_health() == (
+        (RetentionHealthStatus.HEALTHY, False)
+        if measured
+        else (RetentionHealthStatus.UNKNOWN, True)
+    )
+
+
+async def test_a_rerun_in_progress_keeps_the_last_completed_runs_health(
+    test_tenant,
+) -> None:
+    """A running execution with a fresh lease after a measured run reads
+    healthy; after a run that did not measure it stays unknown until a new
+    completed run has measured.
+
+    Mutant: health reads the newest row, so a claim after an unmeasured run
+    brings back healthy from the older snapshot."""
+    await _run_overdue_task(_no_overdue)
+    await _running_row(at=datetime.now(timezone.utc))
+    assert await _measured_health() == (RetentionHealthStatus.HEALTHY, False)
+    async with _committed() as session:
+        await session.execute(
+            sa.delete(RetentionJobRuns).where(
+                RetentionJobRuns.task == _TASK, RetentionJobRuns.outcome == _RUNNING
+            )
+        )
+
+    await _run_overdue_task(_snapshot_raises)
+    await _running_row(at=datetime.now(timezone.utc))
+    assert await _measured_health() == (RetentionHealthStatus.UNKNOWN, True)
+
+    async with _committed() as session:
+        await session.execute(
+            sa.delete(RetentionJobRuns).where(
+                RetentionJobRuns.task == _TASK, RetentionJobRuns.outcome == _RUNNING
+            )
+        )
+    await _run_overdue_task(_no_overdue)
+    assert await _measured_health() == (RetentionHealthStatus.HEALTHY, False)
+
+
+async def test_a_rerun_in_progress_after_a_failed_run_stays_degraded(
+    test_tenant,
+) -> None:
+    """Mutant: `failed` is read from the newest row, so a claim after a failed
+    run reads healthy before the rerun has ended."""
+
+    async def fail(batch: RetentionBatch) -> RetentionStepResult:
+        raise RuntimeError("a chunk failed")
+
+    report = await _run_overdue_task(_no_overdue, RetentionStep(name="boom", run=fail))
+    assert report.outcome is RetentionJobOutcome.FAILED
+    await _running_row(at=datetime.now(timezone.utc))
+
+    async with _committed() as session:
+        health = await load_retention_health(
+            RetentionJobRunRepository(session),
+            (
+                RetentionTaskRegistration(
+                    name=_TASK,
+                    enabled=True,
+                    budget=RetentionBudget(rows=10, files=10, seconds=10),
+                    build=lambda session: _OverdueTask(session, _no_overdue),
+                ),
+            ),
+            now=datetime.now(timezone.utc),
+            lease_stale_after=timedelta(hours=1),
+        )
+    [task] = health.tasks
+    assert (task.status, task.failed) == (RetentionHealthStatus.DEGRADED, True)
+
+
+async def test_a_not_due_reason_must_be_a_blocked_reason(test_tenant) -> None:
+    """Mutant: a task declares a not-due reason it can never report as blocked,
+    so the readback's exception has nothing behind it."""
+
+    class _Undeclared(_FakeTask):
+        not_due_keys = frozenset({"no_longer_due"})
+
+    async with sessionmanager.session() as session:
+        with pytest.raises(runner_module.RetentionContractError):
+            await _runner(session).run(_Undeclared(session))
+    async with _committed() as session:
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count()).where(RetentionJobRuns.task == _TASK)
+            )
+        ) == 0

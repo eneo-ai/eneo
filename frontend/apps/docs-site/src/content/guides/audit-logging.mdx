@@ -75,6 +75,8 @@ Four security events record which account a provider identity reaches (see [Acco
 | `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the account's `id`), `changes.rebinding_allowed_until` with `old` and `new` |
 | `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the window's `id`), and in `extra`: `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
 
+`user_access_token_issued` (Access Token Issued by Operator) is always logged too. It is written when the operator takes a token to act as a user with the super API key (`POST /api/v1/sysadmin/users/{user_id}/access-token/`), in the same transaction and before the token is issued: if the row cannot be stored, no token is issued. Its metadata names the `actor` (`type` `sysadmin`, `via` `eneo_super_api_key`) and the `target` user (`id`, `email`, `username`).
+
 `identity_bound` is written in the sign-in's own transaction, so it exists only for a sign-in that completed. `identity_conflict` is queued and written by the worker, so it survives the refused sign-in; if the queue cannot be reached, the backend log warning `identity_conflict` remains. Neither of the two carries the email or a token.
 
 ## Viewing audit logs

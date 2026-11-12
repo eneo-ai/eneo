@@ -135,6 +135,11 @@ def _transaction_store(container: Container) -> Redis | None:
         return None
 
 
+UNUSABLE_PROVIDER_DETAIL = (
+    "Sign-in is not available for this organisation. Contact your administrator."
+)
+
+
 async def _load_profile(
     federation_config: Mapping[str, object], settings: Settings, correlation_id: str
 ) -> OidcProfile:
@@ -145,13 +150,15 @@ async def _load_profile(
             discovery_ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
         )
     except OidcProviderError as exc:
+        # The reason names hosts and settings: for the log and the operator,
+        # never for a visitor who is not signed in.
         logger.error(
             "OIDC provider configuration is unusable",
             extra={"reason": str(exc), "correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail=UNUSABLE_PROVIDER_DETAIL,
             headers={"X-Correlation-ID": correlation_id},
         ) from exc
 

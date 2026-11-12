@@ -2,19 +2,39 @@
 
 import asyncio
 import contextlib
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Callable, Sequence
+from typing import Literal
 
 import pytest
 from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
+from eneo.data_retention.application.derived_copy_retention_task import (
+    DERIVED_COPIES_TASK,
+)
+from eneo.data_retention.application.empty_session_retention_task import (
+    EMPTY_SESSIONS_TASK,
+)
+from eneo.data_retention.application.job_history_retention_task import (
+    JOB_HISTORY_TASK,
+)
 from eneo.data_retention.application.retention_health import (
     RetentionHealth,
     RetentionHealthStatus,
 )
 from eneo.data_retention.application.retention_registration import (
+    RetentionTaskRegistration,
+    retention_cadence_violations,
     retention_registration_violations,
 )
+from eneo.data_retention.application.retention_runner import (
+    RetentionStep,
+    RetentionTask,
+)
+from eneo.data_retention.domain.retention import RetentionBudget, RetentionOverdue
 from eneo.data_retention.domain.rules import (
     RETENTION_RULES,
     RetentionRule,
@@ -22,12 +42,15 @@ from eneo.data_retention.domain.rules import (
 )
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
+from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
     FOLLOWS_A_REMOVAL,
+    FREQUENT_RUN_SECONDS,
     OUTSIDE_THE_ENGINE,
     RetentionHealthCache,
+    _paced,
     _read_retention_health,
     retention_task_registrations,
 )
@@ -345,3 +368,130 @@ async def test_health_reports_a_refused_connection_as_unknown_once_per_window(
 
     assert first.status is second.status is RetentionHealthStatus.UNKNOWN
     assert refused.attempts == 1
+
+
+class _Task:
+    name = "tests.cadence"
+    count_keys = frozenset({"deleted"})
+    observation_keys: frozenset[str] = frozenset()
+    blocked_keys: frozenset[str] = frozenset()
+    not_due_keys: frozenset[str] = frozenset()
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    def steps(self) -> Sequence[RetentionStep]:
+        return ()
+
+
+class _Probed(_Task):
+    async def has_due(self) -> bool:
+        return True
+
+
+class _ProbedAndOverdue(_Probed):
+    async def overdue(self) -> RetentionOverdue:
+        return RetentionOverdue(count=0, complete=True)
+
+
+def _registration(
+    build: Callable[[AsyncSession], RetentionTask],
+    *,
+    every: Literal["daily", "frequent"],
+    seconds: float = 1800,
+) -> RetentionTaskRegistration:
+    return RetentionTaskRegistration(
+        name="tests.cadence",
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=seconds),
+        build=build,
+        every=every,
+    )
+
+
+_CORE_TASKS = (
+    CONVERSATION_HISTORY_TASK,
+    DERIVED_COPIES_TASK,
+    EMPTY_SESSIONS_TASK,
+    UNUSED_FILES_TASK,
+    JOB_HISTORY_TASK,
+)
+
+
+def test_a_registration_runs_daily_unless_it_says_otherwise():
+    """Mutants: the default cadence is frequent; one of the five core tasks
+    runs frequently. Tasks added later may run frequently."""
+    unsaid = RetentionTaskRegistration(
+        name="tests.cadence",
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=60),
+        build=_Probed,
+    )
+    cadences = {
+        registration.name: registration.every
+        for registration in retention_task_registrations(get_settings())
+    }
+
+    assert unsaid.every == "daily"
+    assert {name: cadences[name] for name in _CORE_TASKS} == dict.fromkeys(
+        _CORE_TASKS, "daily"
+    )
+
+
+def test_a_frequent_task_needs_a_due_probe_and_reports_no_overdue_work():
+    """Mutants: a frequent task without a due probe is accepted, so the
+    five-minute run claims it on every tick; a frequent task also reports
+    overdue work, so health reads two answers for it. A daily task needs
+    neither."""
+    session = AsyncSession()
+    assert retention_cadence_violations(
+        [
+            _registration(_Task, every="frequent"),
+            _registration(_ProbedAndOverdue, every="frequent"),
+        ],
+        session,
+    ) == [
+        "Task tests.cadence runs frequently without a due probe.",
+        "Task tests.cadence runs frequently and reports overdue work; health "
+        "asks its due probe instead.",
+    ]
+    assert (
+        retention_cadence_violations(
+            [
+                _registration(_Probed, every="frequent"),
+                _registration(_Task, every="daily"),
+                _registration(_ProbedAndOverdue, every="daily"),
+            ],
+            session,
+        )
+        == []
+    )
+    assert (
+        retention_cadence_violations(
+            retention_task_registrations(get_settings()), session
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "every,seconds,expected",
+    [
+        ("frequent", 1800, 240),
+        ("frequent", 60, 60),
+        ("daily", 1800, 1800),
+    ],
+)
+def test_a_frequent_pass_is_held_to_its_time_limit(
+    every: Literal["daily", "frequent"], seconds: float, expected: float
+):
+    """Mutant: a frequent registration keeps the shared 1800 seconds, so one
+    pass, also the nightly one, holds its task's lease for half an hour and
+    every tick under it loses the claim."""
+    [paced] = _paced([_registration(_Probed, every=every, seconds=seconds)])
+    assert paced.budget.seconds == expected
+    assert all(
+        registration.budget.seconds <= FREQUENT_RUN_SECONDS
+        for registration in retention_task_registrations(get_settings())
+        if registration.every == "frequent"
+    )

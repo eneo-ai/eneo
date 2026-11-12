@@ -6138,5 +6138,8 @@
   "federation_admin_jit_on": "Nya konton skapas vid första inloggningen: personer i domänerna som saknar konto får ett om e-postadressen är verifierad.",
   "federation_admin_jit_off": "Nya konton skapas inte vid första inloggningen: bara personer som redan har ett konto kan logga in.",
   "federation_admin_jit_no_domains": "Nya konton skapas inte så länge listan är tom: bara personer som redan har ett konto kan logga in. Lägg till domäner för att skapa konton vid första inloggningen.",
-  "federation_admin_jit_link": "Ändra under {setting}"
+  "federation_admin_jit_link": "Ändra under {setting}",
+  "audit_action_user_access_token_issued": "Åtkomsttoken utfärdad av driftansvarig",
+  "audit_action_user_access_token_issued_description": "Loggar när driftansvarig tar en token för att agera som en användare, med serverns super-API-nyckel",
+  "federation_admin_endpoint_host_refused": "Inget sparades. Identitetsleverantörens tokenadress eller signeringsnycklar ligger på {host}, som varken är leverantörens egen värd eller en värd som er driftleverantör har tillåtit. Be er driftleverantör lägga till {host} bland leverantörens tillåtna värdar (allowed_endpoint_hosts); till dess kan ingen logga in via leverantören."
 }

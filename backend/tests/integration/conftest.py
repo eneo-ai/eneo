@@ -1188,10 +1188,17 @@ def oidc_mock(monkeypatch):
         request_log: list[tuple[str, str]] = []
         token_clients: list[str | None] = []
 
+        from tests.fake_oidc_provider import _Body
+
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.content_length = None
+
+            @property
+            def content(self) -> _Body:
+                return _Body(json.dumps(self._payload).encode())
 
             async def __aenter__(self):
                 return self

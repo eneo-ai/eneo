@@ -4,8 +4,8 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.data_retention.domain.rules import RetentionRule, RuleTask, rule_task
-from eneo.data_retention.infrastructure.conversation_retention_policy import (
-    nearest_period,
+from eneo.data_retention.infrastructure.retention_rule_sql import (
+    rule_period,
 )
 from eneo.policy_levels import PolicyLevel
 
@@ -14,17 +14,16 @@ OWN = PolicyLevel.ASSISTANT_OR_APP
 
 
 def test_the_sql_refuses_a_rule_it_cannot_resolve_like_the_kernel():
-    """Mutants: a bounded rule gets the nearest-wins SQL, so the bound is
-    silently dropped; a level without a column, or a column for a level the
-    rule does not declare, changes which period applies."""
+    """Mutants: a level without a column, or a column for a level the rule
+    does not declare, changes which period applies. A rule with a bound is
+    resolved (its parity runs in the database)."""
     columns = {SPACE: sa.literal(60), OWN: sa.literal(30)}
 
+    rule_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
     with pytest.raises(ValueError):
-        nearest_period(RuleTask("bounded", (SPACE, OWN), frozenset({SPACE})), columns)
+        rule_period(RuleTask("partial", (SPACE, OWN)), {OWN: sa.literal(30)})
     with pytest.raises(ValueError):
-        nearest_period(RuleTask("partial", (SPACE, OWN)), {OWN: sa.literal(30)})
-    with pytest.raises(ValueError):
-        nearest_period(RuleTask("extra", (OWN,)), columns)
+        rule_period(RuleTask("extra", (OWN,)), columns)
 
 
 def test_an_exempt_rule_has_no_period_to_resolve():

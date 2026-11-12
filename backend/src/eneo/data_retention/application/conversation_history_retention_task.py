@@ -74,6 +74,9 @@ class ConversationHistoryRetentionTask:
             *(reason.key for reason in CONVERSATION_FILE_BLOCKS),
         }
     )
+    # A conversation that is no longer due when its unit runs (a new question,
+    # a period made longer) is kept by the policy, not by a blocker.
+    not_due_keys = frozenset({ConversationBlockReason.NO_LONGER_DUE.key})
 
     def __init__(
         self,

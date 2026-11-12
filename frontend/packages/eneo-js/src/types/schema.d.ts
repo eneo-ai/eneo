@@ -3791,7 +3791,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 231 actions with their enabled status for the modal UI.
+     * @description Retrieve all 232 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -12830,6 +12830,7 @@ export interface components {
       | "identity_conflict"
       | "identity_rebinding_updated"
       | "identity_migration_window_updated"
+      | "user_access_token_issued"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -18875,6 +18876,8 @@ export interface components {
       additional_redirect_uris: string[];
       /** Allowed Domains */
       allowed_domains: string[];
+      /** Allowed Endpoint Hosts */
+      allowed_endpoint_hosts?: string[];
       /** Client Id */
       client_id: string;
       /**
@@ -35807,6 +35810,15 @@ export interface components {
        */
       allowed_domains?: string[] | null;
       /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
+      /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri
        * @example https://stockholm.eneo.se
@@ -38174,6 +38186,15 @@ export interface components {
        *     ]
        */
       allowed_domains?: string[];
+      /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
       /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri

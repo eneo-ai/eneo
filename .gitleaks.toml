@@ -5,7 +5,8 @@ useDefault = true
 
 # Reviewed public test/example values only. Both the exact path and extracted
 # value must match, so squash commits and line moves do not invalidate reviews.
-# Keep these scoped to generic-api-key; all other built-in rules still apply.
+# Keep each scoped to the one built-in rule that reported it; all other
+# built-in rules still apply.
 [[rules]]
 id = "generic-api-key"
 
@@ -117,3 +118,13 @@ condition = "AND"
 paths = ['''^backend/tests/unit/authentication/test_browser_session_router\.py$''']
 regexTarget = "secret"
 regexes = ['''^replacing=None$''']
+
+[[rules]]
+id = "curl-auth-header"
+
+[[rules.allowlists]]
+description = "Placeholder super API key in the multi-tenant guide's curl examples"
+condition = "AND"
+paths = ['''^frontend/apps/docs-site/src/content/guides/oidc-federation/multi-tenant\.mdx$''']
+regexTarget = "secret"
+regexes = ['''^your-super-admin-api-key$''']

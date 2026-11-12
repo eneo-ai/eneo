@@ -49,6 +49,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_identity_migration_window_updated,
     description: m.audit_action_identity_migration_window_updated_description
   },
+  user_access_token_issued: {
+    name: m.audit_action_user_access_token_issued,
+    description: m.audit_action_user_access_token_issued_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description

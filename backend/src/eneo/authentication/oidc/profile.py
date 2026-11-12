@@ -6,15 +6,17 @@ no migration. Only protocol constants and security floors are fixed here.
 """
 
 import asyncio
+import ipaddress
+import re
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
-import aiohttp
+from yarl import URL
 
 from eneo.authentication.auth_models import DEFAULT_EMAIL_VERIFIED_CLAIMS
-from eneo.main.aiohttp_client import aiohttp_client
+from eneo.authentication.oidc import outbound
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,6 +45,14 @@ DEFAULT_SCOPES = ("openid", "email", "profile")
 DISCOVERY_RETRY_SECONDS = 30
 
 _TOKEN_AUTH_METHODS = ("client_secret_post", "client_secret_basic")
+# The endpoints the backend sends a request to, by the name a refusal uses.
+# userinfo is stored but never fetched, so it is not among them.
+_FETCHED_ENDPOINTS = {"token endpoint": "token_endpoint", "JWKS URI": "jwks_uri"}
+# A host name as allowed_endpoint_hosts lists it: no scheme, port, path or
+# wildcard. An IP address may be listed too, IPv6 with or without brackets.
+_HOST_NAME = re.compile(
+    r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*"
+)
 
 TEMPLATED_ISSUER_GUIDANCE = (
     "The provider's issuer is a template; use your own directory's discovery endpoint"
@@ -62,7 +72,7 @@ class OidcProviderError(Exception):
 
 class OidcProviderUnavailable(OidcProviderError):
     """The provider's discovery document cannot be read: unreachable, not
-    answering 200, or not JSON."""
+    answering 200, refused by the request rules, or not a JSON object."""
 
 
 @dataclass(frozen=True)
@@ -132,25 +142,20 @@ async def fetch_discovery(url: str, *, ttl_seconds: int) -> dict[str, object]:
 async def download_discovery(url: str) -> dict[str, object]:
     """The provider's discovery document, fetched now, without the cache."""
     try:
-        async with aiohttp_client().get(url) as resp:
-            if resp.status != 200:
-                logger.error(
-                    f"Failed to fetch OIDC discovery document: HTTP {resp.status}",
-                    extra={"discovery_url": url, "http_status": resp.status},
-                )
-                raise OidcProviderUnavailable(
-                    f"Failed to fetch discovery document: HTTP {resp.status}"
-                )
-            document: object = await resp.json()
-    except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
+        return await outbound.get_json(url)
+    except outbound.OidcFetchError as exc:
         logger.error(
             "Failed to fetch OIDC discovery document",
-            extra={"discovery_url": url, "error_type": type(exc).__name__},
+            extra={
+                "discovery_url": url,
+                "reason": exc.reason,
+                "http_status": exc.status,
+            },
         )
-        raise OidcProviderUnavailable("Failed to fetch IdP configuration") from exc
-    if not isinstance(document, dict):
-        raise OidcProviderError("Failed to fetch IdP configuration")
-    return cast(dict[str, object], document)
+        # The reason is fixed text: an operator may read it, a visitor never.
+        raise OidcProviderUnavailable(
+            f"Failed to fetch discovery document: {exc.reason}"
+        ) from exc
 
 
 def _text(value: object) -> str | None:
@@ -251,6 +256,77 @@ def _email_claim(config: Mapping[str, object]) -> str:
     return _mapped_claim(config.get("claims_mapping"), "email") or "email"
 
 
+def _address(host: str) -> str | None:
+    """An IP address in one written form, or None when the host is a name."""
+    bare = host[1:-1] if host.startswith("[") and host.endswith("]") else host
+    try:
+        return ipaddress.ip_address(bare).compressed
+    except ValueError:
+        return None
+
+
+def _host_key(host: str) -> str:
+    """A host as the host rule compares it: an address in one form, a name
+    lower-cased."""
+    return _address(host) or host.lower()
+
+
+def _url_host(url: str) -> str:
+    """The host a request to ``url`` connects to, read as aiohttp reads it."""
+    return _host_key(URL(url).raw_host or "")
+
+
+def endpoint_host_names(hosts: object) -> tuple[str, ...]:
+    """The other hosts the token and JWKS endpoints may be on, as the host
+    rule compares them; refused unless a list of host names or addresses."""
+    if hosts is None:
+        return ()
+    if not isinstance(hosts, list) or not all(
+        isinstance(host, str)
+        and (_address(host) is not None or _HOST_NAME.fullmatch(host.lower()))
+        for host in cast(list[object], hosts)
+    ):
+        raise OidcProviderError(
+            "allowed_endpoint_hosts must list host names or IP addresses, without scheme, port or path"
+        )
+    return tuple(_host_key(host) for host in cast(list[str], hosts))
+
+
+def check_endpoint_hosts(
+    discovery_url: str, endpoints: Mapping[str, str], allowed_hosts: Sequence[str]
+) -> None:
+    """Refuse an endpoint the backend must not send a request to.
+
+    Each endpoint passes the request rules and is on the discovery host or on
+    a host the operator listed: a discovery document, or a stored config, must
+    not point the request carrying the code and the client secret, or the one
+    fetching the keys that sign the ID token, at another host. The reason
+    names the host, so the operator knows what to list.
+    """
+    hosts = {_url_host(discovery_url), *map(_host_key, allowed_hosts)}
+    for name, url in endpoints.items():
+        try:
+            outbound.check_url(url)
+        except outbound.OidcFetchError as exc:
+            raise OidcProviderError(f"The {name}: {exc.reason}") from exc
+        host = _url_host(url)
+        if host not in hosts:
+            raise OidcProviderError(
+                f"The {name} is on {host}, which is neither the discovery host "
+                "nor in allowed_endpoint_hosts"
+            )
+
+
+def _discovery_url(config: Mapping[str, object]) -> str | None:
+    url = _text(config.get("discovery_endpoint"))
+    if url is not None:
+        try:
+            outbound.check_url(url)
+        except outbound.OidcFetchError as exc:
+            raise OidcProviderError(f"The discovery endpoint: {exc.reason}") from exc
+    return url
+
+
 def check_config(config: Mapping[str, object]) -> None:
     """Refuse a federation config that no discovery document can make usable.
 
@@ -268,6 +344,15 @@ def check_config(config: Mapping[str, object]) -> None:
     issuer = _text(config.get("issuer"))
     if issuer is not None and is_templated_issuer(issuer):
         raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)
+    hosts = endpoint_host_names(config.get("allowed_endpoint_hosts"))
+    discovery_url = _discovery_url(config)
+    stored = {
+        name: url
+        for name, key in _FETCHED_ENDPOINTS.items()
+        if (url := _text(config.get(key))) is not None
+    }
+    if discovery_url is not None:
+        check_endpoint_hosts(discovery_url, stored, hosts)
 
 
 def build_profile(
@@ -291,6 +376,18 @@ def build_profile(
     issuer = resolve("issuer", "Failed to resolve the provider's issuer")
     if is_templated_issuer(issuer):
         raise OidcProviderError(TEMPLATED_ISSUER_GUIDANCE)
+    discovery_url = _discovery_url(config)
+    if discovery_url is None:
+        raise OidcProviderError("No discovery endpoint configured")
+    endpoints = {
+        name: resolve(key, f"Failed to resolve {name}")
+        for name, key in _FETCHED_ENDPOINTS.items()
+    }
+    check_endpoint_hosts(
+        discovery_url,
+        endpoints,
+        endpoint_host_names(config.get("allowed_endpoint_hosts")),
+    )
     return OidcProfile(
         issuer=issuer,
         client_id=client_id,
@@ -298,9 +395,9 @@ def build_profile(
         authorization_endpoint=resolve(
             "authorization_endpoint", "Failed to resolve authorization endpoint"
         ),
-        token_endpoint=resolve("token_endpoint", "Failed to resolve token endpoint"),
+        token_endpoint=endpoints["token endpoint"],
         token_endpoint_auth_method=_token_auth_method(config, discovery),
-        jwks_uri=resolve("jwks_uri", "Failed to resolve JWKS URI"),
+        jwks_uri=endpoints["JWKS URI"],
         signing_algorithms=_signing_algorithms(config, discovery),
         scopes=_texts(config.get("scopes"), "scopes") or DEFAULT_SCOPES,
         email_claim=email_claim,

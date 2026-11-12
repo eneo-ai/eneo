@@ -246,8 +246,11 @@ It only queues the run and returns before it has run, so follow the worker log.
 
 `GET /api/healthz` reports each retention task as `healthy`, `degraded`,
 `unknown`, `initializing` or `disabled`. A task is `degraded` when its latest
-run failed, when no run has completed for two days, or when the latest run
-found content due for more than a day (`RETENTION_OVERDUE_WINDOW_DAYS`). `limiting_settings`
+finished run failed, when no run has completed for two days, or when the latest run
+found content due for more than a day (`RETENTION_OVERDUE_WINDOW_DAYS`). A failed
+run keeps the task `degraded` until a rerun has finished. A task that is not
+`degraded` reads `unknown` with `overdue_not_measured` when its latest finished run could not measure what
+is overdue, until a later run measures it. `limiting_settings`
 names the setting whose limit kept due content. Retention problems never make
 an otherwise ready API unavailable. See [Health](/docs/audit-logging#health)
 and [Scheduled execution and limits](/docs/audit-logging#scheduled-execution-and-limits).
