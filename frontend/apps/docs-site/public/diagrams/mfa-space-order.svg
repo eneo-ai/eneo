@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="398" viewBox="0 0 860 398" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Order of the work</title>
+  <desc id="d">Sign-in work and file home work run as parallel lanes, and both must land before the entrance check and space switch; flows, the module kit with the speech-to-text module and speech to text in production then follow in order. Making session end stop the module runs alongside and feeds the module kit, and a provider check, with no code, comes before production.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="397" rx="12"/>
+
+  <!-- parallel lanes -->
+  <text class="h" x="24" y="36">Sign-in</text>
+  <rect class="box" x="24" y="46" width="364" height="60" rx="8"/><text class="h" x="206" y="71" text-anchor="middle">MFA on the session</text><text class="s" x="206" y="92" text-anchor="middle">after tolerating malformed sign-in claims</text>
+
+  <text class="h" x="24" y="142">Files</text>
+  <rect class="box" x="24" y="154" width="170" height="80" rx="8"/><text class="h" x="109" y="180" text-anchor="middle">File home column</text><text class="s" x="109" y="201" text-anchor="middle">space deletion and</text><text class="s" x="109" y="220" text-anchor="middle">assistant transfer</text>
+  <path class="edge" d="M194,194 H218"/>
+  <rect class="box" x="218" y="154" width="170" height="80" rx="8"/><text class="h" x="303" y="180" text-anchor="middle">Home is set</text><text class="s" x="303" y="201" text-anchor="middle">on create and attach;</text><text class="s" x="303" y="220" text-anchor="middle">existing files filled</text>
+  <path class="edge" d="M388,194 H412"/>
+  <rect class="box" x="412" y="154" width="170" height="80" rx="8"/><text class="h" x="497" y="180" text-anchor="middle">Read files</text><text class="s" x="497" y="201" text-anchor="middle">with the reader's</text><text class="s" x="497" y="220" text-anchor="middle">sign-in</text>
+
+  <text class="h" x="24" y="266">Session end</text>
+  <rect class="box" x="24" y="278" width="364" height="60" rx="8"/><text class="h" x="206" y="303" text-anchor="middle">Stops the module</text><text class="s" x="206" y="324" text-anchor="middle">and live transcription</text>
+
+  <!-- lanes join the spine -->
+  <path class="edge" d="M388,76 H640"/>
+  <path class="line" d="M582,194 H604 V76"/><circle class="dot" cx="604" cy="76" r="3.5"/>
+  <path class="edge" d="M388,308 H620 V244 H640"/>
+
+  <!-- then in order -->
+  <text class="h" x="640" y="36">Then in order</text>
+  <rect class="box" x="640" y="46" width="196" height="60" rx="8"/><text class="h" x="738" y="71" text-anchor="middle">Entrance check</text><text class="s" x="738" y="92" text-anchor="middle">and space switch</text>
+  <path class="edge" d="M738,106 V130"/>
+  <rect class="box" x="640" y="130" width="196" height="60" rx="8"/><text class="h" x="738" y="155" text-anchor="middle">Flows</text><text class="s" x="738" y="176" text-anchor="middle">follow the space</text>
+  <path class="edge" d="M738,190 V214"/>
+  <rect class="box" x="640" y="214" width="196" height="60" rx="8"/><text class="h" x="738" y="239" text-anchor="middle">Kit and module</text><text class="s" x="738" y="260" text-anchor="middle">for speech to text</text>
+  <path class="edge" d="M738,274 V298"/>
+  <rect class="key" x="640" y="298" width="196" height="76" rx="8"/><text class="h" x="738" y="323" text-anchor="middle">Speech to text</text><text class="s" x="738" y="343" text-anchor="middle">in production, after a</text><text class="s" x="738" y="362" text-anchor="middle">provider check, no code</text>
+</svg>

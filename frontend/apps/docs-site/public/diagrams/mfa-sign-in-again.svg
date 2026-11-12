@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Signing in again with MFA</title>
+  <desc id="d">A person whose session has no MFA opens a space that requires it, chooses sign in with MFA, and the identity provider asks for the second factor. Eneo receives the signed ID token, creates a new session with MFA, ends the old one and returns the person to the same space; an answer that does not meet the rule ends on an end page, not a loop.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+
+  <!-- lanes -->
+  <rect class="lane" x="24" y="24" width="812" height="312" rx="10"/>
+  <path class="lane" d="M24,112 H836 M24,224 H836"/>
+  <text class="h" x="40" y="73">Person</text>
+  <text class="h" x="40" y="173">Eneo</text>
+  <text class="h" x="40" y="287">Identity</text><text class="h" x="40" y="307">provider</text>
+
+  <!-- steps, left to right in time -->
+  <rect class="box" x="124" y="38" width="176" height="60" rx="8"/><text class="h" x="212" y="63" text-anchor="middle">Opens a space</text><text class="s" x="212" y="84" text-anchor="middle">that requires MFA</text>
+  <path class="edge" d="M265,98 V138"/>
+  <rect class="warn" x="230" y="138" width="176" height="60" rx="8"/><text class="h" x="318" y="163" text-anchor="middle">Answers</text><text class="s" x="318" y="184" text-anchor="middle">"sign in with MFA"</text>
+  <path class="edge" d="M371,138 V98"/>
+  <rect class="box" x="336" y="38" width="176" height="60" rx="8"/><text class="h" x="424" y="63" text-anchor="middle">Chooses</text><text class="s" x="424" y="84" text-anchor="middle">sign in with MFA</text>
+  <path class="edge" d="M477,98 V266"/>
+  <rect class="box" x="442" y="266" width="176" height="60" rx="8"/><text class="h" x="530" y="291" text-anchor="middle">Second factor</text><text class="s" x="530" y="312" text-anchor="middle">the provider asks</text>
+  <path class="edge" d="M583,266 V206"/>
+  <rect class="pill" x="525" y="232" width="116" height="22" rx="4"/><text class="s" x="583" y="248" text-anchor="middle">signed ID token</text>
+  <rect class="key" x="548" y="130" width="176" height="76" rx="8"/><text class="h" x="636" y="155" text-anchor="middle">New session</text><text class="s" x="636" y="176" text-anchor="middle">with MFA;</text><text class="s" x="636" y="195" text-anchor="middle">the old one ends</text>
+  <path class="edge" d="M689,130 V98"/>
+  <rect class="ok" x="654" y="38" width="176" height="60" rx="8"/><text class="h" x="742" y="63" text-anchor="middle">Back in the space</text><text class="s" x="742" y="84" text-anchor="middle">the one they opened</text>
+
+  <!-- the one exception: the answer from the provider does not meet the rule -->
+  <path class="edge" d="M618,296 H727 V348"/>
+  <rect class="no" x="424" y="348" width="412" height="32" rx="8"/><text class="t" x="630" y="369" text-anchor="middle">Answer does not meet the rule: end page, no loop</text>
+</svg>

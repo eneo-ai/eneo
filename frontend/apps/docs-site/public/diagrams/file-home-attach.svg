@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="306" viewBox="0 0 860 306" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">A file's life with a home</title>
+  <desc id="d">A generated or flow file gets its home when it is created, an upload without a space stays a draft that is cleaned up if unused, an attached file gets its home in the same step, and every read is checked. Attaching a file in another space is refused; the person uploads it there instead.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="305" rx="12"/>
+
+  <rect class="box" x="24" y="24" width="180" height="118" rx="8"/><text class="h" x="114" y="50" text-anchor="middle">Created</text><text class="s" x="114" y="71" text-anchor="middle">generated and flow</text><text class="s" x="114" y="90" text-anchor="middle">files get their home</text><text class="s" x="114" y="109" text-anchor="middle">at once; an upload</text><text class="s" x="114" y="128" text-anchor="middle">can name its space</text>
+  <path class="edge" d="M204,83 H234"/>
+  <rect class="box" x="234" y="24" width="180" height="118" rx="8"/><text class="h" x="324" y="50" text-anchor="middle">Draft</text><text class="s" x="324" y="71" text-anchor="middle">an upload with</text><text class="s" x="324" y="90" text-anchor="middle">no space, cleaned</text><text class="s" x="324" y="109" text-anchor="middle">up if unused</text>
+  <path class="edge" d="M414,83 H444"/>
+  <rect class="key" x="444" y="24" width="180" height="118" rx="8"/><text class="h" x="534" y="50" text-anchor="middle">Attached</text><text class="s" x="534" y="71" text-anchor="middle">gets its home</text><text class="s" x="534" y="90" text-anchor="middle">in the same step;</text><text class="s" x="534" y="109" text-anchor="middle">two spaces cannot</text><text class="s" x="534" y="128" text-anchor="middle">both take it</text>
+  <path class="edge" d="M624,83 H654"/>
+  <rect class="box" x="654" y="24" width="180" height="118" rx="8"/><text class="h" x="744" y="50" text-anchor="middle">Read</text><text class="s" x="744" y="71" text-anchor="middle">checked every time</text>
+
+  <path class="edge" d="M534,142 V222"/>
+  <rect class="pill" x="444" y="171" width="180" height="22" rx="4"/><text class="s" x="534" y="187" text-anchor="middle">attach in another space</text>
+  <rect class="no" x="424" y="222" width="220" height="60" rx="8"/><text class="h" x="534" y="247" text-anchor="middle">Refused</text><text class="s" x="534" y="268" text-anchor="middle">upload it there instead</text>
+</svg>

@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Reading a file, today and with a home</title>
+  <desc id="d">Today a file's content is fetched through a signed link that works for whoever holds it and checks only the organisation; the owner check covers only the file's details, and the space's MFA requirement is never asked. With a home, the content's own access rule and the home's requirement must both say yes before the content is read, and a link is checked each time it is used.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+
+  <!-- left panel: today -->
+  <rect class="lane" x="24" y="24" width="396" height="352" rx="10"/>
+  <text class="h" x="40" y="50">Today</text>
+  <rect class="box" x="40" y="62" width="208" height="34" rx="8"/><text class="t" x="144" y="84" text-anchor="middle">Someone reads the file</text>
+  <path class="edge" d="M144,96 V120"/><path class="edge" d="M232,96 L300,120"/>
+  <rect class="box" x="56" y="120" width="176" height="76" rx="8"/><text class="h" x="144" y="145" text-anchor="middle">Signed link</text><text class="s" x="144" y="165" text-anchor="middle">works for whoever</text><text class="s" x="144" y="183" text-anchor="middle">holds it</text>
+  <rect class="box" x="256" y="120" width="148" height="76" rx="8"/><text class="h" x="330" y="152" text-anchor="middle">Owner check</text><text class="s" x="330" y="172" text-anchor="middle">file details only</text>
+  <path class="edge" d="M144,196 V262"/>
+  <rect class="pill" x="32" y="218" width="224" height="22" rx="4"/><text class="s" x="144" y="234" text-anchor="middle">checks only the organisation</text>
+  <rect class="box" x="74" y="262" width="140" height="34" rx="8"/><text class="h" x="144" y="285" text-anchor="middle">File content</text>
+  <rect class="gone" x="112" y="312" width="220" height="52" rx="8"/><text class="m" x="222" y="333" text-anchor="middle">Space requires MFA</text><text class="r" x="222" y="353" text-anchor="middle">the space is never asked</text>
+
+  <!-- right panel: with a home -->
+  <rect class="lane" x="440" y="24" width="396" height="352" rx="10"/>
+  <text class="h" x="456" y="50">With a home</text>
+  <rect class="box" x="530" y="62" width="216" height="34" rx="8"/><text class="t" x="638" y="84" text-anchor="middle">Someone reads the file</text>
+  <path class="edge" d="M616,96 L556,120"/><path class="edge" d="M660,96 L720,120"/>
+  <rect class="box" x="456" y="120" width="162" height="76" rx="8"/><text class="h" x="537" y="152" text-anchor="middle">Access rule</text><text class="s" x="537" y="172" text-anchor="middle">the content's own</text>
+  <text class="s" x="638" y="163" text-anchor="middle">and</text>
+  <rect class="key" x="658" y="120" width="162" height="76" rx="8"/><text class="h" x="739" y="145" text-anchor="middle">Home</text><text class="s" x="739" y="165" text-anchor="middle">does the space</text><text class="s" x="739" y="183" text-anchor="middle">require MFA?</text>
+  <path class="line" d="M537,196 L638,214 L739,196"/><circle class="dot" cx="638" cy="214" r="3.5"/>
+  <path class="edge" d="M638,214 V262"/>
+  <rect class="pill" x="563" y="227" width="150" height="22" rx="4"/><text class="s" x="638" y="243" text-anchor="middle">both must say yes</text>
+  <rect class="box" x="568" y="262" width="140" height="34" rx="8"/><text class="h" x="638" y="285" text-anchor="middle">File content</text>
+  <text class="s" x="638" y="326" text-anchor="middle">A link is checked each time it is used;</text>
+  <text class="s" x="638" y="345" text-anchor="middle">an old link stops working once</text>
+  <text class="s" x="638" y="364" text-anchor="middle">the requirement is switched on.</text>
+</svg>
