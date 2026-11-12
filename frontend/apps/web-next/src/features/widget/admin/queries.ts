@@ -86,6 +86,22 @@ export const widgetApi = {
     unwrap(browserApi.PATCH("/api/v1/widgets/{id}/", { params: { path: { id } }, body })),
   activate: (id: string): Promise<Widget> =>
     unwrap(browserApi.POST("/api/v1/widgets/{id}/activate/", { params: { path: { id } } })),
+  /**
+   * Acknowledges exactly the servers and tools the admin was shown; the API
+   * refuses any other list with `external_tools_changed` and the current one.
+   */
+  acknowledgeExternalTools: (id: string, servers: Widget["external_tools"]): Promise<Widget> =>
+    unwrap(
+      browserApi.POST("/api/v1/widgets/{id}/acknowledge-external-tools/", {
+        params: { path: { id } },
+        body: {
+          servers: servers.map((server) => ({
+            id: server.id,
+            tool_ids: server.tools.map((tool) => tool.id)
+          }))
+        }
+      })
+    ),
   /** The kill switch: takes effect immediately for every visitor. */
   pause: (id: string): Promise<Widget> =>
     unwrap(browserApi.POST("/api/v1/widgets/{id}/pause/", { params: { path: { id } } })),

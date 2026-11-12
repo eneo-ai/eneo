@@ -25,6 +25,7 @@ function RuleNumber({
   max,
   step,
   problem,
+  disabledMessage,
   onCommit,
   onRange
 }: {
@@ -36,6 +37,8 @@ function RuleNumber({
   step?: number;
   /** The server's or the policy's objection to the saved value. */
   problem?: string;
+  /** Why the field cannot be changed now; set, the field is disabled. */
+  disabledMessage?: string;
   onCommit: (value: number) => void;
   /** Told whether the field holds a value it cannot send. */
   onRange: (held: boolean) => void;
@@ -67,6 +70,8 @@ function RuleNumber({
       step={step ?? 1}
       isIntegerOnly
       status={status}
+      isDisabled={disabledMessage !== undefined}
+      disabledMessage={disabledMessage}
       onChange={(next) => {
         if (next === null || !Number.isInteger(next) || next < min || next > max) {
           setRangeError(
@@ -88,15 +93,22 @@ function RuleNumber({
 export function WidgetRulesFields({
   autosave,
   state,
-  policy
+  policy,
+  isAdmin = true
 }: {
   autosave: WidgetAutosave;
   state: AutosaveSnapshot<Widget>;
   policy: WidgetPolicy | null;
+  isAdmin?: boolean;
 }) {
   const t = useTranslations();
   const widget = state.widget;
   const blockers = widget.activation_blockers ?? [];
+  // Allowed websites, privacy and bot protection are what a tenant admin
+  // reviewed at activation. The API refuses an editor's change to them on an
+  // active widget; the fields say so instead of failing a save.
+  const governedLocked = widget.status === "active" && !isAdmin;
+  const governedMessage = governedLocked ? t("widget_admin_governed_while_active") : undefined;
   const limits = (change: Partial<Widget["limits"]>) =>
     autosave.patch({ limits: { ...widget.limits, ...change } });
   const privacy = (change: Partial<Widget["privacy"]>) =>
@@ -138,15 +150,20 @@ export function WidgetRulesFields({
           ? blockerLabel("allowed_origins_empty", t)
           : state.refusals["allowed_origins"]
             ? state.refusals["allowed_origins"]
-            : (widget.allowed_origins ?? []).length === 0
-              ? blockerLabel("allowed_origins_empty", t)
-              : undefined;
+            : // Saved before the rule was tightened; the API keeps it but never serves it.
+              blockers.includes("allowed_origin_too_broad")
+              ? blockerLabel("allowed_origin_too_broad", t)
+              : (widget.allowed_origins ?? []).length === 0
+                ? blockerLabel("allowed_origins_empty", t)
+                : undefined;
   // Lines that cannot be sent yet hold back the valid ones with them, and a
-  // valid list typed but not yet committed (blur) is an edit too.
+  // valid list typed but not yet committed (blur) is an edit too. The saved
+  // list as it stands is no edit, even with a line the API no longer accepts.
   const originsHeld =
-    parsedOrigins.invalid.length > 0 ||
-    parsedOrigins.tooMany ||
-    parsedOrigins.origins.join("\n") !== savedOrigins;
+    origins.text !== savedOrigins &&
+    (parsedOrigins.invalid.length > 0 ||
+      parsedOrigins.tooMany ||
+      parsedOrigins.origins.join("\n") !== savedOrigins);
   useEffect(() => {
     autosave.markDraft("allowed_origins", originsHeld);
     return () => autosave.markDraft("allowed_origins", false);
@@ -181,6 +198,11 @@ export function WidgetRulesFields({
 
   return (
     <div className="grid gap-6">
+      {governedLocked && (
+        <p role="note" className="bg-ax-muted text-ax-text rounded-lg px-3 py-2 text-sm">
+          {governedMessage}
+        </p>
+      )}
       <SettingsGroup
         title={t("widget_admin_placement")}
         description={t("widget_admin_allowed_origins_description")}
@@ -195,6 +217,8 @@ export function WidgetRulesFields({
           onFocus={origins.onFocus}
           onBlur={commitOrigins}
           status={originsProblem ? { type: "error", message: originsProblem } : undefined}
+          isDisabled={governedLocked}
+          disabledMessage={governedMessage}
           hasSpellCheck={false}
           width="100%"
         />
@@ -275,6 +299,7 @@ export function WidgetRulesFields({
             "retention_below_policy_minimum",
             "retention_above_policy_maximum"
           )}
+          disabledMessage={governedMessage}
           onCommit={(value) => privacy({ retention_days: value })}
           onRange={range("retention")}
         />
@@ -285,6 +310,8 @@ export function WidgetRulesFields({
           labelPosition="start"
           labelSpacing="spread"
           width="100%"
+          isDisabled={governedLocked}
+          disabledMessage={governedMessage}
           onChange={(checked) => privacy({ store_feedback_text: checked })}
         />
       </SettingsGroup>
@@ -305,6 +332,8 @@ export function WidgetRulesFields({
             { value: "none", label: t("widget_admin_bot_protection_none"), disabled: !noneAllowed }
           ]}
           value={widget.bot_protection ?? "altcha"}
+          isDisabled={governedLocked}
+          disabledMessage={governedMessage}
           onChange={(value) =>
             autosave.patch({ bot_protection: value as NonNullable<Widget["bot_protection"]> })
           }

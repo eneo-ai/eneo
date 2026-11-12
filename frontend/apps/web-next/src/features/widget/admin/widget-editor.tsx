@@ -214,12 +214,14 @@ export function WidgetEditor({
   ];
 
   const blockers = current.activation_blockers ?? [];
-  // The assistant's general MCP servers as configured, and web search only
-  // through an external provider (VISITOR_CAPABILITY_PURPOSES in
+  // The assistant's tools at MCP servers outside Eneo as the API lists them
+  // (what an admin acknowledges; visitors reach no other), and web search
+  // only through an external provider (VISITOR_CAPABILITY_PURPOSES in
   // assistant_service.py). Image generation never.
-  const visitorServers = (assistant.mcp_servers ?? []).filter(
-    (server) => server.purpose === "general" && server.is_enabled
-  );
+  const visitorServers = current.external_tools ?? [];
+  // The template's locks hold only while the widget follows it, so on an
+  // active widget detaching is an admin's call (the API refuses editors too).
+  const detachLocked = current.status === "active" && !isAdmin;
   const visitorCapabilities = (assistant.enabled_capabilities ?? [])
     .filter((purpose) => VISITOR_CAPABILITIES.has(purpose))
     // The one visitor capability has the same name everywhere in the app.
@@ -278,6 +280,9 @@ export function WidgetEditor({
           onReloaded(saved);
         }}
         onActivate={lifecycle(widgetApi.activate)}
+        onAcknowledgeExternalTools={(servers) =>
+          lifecycle((id) => widgetApi.acknowledgeExternalTools(id, servers))()
+        }
         onPause={lifecycle(widgetApi.pause)}
         onArchive={async () => {
           await lifecycle(widgetApi.archive)();
@@ -476,11 +481,18 @@ export function WidgetEditor({
                         />
                         <Button
                           label={t("widget_admin_template_detach")}
+                          isDisabled={detachLocked}
+                          aria-describedby={detachLocked ? `${ids}-detach-locked` : undefined}
                           onClick={() => setConfirm("detach")}
                         />
                       </>
                     )}
                   </div>
+                  {detachLocked && (
+                    <p id={`${ids}-detach-locked`} className="text-ax-text-secondary text-sm">
+                      {t("widget_admin_template_detach_admin_only")}
+                    </p>
+                  )}
                 </SettingsGroup>
               ) : templates.length > 0 && current.status !== "archived" ? (
                 <SettingsGroup
@@ -529,7 +541,15 @@ export function WidgetEditor({
             </>
           )}
 
-          {panel("rules", <WidgetRulesFields autosave={autosave} state={state} policy={policy} />)}
+          {panel(
+            "rules",
+            <WidgetRulesFields
+              autosave={autosave}
+              state={state}
+              policy={policy}
+              isAdmin={isAdmin}
+            />
+          )}
 
           {panel(
             "publish",
@@ -565,7 +585,12 @@ export function WidgetEditor({
                   <ul className="mt-1 list-disc pl-5 text-sm">
                     <li>{t("widget_admin_visitor_access_knowledge")}</li>
                     {visitorServers.map((server) => (
-                      <li key={server.id}>{server.name}</li>
+                      <li key={server.id}>
+                        {t("widget_admin_visitor_access_server_tools", {
+                          name: server.name,
+                          tools: server.tools.map((tool) => tool.name).join(", ")
+                        })}
+                      </li>
                     ))}
                     {visitorCapabilities.map((capability) => (
                       <li key={capability}>
