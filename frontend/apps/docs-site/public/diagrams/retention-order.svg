@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
-  <title id="t">Order of the retention work</title>
-  <desc id="d">First the engine goes into the Flows branch and, on develop, the error code and the preview answer, a small task of its own; then leftover cleanup, authoring chats and the flow run period, which needs both first items. The step period, the recording and the module's local stores (which also need the module's MFA work) follow in order. The normal route then merges Flows into develop, which needs leftover cleanup, authoring chats and the module's local stores, and through them the recording, plus the entrance check and flows that follow the space from the MFA epic; the final test needs the merge and the provider check, or can instead run on a named version of the Flows branch that holds the same prerequisites. Beside the chain on develop, space caps for assistants and apps with the organisation's page need the error code task, and attachment names out of app audit rows can land at any time.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="398" viewBox="0 0 860 398" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">The order of the retention work</title>
+  <desc id="d">On develop the error code and preview answer come before the space caps, and attachment names can land at any time; on the Flows branch the engine comes first, then leftover cleanup, authoring chats and the flow run period, which also needs the error code, followed by the step period and the recording, and then, in the speech-to-text module, its local stores together with its MFA work. The normal route then merges Flows into develop once the whole Flows lane and, from the MFA epic, the entrance check and flows that follow the space are done, and the final test follows with the provider check, or can instead run on a named version of the Flows branch that holds the same prerequisites.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -45,48 +45,43 @@
       .dot,.ah{fill:#8b949e}
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="397" rx="12"/>
 
-  <!-- first -->
-  <text class="h" x="24" y="36">First</text>
-  <rect class="box" x="24" y="48" width="164" height="72" rx="8"/><text class="h" x="106" y="78" text-anchor="middle">Engine</text><text class="s" x="106" y="99" text-anchor="middle">into the Flows branch</text>
-  <rect class="box" x="208" y="48" width="168" height="72" rx="8"/><text class="h" x="292" y="70" text-anchor="middle">Error code</text><text class="s" x="292" y="90" text-anchor="middle">and preview answer,</text><text class="s" x="292" y="109" text-anchor="middle">a small task of its own</text>
-  <text class="m" x="376" y="36" text-anchor="end">on develop</text>
+  <!-- on develop -->
+  <text class="h" x="24" y="36">On develop</text>
+  <rect class="box" x="24" y="46" width="224" height="80" rx="8"/><text class="h" x="136" y="81" text-anchor="middle">Error code</text><text class="s" x="136" y="102" text-anchor="middle">and preview answer</text>
+  <path class="edge" d="M248,86 H272"/>
+  <rect class="box" x="272" y="46" width="168" height="80" rx="8"/><text class="h" x="356" y="72" text-anchor="middle">Space caps</text><text class="s" x="356" y="93" text-anchor="middle">assistants and apps;</text><text class="s" x="356" y="112" text-anchor="middle">organisation's page</text>
+  <rect class="box" x="464" y="46" width="176" height="80" rx="8"/><text class="h" x="552" y="81" text-anchor="middle">Attachment names</text><text class="s" x="552" y="102" text-anchor="middle">out of app audit rows</text>
 
-  <!-- then side by side -->
-  <path class="line" d="M106,120 V140 M76,140 H256 M268,140 H300"/><circle class="dot" cx="106" cy="140" r="3.5"/>
-  <path class="edge" d="M76,140 V158 M200,140 V158 M300,140 V158"/>
-  <path class="edge" d="M348,120 V158"/>
-  <rect class="box" x="24" y="160" width="104" height="60" rx="8"/><text class="h" x="76" y="185" text-anchor="middle">Leftover</text><text class="h" x="76" y="205" text-anchor="middle">cleanup</text>
-  <rect class="box" x="148" y="160" width="104" height="60" rx="8"/><text class="h" x="200" y="185" text-anchor="middle">Authoring</text><text class="h" x="200" y="205" text-anchor="middle">chats</text>
-  <rect class="box" x="272" y="160" width="104" height="60" rx="8"/><text class="h" x="324" y="185" text-anchor="middle">Flow run</text><text class="h" x="324" y="205" text-anchor="middle">period</text>
+  <!-- on the Flows branch; the frame has a gap where the error code arrow enters -->
+  <text class="h" x="24" y="158">On the Flows branch</text>
+  <path class="lane" d="M232,168 H628 A12,12 0 0 1 640,180 V344 A12,12 0 0 1 628,356 H36 A12,12 0 0 1 24,344 V180 A12,12 0 0 1 36,168 H216"/>
+  <path class="edge" d="M224,126 V194"/>
+  <rect class="box" x="36" y="180" width="120" height="76" rx="8"/><text class="h" x="96" y="206" text-anchor="middle">Engine</text><text class="s" x="96" y="227" text-anchor="middle">into the</text><text class="s" x="96" y="246" text-anchor="middle">Flows branch</text>
+  <path class="edge" d="M156,218 H180"/>
+  <rect class="box" x="180" y="194" width="152" height="48" rx="8"/><text class="h" x="256" y="224" text-anchor="middle">Flow run period</text>
+  <path class="edge" d="M332,218 H356"/>
+  <rect class="box" x="356" y="194" width="120" height="48" rx="8"/><text class="h" x="416" y="224" text-anchor="middle">Step period</text>
+  <path class="edge" d="M476,218 H500"/>
+  <rect class="box" x="500" y="194" width="104" height="48" rx="8"/><text class="h" x="552" y="224" text-anchor="middle">Recording</text>
+  <path class="edge" d="M96,256 V284"/>
+  <path class="edge" d="M96,268 H288 V284"/><circle class="dot" cx="96" cy="268" r="3.5"/>
+  <rect class="box" x="36" y="284" width="152" height="48" rx="8"/><text class="h" x="112" y="314" text-anchor="middle">Leftover cleanup</text>
+  <rect class="box" x="212" y="284" width="152" height="48" rx="8"/><text class="h" x="288" y="314" text-anchor="middle">Authoring chats</text>
+  <path class="edge" d="M552,242 V284"/>
+  <rect class="box" x="396" y="284" width="208" height="60" rx="8"/><text class="h" x="500" y="309" text-anchor="middle">Module's local stores</text><text class="s" x="500" y="330" text-anchor="middle">in the module; its MFA work</text>
 
-  <!-- beside the chain -->
-  <text class="m" x="24" y="276">Beside the chain, on develop</text>
-  <rect class="box" x="24" y="288" width="168" height="88" rx="8"/><text class="h" x="108" y="314" text-anchor="middle">Attachment names</text><text class="s" x="108" y="335" text-anchor="middle">out of app audit rows;</text><text class="s" x="108" y="354" text-anchor="middle">any time</text>
-  <rect class="box" x="208" y="288" width="168" height="88" rx="8"/><text class="h" x="292" y="314" text-anchor="middle">Space caps</text><text class="s" x="292" y="335" text-anchor="middle">assistants and apps;</text><text class="s" x="292" y="354" text-anchor="middle">organisation's page</text>
-  <path class="edge" d="M262,120 V286"/>
+  <!-- needed from the MFA epic -->
+  <rect class="box" x="664" y="46" width="172" height="80" rx="8"/><text class="h" x="750" y="72" text-anchor="middle">MFA epic</text><text class="s" x="750" y="93" text-anchor="middle">entrance check; flows</text><text class="s" x="750" y="112" text-anchor="middle">that follow the space</text>
+  <path class="edge" d="M750,126 V170"/>
 
-  <!-- into the chain -->
-  <path class="edge" d="M376,190 H392 V72 H426"/>
-  <path class="line" d="M76,220 V242 H200"/><path class="line" d="M200,220 V242"/><circle class="dot" cx="200" cy="242" r="3.5"/>
-  <path class="line" d="M200,242 H256"/><path class="edge" d="M268,242 H408 V282 H426"/>
-
-  <!-- then in order -->
-  <text class="h" x="428" y="36">Then in order</text>
-  <rect class="box" x="428" y="48" width="192" height="48" rx="8"/><text class="h" x="524" y="78" text-anchor="middle">Step period</text>
-  <path class="edge" d="M524,96 V116"/>
-  <rect class="box" x="428" y="118" width="192" height="48" rx="8"/><text class="h" x="524" y="148" text-anchor="middle">Recording</text>
-  <path class="edge" d="M524,166 V186"/>
-  <rect class="box" x="428" y="188" width="192" height="48" rx="8"/><text class="h" x="524" y="208" text-anchor="middle">Module's local stores</text><text class="s" x="524" y="227" text-anchor="middle">and the module's MFA work</text>
-  <path class="edge" d="M524,236 V256"/>
-  <rect class="box" x="428" y="258" width="192" height="48" rx="8"/><text class="h" x="524" y="278" text-anchor="middle">Merge Flows</text><text class="s" x="524" y="297" text-anchor="middle">into develop</text>
-  <path class="edge" d="M524,306 V326"/>
-  <rect class="key" x="428" y="328" width="192" height="48" rx="8"/><text class="h" x="524" y="358" text-anchor="middle">Final test</text>
-
-  <!-- needed from outside this work -->
-  <rect class="box" x="660" y="210" width="176" height="96" rx="8"/><text class="h" x="748" y="236" text-anchor="middle">MFA epic</text><text class="s" x="748" y="257" text-anchor="middle">entrance check;</text><text class="s" x="748" y="276" text-anchor="middle">flows that follow</text><text class="s" x="748" y="295" text-anchor="middle">the space</text>
-  <path class="edge" d="M660,282 H622"/>
-  <rect class="box" x="660" y="328" width="176" height="48" rx="8"/><text class="h" x="748" y="358" text-anchor="middle">Provider check</text>
-  <path class="edge" d="M660,352 H622"/>
+  <!-- then -->
+  <text class="h" x="664" y="158">Then</text>
+  <path class="edge" d="M640,200 H664"/><circle class="dot" cx="640" cy="200" r="3.5"/>
+  <rect class="box" x="664" y="170" width="172" height="60" rx="8"/><text class="h" x="750" y="195" text-anchor="middle">Merge Flows</text><text class="s" x="750" y="216" text-anchor="middle">into develop</text>
+  <path class="edge" d="M750,230 V254"/>
+  <rect class="key" x="664" y="254" width="172" height="48" rx="8"/><text class="h" x="750" y="284" text-anchor="middle">Final test</text>
+  <path class="edge" d="M750,326 V302"/>
+  <rect class="box" x="664" y="326" width="172" height="48" rx="8"/><text class="h" x="750" y="356" text-anchor="middle">Provider check</text>
 </svg>
