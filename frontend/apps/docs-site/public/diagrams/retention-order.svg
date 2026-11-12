@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Order of the retention work</title>
-  <desc id="d">First the engine goes into the Flows branch and, on develop, the error code and the preview answer, a small task of its own; then leftover cleanup, authoring chats and the flow run period, which needs both first items. The step period, the recording and the module's local stores (which also need the module's MFA work) follow in order; merging Flows into develop needs leftover cleanup, authoring chats and the module's local stores, and through them the recording, plus the entrance check and flows that follow the space from the MFA epic; the final test needs the merge and the provider check. Space caps for assistants and apps with the organisation's page, and attachment names out of app audit rows, land on develop at any time.</desc>
+  <desc id="d">First the engine goes into the Flows branch and, on develop, the error code and the preview answer, a small task of its own; then leftover cleanup, authoring chats and the flow run period, which needs both first items. The step period, the recording and the module's local stores (which also need the module's MFA work) follow in order. The normal route then merges Flows into develop, which needs leftover cleanup, authoring chats and the module's local stores, and through them the recording, plus the entrance check and flows that follow the space from the MFA epic; the final test needs the merge and the provider check, or can instead run on a named version of the Flows branch that holds the same prerequisites. Beside the chain on develop, space caps for assistants and apps with the organisation's page need the error code task, and attachment names out of app audit rows can land at any time.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -54,7 +54,7 @@
   <text class="m" x="376" y="36" text-anchor="end">on develop</text>
 
   <!-- then side by side -->
-  <path class="line" d="M106,120 V140 M76,140 H300"/><circle class="dot" cx="106" cy="140" r="3.5"/>
+  <path class="line" d="M106,120 V140 M76,140 H256 M268,140 H300"/><circle class="dot" cx="106" cy="140" r="3.5"/>
   <path class="edge" d="M76,140 V158 M200,140 V158 M300,140 V158"/>
   <path class="edge" d="M348,120 V158"/>
   <rect class="box" x="24" y="160" width="104" height="60" rx="8"/><text class="h" x="76" y="185" text-anchor="middle">Leftover</text><text class="h" x="76" y="205" text-anchor="middle">cleanup</text>
@@ -62,14 +62,15 @@
   <rect class="box" x="272" y="160" width="104" height="60" rx="8"/><text class="h" x="324" y="185" text-anchor="middle">Flow run</text><text class="h" x="324" y="205" text-anchor="middle">period</text>
 
   <!-- beside the chain -->
-  <text class="m" x="24" y="276">Beside the chain, on develop, any time</text>
-  <rect class="box" x="24" y="288" width="168" height="88" rx="8"/><text class="h" x="108" y="314" text-anchor="middle">Space caps</text><text class="s" x="108" y="335" text-anchor="middle">assistants and apps;</text><text class="s" x="108" y="354" text-anchor="middle">organisation's page</text>
-  <rect class="box" x="208" y="288" width="168" height="88" rx="8"/><text class="h" x="292" y="314" text-anchor="middle">Attachment names</text><text class="s" x="292" y="335" text-anchor="middle">out of app</text><text class="s" x="292" y="354" text-anchor="middle">audit rows</text>
+  <text class="m" x="24" y="276">Beside the chain, on develop</text>
+  <rect class="box" x="24" y="288" width="168" height="88" rx="8"/><text class="h" x="108" y="314" text-anchor="middle">Attachment names</text><text class="s" x="108" y="335" text-anchor="middle">out of app audit rows;</text><text class="s" x="108" y="354" text-anchor="middle">any time</text>
+  <rect class="box" x="208" y="288" width="168" height="88" rx="8"/><text class="h" x="292" y="314" text-anchor="middle">Space caps</text><text class="s" x="292" y="335" text-anchor="middle">assistants and apps;</text><text class="s" x="292" y="354" text-anchor="middle">organisation's page</text>
+  <path class="edge" d="M262,120 V286"/>
 
   <!-- into the chain -->
   <path class="edge" d="M376,190 H392 V72 H426"/>
   <path class="line" d="M76,220 V242 H200"/><path class="line" d="M200,220 V242"/><circle class="dot" cx="200" cy="242" r="3.5"/>
-  <path class="edge" d="M200,242 H408 V282 H426"/>
+  <path class="line" d="M200,242 H256"/><path class="edge" d="M268,242 H408 V282 H426"/>
 
   <!-- then in order -->
   <text class="h" x="428" y="36">Then in order</text>

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Retention period by level</title>
-  <desc id="d">A retention period is chosen per level (organisation, space, assistant, app or flow, step, recording) or not at all, and a level without one inherits the one above; the space's period, chosen there or inherited from the organisation, is the cap, so a level below may shorten it but never extend it. In the example the organisation has no period, the space has 7 days, the flow has none and so gets 7 days, the transcription step has 24 hours and the recording 0 hours, removed when the run ends; with no retention period on any level nothing is removed.</desc>
+  <desc id="d">A period is chosen per level (organisation, space, assistant, app or flow, and under it the step and the recording as two separate branches) or not at all, and an unset period follows its parent; the space's period, chosen there or inherited from the organisation, is the cap, so a level below may shorten it but never extend it. In the example the organisation has no period, the space has 7 days, the flow has none and so gets 7 days, the transcription step has 24 hours and the recording 0 hours, removed when the run ends, while an unset recording period would keep the recording until its run is removed. Without a retention period, retention removes nothing, but leftover cleanup still applies.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -47,25 +47,24 @@
   </style>
   <rect class="bg" x="0.5" y="0.5" width="859" height="399" rx="12"/>
 
-  <text class="s" x="24" y="44">A retention period is chosen per level or not at all; a level without one inherits the one above.</text>
-  <text class="m" x="24" y="74">Level</text><text class="m" x="340" y="74">Example</text>
+  <text class="s" x="24" y="40">A period is chosen per level or not at all. An unset period follows its parent.</text>
 
-  <rect class="box" x="24" y="86" width="292" height="42" rx="8"/><text class="h" x="40" y="113">Organisation</text><text class="s" x="300" y="113" text-anchor="end">days</text>
-  <rect class="key" x="24" y="138" width="292" height="42" rx="8"/><text class="h" x="40" y="165">Space</text><text class="s" x="300" y="165" text-anchor="end">days</text>
-  <rect class="box" x="24" y="190" width="292" height="42" rx="8"/><text class="h" x="40" y="217">Assistant, app or flow</text><text class="s" x="300" y="217" text-anchor="end">days</text>
-  <rect class="box" x="24" y="242" width="292" height="42" rx="8"/><text class="h" x="40" y="269">Step</text><text class="s" x="300" y="269" text-anchor="end">hours</text>
-  <rect class="box" x="24" y="294" width="292" height="42" rx="8"/><text class="h" x="40" y="321">Recording</text><text class="s" x="300" y="321" text-anchor="end">hours</text>
+  <rect class="box" x="24" y="52" width="380" height="52" rx="8"/><text class="h" x="40" y="74">Organisation</text><text class="s" x="388" y="74" text-anchor="end">days</text><text class="s" x="40" y="95">example: no period</text>
+  <path class="line" d="M214,104 V118"/>
+  <rect class="key" x="24" y="118" width="380" height="52" rx="8"/><text class="h" x="40" y="140">Space</text><text class="s" x="388" y="140" text-anchor="end">days</text><text class="s" x="40" y="161">example: 7 days, the cap</text>
+  <text class="h" x="428" y="140">The cap</text><text class="s" x="428" y="161">chosen here or inherited from the organisation</text>
+  <path class="line" d="M214,170 V184"/>
+  <rect class="box" x="24" y="184" width="380" height="52" rx="8"/><text class="h" x="40" y="206">Assistant, app or flow</text><text class="s" x="388" y="206" text-anchor="end">days</text><text class="s" x="40" y="227">example: flow, no period, so 7 days</text>
 
-  <rect class="box" x="340" y="86" width="300" height="42" rx="8"/><text class="m" x="356" y="112">no retention period</text>
-  <rect class="box" x="340" y="138" width="300" height="42" rx="8"/><text class="h" x="356" y="165">7 days</text><text class="s" x="624" y="165" text-anchor="end">the cap</text>
-  <rect class="box" x="340" y="190" width="300" height="42" rx="8"/><text class="t" x="356" y="216">flow: no period, so 7 days</text>
-  <rect class="box" x="340" y="242" width="300" height="42" rx="8"/><text class="t" x="356" y="268">transcription step: 24 hours</text>
-  <rect class="box" x="340" y="294" width="300" height="42" rx="8"/><text class="t" x="356" y="320">0 hours: removed when the run ends</text>
+  <!-- two separate children of the flow -->
+  <path class="line" d="M214,236 V250 M134,250 H454 M134,250 V264 M454,250 V264"/><circle class="dot" cx="214" cy="250" r="3.5"/>
+  <rect class="box" x="24" y="264" width="220" height="74" rx="8"/><text class="h" x="40" y="288">Step</text><text class="s" x="228" y="288" text-anchor="end">hours</text><text class="s" x="40" y="310">example: transcription</text><text class="s" x="40" y="329">step, 24 hours</text>
+  <rect class="box" x="268" y="264" width="372" height="74" rx="8"/><text class="h" x="284" y="288">Recording</text><text class="s" x="624" y="288" text-anchor="end">hours</text><text class="s" x="284" y="310">example: 0 hours, removed when the run ends</text><text class="m" x="284" y="329">unset: kept until its run is removed</text>
 
-  <!-- the cap -->
-  <path class="line" d="M656,190 H664 V336 H656"/>
-  <text class="h" x="680" y="244">Below the cap</text><text class="s" x="680" y="266">may shorten,</text><text class="s" x="680" y="285">never extend</text>
+  <!-- below the cap -->
+  <path class="line" d="M656,184 H664 V338 H656"/>
+  <text class="h" x="680" y="240">Below the cap</text><text class="s" x="680" y="262">may shorten,</text><text class="s" x="680" y="281">never extend</text>
 
-  <path class="lane" d="M24,350 H836"/>
-  <text class="s" x="430" y="376" text-anchor="middle">No retention period on any level means nothing is removed.</text>
+  <path class="lane" d="M24,354 H836"/>
+  <text class="s" x="430" y="380" text-anchor="middle">Without a retention period, retention removes nothing. Leftover cleanup still applies.</text>
 </svg>

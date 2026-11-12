@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="364" viewBox="0 0 860 364" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
-  <title id="t">When a run ends, its recording is released</title>
-  <desc id="d">When a run ends with any end status (completed, failed, cancelled or expired review), a wake-up fires after the commit, with the five-minute task as the fallback, and the recording's content and live transcript are released as one unit: playback answers 410 at once and the file is listed as content_purged, and object storage confirms the bytes are gone a little later. A hold, or another run that still needs the file, keeps it.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="388" viewBox="0 0 860 388" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">When a recording is released</title>
+  <desc id="d">In the example with a recording period of 0 hours, when a run ends with any end status (completed, failed, cancelled or expired review) a wake-up fires after the commit, with the five-minute task as the fallback, and if nothing keeps the file the recording's content and live transcript are released as one unit: playback answers 410 at once and the file is listed as content_purged, and object storage confirms the bytes are gone a little later. A hold or another use that still needs the file keeps it; with a longer recording period the five-minute task releases the recording when the period has passed.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -45,7 +45,9 @@
       .dot,.ah{fill:#8b949e}
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="859" height="363" rx="12"/>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="387" rx="12"/>
+  <text class="s" x="24" y="40">Example: recording period 0 hours. With a longer period, the five-minute task releases it when due.</text>
+  <g transform="translate(0,24)">
 
   <rect class="box" x="24" y="40" width="180" height="116" rx="8"/><text class="h" x="114" y="66" text-anchor="middle">Run ends</text><text class="s" x="114" y="87" text-anchor="middle">any end status:</text><text class="s" x="114" y="106" text-anchor="middle">completed, failed,</text><text class="s" x="114" y="125" text-anchor="middle">cancelled or</text><text class="s" x="114" y="144" text-anchor="middle">expired review</text>
   <path class="edge" d="M204,88 H226"/>
@@ -59,9 +61,10 @@
 
   <!-- the exception -->
   <path class="edge" d="M318,156 V254"/>
-  <rect class="pill" x="244" y="183" width="148" height="44" rx="4"/><text class="s" x="318" y="201" text-anchor="middle">a hold, or another</text><text class="s" x="318" y="219" text-anchor="middle">run needs the file</text>
+  <rect class="pill" x="230" y="183" width="176" height="44" rx="4"/><text class="s" x="318" y="201" text-anchor="middle">a hold or another use</text><text class="s" x="318" y="219" text-anchor="middle">still needs the file</text>
   <rect class="ok" x="228" y="256" width="180" height="56" rx="8"/><text class="h" x="318" y="280" text-anchor="middle">Kept</text><text class="s" x="318" y="300" text-anchor="middle">nothing is released</text>
 
   <path class="edge" d="M24,340 H836"/>
   <rect class="pill" x="768" y="329" width="44" height="22" rx="4"/><text class="s" x="790" y="345" text-anchor="middle">time</text>
+  </g>
 </svg>
