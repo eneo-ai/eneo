@@ -111,7 +111,9 @@
   });
 
   const src = $derived.by(() => {
-    if (!token) return null;
+    // A save that advanced the generation revoked the token; the frame waits
+    // for the new one instead of loading a chat that is refused.
+    if (!token || tokenGeneration !== widget.token_generation) return null;
     const path = previewEmbedPath(widget.public_id, token, lang);
     const effective = pinnedScheme ?? (scheme === "auto" ? appScheme.current : scheme);
     const query = `&scheme=${effective}`;

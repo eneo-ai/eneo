@@ -67,31 +67,42 @@
   let shown = $state<Widget["external_tools"]>([]);
   const ACK_CHECKBOX_ID = "widget-external-tools-ack";
   let shownChanged = $state(false);
+  // Each refusal renders the alert anew, so a second one is announced too.
+  let changes = $state(0);
   let activatesAfter = $state(false);
-  // The button the dialog was opened from, taken when it was pressed: a busy
-  // button is disabled, which drops focus to the page before the dialog
-  // opens. Activating swaps Activate for Pause and pausing the reverse, and an
-  // acknowledgement on a live widget takes away the button with the blocker
-  // it answered; focus then goes to the status heading.
+  // A busy button is disabled, which drops focus to the page, so the button
+  // an action started from is taken when it is pressed. Once the action has
+  // settled focus goes back to it or, when it is gone or still disabled, to a
+  // fallback: activating swaps Activate for Pause and pausing the reverse, and
+  // an acknowledgement on a live widget takes away the button with the blocker
+  // it answered. The dialog's opener gets focus back when the dialog closes.
   let opener: HTMLElement | null = null;
   let heading = $state<HTMLElement>();
-  const pressed = () =>
-    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const pressed = () => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active !== document.body ? active : null;
+  };
+  const usable = (element: HTMLElement | null): element is HTMLElement =>
+    !!element?.isConnected && !element.matches(":disabled");
+  const checkbox = () => document.getElementById(ACK_CHECKBOX_ID);
 
-  async function focusIfRemoved(button: HTMLElement | null) {
+  async function refocus(
+    button: HTMLElement | null,
+    fallback: () => HTMLElement | null | undefined
+  ) {
     await tick();
-    if (button && !button.isConnected) heading?.focus();
+    const active = document.activeElement;
+    // Focus the user has moved on stays where it is.
+    if (active && active !== document.body) return;
+    (usable(button) ? button : fallback())?.focus();
   }
 
   function review(servers: Widget["external_tools"], changed: boolean) {
-    const reopened = consentOpen;
     shown = $state.snapshot(servers);
     shownChanged = changed;
+    if (changed) changes += 1;
     acknowledged = false;
     consentOpen = true;
-    // A refusal inside the open dialog disables its confirming button, which
-    // would drop focus out of the dialog; it moves to the checkbox instead.
-    if (reopened) void tick().then(() => document.getElementById(ACK_CHECKBOX_ID)?.focus());
   }
 
   // Activates, or shows the current list again when it changed under the admin.
@@ -108,8 +119,6 @@
   }
 
   const activate = createAsyncState(async () => {
-    const button = pressed();
-    opener = button;
     try {
       await autosave.flush();
       if (autosave.hasPending) return;
@@ -121,14 +130,16 @@
       await activateOrReview();
     } catch (error) {
       toastWidgetError(error, m.widget_admin_could_not_activate());
-    } finally {
-      // An open dialog hands focus back when it closes.
-      if (!consentOpen) {
-        opener = null;
-        await focusIfRemoved(button);
-      }
     }
   });
+  async function startActivation() {
+    opener = pressed();
+    await activate();
+    if (consentOpen) return;
+    const button = opener;
+    opener = null;
+    await refocus(button, () => heading);
+  }
   const acknowledge = createAsyncState(async () => {
     try {
       await onAcknowledgeExternalTools(shown);
@@ -151,14 +162,24 @@
     }
   });
   const pause = createAsyncState(async () => {
-    const button = pressed();
     try {
       await onPause();
     } catch (error) {
       toastError(error, m.widget_admin_could_not_pause());
     }
-    await focusIfRemoved(button);
   });
+  async function startPause() {
+    const button = pressed();
+    await pause();
+    await refocus(button, () => heading);
+  }
+  async function confirmTools() {
+    const button = pressed();
+    await acknowledge();
+    // A dialog that closed hands focus back itself. One still open after a
+    // refusal keeps focus inside, on the checkbox when the button waits for it.
+    if (consentOpen) await refocus(button, checkbox);
+  }
   const archive = createAsyncState(async () => {
     try {
       await onArchive();
@@ -280,7 +301,7 @@
 
     <div class="flex flex-wrap items-center gap-2">
       {#if widget.status === "active"}
-        <Button variant="outline" onclick={pause} disabled={pause.isLoading}
+        <Button variant="outline" onclick={startPause} disabled={pause.isLoading}
           >{m.widget_admin_pause()}</Button
         >
       {:else if widget.status !== "archived"}
@@ -306,7 +327,7 @@
         {:else}
           <Button
             variant="default"
-            onclick={activate}
+            onclick={startActivation}
             disabled={!canActivate || activate.isLoading}
             aria-describedby={activateReasonId ?? undefined}
           >
@@ -372,11 +393,12 @@
 
 <AlertDialog.Root bind:open={consentOpen}>
   <AlertDialog.Content
+    escapeKeydownBehavior={acknowledge.isLoading ? "ignore" : "close"}
     onCloseAutoFocus={(event) => {
       event.preventDefault();
       const button = opener;
       opener = null;
-      void tick().then(() => (button?.isConnected ? button : heading)?.focus());
+      void tick().then(() => (usable(button) ? button : heading)?.focus());
     }}
   >
     <AlertDialog.Header>
@@ -386,9 +408,14 @@
       >
     </AlertDialog.Header>
     {#if shownChanged}
-      <p role="alert" class="bg-warning-dimmer text-warning-stronger rounded-md px-3 py-2 text-sm">
-        {m.widget_admin_external_tools_changed()}
-      </p>
+      {#key changes}
+        <p
+          role="alert"
+          class="bg-warning-dimmer text-warning-stronger rounded-md px-3 py-2 text-sm"
+        >
+          {m.widget_admin_external_tools_changed()}
+        </p>
+      {/key}
     {/if}
     {#if shown.length > 0}
       <ul class="flex flex-col gap-2 text-sm" aria-label={m.widget_admin_external_tools_servers()}>
@@ -429,7 +456,7 @@
         disabled={(shown.length > 0 && !acknowledged) || acknowledge.isLoading}
         onclick={(event) => {
           event.preventDefault();
-          void acknowledge();
+          void confirmTools();
         }}
       >
         {!activatesAfter
@@ -443,7 +470,7 @@
 </AlertDialog.Root>
 
 <AlertDialog.Root bind:open={archiveOpen}>
-  <AlertDialog.Content>
+  <AlertDialog.Content escapeKeydownBehavior={archive.isLoading ? "ignore" : "close"}>
     <AlertDialog.Header>
       <AlertDialog.Title>{m.widget_admin_archive_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.widget_admin_archive_description()}</AlertDialog.Description>

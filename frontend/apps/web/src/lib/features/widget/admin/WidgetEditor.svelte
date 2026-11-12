@@ -225,6 +225,10 @@
   // in assistant_service.py). Image generation never.
   const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
   const visitorServers = $derived(current.external_tools ?? []);
+  // The organisation's policy can take all of them away. On a live widget,
+  // tools switched on after the last acknowledgement wait for an admin.
+  const externalToolsAllowed = $derived(!blockers.includes("external_tools_not_allowed"));
+  const reachableServers = $derived(externalToolsAllowed ? visitorServers : []);
   // The template's locks hold only while the widget follows it, so on an
   // active widget detaching is an admin's call (the API refuses editors too).
   const detachLocked = $derived(current.status === "active" && !isAdmin);
@@ -585,7 +589,10 @@
                 <p class="text-secondary text-sm">{m.widget_admin_visitor_access_description()}</p>
                 <ul class="mt-1 list-disc pl-5 text-sm">
                   <li>{m.widget_admin_visitor_access_knowledge()}</li>
-                  {#each visitorServers as server (server.id)}
+                  {#if !externalToolsAllowed}
+                    <li class="text-secondary">{m.widget_admin_visitor_access_not_allowed()}</li>
+                  {/if}
+                  {#each reachableServers as server (server.id)}
                     <li>
                       {m.widget_admin_visitor_access_server_tools({
                         name: server.name,
@@ -593,10 +600,15 @@
                       })}
                     </li>
                   {/each}
+                  {#if reachableServers.length > 0 && blockers.includes("external_tools_unacknowledged")}
+                    <li class="text-secondary">
+                      {m.widget_admin_visitor_access_unacknowledged()}
+                    </li>
+                  {/if}
                   {#each visitorCapabilities as capability (capability)}
                     <li>{m.widget_admin_visitor_access_capability({ name: capability })}</li>
                   {/each}
-                  {#if visitorServers.length + visitorCapabilities.length > 0 && !(current.show_tool_activity ?? true)}
+                  {#if reachableServers.length + visitorCapabilities.length > 0 && !(current.show_tool_activity ?? true)}
                     <li class="text-secondary">{m.widget_admin_visitor_access_hidden()}</li>
                   {/if}
                 </ul>

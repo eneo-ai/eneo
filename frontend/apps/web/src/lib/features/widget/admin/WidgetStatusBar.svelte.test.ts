@@ -113,6 +113,40 @@ describe("WidgetStatusBar", () => {
     );
   });
 
+  test.each([
+    {
+      action: "activating",
+      current: widget({ status: "draft", activated_at: null }),
+      button: "widget_admin_activate",
+      fail: { onActivate: vi.fn(async () => Promise.reject(new Error("offline"))) }
+    },
+    {
+      action: "pausing",
+      current: widget(),
+      button: "widget_admin_pause",
+      fail: { onPause: vi.fn(async () => Promise.reject(new Error("offline"))) }
+    }
+  ])("$action that fails gives focus back to its button", async ({ current, button, fail }) => {
+    const noop = vi.fn(async () => {});
+    render(WidgetStatusBar, {
+      autosave: new WidgetAutosave(current, vi.fn()),
+      isAdmin: true,
+      onActivate: noop,
+      onAcknowledgeExternalTools: noop,
+      onPause: noop,
+      onArchive: noop,
+      onReload: noop,
+      ...fail
+    });
+    // Busy, the button is disabled, which drops focus to the page.
+    const pressed = page.getByRole("button", { name: button }).element() as HTMLElement;
+    pressed.focus();
+    pressed.click();
+
+    await vi.waitFor(() => expect(Object.values(fail)[0]).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(document.activeElement).toBe(pressed));
+  });
+
   test("lists what the server refused so it can be found on any tab", async () => {
     const autosave = new WidgetAutosave(
       widget(),

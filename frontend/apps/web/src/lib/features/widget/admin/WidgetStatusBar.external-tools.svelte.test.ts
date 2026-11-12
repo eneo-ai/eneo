@@ -206,6 +206,63 @@ describe("WidgetStatusBar external MCP tools", () => {
     }
   );
 
+  test("an acknowledgement that fails keeps focus in the dialog, on its button", async () => {
+    renderBar(widget(), {
+      onAcknowledgeExternalTools: vi.fn(async () => Promise.reject(new Error("offline")))
+    });
+    click(page.getByRole("button", { name: "widget_admin_activate" }));
+    const dialog = page.getByRole("alertdialog");
+    await userEvent.click(dialog.getByRole("checkbox"));
+    const confirm = dialog.getByRole("button", { name: "widget_admin_activate" });
+    press(confirm);
+
+    await vi.waitFor(() => expect(document.activeElement).toBe(confirm.element()));
+    await expect.element(dialog).toBeVisible();
+  });
+
+  test("Escape leaves the dialog open while the acknowledgement is saved", async () => {
+    let finish!: () => void;
+    const { onActivate } = renderBar(widget(), {
+      onAcknowledgeExternalTools: vi.fn(() => new Promise<void>((resolve) => (finish = resolve)))
+    });
+    click(page.getByRole("button", { name: "widget_admin_activate" }));
+    const dialog = page.getByRole("alertdialog");
+    await userEvent.click(dialog.getByRole("checkbox"));
+    await userEvent.click(dialog.getByRole("button", { name: "widget_admin_activate" }));
+    await expect.element(dialog.getByRole("button", { name: "cancel" })).toBeDisabled();
+
+    await userEvent.keyboard("{Escape}");
+    await expect.element(dialog).toBeVisible();
+
+    finish();
+    await vi.waitFor(() => expect(onActivate).toHaveBeenCalledTimes(1));
+    await expect.element(dialog).not.toBeInTheDocument();
+  });
+
+  test("a list that changes again is announced as a new alert", async () => {
+    const onAcknowledgeExternalTools = vi
+      .fn(async () => {})
+      .mockRejectedValueOnce(refused(409, "external_tools_changed", [casefiles, booking]))
+      .mockRejectedValueOnce(refused(409, "external_tools_changed", [booking]));
+    renderBar(widget(), { onAcknowledgeExternalTools });
+    click(page.getByRole("button", { name: "widget_admin_activate" }));
+    const dialog = page.getByRole("alertdialog");
+    const confirm = dialog.getByRole("button", { name: "widget_admin_activate" });
+
+    await userEvent.click(dialog.getByRole("checkbox"));
+    await userEvent.click(confirm);
+    await expect.element(dialog.getByText("Bokningen")).toBeVisible();
+    const first = dialog.getByRole("alert").element();
+
+    await userEvent.click(dialog.getByRole("checkbox"));
+    await userEvent.click(confirm);
+    await expect.element(dialog.getByText("Ärendesystemet")).not.toBeInTheDocument();
+    await expect
+      .element(dialog.getByRole("alert"))
+      .toHaveTextContent("widget_admin_external_tools_changed");
+    expect(dialog.getByRole("alert").element()).not.toBe(first);
+  });
+
   test("an admin acknowledges a live widget's newer tools in place, without pausing", async () => {
     const live = widget({
       status: "active",

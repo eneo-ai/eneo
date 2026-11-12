@@ -153,6 +153,24 @@ describe("WidgetPreview tokens", () => {
     }
   });
 
+  test("a save that rotates the tokens loads no frame on the revoked one", async () => {
+    const { screen, mints, previewToken } = renderPreview();
+    await expect.poll(() => previewToken.mock.calls.length).toBe(1);
+    mints[0].resolve({ token: "first", expires_in: 3600 });
+    await expect.poll(frameSrc).toContain("preview=first");
+
+    // The save's new updated_at would reload the frame on the old token.
+    await screen.rerender({
+      widget: { ...widget, token_generation: 2, updated_at: "2026-09-21T10:05:00Z" }
+    });
+    await expect.poll(() => previewToken.mock.calls.length).toBe(2);
+    expect(document.querySelector("iframe")).toBeNull();
+    await expect.element(page.getByText("widget_preview_loading")).toBeVisible();
+
+    mints[1].resolve({ token: "second", expires_in: 3600 });
+    await expect.poll(frameSrc).toContain("preview=second");
+  });
+
   test("a stale mint that fails does not fail the current preview", async () => {
     const { screen, mints, previewToken } = renderPreview();
     await expect.poll(() => previewToken.mock.calls.length).toBe(1);

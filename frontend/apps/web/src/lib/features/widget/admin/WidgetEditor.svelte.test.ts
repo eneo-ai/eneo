@@ -504,6 +504,47 @@ describe("WidgetEditor", () => {
     await expect.element(access.getByText("widget_admin_visitor_access_never")).toBeVisible();
   });
 
+  test.each([
+    {
+      case: "the organisation does not allow them",
+      blockers: ["external_tools_not_allowed"],
+      items: ["widget_admin_visitor_access_knowledge", "widget_admin_visitor_access_not_allowed"]
+    },
+    {
+      case: "newer ones wait for an admin",
+      blockers: ["external_tools_unacknowledged"],
+      items: [
+        "widget_admin_visitor_access_knowledge",
+        "widget_admin_visitor_access_server_tools(Kommunens ärenden|Sök ärende)",
+        "widget_admin_visitor_access_unacknowledged",
+        "widget_admin_visitor_access_hidden"
+      ]
+    }
+  ])(
+    "visitor access lists only the tools visitors reach when $case",
+    async ({ blockers, items }) => {
+      renderEditor(
+        widget({
+          external_tools: [
+            { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+          ],
+          external_tools_acknowledged: false,
+          activation_blockers: blockers,
+          show_tool_activity: false
+        } as unknown as Partial<Widget>)
+      );
+      await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+      const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
+      await expect.element(access).toBeVisible();
+      expect(
+        access
+          .getByRole("listitem")
+          .elements()
+          .map((item) => item.textContent?.trim())
+      ).toEqual(items);
+    }
+  );
+
   test("image generation alone is not reported as a hidden tool", async () => {
     renderEditor(widget({ show_tool_activity: false }), {
       enabled_capabilities: ["image_generation"]

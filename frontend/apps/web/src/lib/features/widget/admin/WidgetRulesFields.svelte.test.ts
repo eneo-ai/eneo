@@ -71,8 +71,20 @@ describe("WidgetRulesFields governed settings", () => {
     await expect.element(origins()).toBeDisabled();
     await expect.element(retention()).toBeDisabled();
     await expect.element(page.getByRole("switch")).toBeDisabled();
+    // A locked field says why when it is reached.
+    for (const field of [
+      origins(),
+      retention(),
+      page.getByRole("switch"),
+      page.getByLabelText("widget_admin_bot_protection", { exact: true })
+    ]) {
+      await expect.element(field).toHaveAccessibleDescription(/widget_admin_governed_while_active/);
+    }
     // The budget is policy-capped at run time and stays editable.
     await expect.element(budget()).toBeEnabled();
+    await expect
+      .element(budget())
+      .not.toHaveAccessibleDescription(/widget_admin_governed_while_active/);
   });
 
   test("an admin, or anyone on a draft, edits every rule", async () => {
@@ -145,6 +157,24 @@ describe("WidgetRulesFields origins", () => {
       expect(save).toHaveBeenCalledWith({ allowed_origins: ["https://*.kommun.se"], revision: 0 })
     );
     await expect.element(origins()).toHaveAttribute("aria-invalid", "false");
+  });
+
+  test("a list typed back to the saved one is explained as the saved one", async () => {
+    setup(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      })
+    );
+    await userEvent.fill(origins(), "https://*.se\nkontakt");
+    await userEvent.tab();
+    await expect.element(origins()).toHaveAccessibleDescription(/widget_admin_origins_invalid/);
+
+    await userEvent.fill(origins(), "https://*.se");
+    await userEvent.tab();
+    await expect
+      .element(origins())
+      .toHaveAccessibleDescription(/widget_admin_blocker_origin_too_broad/);
   });
 
   test("follows the saved list after a reload instead of keeping a stale copy", async () => {
