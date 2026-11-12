@@ -338,6 +338,9 @@ describe("HistoryTab", () => {
     renderHistory();
     expect(await screen.findByRole("button", { name: "Namnlös" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Åtgärder för Namnlös" })).toBeTruthy();
+    fireEvent.click(await rowMenuItem("Namnlös", "Ta bort"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    expect(within(dialog).getByText("Namnlös")).toBeTruthy();
   });
 
   it("has no axe violations", async () => {

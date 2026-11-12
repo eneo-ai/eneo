@@ -509,7 +509,10 @@ class AssistantService:
         if not is_builtin_provider(server.http_auth_type):
             return server
         token = self.auth_service.create_scoped_mcp_token(
-            self.user, assistant_id=assistant_id, mcp_server_id=server.id
+            self.user,
+            assistant_id=assistant_id,
+            mcp_server_id=server.id,
+            derived_from=self.user.credential,
         )
         authenticated = copy.copy(server)
         authenticated.http_auth_config_schema = {"token": token}
@@ -3813,6 +3816,7 @@ class AssistantService:
                     self.user,
                     assistant_id=prepared.assistant_to_ask.id,
                     table_tools=table_tools_attached,
+                    derived_from=self.user.credential,
                 )
             return scoped_token
 

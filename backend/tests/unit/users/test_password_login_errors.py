@@ -33,8 +33,7 @@ from tests.fixtures import TEST_TENANT, TEST_USER
 LOGIN_PATH = "/api/v1/users/login/token/"
 EMAIL = "login@example.com"
 PASSWORD = "LoginCredential-SENTINEL-123!"
-TOKEN = AccessToken(access_token="issued-token", token_type="bearer")
-# What the session store returns for TOKEN: the token the login hands out.
+# What the session store returns: the token the login hands out.
 SESSION_TOKEN = AccessToken(access_token="session-token", token_type="bearer")
 PEER_IP = "10.0.0.1"
 
@@ -53,7 +52,7 @@ def login_endpoint(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> Iterator[LoginEndpoint]:
     service = AsyncMock(spec=UserService)
-    service.login.return_value = TOKEN
+    service.login.return_value = TEST_USER
     count = AsyncMock(return_value=LoginAttempt(True, 4, 600))
     clear = AsyncMock()
     monkeypatch.setattr(user_router, "count_login_attempt", count)
@@ -470,7 +469,9 @@ def test_success_preserves_the_token_and_recovers_from_limiter_outages(
     assert response.status_code == 200
     # The issued token, carrying the session the login started for it.
     assert response.json() == SESSION_TOKEN.model_dump()
-    login_endpoint.sessions.start.assert_awaited_once_with(TOKEN.access_token)
+    login_endpoint.sessions.start.assert_awaited_once_with(
+        TEST_USER, auth_method="password"
+    )
     assert PASSWORD not in structured_logs(caplog)
     if limiter_failure == "count":
         login_endpoint.clear.assert_not_awaited()

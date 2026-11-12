@@ -11,6 +11,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -32,10 +33,15 @@ from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.database.tables.identity_bindings_table import IdentityBindings
 from eneo.database.tables.users_table import Users
+from eneo.jobs import job_manager as job_manager_module
+from eneo.jobs.job_manager import JobManager
 from eneo.main.config import get_settings, set_settings
+from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import OTELJSONFormatter
+from eneo.tenants.tenant import TenantBase
 from eneo.users import user_service as user_service_module
 from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.user_repo import UsersRepository
 from tests.fake_oidc_provider import FakeOidcProvider
 from tests.integration.test_federation_tenant_admin import (
     SECRET,
@@ -44,6 +50,7 @@ from tests.integration.test_federation_tenant_admin import (
     _store,
     _stored,
 )
+from tests.silent_server import freezing_redis
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -362,6 +369,112 @@ async def test_a_bound_account_takes_no_new_pair_by_email(
     assert [c["error_message"] for c in _conflicts(enqueued)] == ["account_bound"]
 
 
+@pytest.mark.parametrize("entry", ["generic", "browser"])
+async def test_a_removed_account_signs_in_again_once_an_admin_reactivates_it(
+    client, sign_in, provider, db_container, entry
+):
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email(EMAIL)
+        token = container.auth_service().create_access_token_for_user(admin)
+    admin_headers = {"Authorization": f"Bearer {token}"}
+    member = "leaver@example.com"
+    created = await client.post(
+        "/api/v1/admin/users/",
+        json={"email": member, "username": "leaver"},
+        headers=admin_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+    provider.token_claims["email"] = member
+    assert await sign_in(entry, "person-leaver") == SIGNED_IN
+    account = UUID(created.json()["id"])
+    before = await _rows()
+
+    removed = await client.delete("/api/v1/admin/users/leaver", headers=admin_headers)
+    assert removed.status_code == 200, removed.text
+    reactivated = await client.post(
+        "/api/v1/admin/users/leaver/reactivate", headers=admin_headers
+    )
+    assert reactivated.status_code == 200, reactivated.text
+
+    assert await sign_in(entry, "person-leaver") == SIGNED_IN
+    # Through its binding: no new account, binding or email match.
+    assert (await _rows())["users"] == before["users"]
+    assert await _bindings() == {(account, CLIENT, "person-leaver")}
+    assert await _bound_methods(account) == ["email_match"]
+
+
+@pytest.mark.parametrize("taken", ["before the reactivation", "after its check"])
+async def test_a_removed_account_whose_email_is_live_again_is_not_reactivated(
+    client, db_container, patch_auth_service_jwt, monkeypatch, taken
+):
+    """Only one live account may hold an email address, in any organisation.
+    Another organisation (SCIM, sign-in) may take the address of a removed
+    account, also while it is being reactivated; reactivating it is then a
+    conflict, not a 500."""
+    async with db_container() as container:
+        admin = await container.user_repo().get_user_by_email(EMAIL)
+        token = container.auth_service().create_access_token_for_user(admin)
+        other = await container.tenant_repo().add(
+            TenantBase(name=f"reuse-{uuid4().hex[:8]}")
+        )
+    admin_headers = {"Authorization": f"Bearer {token}"}
+    email = "leaver@example.com"
+    created = await client.post(
+        "/api/v1/admin/users/",
+        json={"email": email, "username": "leaver"},
+        headers=admin_headers,
+    )
+    assert created.status_code in (200, 201), created.text
+    removed = await client.delete("/api/v1/admin/users/leaver", headers=admin_headers)
+    assert removed.status_code == 200, removed.text
+
+    async def take_address() -> None:
+        async with sessionmanager.session() as session, session.begin():
+            await session.execute(
+                sa.insert(Users).values(
+                    email=email,
+                    username="successor",
+                    state="active",
+                    tenant_id=other.id,
+                )
+            )
+
+    if taken == "before the reactivation":
+        await take_address()
+    else:
+        lookup = UsersRepository.get_users_by_email
+
+        async def look_up_then_lose_the_race(self, address, *, limit):
+            found = await lookup(self, address, limit=limit)
+            await take_address()
+            return found
+
+        monkeypatch.setattr(
+            UsersRepository, "get_users_by_email", look_up_then_lose_the_race
+        )
+
+    reactivated = await client.post(
+        "/api/v1/admin/users/leaver/reactivate", headers=admin_headers
+    )
+
+    assert reactivated.status_code == 400, reactivated.text
+    assert reactivated.json()["eneo_error_code"] == ErrorCodes.UNIQUE_USER_ERROR
+    assert await _accounts(email) == [
+        ("leaver", "deleted", False),
+        ("successor", "active", True),
+    ]
+
+
+async def _accounts(email: str) -> list[tuple[str, str, bool]]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(Users.username, Users.state, Users.deleted_at.is_(None))
+            .where(Users.email == email)
+            .order_by(Users.username)
+        )
+        return [tuple(row) for row in rows.tuples()]
+
+
 @pytest.mark.parametrize("change", ["pairwise", "pairwise-with-window", "one-subject"])
 async def test_a_client_id_change_by_an_admin_needs_a_window_for_pairwise_subjects(
     client, sign_in, provider, enqueued, db_container, admin_user, change
@@ -501,6 +614,41 @@ async def test_a_refusal_whose_audit_never_ends_keeps_the_typed_403(
     body = response.json()
     assert (body["code"], body["eneo_error_code"]) == ("identity_conflict", 9082)
     assert await _bindings() == {(await _account(), API, "person-a")}
+
+
+async def test_an_identity_conflict_still_answers_403_when_the_audit_queue_is_silent(
+    sign_in, provider, monkeypatch
+):
+    # The callback audits its refusal through the queue, outside any store
+    # deadline. A queue whose Redis answers the enqueue's WATCH and then
+    # nothing ends the enqueue at the read bound; the refusal still answers.
+    assert await sign_in("generic", "person-a") == SIGNED_IN
+
+    async with freezing_redis(freeze_after=b"WATCH") as redis:
+        settings = get_settings().model_copy(
+            update={
+                "redis_host": "127.0.0.1",
+                "redis_port": redis.port,
+                "redis_db": 0,
+                "redis_conn_timeout": 1,
+            }
+        )
+        manager = JobManager()
+        with monkeypatch.context() as patched:
+            patched.setattr(job_manager_module, "get_settings", lambda: settings)
+            await manager.init()
+        monkeypatch.setattr(audit_service_module, "job_manager", manager)
+        try:
+            started = time.monotonic()
+            async with asyncio.timeout(15):
+                outcome = await sign_in("generic", "someone-else")
+            elapsed = time.monotonic() - started
+        finally:
+            await manager.close()
+
+    assert outcome == "identity_conflict"
+    assert elapsed < 6
+    assert b"WATCH" in redis.commands
 
 
 @contextlib.contextmanager
@@ -694,3 +842,31 @@ async def test_pairwise_subjects_under_the_default_claim_bind_each_client_apart(
         (account, API, provider.subject_for(CLIENT)),
     }
     assert [c["error_message"] for c in _conflicts(enqueued)] == ["subject_mismatch"]
+
+
+async def test_env_mode_api_tokens_bind_under_the_env_subject_claim(
+    raw_client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    provider,
+    test_tenant,
+    enqueued,
+):
+    # In env mode the OIDC_* settings are the sign-in: a stored config left
+    # on the tenant, here one that names another subject claim, is ignored.
+    stored = await _stored(test_tenant.id)
+    await _store(
+        test_tenant.id,
+        {**stored, "claims_mapping": {"email": "email", "subject": "oid"}},
+    )
+    set_settings(get_settings().model_copy(update={"federation_enabled": False}))
+    token = provider.access_token(
+        audience=API, client_id=CLIENT, email=EMAIL, sub="person-a", oid="person-oid"
+    )
+
+    response = await raw_client.get(
+        "/api/v1/spaces/type/personal/", headers={"Authorization": f"Bearer {token}"}
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _bindings() == {(await _account(), API, "person-a")}

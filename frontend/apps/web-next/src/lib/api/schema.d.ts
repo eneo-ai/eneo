@@ -10339,6 +10339,7 @@ export interface components {
       | "identity_conflict"
       | "identity_rebinding_updated"
       | "identity_migration_window_updated"
+      | "user_access_token_issued"
       | "assistant_created"
       | "assistant_deleted"
       | "assistant_updated"
@@ -15596,6 +15597,8 @@ export interface components {
       issuer?: string | null;
       /** Allowed Domains */
       allowed_domains: string[];
+      /** Allowed Endpoint Hosts */
+      allowed_endpoint_hosts?: string[];
       /** Additional Redirect Uris */
       additional_redirect_uris: string[];
       /** Signing Algorithms */
@@ -20296,6 +20299,15 @@ export interface components {
        */
       allowed_domains?: string[] | null;
       /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
+      /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri
        * @example https://stockholm.eneo.se
@@ -21963,6 +21975,15 @@ export interface components {
        *     ]
        */
       allowed_domains?: string[];
+      /**
+       * Allowed Endpoint Hosts
+       * @description Hosts other than the discovery endpoint's that the provider's token endpoint and JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Omitted: only the discovery host.
+       * @example [
+       *       "oauth2.googleapis.com",
+       *       "www.googleapis.com"
+       *     ]
+       */
+      allowed_endpoint_hosts?: string[] | null;
       /**
        * Canonical Public Origin
        * @description Canonical public origin for this tenant (e.g., https://tenant.eneo.se). Required when federation is enabled to construct redirect_uri
@@ -60721,6 +60742,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   delete_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_delete: {
@@ -60832,6 +60862,15 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
+      /** @description Bad Gateway */
+      502: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
     };
   };
   test_tenant_federation_api_v1_sysadmin_tenants__tenant_id__federation_test_post: {
@@ -60890,8 +60929,8 @@ export interface operations {
           "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
-      /** @description Internal Server Error */
-      500: {
+      /** @description Bad Gateway */
+      502: {
         headers: {
           [name: string]: unknown;
         };

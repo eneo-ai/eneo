@@ -76,6 +76,9 @@ class DerivedCopyRetentionTask:
             *(reason.key for reason in CONVERSATION_FILE_BLOCKS),
         }
     )
+    # A conversation that is no longer due when its unit runs (a new question,
+    # a period made longer) is kept by the policy, not by a blocker.
+    not_due_keys = frozenset({ConversationBlockReason.NO_LONGER_DUE.key})
 
     def __init__(
         self,
@@ -144,6 +147,11 @@ class DerivedCopyRetentionTask:
         costs: Mapping[UUID, int] = (
             await self.empty_copies.lock_empty(invalid) if invalid else {}
         )
+        skipped = [copy for copy in invalid if copy not in costs]
+        if skipped:
+            out.blocked[
+                ConversationBlockReason.ROOT_LOCKED.key
+            ] += await self.empty_copies.count_empty(skipped)
         released = await self.empty_copies.delete_due(tuple(costs)) if costs else ()
         out.blocked[ConversationBlockReason.NO_LONGER_DUE.key] += len(costs) - len(
             released
@@ -156,6 +164,7 @@ class DerivedCopyRetentionTask:
             rows=len(edges)
             + edges_deleted
             + len(costs)
+            + len(skipped)
             + sum(costs[copy] for copy in released),
             exhausted=len(edges) < limit,
             cursor=edge_position(last.copy_session_id, last.source_question_id),

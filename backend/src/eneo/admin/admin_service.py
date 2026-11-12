@@ -4,6 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import EmailStr, TypeAdapter
+from sqlalchemy.exc import IntegrityError
 
 from eneo.admin.admin_models import (
     AccountIdentity,
@@ -45,12 +46,16 @@ from eneo.users.user import (
     UserAdminView,
     UserInDB,
     UserState,
+    UserUpdate,
     UserUpdatePublic,
 )
 from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
 
 logger = get_logger(__name__)
+
+# The users table's unique index on the address of live accounts.
+_ACTIVE_EMAIL_INDEX = "idx_unique_active_user_email"
 
 _EMAIL: TypeAdapter[str] = TypeAdapter(EmailStr)
 
@@ -344,8 +349,13 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def reactivate_tenant_user(self, username: str) -> UserInDB:
-        """Reactivate user from any state (INACTIVE or DELETED)"""
+    async def reactivate_tenant_user(self, username: str) -> tuple[UserState, UserInDB]:
+        """Reactivate a user from any state (INACTIVE or DELETED).
+
+        Returns the state the user had and the reactivated user. A removed
+        account's deletion timestamp is cleared in the same update: sign-in
+        skips removed accounts, so a reactivated one must not stay one.
+        """
         logger.info(
             f"Admin user {self.user.username} reactivating user {username} in tenant {self.user.tenant_id}"
         )
@@ -369,19 +379,33 @@ class AdminService:
 
         # Reactivate user: set to ACTIVE and clear deleted_at if present
         if user_in_db.deleted_at is not None:
+            # One live account per address, in any organisation; another may
+            # have taken a removed account's address since. This check ignores
+            # case, as account creation does; the unique index below does not.
+            if await self.user_repo.get_users_by_email(user_in_db.email, limit=1):
+                raise UniqueUserException("That email is already taken.")
             # Clear deletion timestamp when reactivating from DELETED state
             logger.info(
                 f"Clearing deletion timestamp for user {username} during reactivation"
             )
 
-        result = await self.user_service.update_user(
-            user_in_db.id, UserUpdatePublic(state=UserState.ACTIVE)
-        )
+        try:
+            result = await self.user_repo.update(
+                UserUpdate(id=user_in_db.id, state=UserState.ACTIVE, deleted_at=None)
+            )
+        except IntegrityError as exc:
+            # Another account took the address after the check; the request's
+            # transaction rolls back.
+            if _ACTIVE_EMAIL_INDEX not in str(exc.orig):
+                raise
+            raise UniqueUserException("That email is already taken.") from exc
+        if result is None:
+            raise NotFoundException(f"User '{username}' not found in your tenant")
 
         logger.info(
             f"Successfully reactivated user {username} in tenant {self.user.tenant_id}"
         )
-        return result
+        return user_in_db.state, result
 
     @validate_permissions(Permission.ADMIN)
     async def get_inactive_tenant_users(self) -> list[UserStateListItem]:

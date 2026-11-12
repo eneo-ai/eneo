@@ -419,8 +419,16 @@ class SessionService:
             name_filter=name_filter,
         )
 
-    async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
-        session = await self.session_repo.update(session_update)
+    async def update_session(
+        self, session_update: SessionUpdate, *, title_from_turns_at: int | None = None
+    ) -> SessionInDB:
+        session = await self.session_repo.update(
+            session_update, title_from_turns_at=title_from_turns_at
+        )
+        if session is None and title_from_turns_at is not None:
+            # A turn the title was made from was removed meanwhile: the title
+            # is dropped and the conversation keeps the name it has.
+            return await self.get_session_by_uuid(session_update.id)
         return self._check_exists_and_belongs_to_user(session)
 
     async def delete(

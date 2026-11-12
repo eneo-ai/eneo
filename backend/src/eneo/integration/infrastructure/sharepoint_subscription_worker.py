@@ -8,6 +8,7 @@ This worker handles:
 5. Lifecycle events - renews or recreates a subscription Graph asked about
 """
 
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional, cast
 
@@ -27,6 +28,7 @@ from eneo.integration.infrastructure.sharepoint_webhook_service import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 from eneo.worker.worker import Worker
 
@@ -65,11 +67,12 @@ async def persist_renewal_failure(
         async with session.begin_nested():
             await container.sharepoint_subscription_repo().update(subscription)
     except Exception as exc:
-        logger.error(
-            "Failed to record renewal failure for subscription %s: %s",
+        log_error(
+            logger,
+            logging.ERROR,
+            "Failed to record renewal failure for subscription %s",
             subscription.subscription_id,
-            exc,
-            exc_info=True,
+            error=exc,
         )
 
 
@@ -116,8 +119,12 @@ async def get_token_for_subscription(
             id=subscription.user_integration_id
         )
     except Exception as e:
-        logger.error(
-            f"Failed to get user integration for subscription {subscription.subscription_id}: {e}"
+        log_error(
+            logger,
+            logging.ERROR,
+            "Failed to get user integration for subscription %s",
+            subscription.subscription_id,
+            error=e,
         )
         return None
 
@@ -140,8 +147,12 @@ async def get_token_for_subscription(
             return SimpleSharePointToken(access_token=access_token)
 
         except Exception as e:
-            logger.error(
-                f"Failed to get tenant app token for subscription {subscription.subscription_id}: {e}"
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to get tenant app token for subscription %s",
+                subscription.subscription_id,
+                error=e,
             )
             return None
     else:
@@ -170,8 +181,12 @@ async def get_token_for_subscription(
             return token  # type: ignore[return-value]
 
         except Exception as e:
-            logger.error(
-                f"Failed to get/refresh OAuth token for subscription {subscription.subscription_id}: {e}"
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to get/refresh OAuth token for subscription %s",
+                subscription.subscription_id,
+                error=e,
             )
             return None
 
@@ -188,12 +203,14 @@ async def maintain_subscriptions(requests: list[SubscriptionMaintenance]) -> Non
             async with sessionmanager.session() as session, session.begin():
                 container = Container(session=providers.Object(session))
                 await _maintain_subscription(container, request)
-        except Exception:
-            logger.error(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not handle %s for SharePoint subscription %s",
                 request.event,
                 request.subscription_id,
-                exc_info=True,
+                error=exc,
             )
 
 
@@ -291,11 +308,13 @@ async def renew_expiring_subscriptions(container: Container):
                 renewed = await _renew_one(
                     subscription, container, sharepoint_subscription_service
                 )
-        except Exception:
-            logger.error(
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
                 "Could not commit the renewal of subscription %s",
                 subscription.subscription_id,
-                exc_info=True,
+                error=exc,
             )
             renewed = False
         if renewed:
@@ -348,9 +367,12 @@ async def _renew_one(
                     subscription.subscription_id,
                 )
     except Exception as exc:
-        logger.error(
-            f"Error renewing subscription {subscription.subscription_id}: {exc}",
-            exc_info=True,
+        log_error(
+            logger,
+            logging.ERROR,
+            "Error renewing subscription %s",
+            subscription.subscription_id,
+            error=exc,
         )
         await record_failed_attempt(
             subscription, container, exc, failures_before=failures_before
@@ -453,9 +475,12 @@ async def cleanup_orphaned_subscriptions(container: Container):
                 failed_count += 1
 
         except Exception as exc:
-            logger.error(
-                f"Error cleaning up subscription {subscription.subscription_id}: {exc}",
-                exc_info=True,
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error cleaning up subscription %s",
+                subscription.subscription_id,
+                error=exc,
             )
             failed_count += 1
 

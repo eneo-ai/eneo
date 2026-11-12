@@ -6,6 +6,7 @@ to SharePointIndex; folder membership belongs to sharepoint_scope. No token,
 transaction or progress lifecycle is owned here.
 """
 
+import logging
 import random
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
@@ -28,6 +29,7 @@ from eneo.integration.infrastructure.content_service.sharepoint_scope import (
 )
 from eneo.integration.infrastructure.content_service.types import SyncStats
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
@@ -114,12 +116,12 @@ class SharePointReconciliation:
             # Escalated to error (matching the sibling cap guard): a persistent
             # enumeration failure silently disables orphan cleanup for this
             # integration_knowledge, so it must be operator-visible, not a quiet warning.
-            logger.error(
-                "Skipping reconciliation for integration_knowledge %s: could not build "
-                "an authoritative picture (not deleting from a partial list): %s",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Skipping reconciliation for integration_knowledge %s: could not build an authoritative picture (not deleting from a partial list)",
                 integration_knowledge.id,
-                exc,
-                exc_info=True,
+                error=exc,
             )
             stats["reconcile_warning"] = (
                 "Orphan cleanup skipped: could not list SharePoint items "
@@ -197,7 +199,9 @@ class SharePointReconciliation:
                     client, drive_id, folder_id
                 )
             except ScopeFolderUnavailable as exc:
-                logger.warning("Stopped verifying orphans: %s", exc)
+                log_error(
+                    logger, logging.WARNING, "Stopped verifying orphans", error=exc
+                )
                 return []
         gone: list[str] = []
         for offset in range(0, len(orphan_ids), SharePointContentClient.BATCH_SIZE):
@@ -205,7 +209,9 @@ class SharePointReconciliation:
             try:
                 results = await client.get_item_metadata_batch(drive_id, batch)
             except Exception as exc:
-                logger.warning("Stopped verifying orphans: %s", exc)
+                log_error(
+                    logger, logging.WARNING, "Stopped verifying orphans", error=exc
+                )
                 break
             unavailable = False
             for item_id in batch:
@@ -279,12 +285,13 @@ class SharePointReconciliation:
                 folder_id=folder_id,
             )
         except Exception as exc:
-            logger.warning(
-                "Failed to enumerate out-of-scope subtree for folder %s (%s): %s; "
-                "the next pass replays the folder",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Failed to enumerate out-of-scope subtree for folder %s (%s); the next pass replays the folder",
                 folder_name,
                 folder_id,
-                exc,
+                error=exc,
             )
             sync_results.count_failure(
                 stats,

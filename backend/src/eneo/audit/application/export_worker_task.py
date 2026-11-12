@@ -1,5 +1,6 @@
 """Audit log export worker task."""
 
+import logging
 import os
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from eneo.audit.infrastructure.export_job_manager import ExportJobManager
 from eneo.database.database import AsyncSession
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -142,13 +144,12 @@ async def export_audit_logs_task(
 
     except Exception as e:
         error_message = str(e)
-        logger.exception(
+        log_error(
+            logger,
+            logging.ERROR,
             "Export job failed",
-            extra={
-                "job_id": job_id,
-                "tenant_id": str(task_params.tenant_id),
-                "error": error_message,
-            },
+            error=e,
+            extra={"job_id": job_id, "tenant_id": str(task_params.tenant_id)},
         )
 
         # Mark job as failed

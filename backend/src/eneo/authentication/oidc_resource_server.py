@@ -14,9 +14,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import jwt
-from aiohttp import ClientTimeout
 
-from eneo.main.aiohttp_client import aiohttp_client
+from eneo.authentication.oidc import outbound
+from eneo.authentication.oidc.profile import OidcProviderError, check_endpoint_hosts
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
@@ -29,7 +29,6 @@ logger = get_logger(__name__)
 # Asymmetric signature algorithms accepted for IdP access tokens.
 RS256_FAMILY = ["RS256", "RS384", "RS512"]
 JWKS_REFRESH_COOLDOWN_SECONDS = 30
-JWKS_FETCH_TIMEOUT_SECONDS = 5
 
 
 class JWKSFetchError(Exception):
@@ -37,12 +36,11 @@ class JWKSFetchError(Exception):
 
 
 async def _fetch_json(url: str) -> dict[str, Any]:
-    async with aiohttp_client().get(
-        url, timeout=ClientTimeout(total=JWKS_FETCH_TIMEOUT_SECONDS)
-    ) as resp:
-        if resp.status != 200:
-            raise JWKSFetchError(f"HTTP {resp.status} fetching {url}")
-        return await resp.json()
+    try:
+        return await outbound.get_json(url)
+    except outbound.OidcFetchError as exc:
+        # A fixed reason; the caller logs the issuer or JWKS address.
+        raise JWKSFetchError(exc.reason) from exc
 
 
 class JWKSCache:
@@ -116,8 +114,14 @@ class JWKSCache:
             discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
             discovery = await _fetch_json(discovery_url)
             jwks_uri = discovery.get("jwks_uri")
-        if not jwks_uri:
-            raise JWKSFetchError(f"No jwks_uri in discovery document at {issuer}")
+            if not isinstance(jwks_uri, str) or not jwks_uri:
+                raise JWKSFetchError(f"No jwks_uri in discovery document at {issuer}")
+            # Resource-server mode has no list of other hosts: the keys are on
+            # the issuer's host. (A sign-in's profile checked its own.)
+            try:
+                check_endpoint_hosts(discovery_url, {"JWKS URI": jwks_uri}, ())
+            except OidcProviderError as exc:
+                raise JWKSFetchError(str(exc)) from exc
 
         jwks = await _fetch_json(jwks_uri)
 

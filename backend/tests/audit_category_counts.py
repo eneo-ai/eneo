@@ -9,7 +9,7 @@ EXPECTED_CATEGORY_COUNTS: dict[str, int] = {
     # Includes WIDGET_PREVIEW_TOKEN_MINTED and WIDGET_EXTERNAL_TOOL_CALLED.
     "admin_actions": 69,
     "user_actions": 52,
-    "security_events": 17,
+    "security_events": 18,
     "file_operations": 8,
     "integration_events": 24,
     "system_actions": 6,

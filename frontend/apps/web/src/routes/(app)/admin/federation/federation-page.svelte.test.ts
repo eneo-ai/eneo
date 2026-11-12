@@ -507,6 +507,19 @@ describe("refused saves", () => {
     await expect.element(error).toHaveFocus();
   });
 
+  test("an endpoint host the operator has not listed is named, with what to do", async () => {
+    await saveDomainChange({
+      type: "failure",
+      status: 400,
+      data: { failure: { code: "endpoint_host", host: "tokens.idp.example" } }
+    });
+
+    const error = page
+      .getByRole("alert")
+      .filter({ hasText: 'federation_admin_endpoint_host_refused {"host":"tokens.idp.example"}' });
+    await expect.element(error).toHaveFocus();
+  });
+
   test("an unexpected answer is a focused form error", async () => {
     fetchSpy.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     show({ kind: "ready", view });

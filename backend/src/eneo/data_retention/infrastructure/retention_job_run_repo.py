@@ -122,6 +122,26 @@ class RetentionJobRunRecord:
     error_code: RetentionErrorCode | None
     # The last renewal; a running row that stopped renewing was abandoned.
     heartbeat_at: datetime
+    # When this execution read its overdue work; None when it did not (yet).
+    overdue_observed_at: datetime | None = None
+
+
+def _record(row: RetentionJobRuns | None) -> RetentionJobRunRecord | None:
+    if row is None:
+        return None
+    return RetentionJobRunRecord(
+        outcome=RetentionJobOutcome(row.outcome),
+        blocked=_int_map(row.blocked),
+        error_code=(
+            RetentionErrorCode(row.error_code) if row.error_code is not None else None
+        ),
+        heartbeat_at=row.heartbeat_at,
+        overdue_observed_at=row.overdue_observed_at,
+    )
+
+
+# Executions that ran to an end of their own, a failure included.
+_ENDED_OUTCOMES = RETENTION_COMPLETED_OUTCOMES | {RetentionJobOutcome.FAILED}
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,23 +339,35 @@ class RetentionJobRunRepository:
 
     async def latest(self, task: str) -> RetentionJobRunRecord | None:
         """The task's newest execution (any outcome): what health reports of it."""
-        row = await self.session.scalar(
-            sa.select(RetentionJobRuns)
-            .where(RetentionJobRuns.task == task)
-            .order_by(RetentionJobRuns.started_at.desc(), RetentionJobRuns.id.desc())
-            .limit(1)
+        return _record(
+            await self.session.scalar(
+                sa.select(RetentionJobRuns)
+                .where(RetentionJobRuns.task == task)
+                .order_by(
+                    RetentionJobRuns.started_at.desc(), RetentionJobRuns.id.desc()
+                )
+                .limit(1)
+            )
         )
-        if row is None:
-            return None
-        return RetentionJobRunRecord(
-            outcome=RetentionJobOutcome(row.outcome),
-            blocked=_int_map(row.blocked),
-            error_code=(
-                RetentionErrorCode(row.error_code)
-                if row.error_code is not None
-                else None
-            ),
-            heartbeat_at=row.heartbeat_at,
+
+    async def latest_completed(self, task: str) -> RetentionJobRunRecord | None:
+        """The task's newest execution that ran to an end of its own (succeeded,
+        partial or failed): what health judges the due work by, so a rerun in
+        progress does not hide how the last one ended."""
+        return _record(
+            await self.session.scalar(
+                sa.select(RetentionJobRuns)
+                .where(
+                    RetentionJobRuns.task == task,
+                    RetentionJobRuns.outcome.in_(
+                        [outcome.value for outcome in _ENDED_OUTCOMES]
+                    ),
+                )
+                .order_by(
+                    RetentionJobRuns.finished_at.desc(), RetentionJobRuns.id.desc()
+                )
+                .limit(1)
+            )
         )
 
     async def has_any_run(self, tasks: Sequence[str]) -> bool:
@@ -390,18 +422,18 @@ class RetentionJobRunRepository:
         )
 
     async def prune_after_audit_retention(
-        self, *, limit: int
+        self, *, limit: int, now: datetime | None = None
     ) -> RetentionJobPruneResult:
-        """Lock and prune at most `limit` expired, finished executions.
+        """Lock and prune at most `limit` executions expired at `now` (the
+        database's clock when None) that have finished.
 
         The caller audits and charges discovery plus deletion in its transaction.
         Running executions remain leases regardless of their start or heartbeat age.
         """
         if limit <= 0:
             raise ValueError("A job-history prune limit must be positive.")
-        cutoff = sa.func.now() - sa.func.make_interval(
-            0, 0, 0, deployment_audit_retention_days()
-        )
+        period = sa.func.make_interval(0, 0, 0, deployment_audit_retention_days())
+        cutoff = sa.func.now() - period if now is None else now - period
         expired = (
             RetentionJobRuns.finished_at < cutoff,
             RetentionJobRuns.outcome != _RUNNING,

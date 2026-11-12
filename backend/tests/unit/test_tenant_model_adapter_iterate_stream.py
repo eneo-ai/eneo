@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import logging
+from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -38,6 +39,7 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
 class _AsyncChunkStream:
@@ -539,6 +541,55 @@ async def test_provider_connectivity_failure_returns_unreachable_error(
     span.set_attribute.assert_any_call("eneo.ai.provider_unavailable", True)
     span.set_attribute.assert_any_call("eneo.ai.operation", phase)
     span.record_exception.assert_called_once()
+
+
+def _unreachable_error() -> RuntimeError:
+    """A provider that cannot be reached, its errors quoting `SENTINEL`."""
+    try:
+        try:
+            raise httpx.ConnectError(f"cannot reach {SENTINEL}")
+        except httpx.ConnectError as cause:
+            raise RuntimeError(f"failed on {SENTINEL}") from cause
+    except RuntimeError as error:
+        return error
+
+
+class _FailingStream:
+    def __aiter__(self) -> "_FailingStream":
+        return self
+
+    async def __anext__(self) -> object:
+        raise chained_error()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    ["completion", "provider_unavailable", "stream_preparation", "stream_iteration"],
+)
+async def test_a_failed_response_logs_the_kind_of_error_not_its_text(path: str):
+    """A provider's error can echo the prompt it was sent. Mutant: one of the
+    failure paths logs it with its message or a traceback that ends in it."""
+    adapter = _make_completion_adapter()
+    error = _unreachable_error() if path == "provider_unavailable" else chained_error()
+
+    with (
+        emitted(tenant_model_adapter.logger) as records,
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=error),
+        ),
+        suppress(Exception),
+    ):
+        if path == "stream_preparation":
+            await adapter.prepare_streaming(context=SimpleNamespace(), model_kwargs={})
+        elif path == "stream_iteration":
+            await _collect(adapter, _FailingStream())
+        else:
+            await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
+
+    chain = "RuntimeError <- ConnectError" if path == "provider_unavailable" else CHAIN
+    assert logged_errors(records, chain), [record.getMessage() for record in records]
 
 
 @pytest.mark.asyncio

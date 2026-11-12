@@ -7,6 +7,7 @@ when a stronger one fails.
 """
 
 import base64
+import re
 import secrets
 import time
 from collections.abc import Mapping
@@ -17,6 +18,7 @@ import jwt
 
 from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.auth_service import OIDC_CLOCK_LEEWAY_SECONDS, AuthService
+from eneo.authentication.oidc import outbound
 from eneo.authentication.oidc.errors import (
     OidcResponseNotVerifiedError,
     OidcTransactionInvalidError,
@@ -24,7 +26,6 @@ from eneo.authentication.oidc.errors import (
 from eneo.authentication.oidc.profile import OidcProfile
 from eneo.authentication.oidc.transaction import OidcTransaction
 from eneo.authentication.oidc_resource_server import get_federation_signing_key
-from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -83,6 +84,21 @@ def _refuse(
     return OidcResponseNotVerifiedError(message)
 
 
+# An OAuth error code (RFC 6749 section 5.2) is a short token. What else a
+# provider writes, its description, its URI or a body that is not JSON, can
+# name the person signing in, so it is never logged.
+_OAUTH_ERROR_CODE = re.compile(r"[A-Za-z0-9_.-]{1,64}")
+
+
+def _oauth_error(body: object) -> str | None:
+    if not isinstance(body, Mapping):
+        return None
+    error = cast(Mapping[str, object], body).get("error")
+    if isinstance(error, str) and _OAUTH_ERROR_CODE.fullmatch(error):
+        return error
+    return None
+
+
 async def _exchange_code(
     profile: OidcProfile, transaction: OidcTransaction, code: str, correlation_id: str
 ) -> Mapping[str, object]:
@@ -102,31 +118,41 @@ async def _exchange_code(
         )
         del data["client_id"], data["client_secret"]
 
-    async with aiohttp_client().post(
-        profile.token_endpoint, data=data, headers=headers or None
-    ) as resp:
-        if resp.status != 200:
-            try:
-                error_body: object = await resp.json()
-            except Exception:
-                error_body = await resp.text()
-            logger.error(
-                f"Token exchange failed: HTTP {resp.status}",
-                extra={
-                    "http_status": resp.status,
-                    "token_endpoint": profile.token_endpoint,
-                    "error_response": error_body,
-                    "auth_method": profile.token_endpoint_auth_method,
-                    "correlation_id": correlation_id,
-                },
-            )
-            raise _refuse(
-                "token_exchange_failed",
-                correlation_id,
-                "Failed to exchange authorization code for tokens",
-            )
-        body: object = await resp.json()
-    return cast(Mapping[str, object], body) if isinstance(body, Mapping) else {}
+    try:
+        status, body = await outbound.post_form(
+            profile.token_endpoint, data, headers or None
+        )
+    except outbound.OidcFetchError as exc:
+        logger.error(
+            "Token exchange refused",
+            extra={
+                "reason": exc.reason,
+                "http_status": exc.status,
+                "token_endpoint": profile.token_endpoint,
+                "correlation_id": correlation_id,
+            },
+        )
+        raise _refuse(
+            "token_exchange_failed",
+            correlation_id,
+            "Failed to exchange authorization code for tokens",
+        ) from exc
+    if status != 200:
+        failure: dict[str, object] = {
+            "http_status": status,
+            "token_endpoint": profile.token_endpoint,
+            "auth_method": profile.token_endpoint_auth_method,
+            "correlation_id": correlation_id,
+        }
+        if (oauth_error := _oauth_error(body)) is not None:
+            failure["oauth_error"] = oauth_error
+        logger.error(f"Token exchange failed: HTTP {status}", extra=failure)
+        raise _refuse(
+            "token_exchange_failed",
+            correlation_id,
+            "Failed to exchange authorization code for tokens",
+        )
+    return body or {}
 
 
 def _optional_number(claims: Mapping[str, object], name: str) -> int | float | None:

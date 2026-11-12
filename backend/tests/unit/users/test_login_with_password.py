@@ -8,16 +8,16 @@ from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 from starlette.requests import Request
 
-from eneo.authentication.auth_models import AccessToken
 from eneo.authentication.login_attempts import LoginAttempt
 from eneo.main.container.container import Container
 from eneo.main.exceptions import AuthenticationException
 from eneo.users import user_router
+from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.fixtures import TEST_USER
 
 EMAIL = "login@example.com"
 PASSWORD = "LoginCredential-SENTINEL-123!"
-TOKEN = AccessToken(access_token="issued-token", token_type="bearer")
 
 
 def _request() -> Request:
@@ -35,7 +35,7 @@ def _request() -> Request:
 @pytest.fixture
 def login(monkeypatch: pytest.MonkeyPatch):
     service = AsyncMock(spec=UserService)
-    service.login.return_value = TOKEN
+    service.login.return_value = TEST_USER
     count = AsyncMock(return_value=LoginAttempt(True, 4, 600))
     clear = AsyncMock()
     monkeypatch.setattr(user_router, "count_login_attempt", count)
@@ -45,7 +45,7 @@ def login(monkeypatch: pytest.MonkeyPatch):
         redis_client=providers.Object(object()),
     )
 
-    async def call(email: str = EMAIL, password: str = PASSWORD) -> AccessToken:
+    async def call(email: str = EMAIL, password: str = PASSWORD) -> UserInDB:
         return await user_router.login_with_password(
             request=_request(), email=email, password=password, container=container
         )
@@ -54,8 +54,8 @@ def login(monkeypatch: pytest.MonkeyPatch):
     return call
 
 
-async def test_login_with_password_returns_token_and_clears_attempts(login):
-    assert await login() == TOKEN
+async def test_login_with_password_returns_the_user_and_clears_attempts(login):
+    assert await login() == TEST_USER
     login.service.login.assert_awaited_once()
     login.clear.assert_awaited_once()
 

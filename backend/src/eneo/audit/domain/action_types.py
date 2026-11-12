@@ -52,6 +52,8 @@ class ActionType(str, Enum):
     # An org admin re-opening it: per account, or per provider pair.
     IDENTITY_REBINDING_UPDATED = "identity_rebinding_updated"
     IDENTITY_MIGRATION_WINDOW_UPDATED = "identity_migration_window_updated"
+    # The operator (super API key) took a token to act as a person.
+    USER_ACCESS_TOKEN_ISSUED = "user_access_token_issued"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -226,5 +228,6 @@ ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
         ActionType.IDENTITY_CONFLICT,
         ActionType.IDENTITY_REBINDING_UPDATED,
         ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
+        ActionType.USER_ACCESS_TOKEN_ISSUED,
     }
 )

@@ -54,6 +54,28 @@ describe("jobFailureMessage", () => {
     ).toBe("Appen svarade inte");
   });
 
+  it.each([
+    ["pull_sharepoint_content", "processing_failed", "job_failure_task_failed"],
+    ["sync_sharepoint_delta", "cancelled", "job_failure_task_stopped"],
+    ["run_app", "quota_exceeded", "job_failure_task_quota_exceeded"],
+    ["pull_confluence_content", "user_quota_exceeded", "job_failure_user_quota_exceeded"],
+    ["run_app", "future_failure_code", "job_failure_task_failed"]
+  ])(
+    "explains a failed %s recorded as %s without text, in words without a file",
+    (task, code, key) => {
+      expect(
+        jobFailureMessage(
+          t,
+          job({
+            task: task as Job["task"],
+            failure_code: code as Job["failure_code"],
+            result_location: null
+          })
+        )
+      ).toBe(key);
+    }
+  );
+
   it("marks a crawl that completed with notes as a warning, not a failure", () => {
     expect(
       isCrawlWithWarnings(job({ status: "complete", failure_code: "page_limit_reached" }))

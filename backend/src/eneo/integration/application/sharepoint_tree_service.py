@@ -1,9 +1,11 @@
+import logging
 from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import UUID
 
 from eneo.integration.infrastructure.graph_errors import user_facing_sharepoint_failure
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
@@ -76,14 +78,16 @@ class SharePointTreeService:
                 },
             )
         except Exception as e:
-            logger.error(
-                f"Failed to get authentication token: {type(e).__name__}: {str(e)}",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to get authentication token",
+                error=e,
                 extra={
                     "user_integration_id": str(user_integration_id),
                     "space_id": str(space_id),
                     "space_type": space_type,
                 },
-                exc_info=True,
             )
             raise (
                 user_facing_sharepoint_failure(e)
@@ -193,14 +197,16 @@ class SharePointTreeService:
             )
             return tree_data
         except Exception as e:
-            logger.error(
-                f"Failed to fetch folder tree from SharePoint: {type(e).__name__}: {str(e)}",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to fetch folder tree from SharePoint",
+                error=e,
                 extra={
                     "site_id": site_id,
                     "folder_id": folder_id,
                     "folder_path": folder_path,
                 },
-                exc_info=True,
             )
             raise (
                 user_facing_sharepoint_failure(e)
@@ -244,10 +250,12 @@ class SharePointTreeService:
                 filters=filters,
             )
         except Exception as e:
-            logger.error(
-                f"Failed to search SharePoint library: {type(e).__name__}: {str(e)}",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to search SharePoint library",
+                error=e,
                 extra={"site_id": site_id, "drive_id": drive_id},
-                exc_info=True,
             )
             raise (
                 user_facing_sharepoint_failure(e)

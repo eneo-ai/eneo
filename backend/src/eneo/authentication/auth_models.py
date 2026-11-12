@@ -101,6 +101,45 @@ class JWTPayload(JWTMeta, JWTCreds):
     pass
 
 
+CredentialKind = Literal["browser_session", "derived", "bearer", "api_key"]
+
+
+class CredentialFacts(BaseModel):
+    """What the credential a request was admitted with says about it.
+
+    The adapter that resolves the credential sets it on the user; the checks
+    that depend on how the request authenticated read it. Request-scoped:
+    never persisted or returned.
+
+    - ``browser_session``: an Eneo token with ``sid``; ``session`` holds its
+      verified claims.
+    - ``derived``: a token minted from another credential, a scoped MCP
+      token or a module token.
+    - ``bearer``: any other Eneo token, or a provider's access token.
+    - ``api_key``: a user or service API key.
+
+    ``session_ref`` names the browser session the credential belongs to, and
+    ``auth_method`` is the token's claim ("password" for a password sign-in).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: CredentialKind
+    session_ref: Optional[UUID] = None
+    auth_method: Optional[str] = None
+    session: Optional[JWTPayload] = None
+
+    @classmethod
+    def of_token(cls, payload: JWTPayload) -> "CredentialFacts":
+        """An Eneo token's facts: a browser session when it carries ``sid``."""
+        return cls(
+            kind="browser_session" if payload.sid is not None else "bearer",
+            session_ref=payload.session_ref,
+            auth_method=payload.auth_method,
+            session=payload if payload.sid is not None else None,
+        )
+
+
 class AccessToken(BaseModel):
     access_token: str
     token_type: str

@@ -1374,14 +1374,28 @@ async def test_owners_without_due_history_are_charged_and_passed(
         }
     )
 
+    real_now = datetime.now(timezone.utc)
+    # A date on which questions go first among the task's three steps: on the
+    # others a step before them charges its rows from the same 8, and questions
+    # stop after two owners with the cursor past the second.
+    now = next(
+        real_now + timedelta(days=offset)
+        for offset in range(3)
+        if (real_now + timedelta(days=offset)).date().toordinal() % 3 == 0
+    )
+
     # The first run probes owners 1-3, policy or not, and spends the rest of its
     # budget there.
-    first = await run_registered_retention(retention_session, settings=settings)
+    first = await run_registered_retention(
+        retention_session, settings=settings, now=now
+    )
     assert first.counts["questions.owners_examined"] == 3
     assert "questions.questions_deleted" not in first.counts
     assert await retention_session.get(Questions, due_id) is not None
 
-    second = await run_registered_retention(retention_session, settings=settings)
+    second = await run_registered_retention(
+        retention_session, settings=settings, now=now
+    )
     assert second.counts["questions.questions_deleted"] == 1
     assert await retention_session.get(Questions, due_id) is None
 

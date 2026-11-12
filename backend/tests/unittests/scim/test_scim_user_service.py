@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.main.exceptions import UniqueException
 from eneo.scim.constants import (
     SCIM_CORE_USER_URN,
     SCIM_ENTERPRISE_USER_URN,
@@ -389,6 +390,61 @@ class TestCreateUser:
         assert inactive.deleted_at == original_deleted_at
         assert inactive.external_id == "new-ext-id"
         assert result.active is False
+
+
+class TestCreateRacingASignIn:
+    """The address can be taken between the precheck and the insert, by a
+    first sign-in that creates the account or by another SCIM request. The
+    request then gets the answer it gets without the race, never a 500."""
+
+    @staticmethod
+    def _racing_repo(*, taken_by):
+        repo = AsyncMock()
+        repo.get_by_username.return_value = None
+        repo.get_by_external_id.return_value = None
+        repo.email_exists_in_other_tenant.return_value = False
+        # Free at both lookups of the first precheck, taken from then on.
+        repo.get_by_email.side_effect = [None, None, taken_by, taken_by]
+        repo.create.side_effect = UniqueException("User already exists.")
+        return repo
+
+    async def test_a_scim_winner_is_a_conflict(self):
+        winner = _make_db_user()
+        winner.external_id = "ext-other"
+        repo = self._racing_repo(taken_by=winner)
+
+        with pytest.raises(ScimUserConflictError):
+            await _make_service(repo).create_user(
+                ScimUserRequest(userName="jane@example.com", externalId="ext-1")
+            )
+
+        repo.create.assert_awaited_once()
+
+    async def test_an_account_a_sign_in_created_is_claimed(self):
+        winner = _make_db_user(user_name="jane")
+        winner.email = "jane@example.com"
+        repo = self._racing_repo(taken_by=winner)
+        repo.update.return_value = winner
+
+        result = await _make_service(repo).create_user(
+            ScimUserRequest(userName="jane@example.com", externalId="ext-1")
+        )
+
+        assert result.id == str(winner.id)
+        assert winner.external_id == "ext-1"
+        repo.create.assert_awaited_once()
+        repo.update.assert_awaited_once_with(winner)
+
+    async def test_the_precheck_runs_at_most_twice(self):
+        """Lost twice: a conflict, not a third try."""
+        repo = self._racing_repo(taken_by=None)
+        repo.get_by_email.side_effect = None
+        repo.get_by_email.return_value = None
+
+        with pytest.raises(ScimUserConflictError):
+            await _make_service(repo).create_user(CREATE_REQUEST)
+
+        assert repo.create.await_count == 2
 
 
 class TestGetUser:

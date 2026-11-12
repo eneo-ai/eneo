@@ -56,7 +56,7 @@ from eneo.users.password import (
     LocalPasswordPolicy,
     PasswordChangeError,
 )
-from eneo.users.password_lifecycle import password_status_for
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD, password_status_for
 from eneo.users.user import (
     EneoPasswordChangeCapabilityPublic,
     ExternalPasswordChangeCapabilityPublic,
@@ -104,12 +104,13 @@ def _login_form_location(loc: tuple[int | str, ...]) -> tuple[int | str, ...]:
 
 async def login_with_password(
     *, request: Request, email: str, password: str, container: Container
-) -> AccessToken:
+) -> UserInDB:
     """The password login flow: validation, the failed-attempt limiter, logging
     and the public error contract (401 invalid_credentials with
     attempts_remaining, 429 too_many_login_attempts with retry_after_seconds and
     Retry-After, 403 account states, 422 form locations, login_unavailable).
-    Every password login endpoint calls it."""
+    Every password login endpoint calls it, then starts the admitted user's
+    session (``BrowserSessionService.start``)."""
 
     correlation_id = ensure_correlation_id()
     # Trusted-proxy-aware, resolved once by RequestContextMiddleware; a raw
@@ -185,7 +186,7 @@ async def login_with_password(
     service = container.user_service()
 
     try:
-        result = await service.login(email, password, correlation_id, source_ip)
+        user = await service.login(email, password, correlation_id, source_ip)
 
         if attempt is not None:
             try:
@@ -207,7 +208,7 @@ async def login_with_password(
             },
         )
 
-        return result
+        return user
 
     except AuthenticationException:
         # Expected authentication failure - use warning level (not error)
@@ -302,7 +303,7 @@ async def user_login_with_email_and_password(
     ],
 ) -> AccessToken:
     """OAuth2 Login with comprehensive error handling and logging"""
-    token = await login_with_password(
+    user = await login_with_password(
         request=request,
         email=form_data.username,
         password=form_data.password,
@@ -312,9 +313,9 @@ async def user_login_with_email_and_password(
     # ends every copy of it.
     return AccessToken(
         access_token=await container.browser_session_service().start(
-            token.access_token
+            user, auth_method=PASSWORD_AUTH_METHOD
         ),
-        token_type=token.token_type,
+        token_type="bearer",
     )
 
 

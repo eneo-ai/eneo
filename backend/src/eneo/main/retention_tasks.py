@@ -3,10 +3,12 @@
 import asyncio
 import logging
 import time
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from types import MappingProxyType
 
+import sqlalchemy as sa
 from sqlalchemy.exc import SQLAlchemyError
 
 from eneo.data_retention.application.conversation_history_retention_task import (
@@ -34,7 +36,10 @@ from eneo.data_retention.application.retention_health import RetentionHealth
 from eneo.data_retention.application.retention_registration import (
     RetentionTaskRegistration,
 )
-from eneo.data_retention.domain.retention import RetentionBudget
+from eneo.data_retention.domain.retention import (
+    FREQUENT_OVERDUE_AFTER,
+    RetentionBudget,
+)
 from eneo.files.unused_file_retention_task import (
     UNUSED_FILES_TASK,
     UnusedFileRetentionTask,
@@ -100,6 +105,28 @@ OUTSIDE_THE_ENGINE: Mapping[str, str] = MappingProxyType(
 )
 
 
+# One frequent pass ends within this many seconds plus the chunk in progress,
+# before the next five-minute tick, also when the nightly run starts it.
+FREQUENT_RUN_SECONDS = 240
+
+
+def _paced(
+    registrations: Iterable[RetentionTaskRegistration],
+) -> tuple[RetentionTaskRegistration, ...]:
+    return tuple(
+        replace(
+            registration,
+            budget=replace(
+                registration.budget,
+                seconds=min(registration.budget.seconds, FREQUENT_RUN_SECONDS),
+            ),
+        )
+        if registration.every == "frequent"
+        else registration
+        for registration in registrations
+    )
+
+
 def retention_task_registrations(
     settings: Settings, *, now: datetime | None = None
 ) -> tuple[RetentionTaskRegistration, ...]:
@@ -127,7 +154,7 @@ def retention_task_registrations(
             family_rows=settings.retention_max_family_rows,
         )
 
-    return (
+    registrations = (
         RetentionTaskRegistration(
             name=CONVERSATION_HISTORY_TASK,
             enabled=settings.retention_conversations_history_enabled,
@@ -179,15 +206,18 @@ def retention_task_registrations(
                 execution_files=budget.files,
                 chunk_rows=settings.retention_chunk_rows,
                 gather_seconds=settings.retention_chunk_gather_seconds,
+                # Without a given time these two keep the database's clock.
+                now=now,
             ),
         ),
         RetentionTaskRegistration(
             name=JOB_HISTORY_TASK,
             enabled=settings.retention_job_history_enabled,
             budget=budget,
-            build=lambda session: JobHistoryRetentionTask(session),
+            build=lambda session: JobHistoryRetentionTask(session, now=now),
         ),
     )
+    return _paced(registrations)
 
 
 async def _read_retention_health(settings: Settings) -> RetentionHealth:
@@ -206,16 +236,26 @@ async def _read_retention_health(settings: Settings) -> RetentionHealth:
     try:
         async with asyncio.timeout(settings.retention_health_timeout_seconds):
             async with sessionmanager.session() as session, session.begin():
+                # Half the read's time limit: a slow statement, such as a
+                # frequent task's due probe, then fails on the server while
+                # the read still has time for the other tasks. A timer as
+                # long as the limit never fires before the read is cancelled.
                 timeout_ms = max(
-                    1, int(settings.retention_health_timeout_seconds * 1000)
+                    1, int(settings.retention_health_timeout_seconds * 1000) // 2
                 )
                 await set_retention_timeouts(
                     session, statement_timeout_ms=timeout_ms, lock_timeout_ms=timeout_ms
                 )
+                # The database's clock, which also wrote every job row's times.
+                now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
                 return await load_retention_health(
                     RetentionJobRunRepository(session),
-                    retention_task_registrations(settings),
-                    now=datetime.now(timezone.utc),
+                    # Built an hour back: a frequent task's due probe then
+                    # finds only what is more than an hour past its time.
+                    retention_task_registrations(
+                        settings, now=now - FREQUENT_OVERDUE_AFTER
+                    ),
+                    now=now,
                     lease_stale_after=timedelta(
                         seconds=settings.retention_lease_stale_seconds
                     ),

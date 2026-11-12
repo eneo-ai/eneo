@@ -1,6 +1,7 @@
 """SharePoint sync tasks: a webhook that loses the lease race is not dropped."""
 
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -652,3 +653,121 @@ async def test_a_failing_link_does_not_fail_the_sync(
     )
 
     assert await delta_task(params, container) == "Imported 1 file"
+
+
+SENTINEL = "text-the-removed-document-held"
+
+
+class _Emitted(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__(logging.DEBUG)
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def emitted():
+    """Every record any logger emits while the task runs."""
+    handler = _Emitted()
+    loggers = {logging.getLogger(), integration_task.logger}
+    levels = {log: log.level for log in loggers}
+    for log in loggers:
+        log.addHandler(handler)
+        log.setLevel(logging.DEBUG)
+    yield handler.records
+    for log in loggers:
+        log.removeHandler(handler)
+        log.setLevel(levels[log])
+
+
+async def _fails_quoting_the_document(*_, **__):
+    try:
+        raise ValueError(f"inner {SENTINEL}")
+    except ValueError as inner:
+        raise RuntimeError(f"outer {SENTINEL}") from inner
+
+
+def _assert_logged_without_its_text(records: list[logging.LogRecord]) -> None:
+    for record in records:
+        assert not record.exc_info and not record.stack_info, record.getMessage()
+        assert SENTINEL not in repr(record.__dict__), record.getMessage()
+    assert any(
+        str(getattr(record, "error_type", "")).startswith("RuntimeError <- ValueError")
+        for record in records
+    ), [record.getMessage() for record in records]
+
+
+@pytest.mark.parametrize("task", [delta_task, full_task], ids=["delta", "full"])
+async def test_a_failed_sync_logs_the_kind_of_error_not_its_text(
+    fake_redis, service, container, params, task, emitted
+):
+    """A sync's error can quote the documents it read; the log keeps the kind
+    of error and where it was raised, never its message or traceback."""
+    service.pull_content.side_effect = _fails_quoting_the_document
+    service.process_delta_changes.side_effect = _fails_quoting_the_document
+
+    with pytest.raises(integration_task.IntegrationSyncError):
+        await task(params, container)
+
+    _assert_logged_without_its_text(emitted)
+
+
+async def test_a_failed_pending_pass_logs_the_kind_of_error_not_its_text(
+    fake_redis, service, container, params, emitted
+):
+    _marker_lands_during_the_sync(fake_redis, service)
+    service.process_delta_changes.side_effect = _fails_quoting_the_document
+
+    assert await full_task(params, container) == "Imported 3 files"
+
+    _assert_logged_without_its_text(emitted)
+
+
+async def test_a_lease_that_cannot_be_released_logs_its_kind_not_its_text(
+    fake_redis, service, container, params, monkeypatch, emitted
+):
+    @asynccontextmanager
+    async def lease(redis_client, key, *, ttl_seconds, **_):
+        await redis_client.set(key, "owner", nx=True, ex=ttl_seconds)
+        yield True
+        await _fails_quoting_the_document()
+
+    monkeypatch.setattr(integration_task, "redis_lease", lease)
+
+    assert await delta_task(params, container) == "Imported 1 file"
+
+    _assert_logged_without_its_text(emitted)
+
+
+async def test_a_follow_up_that_cannot_be_queued_logs_its_kind_not_its_text(
+    fake_redis, service, container, params, follow_ups, emitted
+):
+    follow_ups.side_effect = _fails_quoting_the_document
+
+    async def notification(**_):
+        fake_redis.store[PENDING_KEY] = "1"
+        raise RuntimeError("Graph 502")
+
+    service.process_delta_changes.side_effect = notification
+
+    with pytest.raises(integration_task.IntegrationSyncError):
+        await delta_task(params, container)
+
+    _assert_logged_without_its_text(emitted)
+
+
+async def test_a_failing_link_logs_its_kind_not_its_text(
+    fake_redis, service, container, params, knowledge, emitted
+):
+    knowledge.sharepoint_subscription_id = None
+    knowledge.site_id = "site-1"
+    container.session.return_value.begin_nested = MagicMock(return_value=_Savepoint())
+    container.sharepoint_subscription_repo.return_value.get_by_user_and_site = (
+        AsyncMock(side_effect=_fails_quoting_the_document)
+    )
+
+    assert await delta_task(params, container) == "Imported 1 file"
+
+    _assert_logged_without_its_text(emitted)

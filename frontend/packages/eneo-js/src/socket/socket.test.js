@@ -123,3 +123,112 @@ test("a disconnect after a 1008 ends the subscriptions it held", (t) => {
   assert.deepEqual(reopened.sent, []);
   assert.deepEqual(seen, []);
 });
+
+const FIRST_RETRY = 2 * 1000;
+const LAST_RETRY = 5 * 60 * 1000;
+
+/** Ticks until the client opens its next socket; returns how long that took. */
+function untilNextSocket() {
+  const before = FakeWebSocket.opened.length;
+  let waited = 0;
+  while (FakeWebSocket.opened.length === before && waited <= LAST_RETRY) {
+    mock.timers.tick(1000);
+    waited += 1000;
+  }
+  return waited;
+}
+
+test("refused connections are retried later and later, up to a ceiling", (t) => {
+  const { socket } = connected(t);
+  socket.closedByServer(1006);
+
+  /** @type {number[]} */
+  const waits = [];
+  for (let attempt = 0; attempt < 10; attempt++) {
+    waits.push(untilNextSocket());
+    // The handshake is refused, as for a session that ended before it.
+    FakeWebSocket.opened.at(-1)?.closedByServer(1006);
+  }
+
+  assert.deepEqual(
+    waits,
+    [2, 4, 8, 16, 32, 64, 128, 256, 300, 300].map((s) => s * 1000)
+  );
+});
+
+test("an opened socket starts the retries from the beginning again", (t) => {
+  const { socket } = connected(t);
+  socket.closedByServer(1006);
+  for (let attempt = 0; attempt < 4; attempt++) {
+    untilNextSocket();
+    FakeWebSocket.opened.at(-1)?.closedByServer(1006);
+  }
+
+  untilNextSocket();
+  const reopened = FakeWebSocket.opened.at(-1);
+  reopened?.open();
+  reopened?.closedByServer(1006);
+
+  assert.equal(untilNextSocket(), FIRST_RETRY);
+});
+
+test("reconnecting keeps one heartbeat, and its pong is still heard", (t) => {
+  const { socket } = connected(t);
+  socket.closedByServer(1006);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    untilNextSocket();
+    const next = FakeWebSocket.opened.at(-1);
+    next?.open();
+    next?.closedByServer(1006);
+  }
+  untilNextSocket();
+  const current = /** @type {FakeWebSocket} */ (FakeWebSocket.opened.at(-1));
+  current.open();
+  const opened = FakeWebSocket.opened.length;
+
+  for (let cycle = 0; cycle < 3; cycle++) {
+    mock.timers.tick(PING_INTERVAL);
+    current.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+  }
+  mock.timers.tick(PONG_TIMEOUT);
+
+  // One ping per interval from one heartbeat, and each pong keeps it open.
+  assert.deepEqual(current.sent, [{ type: "ping" }, { type: "ping" }, { type: "ping" }]);
+  assert.equal(FakeWebSocket.opened.length, opened);
+});
+
+test("a pong reaches the handlers registered for it, once", (t) => {
+  const { client, socket } = connected(t);
+  let pongs = 0;
+  client.registerHandler("pong", () => pongs++);
+
+  mock.timers.tick(PING_INTERVAL);
+  socket.onmessage?.({ data: JSON.stringify({ type: "pong" }) });
+  mock.timers.tick(PONG_TIMEOUT);
+
+  // The pong also ended the wait for it: no reconnect.
+  assert.equal(pongs, 1);
+  assert.equal(FakeWebSocket.opened.length, 1);
+});
+
+test("a lost pong leaves one heartbeat on the new socket", (t) => {
+  connected(t);
+  mock.timers.tick(PING_INTERVAL);
+  mock.timers.tick(PONG_TIMEOUT);
+  const reopened = FakeWebSocket.opened[1];
+  reopened.open();
+
+  mock.timers.tick(PING_INTERVAL);
+
+  assert.deepEqual(reopened.sent, [{ type: "ping" }]);
+});
+
+test("a disconnect cancels the retry that was waiting", (t) => {
+  const { client, socket } = connected(t);
+  socket.closedByServer(1006);
+
+  client.disconnect();
+  mock.timers.tick(LAST_RETRY + FIRST_RETRY);
+
+  assert.equal(FakeWebSocket.opened.length, 1);
+});

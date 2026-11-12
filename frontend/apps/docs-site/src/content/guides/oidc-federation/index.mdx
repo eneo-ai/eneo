@@ -95,6 +95,15 @@ What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/i
 
 A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
 
+**Eneo's requests to the provider** (discovery, token and JWKS, when the provider is saved, tested and at sign-in) follow these rules, so neither a discovery document nor a stored setting can send the code and client secret elsewhere:
+
+- They use `https`. A provider on the same machine (`localhost`, `127.0.0.1`, `[::1]`) is accepted only with `ENVIRONMENT=development`, and may then use plain `http`.
+- The token endpoint and the JWKS are on the discovery endpoint's host, or on a host listed in `allowed_endpoint_hosts`. This holds for endpoints stored in the federation config too.
+- Private network addresses are allowed; link-local addresses (such as `169.254.169.254`), cloud metadata addresses and IPv4 addresses inside IPv6 are not, whatever a name resolves to.
+- Redirects are not followed: a provider answering `3xx` counts as a failed request.
+- Each request ends after 5 seconds, and an answer larger than 256 KiB is refused.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, the same rules hold for the discovery document of `OIDC_ACCEPTED_ISSUER` and its `jwks_uri`, which must be on the issuer's host: `allowed_endpoint_hosts` does not apply to these requests, also after the settings are moved into Eneo. A provider that breaks one fails every bearer token with `401`, and the backend logs `Failed to fetch JWKS for IdP token validation`.
+
 The provider-bound Zitadel login in the Svelte frontend is deprecated and is removed in the next release; see [Migrate from the Zitadel settings](#migrate-from-the-zitadel-settings). Until then it keeps its own requests: it sends PKCE but no `nonce`.
 
 **Optional provider settings.** Set them through the [federation API](/guides/oidc-federation/multi-tenant#configure-the-tenant-via-api), which also serves a single-tenant setup made through the API. Leave them out to keep the defaults. With the `OIDC_*` environment variables the defaults always apply; to change them, configure the provider through the API (`FEDERATION_ENABLED=true`).
@@ -103,17 +112,19 @@ The provider-bound Zitadel login in the Svelte frontend is deprecated and is rem
 |-------|---------|---------|
 | `signing_algorithms` | The provider's `id_token_signing_alg_values_supported`, else `["RS256"]` | ID token algorithms to accept. Only `RS256`/`384`/`512`, `PS256`/`384`/`512`, `ES256`/`384`/`512` and `EdDSA` (Ed25519 keys) are allowed |
 | `email_verified_claims` | `["email_verified", "xms_edov"]` | Claims that say the email is verified, in order. The first one present decides, so an explicit `false` is never overridden by a later claim |
+| `allowed_endpoint_hosts` | None: only the discovery host | Other hosts the token endpoint and the JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Google needs `["oauth2.googleapis.com", "www.googleapis.com"]` |
 
 ### Upgrading
 
 - Redis is required for sign-in.
+- A provider served over plain `http`, one on the same machine without `ENVIRONMENT=development`, one whose token endpoint or JWKS is on another host than its discovery document, or one that answers with a redirect, no longer signs anyone in. Serve it over `https` on its own host, list the other hosts in `allowed_endpoint_hosts`, or point `discovery_endpoint` at the address that does not redirect. The list needs the federation API (`FEDERATION_ENABLED=true`); with the `OIDC_*` variables only the discovery host is allowed. See [Eneo's requests to the provider](#provider-contract).
 - The ID token's `iss` must equal the provider's issuer: the one Eneo stored from discovery when the federation config was saved, else the one discovery gives at sign-in (always so with the `OIDC_*` variables). A `PATCH` that includes the organisation's own `discovery_endpoint` stores the issuer again. A shared discovery URL whose issuer contains a placeholder (for example `{tenantid}`) is refused: saving such a federation config answers `400`, and a sign-in with one already stored or set in `OIDC_DISCOVERY_ENDPOINT` answers `500` before anyone is sent to the provider. Switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`).
 - PKCE (`S256`) and `nonce` are always sent. A provider that ignores PKCE keeps working.
 - The provider must return the `nonce` in the ID token ([OpenID Connect Core 3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation)). With a provider that does not, every sign-in is refused with `oidc_response_not_verified` (`nonce_mismatch`).
 - The provider's discovery document must stay reachable. Each backend process caches it for `oidc_jwks_cache_ttl_seconds` (default one hour) with no stale copy to fall back on: when the cache has expired and the document cannot be fetched, sign-in answers `500`.
 - A sign-in started before the upgrade must be started again: its state is refused with `400 Invalid state parameter`, or its transaction with `oidc_transaction_invalid`. In a rolling deploy, replace all backend instances together, or accept that sign-ins which cross versions fail until the switch is done; people only need to start the sign-in again.
 - Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter. Any other client that calls `POST /api/v1/auth/callback`, through eneo-js or directly, must forward the redirect's `iss` query parameter whenever the provider sends one: Eneo requires it when the provider's discovery announced it, and refuses one that differs.
-- With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted by the same rules as at sign-in, to the tenant `OIDC_TENANT_ID` names, else to the first active tenant.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted to the tenant `OIDC_TENANT_ID` names, else to the first active tenant. Access tokens use the allowed domains of the selected settings: with `FEDERATION_ENABLED=true` only the domains stored on the provider. With no provider stored there is no browser sign-in, and a token creates no account but admits every existing account in the tenant whose email matches. The `jwks_uri` must be on the issuer's host; see [Eneo's requests to the provider](#provider-contract).
 
 ### Migrate from the MobilityGuard settings
 

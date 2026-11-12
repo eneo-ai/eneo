@@ -285,6 +285,17 @@ describe("ChatPage", () => {
     expect(h1Texts()).toEqual(["Ny konversation", "Ny konversation"]);
   });
 
+  it("names an untitled conversation when asking to delete it", async () => {
+    renderPage("s-untitled");
+    await screen.findByRole("log", { name: "Konversation" });
+    const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
+    fireEvent.click(more!);
+    const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort konversationen" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    expect(within(dialog).getByText("Namnlös")).toBeTruthy();
+  });
+
   it("shows each answer's stored rating when a conversation opens", async () => {
     renderPage("s-rated");
     const log = await screen.findByRole("log", { name: "Konversation" });

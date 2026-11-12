@@ -69,6 +69,7 @@ from eneo.server.dependencies.container import get_container
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
 from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
 
@@ -139,14 +140,16 @@ async def create_browser_session(
         Container, Depends(get_container(transaction_scope="function"))
     ],
 ) -> Response:
-    token = await login_with_password(
+    user = await login_with_password(
         request=request,
         email=form_data.username,
         password=form_data.password,
         container=container,
     )
     session_token = await container.browser_session_service().start(
-        token.access_token, replacing=session_cookie(request, get_settings())
+        user,
+        auth_method=PASSWORD_AUTH_METHOD,
+        replacing=session_cookie(request, get_settings()),
     )
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     # A new token every time, never one the request brought (session fixation).
@@ -557,7 +560,7 @@ async def complete_browser_federation(
     if not code:
         return _federation_failure("no_code_received", next_path=diagnostics.next_path)
     try:
-        token = await federated_sign_in(
+        signed_in = await federated_sign_in(
             CallbackRequest(
                 code=code, state=state, iss=iss, binding_verifier=transaction
             ),
@@ -573,7 +576,7 @@ async def complete_browser_federation(
         diagnostics.detail_code = exc.code
         raise
     session_token = await container.browser_session_service().start(
-        token["access_token"], replacing=session_cookie(request, settings)
+        signed_in.user, auth_method=None, replacing=session_cookie(request, settings)
     )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
     set_session_cookie(response, session_token, settings=settings)

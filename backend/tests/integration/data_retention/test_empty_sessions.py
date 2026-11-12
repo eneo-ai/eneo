@@ -168,12 +168,12 @@ async def test_empty_sessions_do_not_starve_due_history(
     """Mutant: the empty-session scan runs inside the conversation task again; on
     its first-place date it spends a small budget before any question is due."""
     real_now = datetime.now(timezone.utc)
-    # The date on which a three-step rotation (questions, app runs, sessions)
-    # would put the session scan first.
+    # A date on which questions go first among the task's three steps, and on
+    # which a session scan appended as a fourth step would go first.
     now = next(
         real_now + timedelta(days=offset)
-        for offset in range(3)
-        if (real_now + timedelta(days=offset)).date().toordinal() % 3 == 2
+        for offset in range(12)
+        if (real_now + timedelta(days=offset)).date().toordinal() % 12 == 3
     )
     assistant = await _assistant(
         retention_session,
