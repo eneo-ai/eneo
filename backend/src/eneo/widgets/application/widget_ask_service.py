@@ -129,11 +129,13 @@ class WidgetAnswer(AsyncIterator[Completion]):
                 if isinstance(self._answer, _AsyncClosable):
                     await self._answer.aclose()
             finally:
+                # The audit settles last: a stalled audit queue must not spend
+                # the shared budget that retention and the turn hold need.
                 try:
+                    await self._finish(completed)
+                finally:
                     if self._observer is not None:
                         await self._observer.settle()
-                finally:
-                    await self._finish(completed)
 
 
 # Appended to the assistant's prompt for widget turns only: the answer lands
@@ -171,8 +173,9 @@ def widget_prompt_addendum(widget: Widget) -> str:
 DISPATCHED_STATUS = "approved"
 ENDED_STATUSES = frozenset({"succeeded", "failed"})
 DENIED_STATUSES = frozenset({"denied", "timeout_denied"})
-# Recorded for a call that was sent but whose end the turn never reported:
-# the visitor left, or the turn failed, while the server was running it.
+# Recorded for an approved call whose end the turn never reported: the turn
+# ended first (the visitor left, or it failed), so whether the server received
+# the call, or acted on it, is not known.
 UNKNOWN_STATUS = "unknown"
 
 
@@ -198,10 +201,11 @@ class ExternalToolCallAudit:
     the visitor's input and may carry personal data, and the external system
     has its own record of what it received; their names go in.
 
-    Only a call sent to its server is recorded: once it ends, or, when the
-    answer stops before it does, with status ``unknown`` once the answer has
-    settled, since the server may have acted on it either way. A call the
-    round limit refused fails without ever being sent, and stays out.
+    Only an approved call is recorded, since approval is what sends it: once
+    it ends, or, when the turn ends first, with status ``unknown`` once the
+    answer has settled, since the server may have acted on it. A call the
+    round limit refused fails without ever being approved, and stays out. An
+    entry that cannot be written goes to the error log with its metadata.
     """
 
     def __init__(
@@ -220,7 +224,9 @@ class ExternalToolCallAudit:
         self.session_id = session_id
         self.question_id = question_id
         self.preview = preview
-        self._in_flight: dict[str, ToolCallMetadata] = {}
+        # Dispatched calls by id, oldest first: a provider may reuse an id in
+        # a later round, or even within one.
+        self._in_flight: dict[str, list[ToolCallMetadata]] = {}
 
     async def observe(self, chunk: Completion) -> None:
         if chunk.response_type not in (
@@ -236,26 +242,41 @@ class ExternalToolCallAudit:
                 continue
             status = call.result_status
             if status == DISPATCHED_STATUS:
-                self._in_flight[call_id] = call
+                self._in_flight.setdefault(call_id, []).append(call)
             elif status in DENIED_STATUSES:
-                self._in_flight.pop(call_id, None)
+                self._take_dispatched(call_id)
             elif status in ENDED_STATUSES:
                 # Pairing each end with its dispatch keeps out a call refused
                 # at the round limit (never dispatched) and a repeated report
-                # of one that already ended, while a provider reusing an id in
-                # a later round still gets an entry per call.
-                if self._in_flight.pop(call_id, None) is not None:
+                # of one that already ended, while every call under a reused
+                # id still gets an entry of its own.
+                if self._take_dispatched(call_id):
                     await self._record(call, status)
 
-    async def settle(self) -> None:
-        unresolved = list(self._in_flight.values())
-        self._in_flight.clear()
-        for call in unresolved:
-            await self._record(call, UNKNOWN_STATUS)
+    def _take_dispatched(self, call_id: str) -> bool:
+        waiting = self._in_flight.get(call_id)
+        if not waiting:
+            return False
+        waiting.pop(0)
+        if not waiting:
+            del self._in_flight[call_id]
+        return True
 
-    async def _record(self, call: ToolCallMetadata, status: str) -> None:
-        assert self.widget.id is not None
-        metadata = {
+    async def settle(self) -> None:
+        unresolved = [call for calls in self._in_flight.values() for call in calls]
+        self._in_flight.clear()
+        for position, call in enumerate(unresolved):
+            try:
+                await self._record(call, UNKNOWN_STATUS)
+            except BaseException:
+                # Cut off, by the cleanup budget at the latest: the calls not
+                # yet recorded still reach the log.
+                for lost in unresolved[position + 1 :]:
+                    self._log_cut_off(self._metadata(lost, UNKNOWN_STATUS))
+                raise
+
+    def _metadata(self, call: ToolCallMetadata, status: str) -> dict[str, object]:
+        return {
             "public_id": self.widget.public_id,
             "visitor_id": str(self.visitor_id),
             "session_id": str(self.session_id),
@@ -268,6 +289,16 @@ class ExternalToolCallAudit:
             "result_status": status,
             "argument_names": sorted(call.arguments or {}),
         }
+
+    def _log_cut_off(self, metadata: dict[str, object]) -> None:
+        logger.error(
+            "Widget external tool call audit cut off; the entry may be missing",
+            extra={"widget_id": str(self.widget.id), **metadata},
+        )
+
+    async def _record(self, call: ToolCallMetadata, status: str) -> None:
+        assert self.widget.id is not None
+        metadata = self._metadata(call, status)
         try:
             job = await self.audit_service.log_async(
                 tenant_id=self.widget.tenant_id,
@@ -293,6 +324,9 @@ class ExternalToolCallAudit:
                 extra={"widget_id": str(self.widget.id), **metadata},
             )
             return
+        except BaseException:
+            self._log_cut_off(metadata)
+            raise
         if job is None:
             logger.error(
                 "Widget external tool call missing from the audit trail",

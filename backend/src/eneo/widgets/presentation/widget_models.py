@@ -9,6 +9,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.mcp_servers.domain.entities.mcp_server import MCP_TOOL_CATALOG_HARD_MAX_COUNT
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
@@ -71,7 +72,7 @@ class WidgetAcknowledgedServer(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     id: UUID
-    tool_ids: list[UUID] = Field(max_length=1000)
+    tool_ids: list[UUID] = Field(max_length=MCP_TOOL_CATALOG_HARD_MAX_COUNT)
 
 
 class WidgetExternalToolsAcknowledge(BaseModel):

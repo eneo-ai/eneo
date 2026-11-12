@@ -1,9 +1,11 @@
+import asyncio
 import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import anyio
 import pytest
 from starlette.types import Message
 
@@ -18,6 +20,7 @@ from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -944,6 +947,30 @@ async def test_a_call_id_reused_in_a_later_round_is_audited_per_call():
     ] == [("call_9", "succeeded"), ("call_9", "failed")]
 
 
+async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
+    close_case = {"tool_name": "close_case", "mcp_tool_name": "casefiles__close_case"}
+
+    async def turn():
+        yield _external_event(
+            _external_call(result_status="approved"),
+            _external_call(**close_case, result_status="approved"),
+        )
+        yield _external_event(_external_call())
+        yield _external_event(_external_call(**close_case, result_status="failed"))
+        yield Completion(text="Klart.", response_type=ResponseType.TEXT)
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    assert [
+        (call.kwargs["metadata"]["tool_name"], call.kwargs["metadata"]["result_status"])
+        for call in deps.audit.log_async.await_args_list
+    ] == [("create_case", "succeeded"), ("close_case", "failed")]
+
+
 async def test_a_call_the_turn_never_saw_end_is_audited_as_unknown():
     async def turn():
         yield _external_event(_external_call(result_status="approved"))
@@ -998,6 +1025,83 @@ async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
     (record,) = logger.exception.call_args_list + logger.error.call_args_list
     assert record.kwargs["extra"]["tool_call_id"] == "call_9"
     assert record.kwargs["extra"]["argument_names"] == ["body", "title"]
+
+
+async def _left_with_a_stalled_audit_queue(monkeypatch, widget, *, follow_up=False):
+    """The visitor leaves while two external calls run, and the audit queue
+    then hangs past the cleanup budget."""
+
+    async def turn():
+        yield _external_event(
+            _external_call(result_status="approved"),
+            _external_call(tool_call_id="call_10", result_status="approved"),
+        )
+        yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+
+    async def stalled(**_kwargs):
+        await anyio.sleep_forever()
+
+    done: list[str] = []
+
+    def write(name):
+        async def written(*_args):
+            # A real write waits on the database or Redis, where a spent
+            # budget cuts it off.
+            await asyncio.sleep(0.001)
+            done.append(name)
+
+        return written
+
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.2)
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    deps.audit.log_async = AsyncMock(side_effect=stalled)
+    deps.usage.delete_session = AsyncMock(side_effect=write("delete"))
+    deps.limiter.hold_turn = AsyncMock(return_value="owner-1")
+    deps.limiter.release_turn = AsyncMock(side_effect=write("release"))
+    response = await service.ask(
+        _principal(widget),
+        question="q",
+        session_id=deps.session.id if follow_up else None,
+        client_ip=None,
+    )
+    await anext(response.answer)
+    await response.answer.aclose()
+    return deps, logger, done
+
+
+async def test_a_stalled_audit_queue_cannot_keep_a_zero_retention_conversation(
+    monkeypatch,
+):
+    widget = _widget(privacy=WidgetPrivacy(retention_days=0))
+    _deps, _logger, done = await _left_with_a_stalled_audit_queue(monkeypatch, widget)
+    assert done == ["delete"]
+
+
+async def test_a_stalled_audit_queue_does_not_hold_the_conversation(monkeypatch):
+    widget = _widget()
+    deps, _logger, done = await _left_with_a_stalled_audit_queue(
+        monkeypatch, widget, follow_up=True
+    )
+    assert done == ["release"]
+    deps.limiter.release_turn.assert_awaited_once_with(
+        widget, deps.session.id, "owner-1"
+    )
+
+
+async def test_calls_a_stalled_audit_queue_never_recorded_reach_the_log(monkeypatch):
+    _deps, logger, _done = await _left_with_a_stalled_audit_queue(
+        monkeypatch, _widget()
+    )
+    extras = [record.kwargs["extra"] for record in logger.error.call_args_list]
+    assert [(extra["tool_call_id"], extra["result_status"]) for extra in extras] == [
+        ("call_9", "unknown"),
+        ("call_10", "unknown"),
+    ]
+    for extra in extras:
+        assert extra["argument_names"] == ["body", "title"]
+        assert "Trasig lampa" not in json.dumps(extra, ensure_ascii=False)
 
 
 async def test_a_turn_without_an_audit_service_still_answers():

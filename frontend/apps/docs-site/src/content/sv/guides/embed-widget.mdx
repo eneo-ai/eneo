@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@f620e002b806
+translationSource: guides/embed-widget.mdx@24f8810c3092
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -536,8 +536,9 @@ Eneo innebär det:
   anger widgeten, det pseudonyma besökar-id:t, konversationen, servern och
   verktyget, om anropet kom från förhandsvisningen, samt argumentens namn men
   inte deras värden, som kan innehålla besökarens personuppgifter. Resultatet
-  är `succeeded` eller `failed`, eller `unknown` när besökaren lämnade innan
-  anropet var klart. En skrivning i ett externt system som en anonym besökare
+  är `succeeded` eller `failed`, eller `unknown` när turen avslutades innan
+  anropet var klart, till exempel för att besökaren lämnade; servern kan då
+  ändå ha utfört det. En skrivning i ett externt system som en anonym besökare
   utlöst lämnar därmed ett spår även när konversationen i sig aldrig sparas.
   Når posten inte granskningskön loggar backend den som ett fel med samma
   uppgifter.
