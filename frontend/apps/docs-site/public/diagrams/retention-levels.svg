@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Retention period by level</title>
-  <desc id="d">A period is chosen per level (organisation, space, assistant, app or flow, and under it the step and the recording as two separate branches) or not at all, and an unset period follows its parent; the space's period, chosen there or inherited from the organisation, is the cap, so a level below may shorten it but never extend it. In the example the organisation has no period, the space has 7 days, the flow has none and so gets 7 days, the transcription step has 24 hours and the recording 0 hours, removed when the run ends, while an unset recording period would keep the recording until its run is removed. Without a retention period, retention removes nothing, but leftover cleanup still applies.</desc>
+  <desc id="d">A period is chosen per level (organisation, space, assistant, app or flow, and under it the step and the recording as two separate branches) or not at all, and an unset period follows its parent; the space's period, chosen there or inherited from the organisation, is the cap, so a level below may shorten it but never extend it. In the example the organisation has no period, the space has 7 days, the flow has none and so gets 7 days, the transcription step has 24 hours and the recording 0 hours, removed when the run ends, while an unset recording period would keep the recording until its run is removed. Without a period, no age-based removal begins; leftover cleanup, empty-conversation cleanup, the module's limit for unsent recordings and removal of copies whose source has already been removed still apply.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -66,5 +66,5 @@
   <text class="h" x="680" y="240">Below the cap</text><text class="s" x="680" y="262">may shorten,</text><text class="s" x="680" y="281">never extend</text>
 
   <path class="lane" d="M24,354 H836"/>
-  <text class="s" x="430" y="380" text-anchor="middle">Without a retention period, retention removes nothing. Leftover cleanup still applies.</text>
+  <text class="s" x="430" y="380" text-anchor="middle">Without a period, no age-based removal begins. Cleanup, and removal of copies whose source was removed, still apply.</text>
 </svg>
