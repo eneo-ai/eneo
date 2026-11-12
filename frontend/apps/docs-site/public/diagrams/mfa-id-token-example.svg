@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="388" viewBox="0 0 860 388" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">What Eneo reads in the ID token</title>
-  <desc id="d">In a signed ID token with made-up values, Eneo compares the acr value (or, if the organisation chooses, amr instead) with the value the organisation has set to get MFA yes or no, while iss, sub, aud and email only say who the person is and auth_time is not used.</desc>
+  <desc id="d">In a signed ID token with made-up values, Eneo compares the acr value (or, if the organisation chooses, amr instead) with the value the organisation has set to get MFA yes or no, while iss, sub, aud and email belong to the identity and token checks that come before the MFA rule, and auth_time is not used.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -64,7 +64,7 @@
 
   <!-- who the person is -->
   <path class="line" d="M452,70 H460 V190 H452"/>
-  <text class="h" x="476" y="124">Who the person is</text><text class="s" x="476" y="145">not used for MFA</text>
+  <text class="h" x="476" y="124">Identity and token checks</text><text class="s" x="476" y="145">done before the MFA rule</text>
 
   <!-- what Eneo compares -->
   <path class="edge" d="M444,218 H610"/>

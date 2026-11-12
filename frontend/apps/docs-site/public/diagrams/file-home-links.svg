@@ -63,5 +63,5 @@
 
   <path class="edge" d="M200,320 H390"/>
   <rect class="pill" x="255" y="309" width="80" height="22" rx="4"/><text class="s" x="295" y="325" text-anchor="middle">points to</text>
-  <rect class="box" x="392" y="288" width="444" height="64" rx="8"/><text class="h" x="614" y="315" text-anchor="middle">Stored content</text><text class="s" x="614" y="337" text-anchor="middle">counts the files that point here</text>
+  <rect class="box" x="392" y="288" width="444" height="64" rx="8"/><text class="h" x="614" y="315" text-anchor="middle">Stored content</text><text class="s" x="614" y="337" text-anchor="middle">the bytes in storage</text>
 </svg>
