@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="392" viewBox="0 0 860 392" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="364" viewBox="0 0 860 364" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">The entrance check</title>
-  <desc id="d">Every call from the web, a module or a key goes through one entrance check that finds the space it touches; if the space requires MFA and the session has none, the answer is "sign in with MFA", otherwise the call is let in. API keys, access codes and widget visitors cannot show MFA and get a typed refusal.</desc>
+  <desc id="d">Every call from the web, a module or a key goes through one entrance check that finds the space it touches; the call is let in if the space does not require MFA or if a person's session has MFA, a person's session without MFA is answered "sign in with MFA", and a call with no person behind it (an API key, access code or widget visitor) gets a typed refusal.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -45,7 +45,7 @@
       .dot,.ah{fill:#8b949e}
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="859" height="391" rx="12"/>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="363" rx="12"/>
 
   <rect class="box" x="24" y="24" width="142" height="84" rx="8"/><text class="h" x="95" y="50" text-anchor="middle">A call</text><text class="s" x="95" y="71" text-anchor="middle">from web,</text><text class="s" x="95" y="90" text-anchor="middle">module or key</text>
   <path class="edge" d="M166,66 H210"/>
@@ -53,20 +53,26 @@
   <path class="edge" d="M394,66 H438"/>
   <rect class="box" x="438" y="24" width="180" height="84" rx="8"/><text class="h" x="528" y="61" text-anchor="middle">Does the space</text><text class="h" x="528" y="81" text-anchor="middle">require MFA?</text>
 
-  <path class="edge" d="M618,66 H756 V180"/>
-  <rect class="pill" x="671" y="55" width="32" height="22" rx="4"/><text class="s" x="687" y="71" text-anchor="middle">no</text>
-  <path class="edge" d="M528,108 V176"/>
-  <rect class="pill" x="511" y="131" width="34" height="22" rx="4"/><text class="s" x="528" y="147" text-anchor="middle">yes</text>
+  <!-- the space does not require MFA -->
+  <path class="edge" d="M618,66 H674"/>
+  <rect class="pill" x="630" y="55" width="32" height="22" rx="4"/><text class="s" x="646" y="71" text-anchor="middle">no</text>
+  <rect class="ok" x="676" y="24" width="160" height="316" rx="8"/><text class="h" x="756" y="188" text-anchor="middle">Let in</text>
 
-  <rect class="box" x="438" y="176" width="180" height="64" rx="8"/><text class="h" x="528" y="203" text-anchor="middle">Does the session</text><text class="h" x="528" y="223" text-anchor="middle">have MFA?</text>
-  <path class="edge" d="M618,208 H676"/>
-  <rect class="pill" x="630" y="197" width="34" height="22" rx="4"/><text class="s" x="647" y="213" text-anchor="middle">yes</text>
-  <rect class="ok" x="676" y="180" width="160" height="56" rx="8"/><text class="h" x="756" y="214" text-anchor="middle">Let in</text>
+  <!-- it does: who is behind the call? -->
+  <path class="edge" d="M528,108 V150"/>
+  <rect class="pill" x="511" y="118" width="34" height="22" rx="4"/><text class="s" x="528" y="134" text-anchor="middle">yes</text>
+  <rect class="box" x="438" y="152" width="180" height="64" rx="8"/><text class="h" x="528" y="179" text-anchor="middle">Is a person</text><text class="h" x="528" y="199" text-anchor="middle">behind the call?</text>
+  <path class="edge" d="M438,184 H396"/>
+  <rect class="pill" x="401" y="173" width="32" height="22" rx="4"/><text class="s" x="417" y="189" text-anchor="middle">no</text>
+  <rect class="no" x="24" y="144" width="370" height="80" rx="8"/><text class="h" x="209" y="170" text-anchor="middle">Typed refusal</text><text class="s" x="209" y="191" text-anchor="middle">API key, access code or widget</text><text class="s" x="209" y="210" text-anchor="middle">visitor: cannot show MFA</text>
 
-  <path class="edge" d="M528,240 V300"/>
-  <rect class="pill" x="512" y="259" width="32" height="22" rx="4"/><text class="s" x="528" y="275" text-anchor="middle">no</text>
-  <rect class="warn" x="438" y="300" width="180" height="56" rx="8"/><text class="h" x="528" y="334" text-anchor="middle">Sign in with MFA</text>
-
-  <text class="s" x="416" y="333" text-anchor="middle">or</text>
-  <rect class="no" x="24" y="288" width="370" height="80" rx="8"/><text class="h" x="209" y="314" text-anchor="middle">Typed refusal</text><text class="s" x="209" y="335" text-anchor="middle">API keys, access codes and widget</text><text class="s" x="209" y="354" text-anchor="middle">visitors cannot show MFA</text>
+  <!-- a person: does the session have MFA? -->
+  <path class="edge" d="M528,216 V274"/>
+  <rect class="pill" x="511" y="234" width="34" height="22" rx="4"/><text class="s" x="528" y="250" text-anchor="middle">yes</text>
+  <rect class="box" x="438" y="276" width="180" height="64" rx="8"/><text class="h" x="528" y="303" text-anchor="middle">Does the session</text><text class="h" x="528" y="323" text-anchor="middle">have MFA?</text>
+  <path class="edge" d="M618,308 H674"/>
+  <rect class="pill" x="629" y="297" width="34" height="22" rx="4"/><text class="s" x="646" y="313" text-anchor="middle">yes</text>
+  <path class="edge" d="M438,308 H396"/>
+  <rect class="pill" x="401" y="297" width="32" height="22" rx="4"/><text class="s" x="417" y="313" text-anchor="middle">no</text>
+  <rect class="warn" x="210" y="276" width="184" height="64" rx="8"/><text class="h" x="302" y="314" text-anchor="middle">Sign in with MFA</text>
 </svg>

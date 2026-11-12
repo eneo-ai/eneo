@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Signing in again with MFA</title>
-  <desc id="d">A person whose session has no MFA opens a space that requires it, chooses sign in with MFA, and the identity provider asks for the second factor. Eneo receives the signed ID token, creates a new session with MFA, ends the old one and returns the person to the same space; an answer that does not meet the rule ends on an end page, not a loop.</desc>
+  <desc id="d">A person whose session has no MFA opens a space that requires it, chooses sign in with MFA, and the identity provider asks for the second factor. Eneo receives the signed ID token and applies the organisation's rule: if the answer meets it, Eneo creates a new session with MFA, ends the old one and returns the person to the same space; if not, Eneo shows an end page, not a loop.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -62,13 +62,13 @@
   <rect class="box" x="336" y="38" width="176" height="60" rx="8"/><text class="h" x="424" y="63" text-anchor="middle">Chooses</text><text class="s" x="424" y="84" text-anchor="middle">sign in with MFA</text>
   <path class="edge" d="M477,98 V266"/>
   <rect class="box" x="442" y="266" width="176" height="60" rx="8"/><text class="h" x="530" y="291" text-anchor="middle">Second factor</text><text class="s" x="530" y="312" text-anchor="middle">the provider asks</text>
-  <path class="edge" d="M583,266 V206"/>
+  <path class="edge" d="M583,266 V196"/>
   <rect class="pill" x="525" y="232" width="116" height="22" rx="4"/><text class="s" x="583" y="248" text-anchor="middle">signed ID token</text>
-  <rect class="key" x="548" y="130" width="176" height="76" rx="8"/><text class="h" x="636" y="155" text-anchor="middle">New session</text><text class="s" x="636" y="176" text-anchor="middle">with MFA;</text><text class="s" x="636" y="195" text-anchor="middle">the old one ends</text>
-  <path class="edge" d="M689,130 V98"/>
+  <rect class="key" x="548" y="120" width="176" height="74" rx="8"/><text class="h" x="636" y="144" text-anchor="middle">New session</text><text class="s" x="636" y="165" text-anchor="middle">with MFA;</text><text class="s" x="636" y="184" text-anchor="middle">the old one ends</text>
+  <path class="edge" d="M689,120 V98"/>
   <rect class="ok" x="654" y="38" width="176" height="60" rx="8"/><text class="h" x="742" y="63" text-anchor="middle">Back in the space</text><text class="s" x="742" y="84" text-anchor="middle">the one they opened</text>
 
-  <!-- the one exception: the answer from the provider does not meet the rule -->
-  <path class="edge" d="M618,296 H727 V348"/>
-  <rect class="no" x="424" y="348" width="412" height="32" rx="8"/><text class="t" x="630" y="369" text-anchor="middle">Answer does not meet the rule: end page, no loop</text>
+  <!-- the one exception: Eneo finds that the answer does not meet the rule -->
+  <circle class="dot" cx="583" cy="212" r="3.5"/>
+  <path class="edge" d="M583,212 H776 V346"/>  <rect class="no" x="424" y="348" width="412" height="32" rx="8"/><text class="t" x="630" y="369" text-anchor="middle">Answer does not meet the rule: end page, no loop</text>
 </svg>

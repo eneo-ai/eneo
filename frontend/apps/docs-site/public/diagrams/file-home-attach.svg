@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="860" height="306" viewBox="0 0 860 306" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="388" viewBox="0 0 860 388" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">A file's life with a home</title>
-  <desc id="d">A generated or flow file gets its home when it is created, an upload without a space stays a draft that is cleaned up if unused, an attached file gets its home in the same step, and every read is checked. Attaching a file in another space is refused; the person uploads it there instead.</desc>
+  <desc id="d">A file starts one of two ways: a generated file, a flow file or an upload that names its space has its home from the start, while an upload with no space is a draft, cleaned up if unused, that gets its home in the same step it is attached, and two spaces cannot both take it. Every file with a home is read in its home and checked every time; attaching it in another space is refused, and the person uploads it there instead.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -45,17 +45,23 @@
       .dot,.ah{fill:#8b949e}
     }
   </style>
-  <rect class="bg" x="0.5" y="0.5" width="859" height="305" rx="12"/>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="387" rx="12"/>
 
-  <rect class="box" x="24" y="24" width="180" height="118" rx="8"/><text class="h" x="114" y="50" text-anchor="middle">Created</text><text class="s" x="114" y="71" text-anchor="middle">generated and flow</text><text class="s" x="114" y="90" text-anchor="middle">files get their home</text><text class="s" x="114" y="109" text-anchor="middle">at once; an upload</text><text class="s" x="114" y="128" text-anchor="middle">can name its space</text>
-  <path class="edge" d="M204,83 H234"/>
-  <rect class="box" x="234" y="24" width="180" height="118" rx="8"/><text class="h" x="324" y="50" text-anchor="middle">Draft</text><text class="s" x="324" y="71" text-anchor="middle">an upload with</text><text class="s" x="324" y="90" text-anchor="middle">no space, cleaned</text><text class="s" x="324" y="109" text-anchor="middle">up if unused</text>
-  <path class="edge" d="M414,83 H444"/>
-  <rect class="key" x="444" y="24" width="180" height="118" rx="8"/><text class="h" x="534" y="50" text-anchor="middle">Attached</text><text class="s" x="534" y="71" text-anchor="middle">gets its home</text><text class="s" x="534" y="90" text-anchor="middle">in the same step;</text><text class="s" x="534" y="109" text-anchor="middle">two spaces cannot</text><text class="s" x="534" y="128" text-anchor="middle">both take it</text>
-  <path class="edge" d="M624,83 H654"/>
-  <rect class="box" x="654" y="24" width="180" height="118" rx="8"/><text class="h" x="744" y="50" text-anchor="middle">Read</text><text class="s" x="744" y="71" text-anchor="middle">checked every time</text>
+  <!-- start 1: created with a home -->
+  <rect class="box" x="24" y="24" width="260" height="88" rx="8"/><text class="h" x="154" y="50" text-anchor="middle">Created with a home</text><text class="s" x="154" y="71" text-anchor="middle">generated and flow files,</text><text class="s" x="154" y="90" text-anchor="middle">an upload that names its space</text>
+  <path class="edge" d="M284,68 H594"/>
+  <rect class="pill" x="364" y="57" width="150" height="22" rx="4"/><text class="s" x="439" y="73" text-anchor="middle">home from the start</text>
 
-  <path class="edge" d="M534,142 V222"/>
-  <rect class="pill" x="444" y="171" width="180" height="22" rx="4"/><text class="s" x="534" y="187" text-anchor="middle">attach in another space</text>
-  <rect class="no" x="424" y="222" width="220" height="60" rx="8"/><text class="h" x="534" y="247" text-anchor="middle">Refused</text><text class="s" x="534" y="268" text-anchor="middle">upload it there instead</text>
+  <!-- start 2: an upload with no space -->
+  <rect class="box" x="24" y="144" width="220" height="112" rx="8"/><text class="h" x="134" y="170" text-anchor="middle">Draft</text><text class="s" x="134" y="191" text-anchor="middle">an upload with no space,</text><text class="s" x="134" y="210" text-anchor="middle">cleaned up if unused</text>
+  <path class="edge" d="M244,200 H318"/>
+  <rect class="pill" x="253" y="189" width="56" height="22" rx="4"/><text class="s" x="281" y="205" text-anchor="middle">attach</text>
+  <rect class="box" x="320" y="144" width="240" height="112" rx="8"/><text class="h" x="440" y="170" text-anchor="middle">Attached</text><text class="s" x="440" y="191" text-anchor="middle">gets its home in the</text><text class="s" x="440" y="210" text-anchor="middle">same step; two spaces</text><text class="s" x="440" y="229" text-anchor="middle">cannot both take it</text>
+  <path class="edge" d="M560,200 H594"/>
+
+  <!-- every file with a home -->
+  <rect class="key" x="596" y="24" width="240" height="232" rx="8"/><text class="h" x="716" y="131" text-anchor="middle">Read in its home</text><text class="s" x="716" y="152" text-anchor="middle">checked every time</text>
+  <path class="edge" d="M716,256 V302"/>
+  <rect class="pill" x="626" y="268" width="180" height="22" rx="4"/><text class="s" x="716" y="284" text-anchor="middle">attach in another space</text>
+  <rect class="no" x="596" y="304" width="240" height="60" rx="8"/><text class="h" x="716" y="329" text-anchor="middle">Refused</text><text class="s" x="716" y="350" text-anchor="middle">upload it there instead</text>
 </svg>

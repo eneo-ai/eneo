@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="400" viewBox="0 0 860 400" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Reading a file, today and with a home</title>
-  <desc id="d">Today a file's content is fetched through a signed link that works for whoever holds it and checks only the organisation; the owner check covers only the file's details, and the space's MFA requirement is never asked. With a home, the content's own access rule and the home's requirement must both say yes before the content is read, and a link is checked each time it is used.</desc>
+  <desc id="d">Today a file's content is fetched through a signed link that works for whoever holds it and checks only the organisation; the owner check covers only the file's details, and the space's MFA requirement is never asked. With a home, the content's own access rule must say yes and the MFA requirement of the home must be met before the content is read, and a link is checked each time it is used.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -66,7 +66,7 @@
   <path class="edge" d="M616,96 L556,120"/><path class="edge" d="M660,96 L720,120"/>
   <rect class="box" x="456" y="120" width="162" height="76" rx="8"/><text class="h" x="537" y="152" text-anchor="middle">Access rule</text><text class="s" x="537" y="172" text-anchor="middle">the content's own</text>
   <text class="s" x="638" y="163" text-anchor="middle">and</text>
-  <rect class="key" x="658" y="120" width="162" height="76" rx="8"/><text class="h" x="739" y="145" text-anchor="middle">Home</text><text class="s" x="739" y="165" text-anchor="middle">does the space</text><text class="s" x="739" y="183" text-anchor="middle">require MFA?</text>
+  <rect class="key" x="658" y="120" width="162" height="76" rx="8"/><text class="h" x="739" y="145" text-anchor="middle">Home</text><text class="s" x="739" y="165" text-anchor="middle">is its MFA</text><text class="s" x="739" y="183" text-anchor="middle">requirement met?</text>
   <path class="line" d="M537,196 L638,214 L739,196"/><circle class="dot" cx="638" cy="214" r="3.5"/>
   <path class="edge" d="M638,214 V262"/>
   <rect class="pill" x="563" y="227" width="150" height="22" rx="4"/><text class="s" x="638" y="243" text-anchor="middle">both must say yes</text>

@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Visual system shared by the eight diagrams in this folder.
+<!-- Visual system shared by the diagrams for MFA on spaces and the home of a file (mfa-*.svg, file-home-*.svg, session-end-recording.svg, speech-to-text-in-mfa-space.svg).
      Canvas: 860 wide, 400 tall or less, opaque background with a 1px border and radius 12, so text stays readable on any page colour.
      Layout: 24px outer margin; boxes radius 8, aligned in rows and columns with gaps of 24 or more; reading starts top left and runs right, then down.
      Strokes: box 1.5; key box 2; arrows 1.5 with one neutral arrowhead; dashes 6 4.

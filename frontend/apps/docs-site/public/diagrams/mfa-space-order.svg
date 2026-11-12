@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="398" viewBox="0 0 860 398" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Order of the work</title>
-  <desc id="d">Sign-in work and file home work run as parallel lanes, and both must land before the entrance check and space switch; flows, the module kit with the speech-to-text module and speech to text in production then follow in order. Making session end stop the module runs alongside and feeds the module kit, and a provider check, with no code, comes before production.</desc>
+  <desc id="d">Sign-in work and file home work run as parallel lanes, and both must land before the entrance check and space switch; flows, the module kit with the speech-to-text module and speech to text in production then follow in order. Reading files also uses what sign-in stores. Ending module access and live transcription when the session ends runs alongside and is needed by flows, and a provider check, with no code, comes before production.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -59,12 +59,13 @@
   <rect class="box" x="412" y="154" width="170" height="80" rx="8"/><text class="h" x="497" y="180" text-anchor="middle">Read files</text><text class="s" x="497" y="201" text-anchor="middle">with the reader's</text><text class="s" x="497" y="220" text-anchor="middle">sign-in</text>
 
   <text class="h" x="24" y="266">Session end</text>
-  <rect class="box" x="24" y="278" width="364" height="60" rx="8"/><text class="h" x="206" y="303" text-anchor="middle">Stops the module</text><text class="s" x="206" y="324" text-anchor="middle">and live transcription</text>
+  <rect class="box" x="24" y="278" width="364" height="60" rx="8"/><text class="h" x="206" y="303" text-anchor="middle">Ends module access</text><text class="s" x="206" y="324" text-anchor="middle">and stops live transcription</text>
 
   <!-- lanes join the spine -->
   <path class="edge" d="M388,76 H640"/>
   <path class="line" d="M582,194 H604 V76"/><circle class="dot" cx="604" cy="76" r="3.5"/>
-  <path class="edge" d="M388,308 H620 V244 H640"/>
+  <path class="edge" d="M388,308 H620 V160 H640"/>
+  <path class="edge" d="M497,76 V154"/><circle class="dot" cx="497" cy="76" r="3.5"/>
 
   <!-- then in order -->
   <text class="h" x="640" y="36">Then in order</text>

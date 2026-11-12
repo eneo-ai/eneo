@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="296" viewBox="0 0 860 296" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">When the session ends during a recording</title>
-  <desc id="d">A recording never asks for MFA. If the session ends during it, by sign-out, a disabled account or expiry, cloud transcription stops within a fixed bound while the recording continues locally, and the person then stops, signs in again and uploads.</desc>
+  <desc id="d">A recording never asks for MFA. If the session ends during it, by sign-out, a disabled account or expiry, cloud transcription stops within 35 seconds while the recording continues locally, and the person then stops, signs in again and uploads.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -52,7 +52,7 @@
   <path class="mark" d="M220,24 V200 M220,256 V272"/>
   <rect class="warn" x="85" y="200" width="270" height="56" rx="8"/><text class="h" x="220" y="224" text-anchor="middle">Session ends</text><text class="s" x="220" y="245" text-anchor="middle">sign-out, disabled account, expiry</text>
 
-  <rect class="no" x="236" y="24" width="216" height="64" rx="8"/><text class="h" x="344" y="50" text-anchor="middle">Cloud transcription</text><text class="s" x="344" y="71" text-anchor="middle">stops within a fixed bound</text>
+  <rect class="no" x="236" y="24" width="216" height="64" rx="8"/><text class="h" x="344" y="50" text-anchor="middle">Cloud transcription</text><text class="s" x="344" y="71" text-anchor="middle">stops within 35 seconds</text>
   <rect class="ok" x="236" y="120" width="216" height="64" rx="8"/><text class="h" x="344" y="146" text-anchor="middle">Recording continues</text><text class="s" x="344" y="167" text-anchor="middle">locally</text>
 
   <path class="edge" d="M452,152 H480"/>

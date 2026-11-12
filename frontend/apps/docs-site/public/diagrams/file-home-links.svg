@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="376" viewBox="0 0 860 376" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">A file's four links</title>
+  <desc id="d">A file with a home has four separate links: its home, exactly one space whose MFA requirement applies wherever the file is read; access through what it is attached to (a conversation, assistant, app or flow run); a trace to the person who created it, kept as today but giving no right to read on its own once the file is in use; and a pointer to the stored content.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="375" rx="12"/>
+
+  <rect class="box" x="24" y="24" width="176" height="328" rx="8"/><text class="h" x="112" y="182" text-anchor="middle">File</text><text class="s" x="112" y="204" text-anchor="middle">same id as today</text>
+
+  <path class="edge" d="M200,56 H390"/>
+  <rect class="pill" x="267" y="45" width="56" height="22" rx="4"/><text class="s" x="295" y="61" text-anchor="middle">home</text>
+  <rect class="key" x="392" y="24" width="444" height="64" rx="8"/><text class="h" x="614" y="51" text-anchor="middle">Exactly one space</text><text class="s" x="614" y="73" text-anchor="middle">its MFA requirement applies wherever the file is read</text>
+
+  <path class="edge" d="M200,144 H390"/>
+  <rect class="pill" x="263" y="133" width="64" height="22" rx="4"/><text class="s" x="295" y="149" text-anchor="middle">access</text>
+  <rect class="box" x="392" y="112" width="444" height="64" rx="8"/><text class="h" x="614" y="139" text-anchor="middle">Conversation, assistant, app or flow run</text><text class="s" x="614" y="161" text-anchor="middle">decides who may read the file</text>
+
+  <path class="edge" d="M200,232 H390"/>
+  <rect class="pill" x="267" y="221" width="56" height="22" rx="4"/><text class="s" x="295" y="237" text-anchor="middle">trace</text>
+  <rect class="box" x="392" y="200" width="444" height="64" rx="8"/><text class="h" x="614" y="227" text-anchor="middle">Person who created it</text><text class="s" x="614" y="249" text-anchor="middle">kept as today; no right to read on its own once in use</text>
+
+  <path class="edge" d="M200,320 H390"/>
+  <rect class="pill" x="255" y="309" width="80" height="22" rx="4"/><text class="s" x="295" y="325" text-anchor="middle">points to</text>
+  <rect class="box" x="392" y="288" width="444" height="64" rx="8"/><text class="h" x="614" y="315" text-anchor="middle">Stored content</text><text class="s" x="614" y="337" text-anchor="middle">counts the files that point here</text>
+</svg>
