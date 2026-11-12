@@ -4887,6 +4887,8 @@
   "widget_admin_visitor_access_capability": "{name}, när ytan tillåter det och organisationens leverantör är en extern tjänst",
   "widget_admin_visitor_access_never": "Aldrig tillgängligt för besökare: bildgenerering, filanalys och filskapande, diagram, filuppladdning, bilder och filer som verktyg returnerar samt Eneos inbyggda verktygsleverantörer.",
   "widget_admin_visitor_access_server_tools": "{name}: {tools}",
+  "widget_admin_visitor_access_not_allowed": "Inga verktyg på MCP-servrar utanför Eneo: organisationen tillåter dem inte i widgetar.",
+  "widget_admin_visitor_access_unacknowledged": "Av dessa utelämnas verktyg som slagits på efter den senaste bekräftelsen, tills en organisationsadministratör bekräftar dem.",
   "widget_admin_external_tools_title": "Assistenten använder verktyg på MCP-servrar utanför Eneo",
   "widget_admin_external_tools_description": "Besökare är anonyma, en fråga kan bära instruktioner till assistenten, och ingen godkänner ett verktygsanrop i en besökares tur. Allt dessa verktyg kan läsa eller göra kan en besökare få assistenten att göra, med argument besökaren själv väljer. Varje sådant anrop skrivs till granskningsloggen.",
   "widget_admin_external_tools_servers": "MCP-servrar utanför Eneo",

@@ -141,12 +141,15 @@ export function WidgetRulesFields({
     parsedOrigins.origins.length === 0 &&
     parsedOrigins.invalid.length === 0;
   const [originsTouched, setOriginsTouched] = useState(false);
+  // Left, or typed back, as saved, the field is explained as the saved list.
+  const originsEdited = origins.text !== savedOrigins;
+  const originsChecked = originsTouched && originsEdited;
   const originsProblem =
-    originsTouched && parsedOrigins.invalid.length > 0
+    originsChecked && parsedOrigins.invalid.length > 0
       ? t("widget_admin_origins_invalid", { origins: parsedOrigins.invalid.join(", ") })
-      : originsTouched && parsedOrigins.tooMany
+      : originsChecked && parsedOrigins.tooMany
         ? t("widget_admin_origins_too_many", { max: MAX_ALLOWED_ORIGINS })
-        : originsTouched && emptiedWhileActive
+        : originsChecked && emptiedWhileActive
           ? blockerLabel("allowed_origins_empty", t)
           : state.refusals["allowed_origins"]
             ? state.refusals["allowed_origins"]
@@ -160,7 +163,7 @@ export function WidgetRulesFields({
   // valid list typed but not yet committed (blur) is an edit too. The saved
   // list as it stands is no edit, even with a line the API no longer accepts.
   const originsHeld =
-    origins.text !== savedOrigins &&
+    originsEdited &&
     (parsedOrigins.invalid.length > 0 ||
       parsedOrigins.tooMany ||
       parsedOrigins.origins.join("\n") !== savedOrigins);

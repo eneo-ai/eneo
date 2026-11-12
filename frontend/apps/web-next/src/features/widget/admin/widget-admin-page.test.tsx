@@ -354,6 +354,50 @@ describe("WidgetAdminPage", () => {
   });
 
   it.each([
+    {
+      case: "the organisation does not allow them",
+      blockers: ["external_tools_not_allowed"],
+      items: [
+        "Kunskap: assistentens samlingar och webbplatser",
+        "Inga verktyg på MCP-servrar utanför Eneo: organisationen tillåter dem inte i widgetar."
+      ]
+    },
+    {
+      case: "newer ones wait for an admin",
+      blockers: ["external_tools_unacknowledged"],
+      items: [
+        "Kunskap: assistentens samlingar och webbplatser",
+        "Kommunens ärenden: Sök ärende",
+        "Av dessa utelämnas verktyg som slagits på efter den senaste bekräftelsen, tills en organisationsadministratör bekräftar dem.",
+        "Används, men visas inte för besökaren (verktygsaktivitet är av)."
+      ]
+    }
+  ])(
+    "visitor access lists only the tools visitors reach when $case",
+    async ({ blockers, items }) => {
+      showPage([
+        widget({
+          status: "active",
+          activated_at: "2026-09-01T00:00:00Z",
+          external_tools: [
+            { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+          ],
+          external_tools_acknowledged: false,
+          activation_blockers: blockers,
+          show_tool_activity: false
+        })
+      ]);
+      fireEvent.click(await screen.findByRole("tab", { name: /Publicera/ }));
+      const access = await screen.findByRole("region", { name: "Besökare får tillgång till" });
+      expect(
+        within(access)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent)
+      ).toEqual(items);
+    }
+  );
+
+  it.each([
     { case: "only an admin", permissions: ["widgets"], locked: true },
     { case: "an admin", permissions: ["widgets", "admin"], locked: false }
   ] as const)("$case detaches a live widget from its template", async ({ permissions, locked }) => {

@@ -174,4 +174,31 @@ describe("WidgetRulesFields allowed websites", () => {
       )
     );
   });
+
+  it("a saved list left, or typed back, as it was is explained as the saved one", () => {
+    const autosave = new WidgetAutosave(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      }),
+      vi.fn(),
+      { delay: 10 }
+    );
+    renderInApp(<Rules autosave={autosave} />);
+    const origins = screen.getByRole("textbox", { name: "Tillåtna webbplatser" });
+    const tooBroad = /täcker en hel toppdomän/;
+
+    fireEvent.focus(origins);
+    fireEvent.blur(origins);
+    expect(screen.getByText(tooBroad)).toBeTruthy();
+
+    fireEvent.change(origins, { target: { value: "https://*.se\nkontakt" } });
+    fireEvent.blur(origins);
+    expect(screen.getByText(/Ingen giltig origin/)).toBeTruthy();
+
+    fireEvent.change(origins, { target: { value: "https://*.se" } });
+    fireEvent.blur(origins);
+    expect(screen.getByText(tooBroad)).toBeTruthy();
+    expect(screen.queryByText(/Ingen giltig origin/)).toBeNull();
+  });
 });

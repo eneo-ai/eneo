@@ -4887,6 +4887,8 @@
   "widget_admin_visitor_access_capability": "{name}, when the space allows it and the organisation's provider is an external service",
   "widget_admin_visitor_access_never": "Never available to visitors: image generation, file analysis and creation, charts, file uploads, images and files returned by tools, and Eneo's built-in tool providers.",
   "widget_admin_visitor_access_server_tools": "{name}: {tools}",
+  "widget_admin_visitor_access_not_allowed": "No tools on MCP servers outside Eneo: the organisation does not allow them in widgets.",
+  "widget_admin_visitor_access_unacknowledged": "Of these, tools switched on after the last acknowledgement are left out until a tenant admin acknowledges them.",
   "widget_admin_external_tools_title": "The assistant uses tools on MCP servers outside Eneo",
   "widget_admin_external_tools_description": "Visitors are anonymous, a question can carry instructions to the assistant, and no one approves a tool call in a visitor's turn. Anything these tools can read or do, a visitor can make the assistant do with arguments of the visitor's choosing. Every such call is written to the audit log.",
   "widget_admin_external_tools_servers": "MCP servers outside Eneo",

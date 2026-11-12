@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, screen } from "@testing-library/react";
+import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { Widget } from "./autosave";
@@ -62,6 +62,24 @@ describe("WidgetPreview", () => {
     expect(screen.getByRole("button", { name: "Ladda om" }).hasAttribute("disabled")).toBe(true);
     expect(api.POST).not.toHaveBeenCalled();
     expect(document.querySelector("iframe")).toBeNull();
+  });
+
+  it("a save that rotates the tokens loads no frame on the revoked one", async () => {
+    const answers = mintOnRequest();
+    const view = renderInApp(<WidgetPreview widget={widget()} />);
+    expect(mints()).toBe(1);
+    await act(async () => answers[0]!({ token: "first", expires_in: 3600 }));
+    expect(document.querySelector("iframe")?.getAttribute("src")).toContain("#preview=first");
+
+    // The save's new updated_at would reload the frame on the old token.
+    view.rerender(
+      <WidgetPreview widget={widget({ token_generation: 2, updated_at: "2026-09-21T10:05:00Z" })} />
+    );
+    await waitFor(() => expect(mints()).toBe(2));
+    expect(document.querySelector("iframe")).toBeNull();
+
+    await act(async () => answers[1]!({ token: "second", expires_in: 3600 }));
+    expect(document.querySelector("iframe")?.getAttribute("src")).toContain("#preview=second");
   });
 
   it("a renewal that falls due on a hidden page waits until it is shown", async () => {

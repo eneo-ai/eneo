@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import type { Widget } from "./autosave";
 import { widgetApi } from "./queries";
@@ -59,7 +59,9 @@ export function WidgetLiveTest({
       setLoading(false);
     }
   }
-  useEffect(() => {
+  // At commit, not after paint: a start answered in between would mount a
+  // widget the pause already removed from this render.
+  useLayoutEffect(() => {
     if (!paused) return;
     generation.current += 1;
     mounted.current?.remove();

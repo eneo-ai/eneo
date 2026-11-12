@@ -133,7 +133,9 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
   }, []);
 
   let src: string | null = null;
-  if (token) {
+  // A save that advanced the generation revoked the token; the frame waits
+  // for the new one instead of loading a chat that is refused.
+  if (token && tokenGeneration === widget.token_generation) {
     const path = previewEmbedPath(widget.public_id, token, lang);
     const effective = pinnedScheme ?? (scheme === "auto" ? appScheme : scheme);
     // updated_at forces a reload after every saved change.

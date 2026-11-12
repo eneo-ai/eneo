@@ -72,6 +72,7 @@ function descriptionOf(element: Element) {
 type Handlers = {
   onActivate: () => Promise<void>;
   onAcknowledgeExternalTools: (servers: ExternalTools) => Promise<void>;
+  onPause: () => Promise<void>;
 };
 
 /** The status bar as the editor mounts it: state read from the autosave store. */
@@ -92,7 +93,6 @@ function Bar({
       state={state}
       isAdmin={isAdmin}
       {...handlers}
-      onPause={noop}
       onArchive={noop}
       onReload={noop}
     />
@@ -104,7 +104,8 @@ function renderBar(
   {
     isAdmin = true,
     onActivate = vi.fn<Handlers["onActivate"]>(async () => {}),
-    onAcknowledgeExternalTools = vi.fn<Handlers["onAcknowledgeExternalTools"]>(async () => {})
+    onAcknowledgeExternalTools = vi.fn<Handlers["onAcknowledgeExternalTools"]>(async () => {}),
+    onPause = vi.fn<Handlers["onPause"]>(async () => {})
   }: Partial<Handlers> & { isAdmin?: boolean } = {}
 ) {
   const autosave = new WidgetAutosave(current, vi.fn());
@@ -114,9 +115,10 @@ function renderBar(
       isAdmin={isAdmin}
       onActivate={onActivate}
       onAcknowledgeExternalTools={onAcknowledgeExternalTools}
+      onPause={onPause}
     />
   );
-  return { autosave, onActivate, onAcknowledgeExternalTools };
+  return { autosave, onActivate, onAcknowledgeExternalTools, onPause };
 }
 
 /** Presses a button the way a pointer does: it takes focus, then the click. */
@@ -327,9 +329,67 @@ describe("WidgetStatusBar tools on MCP servers outside Eneo", () => {
     );
   });
 
+  it("a list that changes again is announced as a new alert", async () => {
+    const onAcknowledgeExternalTools = vi.fn<Handlers["onAcknowledgeExternalTools"]>(
+      async () => {}
+    );
+    onAcknowledgeExternalTools
+      .mockRejectedValueOnce(refused(409, "external_tools_changed", [casefiles, booking]))
+      .mockRejectedValueOnce(refused(409, "external_tools_changed", [booking]));
+    renderBar(widget(), { onAcknowledgeExternalTools });
+    press(screen.getByRole("button", { name: "Aktivera" }));
+    const dialog = await screen.findByRole("dialog", { name: DIALOG });
+    const confirm = () => {
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: ACKNOWLEDGE }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Aktivera" }));
+    };
+
+    confirm();
+    const first = await within(dialog).findByRole("alert");
+    confirm();
+    await waitFor(() => expect(within(dialog).queryByText("Ärendesystemet")).toBeNull());
+    expect(within(dialog).getByRole("alert").textContent).toBe(CHANGED);
+    expect(within(dialog).getByRole("alert")).not.toBe(first);
+  });
+
   it("an editor is told why a live widget's newer tools wait, with nothing to press", () => {
     renderBar(live(), { isAdmin: false });
     expect(screen.getByText(LIVE_BLOCKER)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Granska och bekräfta verktygen" })).toBeNull();
   });
+});
+
+describe("WidgetStatusBar focus", () => {
+  it.each([
+    {
+      action: "activating",
+      from: widget({ external_tools: [], external_tools_acknowledged: true }),
+      button: "Aktivera",
+      to: { status: "active", activated_at: "2026-09-01T00:00:00Z" },
+      next: "Pausa"
+    },
+    {
+      action: "pausing",
+      from: live({ activation_blockers: [], external_tools_acknowledged: true }),
+      button: "Pausa",
+      to: { status: "paused" },
+      next: "Återuppta"
+    }
+  ] as const)(
+    "$action hands focus to the status heading, not to the button that takes its place",
+    async ({ from, button, to, next }) => {
+      const onActivate = vi.fn<Handlers["onActivate"]>();
+      const onPause = vi.fn<Handlers["onPause"]>();
+      const { autosave } = renderBar(from, { onActivate, onPause });
+      const done = async () => autosave.replace({ ...from, ...to } as Widget);
+      onActivate.mockImplementation(done);
+      onPause.mockImplementation(done);
+
+      press(screen.getByRole("button", { name: button }));
+      await screen.findByRole("button", { name: next });
+      await waitFor(() =>
+        expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Status" }))
+      );
+    }
+  );
 });

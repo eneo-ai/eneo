@@ -83,12 +83,15 @@ export function WidgetStatusBar({
   const [acknowledged, setAcknowledged] = useState(false);
   const [confirmTried, setConfirmTried] = useState(false);
   const [acknowledging, setAcknowledging] = useState(false);
+  // Each refusal mounts the alert anew, so a second one is announced too.
+  const [changes, setChanges] = useState(0);
   const checkbox = useRef<HTMLInputElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const rescueFocus = useFocusRescue();
 
   function showReview(next: Review) {
     setReview(next);
+    if (next.changed) setChanges((count) => count + 1);
     setAcknowledged(false);
     setConfirmTried(false);
   }
@@ -132,7 +135,8 @@ export function WidgetStatusBar({
         showReview({ servers: tools, changed: false, activatesAfter: true });
         return;
       }
-      await activateOrReview();
+      // Activate gives way to Pause, which is a new button: focus would fall to the page.
+      if (await activateOrReview()) rescueFocus(heading.current);
     } catch (error) {
       toastWidgetError(error, t);
     } finally {
@@ -179,6 +183,7 @@ export function WidgetStatusBar({
     setBusy("pause");
     try {
       await onPause();
+      rescueFocus(heading.current);
     } catch (error) {
       toastApiError(error, t);
     } finally {
@@ -300,8 +305,11 @@ export function WidgetStatusBar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Keyed apart: a pressed Activate must not become the Pause button
+              under the user's focus, nor Pause the Activate button. */}
           {widget.status === "active" ? (
             <Button
+              key="pause"
               label={t("widget_admin_pause")}
               isLoading={busy === "pause"}
               isInterruptible
@@ -309,6 +317,7 @@ export function WidgetStatusBar({
             />
           ) : widget.status !== "archived" ? (
             <Button
+              key="activate"
               variant="primary"
               label={activateLabel}
               isDisabled={!canActivate}
@@ -408,6 +417,7 @@ export function WidgetStatusBar({
                   </p>
                   {review.changed && (
                     <p
+                      key={changes}
                       role="alert"
                       className="bg-ax-warning-muted text-ax-text rounded-lg px-3 py-2 text-sm"
                     >

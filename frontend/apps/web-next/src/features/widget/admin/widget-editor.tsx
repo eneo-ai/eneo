@@ -219,6 +219,10 @@ export function WidgetEditor({
   // only through an external provider (VISITOR_CAPABILITY_PURPOSES in
   // assistant_service.py). Image generation never.
   const visitorServers = current.external_tools ?? [];
+  // The organisation's policy can take all of them away. On a live widget,
+  // tools switched on after the last acknowledgement wait for an admin.
+  const externalToolsAllowed = !blockers.includes("external_tools_not_allowed");
+  const reachableServers = externalToolsAllowed ? visitorServers : [];
   // The template's locks hold only while the widget follows it, so on an
   // active widget detaching is an admin's call (the API refuses editors too).
   const detachLocked = current.status === "active" && !isAdmin;
@@ -584,7 +588,12 @@ export function WidgetEditor({
                   </p>
                   <ul className="mt-1 list-disc pl-5 text-sm">
                     <li>{t("widget_admin_visitor_access_knowledge")}</li>
-                    {visitorServers.map((server) => (
+                    {!externalToolsAllowed && (
+                      <li className="text-ax-text-secondary">
+                        {t("widget_admin_visitor_access_not_allowed")}
+                      </li>
+                    )}
+                    {reachableServers.map((server) => (
                       <li key={server.id}>
                         {t("widget_admin_visitor_access_server_tools", {
                           name: server.name,
@@ -592,12 +601,18 @@ export function WidgetEditor({
                         })}
                       </li>
                     ))}
+                    {reachableServers.length > 0 &&
+                      blockers.includes("external_tools_unacknowledged") && (
+                        <li className="text-ax-text-secondary">
+                          {t("widget_admin_visitor_access_unacknowledged")}
+                        </li>
+                      )}
                     {visitorCapabilities.map((capability) => (
                       <li key={capability}>
                         {t("widget_admin_visitor_access_capability", { name: capability })}
                       </li>
                     ))}
-                    {visitorServers.length + visitorCapabilities.length > 0 &&
+                    {reachableServers.length + visitorCapabilities.length > 0 &&
                       !(current.show_tool_activity ?? true) && (
                         <li className="text-ax-text-secondary">
                           {t("widget_admin_visitor_access_hidden")}
