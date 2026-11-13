@@ -52,6 +52,12 @@ def round_trip_db(test_settings):
     conn.autocommit = True
     command.upgrade(cfg, "head")
     command.downgrade(cfg, PRE_REVISION)
+    # The flag as 202610211900 seeds it: neither direction of the revision
+    # resets a value an earlier test turned on.
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE global_feature_flags SET enabled = false WHERE name = 'flows_core'"
+        )
     try:
         yield {"conn": conn, "cfg": cfg}
     finally:
