@@ -3,11 +3,43 @@
 Status record for the integration branch `feat/flows-core-integration`. It
 keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
-a loopback MCP server and a web-next administration. Flows are on for every
-tenant: the `flows_core` feature flag is seeded off by 202610211900 and turned
-on by 202610220930, which also gives existing predefined Owner roles the four
-flow permissions (and AI Configurator roles `flows_trace`), as new tenants get
-them. A tenant row with `enabled = false` turns flows off for that tenant.
+a loopback MCP server and a web-next administration. Flows are off until an
+organisation chooses them: 202610211900 seeds the `flows_core` feature flag
+off, no upgrade turns it on or gives a role a flow permission, and the
+predefined roles of a new organisation carry none.
+
+## Turning Flows on
+
+Switch Flows on for one organisation with that organisation's own flag row,
+then give the roles that should use them the flow permissions. The global row
+stays off, so no other organisation is affected. Replace `<organisation>` with
+the name in `tenants.name`:
+
+```sql
+INSERT INTO tenant_feature_flags (name, feature_id, tenant_id, enabled)
+SELECT 'flows_core', flag.id, tenant.id, true
+FROM global_feature_flags AS flag, tenants AS tenant
+WHERE flag.name = 'flows_core' AND tenant.name = '<organisation>'
+ON CONFLICT (feature_id, tenant_id)
+DO UPDATE SET enabled = true, updated_at = now();
+
+UPDATE roles
+SET permissions = permissions || ARRAY(
+    SELECT permission
+    FROM unnest('{flows_view,flows_run,flows_manage,flows_trace}'::varchar[])
+        AS permission
+    WHERE permission <> ALL (permissions)
+)
+WHERE predefined_source = 'Owner'
+  AND tenant_id = (SELECT id FROM tenants WHERE name = '<organisation>');
+```
+
+`flows_view` reads flows, `flows_run` runs them, `flows_manage` builds and
+publishes them, and `flows_trace` reads run traces. Grant other roles the
+permissions they need in the same way, selecting them by `name` instead of
+`predefined_source`. Resetting the Owner role to its template removes the flow
+permissions again. To switch Flows off for the organisation, set `enabled` on
+its row to `false`.
 
 ## Starting points
 
