@@ -556,6 +556,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
 }
 
 
+def _is_documented_error(detail: object) -> TypeGuard[dict[str, Any]]:
+    """A raised detail that names its own error: a dict with `code` and `message`."""
+    return isinstance(detail, dict) and "code" in detail and "message" in detail
+
+
 def _http_exception_body(
     exc: StarletteHTTPException, request_id: str | None
 ) -> dict[str, Any]:
@@ -568,12 +573,12 @@ def _http_exception_body(
     """
     detail: object = exc.detail
     structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
-    if structured is not None and "code" in structured and "message" in structured:
+    if _is_documented_error(detail):
         # Every raiser of this shape means it as the documented error, and its
         # extra keys (`retry_after_seconds`, `existing_status`) are part of the
         # route's contract, so the dict becomes the body. Most raisers left the
         # numeric category out; fill it here so a direct raise cannot bypass it.
-        body = dict(structured)
+        body = dict(detail)
         body.setdefault(
             "eneo_error_code", default_error_code_for_status(exc.status_code).value
         )
@@ -625,8 +630,10 @@ def add_exception_handlers(app: FastAPI):
             response = await unhandled_exception_handler(request, http_exc)
             response.headers.update(http_exc.headers or {})
             return response
-        if http_exc.status_code == 422:
-            # The raiser's headers win; otherwise carry the request's correlation id.
+        if http_exc.status_code == 422 and not _is_documented_error(http_exc.detail):
+            # A 422 that names its own error keeps it; any other answers as a
+            # request validation error. The raiser's headers win; otherwise
+            # carry the request's correlation id.
             headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
             return JSONResponse(
                 status_code=422,
