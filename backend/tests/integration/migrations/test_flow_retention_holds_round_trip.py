@@ -152,15 +152,24 @@ def test_downgrade_drops_the_table_and_upgrade_restores_it(round_trip_db):
     assert _schema(conn) == before
 
 
-def _insert_role(conn, tenant_id: str, permissions: list[str]) -> str:
+def _insert_role(
+    conn,
+    tenant_id: str,
+    permissions: list[str],
+    *,
+    predefined_source: str | None = None,
+) -> str:
     with conn.cursor() as cursor:
         cursor.execute(
             """
-            INSERT INTO roles (id, name, permissions, tenant_id, created_at, updated_at)
-            VALUES (gen_random_uuid(), %s, %s, %s, now(), now())
+            INSERT INTO roles (
+                id, name, permissions, predefined_source, tenant_id,
+                created_at, updated_at
+            )
+            VALUES (gen_random_uuid(), %s, %s, %s, %s, now(), now())
             RETURNING id
             """,
-            (f"retention-role-{uuid4()}", permissions, tenant_id),
+            (f"retention-role-{uuid4()}", permissions, predefined_source, tenant_id),
         )
         return cursor.fetchone()[0]
 
@@ -171,7 +180,7 @@ def _permissions(conn, role_id: str) -> list[str]:
         return list(cursor.fetchone()[0])
 
 
-def test_admin_roles_get_both_retention_permissions_and_downgrade_removes_them(
+def test_only_the_owner_role_gets_the_retention_permissions_and_downgrade_removes_them(
     round_trip_db,
 ):
     conn, cfg, _engine = round_trip_db
@@ -183,25 +192,30 @@ def test_admin_roles_get_both_retention_permissions_and_downgrade_removes_them(
             (f"retention-roles-{uuid4()}",),
         )
         tenant_id = cursor.fetchone()[0]
+    owner_role = _insert_role(
+        conn, tenant_id, ["admin", "assistants"], predefined_source="Owner"
+    )
     admin_role = _insert_role(conn, tenant_id, ["admin", "assistants"])
     partial_role = _insert_role(conn, tenant_id, ["admin", "retention_holds"])
     member_role = _insert_role(conn, tenant_id, ["assistants"])
 
     command.upgrade(cfg, REVISION)
-    assert _permissions(conn, admin_role) == [
+    assert _permissions(conn, owner_role) == [
         "admin",
         "assistants",
         "retention_manage",
         "retention_holds",
     ]
-    assert _permissions(conn, partial_role) == [
-        "admin",
-        "retention_holds",
-        "retention_manage",
-    ]
+    # Another role with admin is an organisation's own choice: the upgrade
+    # neither widens nor narrows it.
+    assert _permissions(conn, admin_role) == ["admin", "assistants"]
+    assert _permissions(conn, partial_role) == ["admin", "retention_holds"]
     assert _permissions(conn, member_role) == ["assistants"]
 
+    # The downgrade removes both values from every role, because the previous
+    # release cannot read a role that holds them.
     command.downgrade(cfg, PRE_REVISION)
+    assert _permissions(conn, owner_role) == ["admin", "assistants"]
     assert _permissions(conn, admin_role) == ["admin", "assistants"]
     assert _permissions(conn, partial_role) == ["admin"]
     assert _permissions(conn, member_role) == ["assistants"]

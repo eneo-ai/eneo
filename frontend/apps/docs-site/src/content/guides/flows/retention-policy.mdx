@@ -243,9 +243,10 @@ Two role permissions, granted per role, separate the duties:
 
 Either permission can read the shared views (Flow targets, effective rules,
 holds). One person may hold both. Neither is implied by `admin`: when this
-version is installed, every role that has `admin` receives both, and the
-predefined Owner role lists both, so existing administrators keep control. An
-organization can then create a role such as "Arkivansvarig" with only these.
+version is installed, the predefined Owner role receives both, as it does in a
+new organization. Other roles, including roles with `admin`, receive neither
+until an administrator grants them. An organization can then create a role
+such as "Arkivansvarig" with only these.
 Only signed-in people decide: a request made with any API key is refused
 (`retention_person_required`, 403) whatever its permissions; a missing
 permission is refused with `retention_permission_required` (403).
@@ -256,9 +257,11 @@ through the endpoints above: rules with `retention_manage`, legal holds with
 request.
 
 **Operator note (rolling deploy):** the upgrade adds `retention_manage` and
-`retention_holds` to every role that has `admin`. Servers still on the previous
+`retention_holds` to the predefined Owner role. Servers still on the previous
 release do not know these values and reject those roles until the rollout
-completes. Deploy this release with a short stop of the old servers.
+completes. Deploy this release with a short stop of the old servers. A
+downgrade past this version removes both values from every role; grant them
+again to roles other than Owner after upgrading once more.
 
 ## Audit and authorization
 

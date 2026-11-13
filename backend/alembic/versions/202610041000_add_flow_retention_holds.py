@@ -9,15 +9,19 @@ transaction and take locks only on the new table (plus a SHARE ROW EXCLUSIVE on
 tenants, flows and users for the foreign keys, released at commit).
 lock_timeout bounds those waits.
 
-retention_manage and retention_holds are explicit per-role grants. So that
-today's administrators keep control, every role that has `admin` gets both in
-one UPDATE over the small roles table (row locks on the admin roles only). The
-predefined Owner template lists both for new organisations. The statement is
-plain SQL, so `alembic upgrade --sql` emits it as is; the downgrade removes the
-two values from every role.
+retention_manage and retention_holds are explicit per-role grants. The
+predefined Owner role gets both, as the Owner template gives them to new
+organisations; every other role, including a custom role with `admin`, is the
+organisation's own choice and is left alone. The statement is plain SQL, so
+`alembic upgrade --sql` emits it as is.
+
+The downgrade removes the two values from every role, because the previous
+release cannot read a role that holds them. It does not remember which roles
+were granted them explicitly after the upgrade; an administrator grants those
+again after upgrading once more.
 
 Rolling deploy: pods still on the previous release do not know the two new
-permission values and reject the roles that carry them (every admin role after
+permission values and reject the roles that carry them (the Owner roles after
 this UPDATE) until the rollout completes, as with 202609052200. Deploy this
 release with a short stop of the old pods to avoid that window.
 """
@@ -156,7 +160,7 @@ def upgrade() -> None:
         op.execute(
             "UPDATE roles SET permissions = "
             f"array_append(permissions, '{permission}') "
-            "WHERE 'admin' = ANY(permissions) "
+            "WHERE predefined_source = 'Owner' "
             f"AND NOT ('{permission}' = ANY(permissions))"
         )
 
