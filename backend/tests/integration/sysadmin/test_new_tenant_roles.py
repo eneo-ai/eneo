@@ -13,7 +13,8 @@ from httpx import AsyncClient
 from eneo.database.database import sessionmanager
 from eneo.database.tables.roles_table import Roles
 
-FLOW_PERMISSIONS = {"flows_view", "flows_run", "flows_manage", "flows_trace"}
+# The older "flows" value grants all four flow permissions.
+FLOW_PERMISSIONS = {"flows", "flows_view", "flows_run", "flows_manage", "flows_trace"}
 
 
 @pytest.mark.integration
