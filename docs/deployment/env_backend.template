@@ -521,7 +521,7 @@ FLOW_MAX_INLINE_TEXT_BYTES=8388608
 # Calls per mapped step; includes the native-JSON fallback reserve.
 FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT=1000
 # Persistent assistant attachments must also fit the selected model's context.
-ATTACHMENT_MAX_SIZE_BYTES=268435456
+ATTACHMENT_MAX_SIZE_BYTES=26214400
 ATTACHMENT_MAX_FILES=100
 
 # Per-tenant crawl ceiling (default: 4). Single-tenant deployments can set this

@@ -24,7 +24,6 @@ from eneo.main.removed_env import (
     UPGRADE_GUIDE_URL,
     check_removed_variables,
 )
-from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -777,7 +776,7 @@ class Settings(BaseSettings):
     # silently truncated. The file count is only an abuse guardrail and the byte
     # cap only bounds storage.
     attachment_max_files: int = 100
-    attachment_max_size_bytes: int = DEFAULT_FILE_UPLOAD_LIMIT_BYTES
+    attachment_max_size_bytes: int = 26214400  # 25 MiB
     # Tokens kept free in the input window for the live question (and a little
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000

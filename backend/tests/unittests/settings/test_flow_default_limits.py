@@ -29,7 +29,7 @@ DEFAULTS = {
     "flow_pdf_max_pages": 2000,
     "flow_pdf_max_extracted_bytes": 134217728,
     "flow_pdf_extraction_timeout_seconds": 900,
-    "attachment_max_size_bytes": 268435456,
+    "attachment_max_size_bytes": 26214400,
     "attachment_max_files": 100,
 }
 
