@@ -61,7 +61,7 @@
   <path class="edge" d="M371,138 V98"/>
   <rect class="box" x="336" y="38" width="176" height="60" rx="8"/><text class="h" x="424" y="63" text-anchor="middle">Chooses</text><text class="s" x="424" y="84" text-anchor="middle">sign in with MFA</text>
   <path class="edge" d="M477,98 V266"/>
-  <rect class="box" x="442" y="266" width="176" height="60" rx="8"/><text class="h" x="530" y="291" text-anchor="middle">Second factor</text><text class="s" x="530" y="312" text-anchor="middle">the provider asks</text>
+  <rect class="box" x="442" y="266" width="176" height="60" rx="8"/><text class="h" x="530" y="291" text-anchor="middle">Second factor</text><text class="s" x="530" y="312" text-anchor="middle">the IdP asks</text>
   <path class="edge" d="M583,266 V196"/>
   <rect class="pill" x="525" y="232" width="116" height="22" rx="4"/><text class="s" x="583" y="248" text-anchor="middle">signed ID token</text>
   <rect class="key" x="548" y="120" width="176" height="74" rx="8"/><text class="h" x="636" y="144" text-anchor="middle">New session</text><text class="s" x="636" y="165" text-anchor="middle">with MFA;</text><text class="s" x="636" y="184" text-anchor="middle">the old one ends</text>

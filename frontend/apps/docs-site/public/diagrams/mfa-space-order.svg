@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="860" height="398" viewBox="0 0 860 398" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
   <title id="t">Order of the work</title>
-  <desc id="d">Sign-in work and file home work run as parallel lanes, and both must land before the entrance check and space switch; flows, the module kit with the speech-to-text module and speech to text in production then follow in order. Reading files also uses what sign-in stores. Ending module access and live transcription when the session ends runs alongside and is needed by flows, and a provider check, with no code, comes before production.</desc>
+  <desc id="d">Sign-in work and file home work run as parallel lanes, and both must land before the entrance check and space switch; flows, the module kit with the speech-to-text module and speech to text in production then follow in order. Reading files also uses what sign-in stores. Ending module access and live transcription when the session ends runs alongside and is needed by flows, and an IdP check, with no code, comes before production.</desc>
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
   </defs>
@@ -75,5 +75,5 @@
   <path class="edge" d="M738,190 V214"/>
   <rect class="box" x="640" y="214" width="196" height="60" rx="8"/><text class="h" x="738" y="239" text-anchor="middle">Kit and module</text><text class="s" x="738" y="260" text-anchor="middle">for speech to text</text>
   <path class="edge" d="M738,274 V298"/>
-  <rect class="key" x="640" y="298" width="196" height="76" rx="8"/><text class="h" x="738" y="323" text-anchor="middle">Speech to text</text><text class="s" x="738" y="343" text-anchor="middle">in production, after a</text><text class="s" x="738" y="362" text-anchor="middle">provider check, no code</text>
+  <rect class="key" x="640" y="298" width="196" height="76" rx="8"/><text class="h" x="738" y="323" text-anchor="middle">Speech to text</text><text class="s" x="738" y="343" text-anchor="middle">in production, after a</text><text class="s" x="738" y="362" text-anchor="middle">IdP check, no code</text>
 </svg>
