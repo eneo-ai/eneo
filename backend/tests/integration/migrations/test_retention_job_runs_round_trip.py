@@ -17,6 +17,7 @@ from eneo.database.tables.files_table import Files
 from eneo.database.tables.questions_table import InfoBlobReferences, Questions
 from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.database.tables.sessions_table import Sessions
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -66,14 +67,13 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     conn.autocommit = True
-    command.upgrade(cfg, REVISION)
     engine = sa.create_engine(test_settings.sync_database_url)
-    try:
-        yield conn, cfg, engine
-    finally:
-        command.upgrade(cfg, "head")
-        engine.dispose()
-        conn.close()
+    with at_revision(cfg, REVISION):
+        try:
+            yield conn, cfg, engine
+        finally:
+            engine.dispose()
+            conn.close()
 
 
 def _shape(columns: list[str], unique: bool, partial: bool) -> tuple[object, ...]:
