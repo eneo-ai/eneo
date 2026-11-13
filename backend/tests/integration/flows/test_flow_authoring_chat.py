@@ -54,7 +54,9 @@ async def enabled_flow(db_container, admin_user, client, flow_process_auth_heade
         await container.session().execute(
             sa.update(CompletionModels)
             .where(CompletionModels.tenant_id == admin_user.tenant_id)
-            .values(supports_tool_calling=True)
+            # The chat's instructions alone exceed the seeded models' 8000
+            # input tokens; a model that builds flows has a larger window.
+            .values(supports_tool_calling=True, max_input_tokens=128_000)
         )
     headers = dict(flow_process_auth_headers)
     space_response = await client.post(
@@ -851,7 +853,7 @@ async def model_choices(
         await session.execute(
             sa.update(CompletionModels)
             .where(CompletionModels.id.in_([strong.id, outside.id]))
-            .values(supports_tool_calling=True)
+            .values(supports_tool_calling=True, max_input_tokens=128_000)
         )
         await session.execute(
             sa.update(CompletionModels)
@@ -1063,7 +1065,11 @@ async def test_a_model_below_the_spaces_classification_is_refused(
         await session.execute(
             sa.update(CompletionModels)
             .where(CompletionModels.id.in_([lowered.id, kept.id]))
-            .values(security_classification_id=high.id, supports_tool_calling=True)
+            .values(
+                security_classification_id=high.id,
+                supports_tool_calling=True,
+                max_input_tokens=128_000,
+            )
         )
         await session.execute(
             sa.update(Tenants)
