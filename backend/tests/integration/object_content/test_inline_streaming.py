@@ -523,6 +523,7 @@ async def test_inline_path_is_adopted_by_audio_without_consuming_chunks(
 ):
     from eneo.files.file_service import FileDownload
     from eneo.flows.runtime.audio_spool import spool_audio
+    from eneo.main import process_scratch
     from eneo.object_content.content_service import detach_content_read
 
     database = object_content_database
@@ -532,7 +533,9 @@ async def test_inline_path_is_adopted_by_audio_without_consuming_chunks(
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    # The verified file and the audio spool both live in the process's own
+    # temporary directory; point it here to see what is left behind.
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     source_paths = []
 
     async def forbidden_chunks():
