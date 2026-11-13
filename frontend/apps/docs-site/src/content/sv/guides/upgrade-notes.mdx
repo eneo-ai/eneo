@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@27dfa5790d86
+translationSource: guides/upgrade-notes.mdx@f8e43b647ca3
 ---
 
 import { Callout } from "nextra/components";
@@ -161,6 +161,7 @@ flowchart TB
 | `MAX_TOOL_ROUNDS` är som standard 40 (var fast 10), så en verktygstung tur kan kosta upp till fyra gånger så många anrop och token; LiteLLM:s `REQUEST_TIMEOUT` gäller inte längre | Alla | `MAX_TOOL_ROUNDS=10` behåller det gamla taket; flytta en egen `REQUEST_TIMEOUT` till `COMPLETION_REQUEST_TIMEOUT_SECONDS` (standard 600) |
 | Leverantörstyper som inte kan routas nekas med `400`; modellnamn dubblerar inte längre prefixet | Administratörer | Rätta `mistral/mistral/…`-namn på chattmodeller; inbäddnings- och omrankningsmodeller kräver nya modeller; [skapa om nekade leverantörer](/guides/ai-providers#adding-a-provider-admin-ui) |
 | Avbilderna saknar `apt`; frontend-avbilden saknar också `npm`, `npx`, `corepack` och `yarn` | Byggen ovanpå avbilderna | Installera i ett separat byggsteg |
+| Backend kräver Python 3.11.5 eller en senare 3.11-version (`>=3.11.5,<3.12`); 2.3 godtog alla 3.11-versioner | Backend som körs utanför avbilderna | Byt till Python 3.11.5 eller en senare 3.11-version; installationer med avbilderna behöver inte göra något |
 | `MCP_APP_CONTENT_BASE_URL` valideras vid start | Installationer som sätter den | Inget; vanliga värden godtas |
 | [SharePoint](#sharepoint) | Installationer med SharePoint | Låt synkar bli klara; gå igenom Problem; importera om personliga källor för inaktiverade ägare |
 | [Webbwidgetar](#widgets) | Driftansvariga | Kör kontrollen av sessioner före uppgraderingen |
