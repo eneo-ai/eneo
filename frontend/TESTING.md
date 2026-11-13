@@ -119,6 +119,11 @@ encrypted as in production, with a fixed, public test `ENCRYPTION_KEY` set in bo
 (meaningless) API key encrypted with it, and a provider added in the UI is
 encrypted by the backend, so specs can add providers too.
 
+**Flows on for the test tenant.** An installation has Flows off and gives no
+role the flow permissions, so `e2e/seed.py` switches Flows on for `E2ETenant`
+through the tenant's own flag row and grants its Owner role `flows_view`,
+`flows_run`, `flows_manage` and `flows_trace`.
+
 > **Status:** the suite covers login, rejected credentials, unauthenticated
 > redirects, authenticated landing, primary navigation, account data, logout,
 > deterministic chat streaming, and reopening persisted chat history. It runs in
