@@ -228,7 +228,7 @@ be reached rather than that the password was wrong.
 2. **Python version check**:
    ```bash
    # Check Python version
-   python3 --version  # Should be 3.11+
+   python3 --version  # Should be 3.11.5 or a later 3.11 release
 
    # uv uses system Python - ensure correct version is installed
    ```

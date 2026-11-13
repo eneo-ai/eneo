@@ -13,6 +13,8 @@ import logging
 import traceback
 from collections.abc import Mapping
 
+from eneo.observability.error_text import http_response
+
 
 def log_error(
     log: logging.Logger,
@@ -43,7 +45,8 @@ def error_facts(error: BaseException) -> dict[str, object]:
     """Fields for a log record's `extra`.
 
     `error_type` names the exception and its causes, outermost first.
-    `error_status` is the first HTTP status code in that chain, if any.
+    `error_status` is the first HTTP status code in that chain, if any: an
+    HTTP client's response status or an integer `status_code`.
     `error_stack` lists where each was raised, as `file:line in function`,
     and `error_at` is the innermost of those: where the failure began.
     """
@@ -59,13 +62,20 @@ def error_facts(error: BaseException) -> dict[str, object]:
             (
                 status
                 for exception in chain
-                if isinstance(status := getattr(exception, "status_code", None), int)
+                if isinstance(status := _status(exception), int)
             ),
             None,
         ),
         "error_stack": stack,
         "error_at": stack[-1] if stack else None,
     }
+
+
+def _status(exception: BaseException) -> object:
+    response = http_response(exception)
+    if response is not None:
+        return response[0]
+    return getattr(exception, "status_code", None)
 
 
 def _chain(error: BaseException) -> list[BaseException]:
