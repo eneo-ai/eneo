@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@943fc45e23e6
+translationSource: guides/upgrade-notes.mdx@27dfa5790d86
 ---
 
 import { Callout } from "nextra/components";
@@ -30,6 +30,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 9. Berätta för användarna att namn och feedbackkommentarer på konversationer som är äldre än sin gallringstid tas bort den första natten. Se [Namn och feedbacktext](#names-and-feedback-follow-retention).
 10. Planera driftstopp för `db-init`: migreringen `202611091200` låser `sessions` medan den skriver om varje rad, och flera migreringar bygger index samtidigt med drift. Om `db-init` avbryts, kör den igen. Se [Migreringen `202611091200`](#sessions-migration).
 11. Exportera granskningsloggen först om du behöver filnamnen: uppgraderingen tar bort dem för gott. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
+12. Kör kontrollen av sessioner mot databasen från 2.3: en session som har både användare och API-nyckel, eller ingen av dem, stoppar `db-init`. Se [Webbwidgetar](#widgets).
 
 **Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
@@ -162,7 +163,7 @@ flowchart TB
 | Avbilderna saknar `apt`; frontend-avbilden saknar också `npm`, `npx`, `corepack` och `yarn` | Byggen ovanpå avbilderna | Installera i ett separat byggsteg |
 | `MCP_APP_CONTENT_BASE_URL` valideras vid start | Installationer som sätter den | Inget; vanliga värden godtas |
 | [SharePoint](#sharepoint) | Installationer med SharePoint | Låt synkar bli klara; gå igenom Problem; importera om personliga källor för inaktiverade ägare |
-| [Webbwidgetar](#widgets) | Driftansvariga | Kör kontrollen av sessioner |
+| [Webbwidgetar](#widgets) | Driftansvariga | Kör kontrollen av sessioner före uppgraderingen |
 | Ny behörighet Egna Skills (`personal_skills`) för Ägarroller | Administratörer | Inget; ge den till andra roller vid behov |
 
 ### Underhållare [#maintainers]
@@ -408,6 +409,6 @@ Den första nattliga körningen tömmer namn och feedbacktext för varje konvers
 
 ### Webbwidgetar [#widgets]
 
-**Gör:** sätt `TRUSTED_PROXY_COUNT`; kör `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, som måste returnera 0.
+**Gör:** sätt `TRUSTED_PROXY_COUNT`. Kör före uppgraderingen `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1` mot databasen från 2.3; den måste returnera 0. En session som frågan räknar stoppar `db-init`: det nya schemat tillåter exakt en av användare, API-nyckel eller widget per session. Efter uppgraderingen räknar frågan också widgetsamtal, så då gäller den inte längre.
 
 **Återställning:** nedgraderingar tar bort widgetsessioner och tabeller.
