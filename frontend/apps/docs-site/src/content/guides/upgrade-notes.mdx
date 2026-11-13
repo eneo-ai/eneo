@@ -25,6 +25,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 9. Tell users that names and feedback comments of conversations older than their retention period are removed on the first night. See [Names and feedback text](#names-and-feedback-follow-retention).
 10. Plan downtime for `db-init`: migration `202611091200` locks `sessions` while it rewrites every row, and several migrations build indexes concurrently. If `db-init` is interrupted, run it again. See [Migration `202611091200`](#sessions-migration).
 11. Export the audit log first if you need file names: the upgrade removes them for good. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
+12. Run the sessions check against the 2.3 database: a session with both or neither of a user and an API key stops `db-init`. See [Web widgets](#widgets).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -155,9 +156,10 @@ flowchart TB
 | `MAX_TOOL_ROUNDS` defaults to 40 (was a fixed 10), so a tool-heavy turn can cost up to four times the calls and tokens; LiteLLM's `REQUEST_TIMEOUT` no longer applies | Everyone | `MAX_TOOL_ROUNDS=10` keeps the old cap; move a custom `REQUEST_TIMEOUT` to `COMPLETION_REQUEST_TIMEOUT_SECONDS` (default 600) |
 | Provider types that cannot route are refused with `400`; model names no longer double the prefix | Administrators | Fix `mistral/mistral/…` completion model names; embedding and reranking need new models; [recreate refused providers](/guides/ai-providers#adding-a-provider-admin-ui) |
 | Images have no `apt`; the frontend image also has no `npm`, `npx`, `corepack` or `yarn` | Builds on the images | Install in a separate build stage |
+| The backend needs Python 3.11.5 or a later 3.11 release (`>=3.11.5,<3.12`); 2.3 accepted any 3.11 release | Backends run outside the images | Move to Python 3.11.5 or a later 3.11 release; image-based installations need nothing |
 | `MCP_APP_CONTENT_BASE_URL` is validated at startup | Installations that set it | Nothing; typical values pass |
 | [SharePoint](#sharepoint) | SharePoint installations | Let syncs finish; review Problems; re-import personal sources of deactivated owners |
-| [Web widgets](#widgets) | Operators | Run the sessions check |
+| [Web widgets](#widgets) | Operators | Run the sessions check before upgrading |
 | New permission Own Skills (`personal_skills`) for Owner roles | Administrators | Nothing; grant it to other roles if wanted |
 
 ### Maintainers [#maintainers]
@@ -403,6 +405,6 @@ The first nightly run empties the name and feedback text of every conversation o
 
 ### Web widgets [#widgets]
 
-**Do:** set `TRUSTED_PROXY_COUNT`; run `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, which must return 0.
+**Do:** set `TRUSTED_PROXY_COUNT`. Before the upgrade, run `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1` against the 2.3 database; it must return 0. A session it counts stops `db-init`: the new schema allows exactly one of a user, an API key or a widget per session. After the upgrade the query also counts widget conversations, so it no longer applies.
 
 **Rollback:** downgrades delete widget sessions and tables.
