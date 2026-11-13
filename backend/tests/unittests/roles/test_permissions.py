@@ -306,6 +306,15 @@ class TestPermissionSemantics:
             validate_permission(user, Permission.ADMIN)
 
 
+_FLOW_PERMISSIONS = {
+    Permission.FLOWS,
+    Permission.FLOWS_VIEW,
+    Permission.FLOWS_RUN,
+    Permission.FLOWS_MANAGE,
+    Permission.FLOWS_TRACE,
+}
+
+
 class TestRoleTemplates:
     @pytest.fixture
     def templates(self):
@@ -318,14 +327,20 @@ class TestRoleTemplates:
             for t in load_predefined_roles_from_config()
         }
 
-    def test_owner_has_all_permissions(self, templates):
+    def test_owner_has_all_permissions_but_flows(self, templates):
         owner = templates["Owner"]
         for permission in Permission:
-            if permission in {Permission.EDITOR, Permission.FLOWS}:
+            if permission in {Permission.EDITOR, *_FLOW_PERMISSIONS}:
                 continue
             assert permission.value in owner, (
                 f"Owner template missing permission: {permission.value}"
             )
+
+    def test_no_template_grants_a_flow_permission(self, templates):
+        # Flows are off until an organisation switches them on; it then
+        # grants the roles that should use them.
+        for name, permissions in templates.items():
+            assert not permissions & {p.value for p in _FLOW_PERMISSIONS}, name
 
     def test_user_has_basic_permissions(self, templates):
         user = templates["User"]
@@ -349,7 +364,7 @@ class TestRoleTemplates:
         assert "skills_management" not in ai
         assert "personal_skills" not in ai
         assert "shared_spaces" in ai
-        assert "flows_trace" in ai
+        assert "flows_trace" not in ai
         assert "admin" not in ai
         assert "assistant_debug" in ai
 
