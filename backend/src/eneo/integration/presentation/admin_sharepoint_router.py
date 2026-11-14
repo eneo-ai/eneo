@@ -1,3 +1,4 @@
+import logging
 import secrets
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated, Optional, cast
@@ -43,6 +44,7 @@ from eneo.integration.presentation.admin_models import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
@@ -335,9 +337,11 @@ async def configure_sharepoint_app(
                         f"Updated tenant_app integration {existing_integration.id}"
                     )
                 except Exception as update_error:
-                    logger.error(
-                        f"Failed to update tenant_app integration: {type(update_error).__name__}: {str(update_error)}",
-                        exc_info=True,
+                    log_error(
+                        logger,
+                        logging.ERROR,
+                        "Failed to update tenant_app integration",
+                        error=update_error,
                     )
                     raise
             else:
@@ -362,8 +366,10 @@ async def configure_sharepoint_app(
 
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to configure SharePoint app", exc_info=True)
+    except Exception as exc:
+        log_error(
+            logger, logging.ERROR, "Failed to configure SharePoint app", error=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to configure SharePoint app",
@@ -413,8 +419,8 @@ async def get_sharepoint_app(
 
         return _to_app_public(app, encryption_service)
 
-    except Exception:
-        logger.error("Failed to get SharePoint app", exc_info=True)
+    except Exception as exc:
+        log_error(logger, logging.ERROR, "Failed to get SharePoint app", error=exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to get SharePoint app",
@@ -488,7 +494,9 @@ async def test_sharepoint_app_credentials(
         )
 
     except Exception as e:
-        logger.error(f"Failed to test SharePoint app credentials: {e}")
+        log_error(
+            logger, logging.ERROR, "Failed to test SharePoint app credentials", error=e
+        )
         return TenantAppTestResult(
             success=False,
             error_message=user_visible_error(e),
@@ -610,8 +618,8 @@ async def delete_sharepoint_app(
 
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to delete SharePoint app", exc_info=True)
+    except Exception as exc:
+        log_error(logger, logging.ERROR, "Failed to delete SharePoint app", error=exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to delete SharePoint app",
@@ -671,7 +679,13 @@ async def list_sharepoint_subscriptions(
                         if user_obj:
                             users_map[ui.user_id] = user_obj
             except Exception as e:
-                logger.warning(f"Could not fetch user_integration {ui_id}: {e}")
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not fetch user_integration %s",
+                    ui_id,
+                    error=e,
+                )
 
         # Convert to public models with computed fields
         result: list[SharePointSubscriptionPublic] = []
@@ -694,8 +708,10 @@ async def list_sharepoint_subscriptions(
 
         return result
 
-    except Exception:
-        logger.error("Failed to list SharePoint subscriptions", exc_info=True)
+    except Exception as exc:
+        log_error(
+            logger, logging.ERROR, "Failed to list SharePoint subscriptions", error=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to list SharePoint subscriptions",
@@ -773,10 +789,12 @@ async def renew_expired_subscriptions(
                         container=container,
                     )
                 except Exception as token_error:
-                    logger.error(
-                        "Failed to resolve token for subscription %s: %s",
+                    log_error(
+                        logger,
+                        logging.ERROR,
+                        "Failed to resolve token for subscription %s",
                         sub.id,
-                        token_error,
+                        error=token_error,
                     )
                     errors.append(
                         f"Failed to resolve token for subscription {sub.id}: "
@@ -799,8 +817,12 @@ async def renew_expired_subscriptions(
                     errors.append(f"Failed to recreate subscription {sub.id}")
 
             except Exception as exc:
-                logger.error(
-                    f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "Error recreating subscription %s",
+                    sub.id,
+                    error=exc,
                 )
                 failed += 1
                 errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
@@ -820,8 +842,10 @@ async def renew_expired_subscriptions(
 
         return result
 
-    except Exception:
-        logger.error("Failed to renew expired subscriptions", exc_info=True)
+    except Exception as exc:
+        log_error(
+            logger, logging.ERROR, "Failed to renew expired subscriptions", error=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to renew expired subscriptions",
@@ -898,8 +922,12 @@ async def recreate_all_subscriptions(
             else:
                 raise RuntimeError("Graph did not accept the new subscription")
         except Exception as exc:
-            logger.error(
-                f"Error recreating subscription {sub.id}: {exc}", exc_info=True
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error recreating subscription %s",
+                sub.id,
+                error=exc,
             )
             failed += 1
             errors.append(f"Subscription {sub.id}: {user_visible_error(exc)}")
@@ -982,10 +1010,12 @@ async def recreate_subscription(
                 container=container,
             )
         except Exception as token_error:
-            logger.error(
-                "Failed to resolve token for subscription %s: %s",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to resolve token for subscription %s",
                 subscription_id,
-                token_error,
+                error=token_error,
             )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -1025,9 +1055,13 @@ async def recreate_subscription(
 
     except HTTPException:
         raise
-    except Exception:
-        logger.error(
-            "Failed to recreate subscription %s", subscription_id, exc_info=True
+    except Exception as exc:
+        log_error(
+            logger,
+            logging.ERROR,
+            "Failed to recreate subscription %s",
+            subscription_id,
+            error=exc,
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1114,8 +1148,10 @@ async def start_service_account_auth(
 
     except HTTPException:
         raise
-    except Exception:
-        logger.error("Failed to start service account OAuth", exc_info=True)
+    except Exception as exc:
+        log_error(
+            logger, logging.ERROR, "Failed to start service account OAuth", error=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to start service account OAuth",
@@ -1386,8 +1422,10 @@ async def service_account_auth_callback(
 
     except (HTTPException, OAuthCodeRejectedError, OAuthClientRejectedError):
         raise
-    except Exception:
-        logger.error("Failed to complete service account OAuth", exc_info=True)
+    except Exception as exc:
+        log_error(
+            logger, logging.ERROR, "Failed to complete service account OAuth", error=exc
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to complete service account OAuth",

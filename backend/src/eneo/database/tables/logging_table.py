@@ -1,4 +1,4 @@
-from sqlalchemy import UUID, Column, MetaData, String, Table, func
+from sqlalchemy import UUID, Column, Index, MetaData, String, Table, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import registry
 
@@ -20,6 +20,15 @@ def create_logging_table(metadata_obj: MetaData) -> type:
         Column("context", String),
         Column("model_kwargs", JSONB),
         Column("json_body", JSONB),
+        # The conversation whose removals clear this log, while it holds
+        # content. The database sets it when the log is linked to its
+        # question and unsets it when a removal clears the log.
+        Column("session_id", UUID),  # pyright: ignore[reportUnknownArgumentType]  # untyped Column in Table constructor
+        Index(
+            "ix_logging_session_id",
+            "session_id",
+            postgresql_where=text("session_id IS NOT NULL"),
+        ),
     )
 
     class Logging:

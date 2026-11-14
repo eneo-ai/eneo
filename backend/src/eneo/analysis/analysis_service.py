@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
@@ -25,6 +26,7 @@ from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.main.exceptions import (
     BadRequestException,
@@ -32,6 +34,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
@@ -233,9 +236,12 @@ class AnalysisService:
         summaries: list[str] = []
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.warning(
+                log_error(
+                    logger,
+                    logging.WARNING,
                     "analysis_chunk_failed",
-                    extra={"chunk_index": i + 1, "error": str(result)},
+                    error=result,
+                    extra={"chunk_index": i + 1},
                 )
             elif result:
                 summaries.append(result)
@@ -623,6 +629,10 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
         )
         if question is None:
+            if await self.question_repo.in_removed_copy(
+                id=message_id, tenant_id=self.user.tenant_id
+            ):
+                raise DerivedSourceRemovedError()
             raise NotFoundException("Message not found")
         return question
 
@@ -1039,16 +1049,23 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
-        session = await self.session_repo.get(id=session_id)
-        assert session is not None
-
-        if session.group_chat_id is not None:
-            await self._check_insight_access(group_chat_id=session.group_chat_id)
+        # Authorize on the session's facts before reading its turns, so a turn
+        # read that finds nothing can be explained only to an authorized reader.
+        facts = await self.session_repo.get_ownership(session_id)
+        if facts is None:
+            raise NotFoundException("Session not found")
+        if facts.group_chat_id is not None:
+            await self._check_insight_access(group_chat_id=facts.group_chat_id)
         else:
-            if session.assistant is None:
+            if facts.assistant_id is None:
                 raise NotFoundException("Session assistant not found")
-            await self._check_insight_access(assistant_id=session.assistant.id)
+            await self._check_insight_access(assistant_id=facts.assistant_id)
 
+        session = await self.session_repo.get(id=session_id)
+        if session is None:
+            if await self.session_repo.is_removed_copy(session_id):
+                raise DerivedSourceRemovedError()
+            raise NotFoundException("Session not found")
         return session
 
     async def get_conversation_stats(

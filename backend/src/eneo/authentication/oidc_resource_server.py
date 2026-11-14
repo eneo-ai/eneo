@@ -14,9 +14,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 import jwt
-from aiohttp import ClientTimeout
 
-from eneo.main.aiohttp_client import aiohttp_client
+from eneo.authentication.oidc import outbound
+from eneo.authentication.oidc.profile import OidcProviderError, check_endpoint_hosts
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
@@ -29,7 +29,6 @@ logger = get_logger(__name__)
 # Asymmetric signature algorithms accepted for IdP access tokens.
 RS256_FAMILY = ["RS256", "RS384", "RS512"]
 JWKS_REFRESH_COOLDOWN_SECONDS = 30
-JWKS_FETCH_TIMEOUT_SECONDS = 5
 
 
 class JWKSFetchError(Exception):
@@ -37,24 +36,26 @@ class JWKSFetchError(Exception):
 
 
 async def _fetch_json(url: str) -> dict[str, Any]:
-    async with aiohttp_client().get(
-        url, timeout=ClientTimeout(total=JWKS_FETCH_TIMEOUT_SECONDS)
-    ) as resp:
-        if resp.status != 200:
-            raise JWKSFetchError(f"HTTP {resp.status} fetching {url}")
-        return await resp.json()
+    try:
+        return await outbound.get_json(url)
+    except outbound.OidcFetchError as exc:
+        # A fixed reason; the caller logs the issuer or JWKS address.
+        raise JWKSFetchError(exc.reason) from exc
 
 
 class JWKSCache:
-    """In-process JWKS cache keyed by issuer, with TTL and rotation refetch.
+    """In-process JWKS cache for one key source, with TTL and rotation refetch.
 
-    Unknown key IDs may trigger one rotation refresh per cooldown, independent
-    of the attacker-chosen ID. Valid cached keys never wait for that network
+    The source is the ``jwks_uri`` when given, else the issuer's discovery;
+    the cache starts over only when the source changes, so issuers sharing
+    one JWKS address share its keys and its cooldown. Unknown key IDs may
+    trigger one rotation refresh per cooldown, independent of the
+    attacker-chosen ID. Valid cached keys never wait for that network
     request. Failed or expired refreshes are bounded by the same cooldown.
     """
 
     def __init__(self):
-        self._issuer: str | None = None
+        self._source: str | None = None
         self._keys: dict[str, jwt.PyJWK] = {}
         self._fetched_at: float | None = None
         self._refresh_retry_at = 0.0
@@ -62,11 +63,12 @@ class JWKSCache:
         self._lock = asyncio.Lock()
 
     async def get_signing_key(
-        self, *, issuer: str, kid: str, ttl_seconds: int
+        self, *, issuer: str, kid: str, ttl_seconds: int, jwks_uri: str | None = None
     ) -> jwt.PyJWK:
+        source = jwks_uri or issuer
         now = time.monotonic()
         if (
-            self._issuer == issuer
+            self._source == source
             and self._fetched_at is not None
             and now - self._fetched_at <= ttl_seconds
         ):
@@ -75,8 +77,8 @@ class JWKSCache:
                 return key
 
         async with self._lock:
-            if self._issuer != issuer:
-                self._issuer = issuer
+            if self._source != source:
+                self._source = source
                 self._keys = {}
                 self._fetched_at = None
                 self._refresh_retry_at = self._rotation_retry_at = 0.0
@@ -96,7 +98,7 @@ class JWKSCache:
             self._refresh_retry_at = now + JWKS_REFRESH_COOLDOWN_SECONDS
             if not expired:
                 self._rotation_retry_at = now + JWKS_REFRESH_COOLDOWN_SECONDS
-            await self._refresh(issuer)
+            await self._refresh(issuer, jwks_uri)
             self._refresh_retry_at = 0.0
             key = self._keys.get(kid)
 
@@ -107,20 +109,28 @@ class JWKSCache:
                 raise AuthenticationException("Could not validate token credentials.")
             return key
 
-    async def _refresh(self, issuer: str) -> None:
-        discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
-        discovery = await _fetch_json(discovery_url)
-
-        jwks_uri = discovery.get("jwks_uri")
-        if not jwks_uri:
-            raise JWKSFetchError(f"No jwks_uri in discovery document at {issuer}")
+    async def _refresh(self, issuer: str, jwks_uri: str | None = None) -> None:
+        if jwks_uri is None:
+            discovery_url = f"{issuer.rstrip('/')}/.well-known/openid-configuration"
+            discovery = await _fetch_json(discovery_url)
+            jwks_uri = discovery.get("jwks_uri")
+            if not isinstance(jwks_uri, str) or not jwks_uri:
+                raise JWKSFetchError(f"No jwks_uri in discovery document at {issuer}")
+            # Resource-server mode has no list of other hosts: the keys are on
+            # the issuer's host. (A sign-in's profile checked its own.)
+            try:
+                check_endpoint_hosts(discovery_url, {"JWKS URI": jwks_uri}, ())
+            except OidcProviderError as exc:
+                raise JWKSFetchError(str(exc)) from exc
 
         jwks = await _fetch_json(jwks_uri)
 
         keys: dict[str, jwt.PyJWK] = {}
         for jwk_data in jwks.get("keys", []):
             kid = jwk_data.get("kid")
-            if not kid:
+            # As PyJWKClient: only keys for signing, never one marked for
+            # encryption.
+            if not kid or jwk_data.get("use") not in ("sig", None):
                 continue
             try:
                 keys[kid] = jwt.PyJWK.from_dict(jwk_data)
@@ -130,7 +140,6 @@ class JWKSCache:
                     extra={"issuer": issuer, "kid": kid},
                 )
 
-        self._issuer = issuer
         self._keys = keys
         self._fetched_at = time.monotonic()
 
@@ -142,6 +151,19 @@ class JWKSCache:
 
 # Process-wide cache shared across requests.
 _jwks_cache = JWKSCache()
+# The sign-in callback's keys, one cache per provider's JWKS address, so
+# organisations with different providers never evict each other's keys.
+_federation_jwks_caches: dict[str, JWKSCache] = {}
+
+
+async def get_federation_signing_key(
+    *, issuer: str, jwks_uri: str, kid: str, ttl_seconds: int
+) -> jwt.PyJWK:
+    """The provider's signing key for an ID token, from the shared cache."""
+    cache = _federation_jwks_caches.setdefault(jwks_uri, JWKSCache())
+    return await cache.get_signing_key(
+        issuer=issuer, kid=kid, ttl_seconds=ttl_seconds, jwks_uri=jwks_uri
+    )
 
 
 async def validate_idp_access_token(
@@ -219,3 +241,4 @@ def reset_jwks_cache() -> None:
     """Drop cached JWKS state (test hook and operational escape hatch)."""
     global _jwks_cache
     _jwks_cache = JWKSCache()
+    _federation_jwks_caches.clear()

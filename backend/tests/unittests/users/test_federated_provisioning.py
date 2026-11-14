@@ -2,22 +2,39 @@
 
 from collections.abc import Sequence
 from datetime import datetime, timezone
-from types import SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from cryptography.fernet import Fernet
 
-from eneo.authentication.auth_models import AccessToken, FederatedIdentity
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.auth_models import FederatedIdentity
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.main.config import Settings
-from eneo.main.exceptions import AuthenticationException, FederatedLoginDenied
-from eneo.settings.credential_resolver import CredentialResolver
+from eneo.main.exceptions import FederatedLoginDenied
+from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.federation_startup_migration import (
+    FederationStartupMigrationService,
+)
 from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.tenants.tenant_federation_service import TenantFederationService
 from eneo.users.user import UserAdd, UserInDB, UserState
 from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
+from tests.fake_oidc_provider import FakeOidcProvider, install
 from tests.fixtures import TEST_TENANT, TEST_USER
+from tests.identity_bindings_in_memory import IdentityBindingsInMemory
+
+ISSUER = "https://idp.example.org"
+
+
+def identity_of(claims: dict[str, object], **mapping: str) -> FederatedIdentity:
+    return FederatedIdentity.from_claims(
+        claims, issuer=ISSUER, audience="client", **mapping
+    )
 
 
 class UsersInMemory:
@@ -35,6 +52,28 @@ class UsersInMemory:
             ),
             None,
         )
+
+    async def get_users_by_email(self, email: str, *, limit: int) -> list[UserInDB]:
+        return [
+            user
+            for user in self.users
+            if user.email.lower() == email.lower() and user.deleted_at is None
+        ][:limit]
+
+    async def get_user_by_id(
+        self, id: UUID, with_deleted: bool = False
+    ) -> UserInDB | None:
+        return next(
+            (
+                user
+                for user in self.users
+                if user.id == id and (with_deleted or user.deleted_at is None)
+            ),
+            None,
+        )
+
+    async def get_user_by_id_for_update(self, id: UUID) -> UserInDB | None:
+        return await self.get_user_by_id(id)
 
     async def has_removed_user_by_email(self, email: str, tenant_id: UUID) -> bool:
         return any(
@@ -92,6 +131,12 @@ class AuditLog:
     async def log(self, **event: object) -> None:
         self.events.append(event)
 
+    async def log_async(self, **event: object) -> None:
+        self.events.append(event)
+
+    def of(self, action: ActionType) -> list[dict[str, object]]:
+        return [event for event in self.events if event["action"] == action]
+
 
 @pytest.fixture
 def tenant() -> TenantInDB:
@@ -105,18 +150,11 @@ def tenant() -> TenantInDB:
     )
 
 
-@pytest.fixture(params=["federation", "global-oidc"])
-def entrypoint(request: pytest.FixtureRequest) -> str:
-    return request.param
-
-
 async def sign_in(
-    monkeypatch: pytest.MonkeyPatch,
     tenant: TenantInDB,
     users: UsersInMemory,
     claims: dict[str, object],
     domains: list[str],
-    entrypoint: str,
 ) -> tuple[UserInDB, bool, AuditLog]:
     audit = AuditLog()
     service = UserService(
@@ -128,34 +166,14 @@ async def sign_in(
         api_key_v2_repo=None,
         settings_repo=None,
         info_blob_repo=None,
+        identity_binding_repo=IdentityBindingsInMemory(),
     )
-    if entrypoint == "federation":
-        user, created = await service.resolve_federated_user(
-            identity=FederatedIdentity.from_claims(claims),
-            tenant_id=tenant.id,
-            allowed_domains=domains,
-            correlation_id="admission-test",
-        )
-    else:
-        from eneo.users import user_service
-
-        monkeypatch.setattr(
-            user_service,
-            "get_settings",
-            lambda: SimpleNamespace(
-                oidc_client_id="client",
-                oidc_tenant_id=str(tenant.id),
-                oidc_allowed_domains=domains,
-            ),
-        )
-        token, created, user = await service.login_with_mobilityguard(
-            id_token="validated-id-token",
-            access_token="access-token",
-            key=SimpleNamespace(key="signing-key"),
-            signing_algos=["RS256"],
-            correlation_id="admission-test",
-        )
-        assert token == AccessToken(access_token=str(user.id), token_type="bearer")
+    user, created = await service.resolve_federated_user(
+        identity=identity_of(claims),
+        tenant_id=tenant.id,
+        allowed_domains=domains,
+        correlation_id="admission-test",
+    )
     return user, created, audit
 
 
@@ -174,6 +192,7 @@ def existing_user(tenant: TenantInDB, **updates: object) -> UserInDB:
 
 
 CLAIMS: dict[str, object] = {
+    "iss": ISSUER,
     "sub": "subject",
     "email": "user@example.com",
     "email_verified": True,
@@ -181,11 +200,14 @@ CLAIMS: dict[str, object] = {
 
 
 async def test_jit_creates_member_with_default_role_and_audit(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     users = UsersInMemory(tenant)
     user, created, audit = await sign_in(
-        monkeypatch, tenant, users, CLAIMS, ["Example.COM"], entrypoint
+        tenant,
+        users,
+        CLAIMS,
+        ["Example.COM"],
     )
     assert created is True
     assert user.tenant_id == tenant.id
@@ -194,33 +216,31 @@ async def test_jit_creates_member_with_default_role_and_audit(
     assert user.email_verified is True
     assert len(users.created) == 1
     assert [role.id for role in users.created[0].roles] == [tenant.default_role_id]
-    assert len(audit.events) == 1
-    assert audit.events[0]["tenant_id"] == tenant.id
-    assert audit.events[0]["entity_id"] == user.id
+    [created_event] = audit.of(ActionType.USER_CREATED)
+    assert created_event["tenant_id"] == tenant.id
+    assert created_event["entity_id"] == user.id
+    [bound] = audit.of(ActionType.IDENTITY_BOUND)
+    assert (bound["entity_id"], bound["metadata"]["method"]) == (user.id, "jit")
 
 
 @pytest.mark.parametrize("domains", [[], ["outside.example"]])
-async def test_jit_rejects_empty_or_wrong_domain(
-    monkeypatch, tenant, entrypoint, domains
-):
+async def test_jit_rejects_empty_or_wrong_domain(tenant, domains):
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, domains, entrypoint)
+        await sign_in(tenant, users, CLAIMS, domains)
     assert users.created == []
 
 
 async def test_distinct_international_domains_do_not_alias(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="is not allowed"):
         await sign_in(
-            monkeypatch,
             tenant,
             users,
             {**CLAIMS, "email": "user@faß.de"},
             ["fass.de"],
-            entrypoint,
         )
     assert users.created == []
 
@@ -228,17 +248,15 @@ async def test_distinct_international_domains_do_not_alias(
 @pytest.mark.parametrize("email", ["user@bücher.de", "user@xn--bcher-kva.de"])
 @pytest.mark.parametrize("existing", [False, True])
 async def test_international_domains_match_unicode_and_punycode(
-    monkeypatch, tenant, entrypoint, email, existing
+    tenant, email, existing
 ):
     member = existing_user(tenant, email="user@bücher.de") if existing else None
     users = UsersInMemory(tenant, [member] if member else [])
     user, created, _ = await sign_in(
-        monkeypatch,
         tenant,
         users,
         {**CLAIMS, "email": email},
         ["xn--bcher-kva.de"],
-        entrypoint,
     )
     assert user.email == "user@bücher.de"
     assert created is (not existing)
@@ -248,44 +266,44 @@ async def test_international_domains_match_unicode_and_punycode(
 
 
 async def test_invalid_domain_configuration_fails_closed(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="domains are invalid"):
         await sign_in(
-            monkeypatch, tenant, users, CLAIMS, ["invalid domain"], entrypoint
+            tenant,
+            users,
+            CLAIMS,
+            ["invalid domain"],
         )
     assert users.created == []
 
 
 @pytest.mark.parametrize("verified", ["true", "TRUE", " True ", "1", 1])
-async def test_jit_accepts_text_forms_of_a_positive_verification(
-    monkeypatch, tenant, entrypoint, verified
-):
+async def test_jit_accepts_text_forms_of_a_positive_verification(tenant, verified):
     users = UsersInMemory(tenant)
     user, created, _ = await sign_in(
-        monkeypatch,
         tenant,
         users,
         {**CLAIMS, "email_verified": verified},
         ["example.com"],
-        entrypoint,
     )
     assert created is True
     assert user.email_verified is True
 
 
 @pytest.mark.parametrize("domain_verified", [True, "true", "1", 1])
-async def test_jit_accepts_entra_domain_owner_verification(
-    monkeypatch, tenant, entrypoint, domain_verified
-):
+async def test_jit_accepts_entra_domain_owner_verification(tenant, domain_verified):
     """Entra ID omits email_verified for organisational accounts; its optional
     xms_edov claim is the equivalent signal for the standard email."""
     claims = {**CLAIMS, "xms_edov": domain_verified}
     claims.pop("email_verified")
     users = UsersInMemory(tenant)
     user, created, _ = await sign_in(
-        monkeypatch, tenant, users, claims, ["example.com"], entrypoint
+        tenant,
+        users,
+        claims,
+        ["example.com"],
     )
     assert created is True
     assert user.email_verified is True
@@ -293,7 +311,7 @@ async def test_jit_accepts_entra_domain_owner_verification(
 
 @pytest.mark.parametrize("domain_verified", [False, "false", "0", 0, "", None])
 async def test_jit_rejects_a_negative_or_missing_entra_domain_verification(
-    monkeypatch, tenant, entrypoint, domain_verified
+    tenant, domain_verified
 ):
     claims = {**CLAIMS, "xms_edov": domain_verified}
     claims.pop("email_verified")
@@ -301,86 +319,86 @@ async def test_jit_rejects_a_negative_or_missing_entra_domain_verification(
         claims.pop("xms_edov")
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="verified email"):
-        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+        await sign_in(tenant, users, claims, ["example.com"])
     assert users.created == []
 
 
 def test_entra_domain_verification_does_not_override_an_explicit_negative():
     with pytest.raises(ValueError, match="not verified"):
-        FederatedIdentity.from_claims(
-            {**CLAIMS, "email_verified": False, "xms_edov": True}
-        )
+        identity_of({**CLAIMS, "email_verified": False, "xms_edov": True})
 
 
 @pytest.mark.parametrize("email_verified", ["false", "0", 0, "", "yes", 2, "true1"])
 async def test_entra_domain_verification_is_only_a_fallback_for_a_missing_claim(
-    monkeypatch, tenant, entrypoint, email_verified
+    tenant, email_verified
 ):
     """A sent email_verified keeps its own verdict; xms_edov never overrides
     a negative or unrecognised value, only fills in for an absent one."""
     claims = {**CLAIMS, "email_verified": email_verified, "xms_edov": True}
-    assert FederatedIdentity.from_claims(claims).email_verified is False
+    assert identity_of(claims).email_verified is False
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="verified email"):
-        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+        await sign_in(tenant, users, claims, ["example.com"])
     assert users.created == []
 
 
 def test_entra_domain_verification_fills_in_for_a_null_claim():
-    identity = FederatedIdentity.from_claims(
-        {**CLAIMS, "email_verified": None, "xms_edov": True}
-    )
+    identity = identity_of({**CLAIMS, "email_verified": None, "xms_edov": True})
     assert identity.email_verified is True
 
 
 @pytest.mark.parametrize(
     "verified", [None, "false", "0", 0, 2, "yes", "", "true1", 1.0, ["true"]]
 )
-async def test_jit_requires_a_positive_verification(
-    monkeypatch, tenant, entrypoint, verified
-):
+async def test_jit_requires_a_positive_verification(tenant, verified):
     claims = {**CLAIMS, "email_verified": verified}
     if verified is None:
         claims.pop("email_verified")
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="verified email"):
-        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+        await sign_in(tenant, users, claims, ["example.com"])
     assert users.created == []
 
 
 async def test_provisioning_false_blocks_new_accounts_in_both_paths(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     tenant.provisioning = False
     users = UsersInMemory(tenant)
     with pytest.raises(
         FederatedLoginDenied, match="Provision the account through SCIM"
     ):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, ["example.com"], entrypoint)
+        await sign_in(tenant, users, CLAIMS, ["example.com"])
     assert users.created == []
 
 
 @pytest.mark.parametrize("verified", [None, True])
 async def test_existing_scim_member_can_sign_in_without_jit_requirements(
-    monkeypatch, tenant, entrypoint, verified
+    tenant, verified
 ):
     tenant.provisioning = False
     member = existing_user(tenant)
     users = UsersInMemory(tenant, [member])
-    claims = {"sub": "subject", "email": member.email, "email_verified": verified}
+    claims = {
+        "iss": ISSUER,
+        "sub": "subject",
+        "email": member.email,
+        "email_verified": verified,
+    }
     user, created, audit = await sign_in(
-        monkeypatch, tenant, users, claims, [], entrypoint
+        tenant,
+        users,
+        claims,
+        [],
     )
     assert user.id == member.id
     assert created is False
     assert users.created == []
-    assert audit.events == []
+    assert audit.of(ActionType.USER_CREATED) == []
 
 
 @pytest.mark.parametrize("state", [UserState.INACTIVE, UserState.DELETED])
-async def test_inactive_or_removed_member_cannot_be_recreated(
-    monkeypatch, tenant, entrypoint, state
-):
+async def test_inactive_or_removed_member_cannot_be_recreated(tenant, state):
     member = existing_user(
         tenant,
         state=state,
@@ -388,47 +406,45 @@ async def test_inactive_or_removed_member_cannot_be_recreated(
     )
     users = UsersInMemory(tenant, [member])
     with pytest.raises(FederatedLoginDenied, match="inactive or has been removed"):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, ["example.com"], entrypoint)
+        await sign_in(tenant, users, CLAIMS, ["example.com"])
     assert users.created == []
     assert member.state == state
 
 
 async def test_scim_reactivation_allows_same_account_to_sign_in(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     member = existing_user(
         tenant, state=UserState.DELETED, deleted_at=datetime.now(timezone.utc)
     )
     users = UsersInMemory(tenant, [member])
     with pytest.raises(FederatedLoginDenied):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, [], entrypoint)
+        await sign_in(tenant, users, CLAIMS, [])
     # SCIM/admin restores the original row; OIDC must reuse it.
     member.state = UserState.ACTIVE
     member.deleted_at = None
-    user, created, _ = await sign_in(monkeypatch, tenant, users, CLAIMS, [], entrypoint)
+    user, created, _ = await sign_in(tenant, users, CLAIMS, [])
     assert user.id == member.id
     assert created is False
     assert users.created == []
 
 
 async def test_existing_member_in_other_tenant_is_denied(
-    monkeypatch, tenant, entrypoint
+    tenant,
 ):
     member = existing_user(tenant, tenant_id=uuid4())
     users = UsersInMemory(tenant, [member])
     with pytest.raises(FederatedLoginDenied, match="Access denied"):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, [], entrypoint)
+        await sign_in(tenant, users, CLAIMS, [])
     assert users.created == []
 
 
 @pytest.mark.parametrize("state", [TenantState.SUSPENDED])
-async def test_inactive_tenant_cannot_admit_users(
-    monkeypatch, tenant, entrypoint, state
-):
+async def test_inactive_tenant_cannot_admit_users(tenant, state):
     tenant.state = state
     users = UsersInMemory(tenant)
     with pytest.raises(FederatedLoginDenied, match="Tenant is not active"):
-        await sign_in(monkeypatch, tenant, users, CLAIMS, ["example.com"], entrypoint)
+        await sign_in(tenant, users, CLAIMS, ["example.com"])
     assert users.created == []
 
 
@@ -438,30 +454,31 @@ async def test_inactive_tenant_cannot_admit_users(
 def test_verification_must_cover_the_selected_email(
     mapped_email, verified, verification_claim
 ):
-    claims = {"sub": "subject", "email": CLAIMS["email"], "mail": mapped_email}
+    claims = {**CLAIMS, "mail": mapped_email}
+    claims.pop("email_verified")
     claims[verification_claim] = verified
-    identity = FederatedIdentity.from_claims(claims, email_claim="mail")
+    identity = identity_of(claims, email_claim="mail")
     assert identity.email_verified is (mapped_email == CLAIMS["email"])
 
 
 @pytest.mark.parametrize("existing", [False, True])
 async def test_explicitly_unverified_email_is_rejected_before_account_admission(
-    monkeypatch, tenant, entrypoint, existing
+    tenant, existing
 ):
     member = existing_user(tenant) if existing else None
     users = UsersInMemory(tenant, [member] if member else [])
     claims = {**CLAIMS, "email_verified": False}
-    rejection = ValueError if entrypoint == "federation" else AuthenticationException
-    with pytest.raises(rejection):
-        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+    with pytest.raises(ValueError):
+        await sign_in(tenant, users, claims, ["example.com"])
     assert users.created == []
     if member:
         assert member.state == UserState.ACTIVE
 
 
 def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification():
-    identity = FederatedIdentity.from_claims(
+    identity = identity_of(
         {
+            "sub": "subject",
             "email": "unverified@external.example",
             "email_verified": False,
             "upn": "employee@municipality.example",
@@ -472,22 +489,96 @@ def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification(
     assert identity.email_verified is False
 
 
-@pytest.mark.parametrize("email", [None, 123, "", "invalid", "user@", "@example.com"])
-def test_invalid_email_is_rejected_before_account_admission(email):
-    with pytest.raises(ValueError):
-        FederatedIdentity.from_claims({"email": email, "email_verified": True})
+@pytest.mark.parametrize(
+    ("email", "error"),
+    [
+        (None, "Email claim not found"),
+        (123, "Email claim not found"),
+        ("", "Email claim not found"),
+        ("invalid", "Email claim from identity provider is invalid"),
+        ("user@", "Email claim from identity provider is invalid"),
+        ("@example.com", "Email claim from identity provider is invalid"),
+    ],
+)
+def test_invalid_email_is_rejected_before_account_admission(email, error):
+    # Every other claim is valid, so the email is what is refused.
+    with pytest.raises(ValueError, match=error):
+        identity_of({**CLAIMS, "email": email})
 
 
-def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch):
+@pytest.mark.parametrize("moved", [False, True], ids=["oidc-env", "moved-into-eneo"])
+async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
+    monkeypatch, test_settings, tenant, moved
+):
+    """OIDC_ALLOWED_DOMAINS decides who signs in before the OIDC_* settings are
+    moved into the stored configuration (the env-to-tenant script) and after."""
+    provider = FakeOidcProvider(issuer=ISSUER)
+    install(monkeypatch, provider)
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    settings = test_settings.model_copy(
+        update={
+            "federation_enabled": moved,
+            "oidc_discovery_endpoint": provider.discovery_url,
+            "oidc_client_id": "client",
+            "oidc_client_secret": "client-secret-value",
+            "oidc_allowed_domains": ["example.com"],
+        }
+    )
+    if moved:
+        tenant_repo = AsyncMock()
+        tenant_repo.get_all_active.return_value = [tenant]
+        tenant_repo.lock_federation_config.return_value = tenant.federation_config
+        await FederationStartupMigrationService(
+            tenant_repo=tenant_repo,
+            encryption_service=encryption,
+            federation_service=TenantFederationService(
+                tenant_repo=tenant_repo,
+                encryption_service=encryption,
+                audit_service=AsyncMock(),
+            ),
+            settings=settings,
+        ).migrate_env_oidc_to_tenant_federation()
+        stored = tenant_repo.update_federation_config.await_args.kwargs[
+            "federation_config"
+        ]
+        tenant = tenant.model_copy(update={"federation_config": stored})
+    # Read as the federation callback reads them (federation_router.py).
+    config = sign_in_config(settings, tenant, encryption)
+    domains = cast(list[str], config.get("allowed_domains") or [])
+
+    # A current member inside the domains still signs in...
+    member = existing_user(tenant)
+    signed_in, created, _ = await sign_in(
+        tenant, UsersInMemory(tenant, [member]), CLAIMS, domains
+    )
+    assert (signed_in.id, created) == (member.id, False)
+    # ...a current member outside them is refused...
+    outsider = existing_user(tenant, email="user@outside.example")
+    with pytest.raises(FederatedLoginDenied, match="not allowed"):
+        await sign_in(
+            tenant,
+            UsersInMemory(tenant, [outsider]),
+            {**CLAIMS, "email": "user@outside.example"},
+            domains,
+        )
+    # ...and a new account inside them is still created.
+    _, created, _ = await sign_in(tenant, UsersInMemory(tenant), CLAIMS, domains)
+    assert created is True
+
+
+def test_global_oidc_domain_configuration_is_resolved(
+    test_settings, monkeypatch, tenant
+):
     monkeypatch.setenv("OIDC_ALLOWED_DOMAINS", '["example.com"]')
     settings = Settings(
         _env_file=None,
         **test_settings.model_dump(exclude={"oidc_allowed_domains"}),
     )
     settings.oidc_discovery_endpoint = "https://idp.example.com/discovery"
+    settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
-    config = CredentialResolver(settings=settings).get_federation_config()
+    config = sign_in_config(settings, tenant, EncryptionService())
     assert config["allowed_domains"] == ["example.com"]
 
 

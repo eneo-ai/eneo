@@ -15,15 +15,7 @@ import { Callout, Cards } from 'nextra/components'
   >
     **One organization, one identity provider.**
 
-    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Configure it with environment variables or through the sysadmin API.
-  </Cards.Card>
-  <Cards.Card
-    title="Multi-Tenant Federation"
-    href="/guides/oidc-federation/multi-tenant"
-  >
-    **Multiple organizations, each with their own IdP.**
-
-    Each tenant (municipality, company) uses their own identity provider. Configuration is managed via the sysadmin API - no restarts needed.
+    All users authenticate against the same IdP (Azure Entra ID, Keycloak, Auth0, MobilityGuard, …). Store its settings in Eneo (recommended), or keep them in the server configuration.
   </Cards.Card>
 </Cards>
 
@@ -33,10 +25,10 @@ import { Callout, Cards } from 'nextra/components'
 
 | Scenario | Recommended Setup |
 |----------|-------------------|
-| Single organization deployment | [Single-Tenant](/guides/oidc-federation/single-tenant) |
-| Want to change OIDC settings without restarting, or restrict logins by email domain | [Single-Tenant via the API](/guides/oidc-federation/single-tenant#api-configuration) |
-| SaaS platform with multiple customers | [Multi-Tenant](/guides/oidc-federation/multi-tenant) |
-| Each organization brings their own IdP | [Multi-Tenant](/guides/oidc-federation/multi-tenant) |
+| New single-organization deployment | [Single-Tenant with the settings stored in Eneo](/guides/oidc-federation/single-tenant#api-configuration): administrators change the client ID, client secret and allowed email domains in Eneo, without a restart |
+| Identity provider managed as configuration code | [Single-Tenant in the server configuration](/guides/oidc-federation/single-tenant#environment-variable-configuration) (`OIDC_*` variables) |
+| Existing deployment with `OIDC_*` variables | Nothing changes on upgrade; to let administrators change the settings, [move them into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo) |
+| Several organisations | Single-tenant is recommended: one installation per organisation, each with its own IdP. Several organisations in one installation ([Multi-Tenant](/guides/oidc-federation/multi-tenant)) have basic support only, will be phased out and have no guaranteed data separation, because they share the same database |
 
 ---
 
@@ -49,6 +41,7 @@ Eneo works with any OIDC-compliant identity provider that supports discovery (`/
 - **Keycloak**
 - **Auth0**
 - **Okta**
+- **Zitadel**
 
 <Callout type="info">
   The guides walk through Azure Entra ID, Keycloak, Auth0 and MobilityGuard as examples. The same principles apply to other OIDC providers.
@@ -66,7 +59,8 @@ Make sure you have:
 
 **For the sysadmin API (single-tenant API setup and multi-tenant):**
 - `FEDERATION_ENABLED=true`, an `ENCRYPTION_KEY` and an `ENEO_SUPER_API_KEY` in the backend `.env`
-- Redis (recommended - it caches auth state for tamper detection, but the login flow also works without it)
+
+**For every setup:** Redis. Each sign-in keeps its one-time transaction there; without Redis, sign-in is refused.
 
 ---
 
@@ -78,18 +72,223 @@ Eneo uses the **OAuth 2.0 Authorization Code Flow** with OpenID Connect:
 2. Eneo asks the backend for an authorization URL (`GET /api/v1/auth/initiate`) and redirects to your Identity Provider
 3. User authenticates with their credentials
 4. IdP redirects back to `{origin}/login/callback` with an authorization code
-5. Eneo exchanges the code for tokens, validates the ID token and matches the user by email
-6. User is logged in
+5. Eneo exchanges the code for tokens, validates the ID token and finds the account bound to the person's identity (by email on the first sign-in, see [Account Binding](#account-binding))
+6. User is logged in, with a server-side session that signing out ends
 
 For technical details, see [Authentication Architecture](/docs/authentication-architecture). To keep users and groups in sync from your directory, see [SCIM Provisioning](/guides/scim-provisioning).
 
 ---
 
-## Next Steps
+## Provider Contract
 
-Choose your setup path:
+What Eneo expects from any OIDC provider on the generic sign-in (`/api/v1/auth/initiate` and `/api/v1/auth/callback`), whichever setup you use.
+
+**Eneo sends** `state`, `nonce` and a PKCE `code_challenge` with method `S256` on every authorization request, and the matching `code_verifier` with the token request. A provider that ignores PKCE still signs users in; Eneo then relies on `state`, `nonce` and the client secret, so such a provider does not give you PKCE protection.
+
+**Eneo checks**, before anyone is signed in:
+
+- The ID token's signature against the provider's JWKS, using only the allowed algorithms (never `none` or a symmetric algorithm)
+- `iss` equals the issuer the sign-in started with. If the provider's issuer changes during a sign-in, that sign-in ends with `400` (`oidc_transaction_invalid`) before the code is sent anywhere. When the provider's discovery said at the start that it sends the `iss` parameter on its redirect ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207)), that parameter must be present and equal too; otherwise it may be missing, but one that is sent must be equal
+- `aud` contains Eneo's client ID; `azp`, when present, equals it, and it is required when `aud` names several clients
+- `exp`, `iat` and `sub` are present, the token has not expired, and `iat` and `auth_time` are not in the future (`oidc_clock_leeway_seconds`, default 120 seconds, allows for clock skew)
+- `nonce` equals the one Eneo sent for this sign-in
+
+A response that fails any check ends the sign-in with `401` (`oidc_response_not_verified`); nothing falls back to a weaker check.
+
+**Eneo's requests to the provider** (discovery, token and JWKS, when the provider is saved, tested and at sign-in) follow these rules, so neither a discovery document nor a stored setting can send the code and client secret elsewhere:
+
+- They use `https`. A provider on the same machine (`localhost`, `127.0.0.1`, `[::1]`) is accepted only with `ENVIRONMENT=development`, and may then use plain `http`.
+- The token endpoint and the JWKS are on the discovery endpoint's host, or on a host listed in `allowed_endpoint_hosts`. This holds for endpoints stored in the federation config too.
+- Private network addresses are allowed; link-local addresses (such as `169.254.169.254`), cloud metadata addresses and IPv4 addresses inside IPv6 are not, whatever a name resolves to.
+- Redirects are not followed: a provider answering `3xx` counts as a failed request.
+- Each request ends after 5 seconds, and an answer larger than 256 KiB is refused.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, the same rules hold for the discovery document of `OIDC_ACCEPTED_ISSUER` and its `jwks_uri`, which must be on the issuer's host: `allowed_endpoint_hosts` does not apply to these requests, also after the settings are moved into Eneo. A provider that breaks one fails every bearer token with `401`, and the backend logs `Failed to fetch JWKS for IdP token validation`.
+
+The provider-bound Zitadel login in the Svelte frontend is deprecated and is removed in the next release; see [Migrate from the Zitadel settings](#migrate-from-the-zitadel-settings). Until then it keeps its own requests: it sends PKCE but no `nonce`.
+
+**Optional provider settings.** Set them through the [federation API](/guides/oidc-federation/multi-tenant#configure-the-tenant-via-api), which also serves a single-tenant setup made through the API. Leave them out to keep the defaults. With the `OIDC_*` environment variables the defaults always apply; to change them, configure the provider through the API (`FEDERATION_ENABLED=true`).
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `signing_algorithms` | The provider's `id_token_signing_alg_values_supported`, else `["RS256"]` | ID token algorithms to accept. Only `RS256`/`384`/`512`, `PS256`/`384`/`512`, `ES256`/`384`/`512` and `EdDSA` (Ed25519 keys) are allowed |
+| `email_verified_claims` | `["email_verified", "xms_edov"]` | Claims that say the email is verified, in order. The first one present decides, so an explicit `false` is never overridden by a later claim |
+| `allowed_endpoint_hosts` | None: only the discovery host | Other hosts the token endpoint and the JWKS may be on, as host names or IP addresses (IPv6 with or without brackets; no scheme, port or path). Google needs `["oauth2.googleapis.com", "www.googleapis.com"]` |
+
+### Upgrading
+
+- Redis is required for sign-in.
+- A provider served over plain `http`, one on the same machine without `ENVIRONMENT=development`, one whose token endpoint or JWKS is on another host than its discovery document, or one that answers with a redirect, no longer signs anyone in. Serve it over `https` on its own host, list the other hosts in `allowed_endpoint_hosts`, or point `discovery_endpoint` at the address that does not redirect. The list needs the federation API (`FEDERATION_ENABLED=true`); with the `OIDC_*` variables only the discovery host is allowed. See [Eneo's requests to the provider](#provider-contract).
+- The ID token's `iss` must equal the provider's issuer: the one Eneo stored from discovery when the federation config was saved, else the one discovery gives at sign-in (always so with the `OIDC_*` variables). A `PATCH` that includes the organisation's own `discovery_endpoint` stores the issuer again. A shared discovery URL whose issuer contains a placeholder (for example `{tenantid}`) is refused: saving such a federation config answers `400`, and a sign-in with one already stored or set in `OIDC_DISCOVERY_ENDPOINT` answers `500` before anyone is sent to the provider. Switch to your organisation's own discovery URL before upgrading (`discovery_endpoint` in the federation config, or `OIDC_DISCOVERY_ENDPOINT`).
+- PKCE (`S256`) and `nonce` are always sent. A provider that ignores PKCE keeps working.
+- The provider must return the `nonce` in the ID token ([OpenID Connect Core 3.1.3.7](https://openid.net/specs/openid-connect-core-1_0.html#IDTokenValidation)). With a provider that does not, every sign-in is refused with `oidc_response_not_verified` (`nonce_mismatch`).
+- The provider's discovery document must stay reachable. Each backend process caches it for `oidc_jwks_cache_ttl_seconds` (default one hour) with no stale copy to fall back on: when the cache has expired and the document cannot be fetched, sign-in answers `500`.
+- A sign-in started before the upgrade must be started again: its state is refused with `400 Invalid state parameter`, or its transaction with `oidc_transaction_invalid`. In a rolling deploy, replace all backend instances together, or accept that sign-ins which cross versions fail until the switch is done; people only need to start the sign-in again.
+- Upgrade the frontend together with the backend: the older frontend does not forward the provider's `iss` parameter. Any other client that calls `POST /api/v1/auth/callback`, through eneo-js or directly, must forward the redirect's `iss` query parameter whenever the provider sends one: Eneo requires it when the provider's discovery announced it, and refuses one that differs.
+- With `OIDC_RESOURCE_SERVER_ENABLED=true`, Eneo also accepts the provider's access tokens as bearer tokens. Such a token must be a JWT signed with `RS256`, `RS384` or `RS512` that names its key (`kid`) and carries `sub`, `email`, `exp`, `iss` equal to `OIDC_ACCEPTED_ISSUER` and `aud` containing `OIDC_ACCEPTED_AUDIENCE`. The person is admitted to the tenant `OIDC_TENANT_ID` names, else to the first active tenant. Access tokens use the allowed domains of the selected settings: with `FEDERATION_ENABLED=true` only the domains stored on the provider. With no provider stored there is no browser sign-in, and a token creates no account but admits every existing account in the tenant whose email matches. The `jwks_uri` must be on the issuer's host; see [Eneo's requests to the provider](#provider-contract).
+
+### Migrate from the MobilityGuard settings
+
+Eneo has no sign-in of its own for MobilityGuard any more. MobilityGuard signs people in through the OIDC settings, like every other provider. A client that posted codes to `POST /api/v1/users/login/openid-connect/mobilityguard/` now gets `404`, whatever the variables are called; it must sign in through `/api/v1/auth/initiate` and `/api/v1/auth/callback` instead. Rename or remove the old variables:
+
+| Old variable | Where | Use instead |
+|--------------|-------|-------------|
+| `MOBILITYGUARD_DISCOVERY_ENDPOINT` | backend | `OIDC_DISCOVERY_ENDPOINT` |
+| `MOBILITYGUARD_CLIENT_ID` | backend | `OIDC_CLIENT_ID` |
+| `MOBILITYGUARD_CLIENT_SECRET` | backend | `OIDC_CLIENT_SECRET` |
+| `MOBILITYGUARD_TENANT_ID` | backend | `OIDC_TENANT_ID` |
+| `MOBILITY_GUARD_AUTH` | frontend | Nothing: the backend reads the authorization endpoint from discovery |
+| `MOBILITYGUARD_CLIENT_ID` | frontend | Nothing: the backend's `OIDC_CLIENT_ID` is used |
+
+The backend does not start while a `MOBILITYGUARD_*` variable is set without its `OIDC_*` name. Its log names the variable to use, for example:
+
+```text
+MOBILITYGUARD_CLIENT_ID is no longer read. Rename it to OIDC_CLIENT_ID.
+```
+
+When both names are set, the `OIDC_*` value is used and the backend logs a warning to remove the old one. The frontend logs a warning at startup while `MOBILITY_GUARD_AUTH` or `MOBILITYGUARD_CLIENT_ID` is set.
+
+At the provider, check these differences from the old sign-in:
+
+- The redirect URI stays `{PUBLIC_ORIGIN}/login/callback`, from the backend's `PUBLIC_ORIGIN`. If people reach Eneo at more than one address, the old sign-in could follow one of the organisation's allowed origins; the OIDC settings always use `PUBLIC_ORIGIN`.
+- Eneo asks for the scopes `openid`, `email` and `profile`; the old sign-in asked for `openid` and `email`.
+- Eneo sends the client secret in the request body (`client_secret_post`), or with HTTP Basic when the provider's discovery lists `client_secret_basic` and not `client_secret_post`. The old sign-in always used HTTP Basic.
+- Eneo sends a `nonce`, and the ID token must carry it back (see the contract above). The old sign-in sent none.
+
+**How to check.** Open the login page and sign in. If the page says "Signing in through your organisation is not available right now. Contact your administrator.", the frontend still has `MOBILITY_GUARD_AUTH` while the backend reports no OIDC sign-in: check that the backend has the `OIDC_*` variables and has started. A sign-in begun on the old MobilityGuard link before the upgrade ends on the login page; start it again.
+
+### Migrate from the Zitadel settings
+
+<Callout type="warning">
+  The Zitadel sign-in that `ZITADEL_INSTANCE_URL` and `ZITADEL_PROJECT_CLIENT_ID` turn on in the Svelte frontend is deprecated and is removed in the next release, together with `POST /api/v1/users/provision/`. Zitadel is a standard OIDC provider: register it in the OIDC settings like any other.
+</Callout>
+
+Nothing changes in this release until you move. While either variable is set, the frontend logs one warning at startup:
+
+```text
+The Zitadel sign-in (ZITADEL_INSTANCE_URL, ZITADEL_PROJECT_CLIENT_ID) is deprecated and will be removed in the next release. Register Zitadel in the backend's OIDC_DISCOVERY_ENDPOINT, OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, then remove the ZITADEL_* variables.
+```
+
+The backend logs a warning each time `POST /api/v1/users/provision/` is called, and the OpenAPI schema marks it deprecated.
+
+**1. Register Eneo in Zitadel.** In your Zitadel project, add a web application with these settings:
+
+| Setting | Value |
+|---------|-------|
+| Redirect URI | `{PUBLIC_ORIGIN}/login/callback`, from the backend's `PUBLIC_ORIGIN`: the same address the Zitadel sign-in used |
+| Authentication method | One with a client secret (Basic or Post). Zitadel's discovery lists `client_secret_post`, so Eneo sends the secret in the request body; Zitadel accepts that with either method. The application the Zitadel sign-in used sends no secret, so add a new one or give it a method with a secret |
+| Grant type | Authorization Code |
+| User Info inside ID Token | On. Eneo reads `email` and `email_verified` from the ID token only. Without this setting Zitadel leaves them out, and every sign-in is refused with "Email claim not found in ID token" |
+
+Eneo asks for the scopes `openid`, `email` and `profile`, and sends a `nonce` and PKCE (`S256`); Zitadel supports them without further settings. The Zitadel-specific scope `urn:zitadel:iam:org:project:id:zitadel:aud` is no longer requested.
+
+**2. Set the OIDC settings in the backend.** They replace the frontend's Zitadel variables:
+
+| Old variable | Where | Use instead |
+|--------------|-------|-------------|
+| `ZITADEL_INSTANCE_URL` | frontend | `OIDC_DISCOVERY_ENDPOINT` in the backend: `{ZITADEL_INSTANCE_URL}/.well-known/openid-configuration` |
+| `ZITADEL_PROJECT_CLIENT_ID` | frontend | `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` in the backend, from the application in step 1 |
+
+See [Single-Tenant Setup](/guides/oidc-federation/single-tenant#configure-backend-environment-variables) for the other backend variables. Set `OIDC_ALLOWED_DOMAINS` if people are to be created at their first sign-in (see below).
+
+With the settings stored in Eneo (`FEDERATION_ENABLED=true`), the backend ignores these variables. Register the same discovery URL, client ID, secret and allowed domains through the [sysadmin API](/guides/oidc-federation/single-tenant#configure-via-api) instead. The allowed domains below are then the stored list, which administrators [change in Eneo](/guides/oidc-federation/single-tenant#change-the-settings-in-eneo).
+
+**3. Remove both `ZITADEL_*` variables from the frontend and restart it.** While they are set, the login page still sends people to the Zitadel sign-in, even when the OIDC settings are in place.
+
+The Zitadel sign-in sent Zitadel's ID token to the backend, which accepted it in resource-server mode (`OIDC_RESOURCE_SERVER_ENABLED`, `OIDC_ACCEPTED_ISSUER`, `OIDC_ACCEPTED_AUDIENCE`). After the move, Eneo issues its own token at sign-in. Keep resource-server mode only for other clients that call the API with Zitadel tokens.
+
+**What changes for people:**
+
+- **Passwords and names are changed in Zitadel.** Eneo's account page no longer changes the Zitadel password or name. It shows the username and says the password is managed by the identity provider. People change both on Zitadel's own account pages, for example `{ZITADEL_INSTANCE_URL}/ui/console/users/me`. A person who also has a local Eneo password still sees Eneo's password change, which changes only that local password.
+- **People are created at their first sign-in, not through invite links.** The invite page (`/invite/{organisationId}`) and the activation page (`/activate`) only serve the Zitadel sign-in and are removed with it. A person who signs in for the first time gets an account when the organisation's `provisioning` setting is on, their email domain is in `OIDC_ALLOWED_DOMAINS` and Zitadel reports the address as verified. With provisioning off, create accounts ahead of time, for example through SCIM. Such an account still signs in only when its email domain is in `OIDC_ALLOWED_DOMAINS`, if that list is set, and Zitadel does not report the address as unverified. See [User Provisioning](/guides/oidc-federation/single-tenant#user-provisioning).
+- **Signing out of Eneo does not sign people out of Zitadel.** The Zitadel sign-in also ended the Zitadel session; the OIDC sign-in ends only Eneo's.
+
+The organisation field `zitadel_org_id` in the sysadmin tenant API is not used by any sign-in and is removed in the next release.
+
+**How to check.** Remove the `ZITADEL_*` variables, restart the frontend and sign in. The login page sends you to Zitadel, and after signing in you land in Eneo. The frontend log no longer has the Zitadel warning.
+
+---
+
+## Account Binding
+
+Eneo remembers which provider identity signs in to each account. An identity is four values from the verified token:
+
+| Value | What it is |
+|-------|------------|
+| Issuer | The token's `iss` |
+| Audience | For browser sign-in, Eneo's client ID at the provider. For a provider access token sent to the API as Bearer, the accepted API audience (`OIDC_ACCEPTED_AUDIENCE`) |
+| Subject claim | The name of the [subject claim](#the-subject-claim) the subject was read from, `sub` by default |
+| Subject | The value of that claim |
+
+How a sign-in finds its account:
+
+1. **A bound identity** signs in to its account. The email is not consulted, so an email change at the provider keeps the account, and an address later given to someone else does not open it.
+2. **The same subject under another audience** of the same issuer joins the account that subject is bound to, for example a browser client and an API audience.
+3. **The email, once.** An active account with that email and no binding is bound on that sign-in; an account created by JIT provisioning is bound when it is created. An account that already has a binding is never bound again by email, unless an administrator [re-opens it](#re-opening-a-binding).
+
+A removed or deactivated account keeps its identity: no other account can take it, and it signs in again once SCIM or an administrator reactivates the account.
+
+### The subject claim
+
+The subject claim is `claims_mapping.subject` in the provider config, `sub` by default. It must be an immutable id that the provider never gives to another person, and never the email claim: Eneo refuses that configuration. Some providers issue a different `sub` for each client (Microsoft Entra ID, for example, whose `oid` claim is the stable one). With such a provider, a stable id claim must be the subject claim before people sign in, or every new client ID and every API audience looks like a new person.
+
+Set it with `subject_claim` in the federation `PUT` or `PATCH` (`/api/v1/sysadmin/tenants/{tenant_id}/federation`, with the super API key), or as an administrator with `PATCH /api/v1/admin/federation`. A `PUT` writes the whole configuration, so a `PUT` without it stores `sub`: send the current claim to keep it. A `PATCH` without it keeps the stored claim. The email claim is refused with `422` (`federation_subject_claim_is_email_claim`). Both `GET` answers show it, and a change is audited as `federation_updated`. Configuration by environment variables always uses `sub`.
+
+Changing the subject claim once people are bound changes every subject under the issuer, for every audience. A binding names the claim it was made under and never matches a sign-in under another claim, even with the same value, since the new claim's values may belong to other people. After the change, a person's sign-in finds the account by its email, and the old binding under the pair refuses it unless a window replaces it. Before you change it, open a migration window from each issuer and audience people use to itself, for example one for the browser client and one for the API audience: a pair without its own window is refused `subject_mismatch`.
+
+### Changing the client ID
+
+A new client ID, set by the operator or by an administrator with `PATCH /api/v1/admin/federation`, gives everyone a new issuer and audience pair. With a provider that issues a subject per client, people present a new subject there: open a migration window from the old pair to the new one first, otherwise every bound account is refused `account_bound`. With a provider that gives one subject for every client, the new pair binds by the same subject and needs no window.
+
+### Sign-in conflicts
+
+When the identity cannot be bound, the sign-in is refused. The login page says the account is already linked to another sign-in and asks the person to contact an administrator; the API answers `403` with `code` `identity_conflict` (`eneo_error_code` 9082).
+
+| Reason | Meaning | What an administrator does |
+|--------|---------|----------------------------|
+| `subject_mismatch` | The account is bound under this issuer and audience to another subject | Confirm it is the same person, then open a re-binding allowance; after a subject claim change, a migration window from this pair to itself |
+| `account_bound` | The account is bound, but not under this issuer and audience, for example after a client ID change | A migration window from the old pair, or an allowance for one person |
+| `duplicate_email` | Several accounts have the email, in different letter case | Leave one account with the address |
+| `duplicate_subject` | The subject is bound to two accounts under different audiences | Find which account is the person's from the accounts the audit entry names |
+| `identity_taken` | Another account took the identity while this sign-in waited | Signing in again reaches the account that holds it; check that it is the person's |
+| `account_changed` | The account changed while this sign-in waited for it: it was re-bound, or its email changed | Signing in again decides on the current bindings |
+
+Each refusal writes an `identity_conflict` entry to the [audit log](/guides/audit-logging#sign-in-identity-actions) with the reason, the identity and the accounts involved, and a backend log warning `identity_conflict` with the same fields and the correlation ID. Neither carries the email or a token.
+
+### Re-opening a binding
+
+Two administrator tools let the email bind an account that is already bound. Both are audited, need the admin permission in an interactive session (an API key cannot use them) and end at most 30 days ahead: while they are open, an address reassigned at the provider could reach a bound account, and the limit keeps that exposure short. Neither ever takes an identity another account holds. Both are judged when the sign-in decides, not when it started: a sign-in that was still waiting for the account when one ended does not use it.
+
+| | Re-binding allowance | Migration window |
+|-|----------------------|------------------|
+| Covers | One account | Every account bound under one issuer and audience |
+| Lasts | Until `allowed_until` or the account's next sign-in by email, whichever comes first: single use | Until `closes_at` or until it is closed, for every account |
+| Binds | The presented identity: adds its issuer and audience, or replaces the account's subject there | From one pair to another: adds the new pair and keeps the old, so both keep signing in. From a pair to itself: replaces the subject there, with its claim, once per account bound before the window opened, whether the email or the new subject under another audience finds the account |
+| For | One person with a new identity at the provider | A new client ID, a second entry point, a subject claim change |
+
+The endpoints, under `/api/v1/admin`. `{user_id}` is the account's `id` from `GET /users/`; a username can name more than one account.
+
+| Request | Body | Answer |
+|---------|------|--------|
+| `GET /users/{user_id}/identity` | | `{"bindings": [{"issuer", "audience", "subject_claim", "subject", "created_at"}], "rebinding_allowed_until"}` |
+| `PUT /users/{user_id}/identity/rebinding` | `{"allowed_until"}` | The same shape |
+| `DELETE /users/{user_id}/identity/rebinding` | | The same shape |
+| `GET /identity-migration-windows` | | The open windows |
+| `POST /identity-migration-windows` | `{"from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at"}` | `201` `{"id", "from_issuer", "from_audience", "to_issuer", "to_audience", "closes_at", "created_at"}` |
+| `DELETE /identity-migration-windows/{id}` | | The closed window, `404` when no open window has the id |
+
+The three user routes answer `404` when the id names no account of your organisation, or names a deleted one. `allowed_until` and `closes_at` are times with a time zone, in the future and at most 30 days ahead; anything else answers `422`.
+
+### Upgrading to account binding
+
+- Existing accounts have no binding; each one is bound by its email on its next sign-in.
+- Before you change the client ID with a provider that issues a subject per client, open a migration window from the old pair to the new one; before you change the subject claim, one from each pair to itself.
+- An ordinary upgrade keeps everyone's current session. Rolling the session and binding migrations back and upgrading again gives every session a new id, so people sign in again. The rollback also drops every binding, migration window and re-binding allowance: after the next upgrade, each account is bound by its email on its next sign-in, as after the first upgrade.
+- There is no administration screen for bindings yet: use the API above.
+
+---
+
+## Next Steps
 
 <Cards>
   <Cards.Card title="Single-Tenant Setup" href="/guides/oidc-federation/single-tenant" />
-  <Cards.Card title="Multi-Tenant Federation" href="/guides/oidc-federation/multi-tenant" />
 </Cards>

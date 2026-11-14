@@ -272,6 +272,103 @@ def test_platform_task_runtime_settings_are_environment_configurable(
     assert settings.task_maintenance_timeout_seconds == 120
 
 
+BROWSER_SIGN_IN_VALUES = {
+    "OIDC_DISCOVERY_ENDPOINT": "https://idp.example.org/.well-known/openid-configuration",
+    "OIDC_CLIENT_ID": "env-client-id",
+    "OIDC_CLIENT_SECRET": "env-client-secret-value",
+    "OIDC_ALLOWED_DOMAINS": '["example.org"]',
+}
+
+
+def _ignored_sign_in_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if "Browser sign-in uses the identity provider stored" in record.getMessage()
+    ]
+
+
+@pytest.mark.parametrize(
+    "flag", ["FEDERATION_ENABLED", "FEDERATION_PER_TENANT_ENABLED"]
+)
+def test_stored_mode_names_the_ignored_browser_sign_in_variables(
+    flag: str, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.delenv("FEDERATION_ENABLED", raising=False)
+    monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
+    monkeypatch.delenv("OIDC_RESOURCE_SERVER_ENABLED", raising=False)
+    monkeypatch.setenv(flag, "true")
+    for name, value in BROWSER_SIGN_IN_VALUES.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.WARNING):
+        Settings(_env_file=None)
+
+    [warning] = _ignored_sign_in_warnings(caplog)
+    for name, value in BROWSER_SIGN_IN_VALUES.items():
+        assert name in warning
+        assert value not in caplog.text
+
+
+def test_env_mode_does_not_warn_about_the_variables_it_uses(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "false")
+    monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
+    for name, value in BROWSER_SIGN_IN_VALUES.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.WARNING):
+        Settings(_env_file=None)
+
+    assert _ignored_sign_in_warnings(caplog) == []
+
+
+def test_stored_mode_does_not_warn_about_settings_that_still_apply(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "true")
+    monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
+    for name in BROWSER_SIGN_IN_VALUES:
+        monkeypatch.delenv(name, raising=False)
+    for name, value in {
+        "PUBLIC_ORIGIN": "https://eneo.example.org",
+        "OIDC_TENANT_ID": "tenant-123",
+        "OIDC_RESOURCE_SERVER_ENABLED": "true",
+        "OIDC_ACCEPTED_ISSUER": "https://idp.example.org",
+        "OIDC_ACCEPTED_AUDIENCE": "eneo-api",
+        "OIDC_STATE_TTL_SECONDS": "600",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.WARNING):
+        Settings(_env_file=None)
+
+    assert _ignored_sign_in_warnings(caplog) == []
+
+
+def test_allowed_domains_are_called_ignored_with_access_tokens_too(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+):
+    """Access tokens read the stored provider's domains, as browser sign-in does."""
+    _set_minimal_settings_env(monkeypatch)
+    monkeypatch.setenv("FEDERATION_ENABLED", "true")
+    monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
+    monkeypatch.setenv("OIDC_RESOURCE_SERVER_ENABLED", "true")
+    for name, value in BROWSER_SIGN_IN_VALUES.items():
+        monkeypatch.setenv(name, value)
+
+    with caplog.at_level(logging.WARNING):
+        Settings(_env_file=None)
+
+    [warning] = _ignored_sign_in_warnings(caplog)
+    assert "OIDC_CLIENT_SECRET" in warning
+    assert "OIDC_ALLOWED_DOMAINS" in warning
+
+
 @pytest.fixture(autouse=True)
 def cleanup_settings():
     """Automatically reset settings after each test."""

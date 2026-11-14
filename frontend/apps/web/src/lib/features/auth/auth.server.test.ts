@@ -85,6 +85,8 @@ describe("resolveLoginStateDestination", () => {
 describe("generic OIDC browser login attempt", () => {
   const ATTEMPT_A = "11111111-1111-4111-8111-111111111111";
   const ATTEMPT_B = "22222222-2222-4222-8222-222222222222";
+  const VERIFIER = "binding-verifier".padEnd(43, "0");
+  const LATER = Math.floor(Date.now() / 1000) + 600;
 
   function callbackState(attemptId: string, destination: string | null): string {
     const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
@@ -117,7 +119,8 @@ describe("generic OIDC browser login attempt", () => {
       cookies as never,
       destination,
       ATTEMPT_A,
-      Math.floor(Date.now() / 1000) + 600
+      Math.floor(Date.now() / 1000) + 600,
+      VERIFIER
     );
 
     expect(cookies.set).toHaveBeenCalledWith(OidcLoginAttemptCookie, expect.any(String), {
@@ -130,11 +133,12 @@ describe("generic OIDC browser login attempt", () => {
     expect(JSON.parse(cookies.get(OidcLoginAttemptCookie) ?? "{}")).toEqual({
       attemptId: ATTEMPT_A,
       destination,
-      expiresAt: expect.any(Number)
+      expiresAt: expect.any(Number),
+      bindingVerifier: VERIFIER
     });
     await expect(
       consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
-    ).resolves.toEqual({ status: "matched", destination });
+    ).resolves.toEqual({ status: "matched", destination, bindingVerifier: VERIFIER });
     expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
     await expect(
       consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
@@ -148,7 +152,8 @@ describe("generic OIDC browser login attempt", () => {
       cookies as never,
       destination,
       ATTEMPT_A,
-      Math.floor(Date.now() / 1000) + 600
+      Math.floor(Date.now() / 1000) + 600,
+      VERIFIER
     );
 
     await expect(
@@ -158,7 +163,7 @@ describe("generic OIDC browser login attempt", () => {
 
     await expect(
       consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, destination))
-    ).resolves.toEqual({ status: "matched", destination });
+    ).resolves.toEqual({ status: "matched", destination, bindingVerifier: VERIFIER });
     expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
   });
 
@@ -170,32 +175,43 @@ describe("generic OIDC browser login attempt", () => {
         cookies as never,
         destination,
         ATTEMPT_A,
-        Math.floor(Date.now() / 1000) + 600
+        Math.floor(Date.now() / 1000) + 600,
+        VERIFIER
       );
 
       await expect(
         consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
-      ).resolves.toEqual({ status: "matched", destination: null });
+      ).resolves.toEqual({ status: "matched", destination: null, bindingVerifier: VERIFIER });
     }
   );
 
-  test.each(["null", "not-json", JSON.stringify({ attemptId: ATTEMPT_A, destination: "/" })])(
-    "rejects malformed or pre-upgrade attempts without authentication fallback",
-    async (value) => {
-      const cookies = cookieJar(value);
-      await expect(
-        consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
-      ).resolves.toEqual({ status: "invalid" });
-      expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
-    }
-  );
+  test.each([
+    "null",
+    "not-json",
+    JSON.stringify({ attemptId: ATTEMPT_A, destination: "/" }),
+    // Started before sign-ins were bound: the backend would refuse it anyway.
+    JSON.stringify({ attemptId: ATTEMPT_A, destination: null, expiresAt: LATER }),
+    JSON.stringify({
+      attemptId: ATTEMPT_A,
+      destination: null,
+      expiresAt: LATER,
+      bindingVerifier: "too-short"
+    })
+  ])("rejects malformed or pre-upgrade attempts without authentication fallback", async (value) => {
+    const cookies = cookieJar(value);
+    await expect(
+      consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
+    ).resolves.toEqual({ status: "invalid" });
+    expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
+  });
 
   test("rejects an unsafe destination in a manipulated cookie", async () => {
     const externalCookies = cookieJar(
       JSON.stringify({
         attemptId: ATTEMPT_A,
         destination: "//evil.example/module-login",
-        expiresAt: Math.floor(Date.now() / 1000) + 600
+        expiresAt: Math.floor(Date.now() / 1000) + 600,
+        bindingVerifier: VERIFIER
       })
     );
 
@@ -210,13 +226,23 @@ describe("generic OIDC browser login attempt", () => {
       JSON.stringify({
         attemptId: ATTEMPT_A,
         destination: null,
-        expiresAt: Math.floor(Date.now() / 1000) - 1
+        expiresAt: Math.floor(Date.now() / 1000) - 1,
+        bindingVerifier: VERIFIER
       })
     );
     await expect(
       consumeOidcLoginAttempt(cookies as never, callbackState(ATTEMPT_A, null))
     ).resolves.toEqual({ status: "expired" });
     expect(cookies.delete).toHaveBeenCalledWith(OidcLoginAttemptCookie, { path: "/" });
+  });
+
+  test("refuses to start an attempt with a malformed binding verifier", () => {
+    const cookies = cookieJar();
+
+    expect(() =>
+      startOidcLoginAttempt(cookies as never, null, ATTEMPT_A, LATER, "too-short")
+    ).toThrow();
+    expect(cookies.set).not.toHaveBeenCalled();
   });
 });
 
@@ -246,7 +272,7 @@ describe("clearFrontendCookies", () => {
     const jar = cookieJar({
       auth: "id-token",
       acc: "access-token",
-      mobilityguard: "verifier",
+      other: "value",
       PARAGLIDE_LOCALE: "sv"
     });
 
@@ -256,7 +282,7 @@ describe("clearFrontendCookies", () => {
     expect(jar.deleted).toEqual([
       { name: "auth", path: "/" },
       { name: "acc", path: "/" },
-      { name: "mobilityguard", path: "/" },
+      { name: "other", path: "/" },
       { name: "PARAGLIDE_LOCALE", path: "/" }
     ]);
   });

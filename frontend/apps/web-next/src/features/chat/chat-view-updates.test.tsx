@@ -38,6 +38,12 @@ vi.mock("@/lib/api/browser", () => ({
 }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
+// The chat view's side panel prefetches the document editor (TipTap, ProseMirror)
+// once it mounts; jsdom has no requestIdleCallback, so that starts at once and the
+// editor's evaluation lands in the first test. Load it while the file is collected,
+// as the prefetch would, so each test times the conversation only.
+await import("./side-panel/file-panel");
+
 afterEach(cleanup);
 
 const partner: ChatPartner = { type: "assistant", id: "assistant-1", name: "Assistenten" };

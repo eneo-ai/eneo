@@ -5,6 +5,20 @@ const HEARTBEAT = {
   TIMEOUT: 20 * 1000
 };
 
+/** The server closes an open socket with this code when its session ended. */
+const SESSION_ENDED = 1008;
+
+/**
+ * Waits before opening a socket again after one closed: doubling from the first
+ * to the last, back to the first once a socket opens. A refused handshake looks
+ * like a dropped network (1006), so the client never gives up; it only asks
+ * less often.
+ */
+const RETRY = {
+  FIRST: 2 * 1000,
+  LAST: 5 * 60 * 1000
+};
+
 /** @typedef {import("./types").ServerMessages} ServerMessages*/
 /** @typedef {import("./types").ClientSubscribableMessageType} ClientSubscribableMessageType*/
 
@@ -37,11 +51,21 @@ export function createEneoSocket(args, options) {
     // In local dev we do not always have SSL
     url.protocol = url.protocol === "http:" ? "ws:" : "wss:";
     url.pathname = "api/v1/ws";
+    // Each attempt starts from nothing: no heartbeat or retry of an earlier one.
+    stopTimers();
     socket = new WebSocket(url.toString(), ["eneo", `auth_${token}`]);
     socket.onmessage = dispatchToHandlers;
-    // Don't set onclose, this will be handled by our heartbeat
-    // socket.onclose = reconnect;
+    socket.onclose = (event) => {
+      stopTimers();
+      socket = null;
+      // A session that ended (signed out, expired) is final: the same token
+      // cannot open another socket.
+      if (event.code === SESSION_ENDED) return;
+      retryTimeout = setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, RETRY.LAST);
+    };
     socket.onopen = () => {
+      retryDelay = RETRY.FIRST;
       startHeartbeat();
       initSubscriptions();
     };
@@ -62,15 +86,18 @@ export function createEneoSocket(args, options) {
   }
 
   function disconnect() {
+    // Only an existing socket can be told; the local state goes either way,
+    // also after a 1008 left none, so a later connect starts clean.
     if (socket) {
       currentSubscriptions.forEach((count, type) => {
         sendMessage({ type: "unsubscribe", data: { channel: type } });
       });
-      currentSubscriptions.clear();
-      handlers.clear();
-      clearInterval(heartbeatInterval);
-      safelyCloseSocket();
     }
+    currentSubscriptions.clear();
+    handlers.clear();
+    stopTimers();
+    retryDelay = RETRY.FIRST;
+    safelyCloseSocket();
   }
 
   /** @param {MessageEvent} event */
@@ -78,6 +105,8 @@ export function createEneoSocket(args, options) {
     try {
       /** @type {import("./types").WebsocketMessage} */
       const { type, data } = JSON.parse(event.data);
+      // A pong ends the wait for it; handlers registered for it still hear it.
+      if (type === "pong") clearTimeout(heartbeatReconnectTimeout);
       handlers.get(type)?.forEach((handler) => handler(data));
     } catch (error) {
       console.error("Failed to parse message: ", error);
@@ -141,22 +170,27 @@ export function createEneoSocket(args, options) {
   let heartbeatReconnectTimeout = undefined;
   /** @type { ReturnType<typeof setInterval> | undefined } Heartbeat ping interval  */
   let heartbeatInterval = undefined;
-  function startHeartbeat() {
-    // Reset any running intervals on start
+  /** @type { ReturnType<typeof setTimeout> | undefined } The next attempt after a close */
+  let retryTimeout = undefined;
+  let retryDelay = RETRY.FIRST;
+
+  function stopTimers() {
+    clearTimeout(retryTimeout);
     clearTimeout(heartbeatReconnectTimeout);
     clearInterval(heartbeatInterval);
+  }
+
+  function startHeartbeat() {
     heartbeatInterval = setInterval(() => {
-      sendMessage({ type: "ping" });
+      sendMessage({ type: "ping" }).catch(() => {});
+      clearTimeout(heartbeatReconnectTimeout);
       heartbeatReconnectTimeout = setTimeout(() => {
-        // Try to reconnect, should also try to heal existing subscriptions
+        // No pong: the connection is gone without a close. Open a new one now,
+        // which also heals the subscriptions.
         safelyCloseSocket();
         connect();
       }, HEARTBEAT.TIMEOUT);
     }, HEARTBEAT.INTERVAL);
-
-    registerHandler("pong", () => {
-      clearTimeout(heartbeatReconnectTimeout);
-    });
   }
 
   /**

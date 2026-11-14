@@ -47,6 +47,7 @@ import { initObjectStoreConnection } from "./endpoints/object-store-connection.j
 import { initModules } from "./endpoints/modules.js";
 import { initTranscriptionServices } from "./endpoints/transcription-services.js";
 import { initWidgets } from "./endpoints/widgets.js";
+import { initFederation } from "./endpoints/federation.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -110,6 +111,7 @@ export function createEneo(args) {
     modules: initModules(client),
     transcriptionServices: initTranscriptionServices(client),
     widgets: initWidgets(client),
+    federation: initFederation(client),
     client
   };
 }

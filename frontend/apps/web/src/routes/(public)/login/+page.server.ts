@@ -2,13 +2,14 @@ import { env } from "$env/dynamic/private";
 import { getBackendUrl } from "$lib/core/environment.server";
 import {
   clearOidcLoginAttempt,
+  createCodePair,
   encodeState,
   parseJwt,
   startOidcLoginAttempt,
   resolveSafeLoginDestination
 } from "$lib/features/auth/auth.server";
 import { loginWithEneo, type EneoLoginFailureReason } from "$lib/features/auth/eneo.server";
-import { getMobilityguardLink } from "$lib/features/auth/mobilityguard.server";
+import { backendErrorCode } from "$lib/features/auth/LoginError";
 import { getZitadelLink } from "$lib/features/auth/zitadel.server";
 import { redirect, fail, type Actions } from "@sveltejs/kit";
 import type { PageServerLoad } from "./$types";
@@ -70,15 +71,23 @@ export const actions: Actions = {
 
     const attemptId = crypto.randomUUID();
     const frontendState = encodeState({ loginMethod: "oidc", next: destination, attemptId });
+    // The backend keeps the hash; the secret stays in this browser's HttpOnly cookie.
+    const binding = await createCodePair();
     let authorizationUrl: string;
+    let unavailable = false;
     try {
       const backendUrl = getBackendUrl();
       if (!backendUrl) throw new Error("Missing backend URL");
       const initiateUrl = new URL(`${backendUrl.replace(/\/$/, "")}/api/v1/auth/initiate`);
       initiateUrl.searchParams.set("state", frontendState);
+      initiateUrl.searchParams.set("binding_challenge", binding.codeChallenge);
       if (tenant !== null) initiateUrl.searchParams.set("tenant", tenant);
       const response = await event.fetch(initiateUrl);
-      if (!response.ok) throw new Error(`OIDC initiate returned HTTP ${response.status}`);
+      if (!response.ok) {
+        const body: unknown = await response.json().catch(() => null);
+        unavailable = backendErrorCode(body) === "oidc_login_unavailable";
+        throw new Error(`OIDC initiate returned HTTP ${response.status}`);
+      }
 
       const responseData: unknown = await response.json();
       if (
@@ -111,12 +120,18 @@ export const actions: Actions = {
       authorizationUrl = responseData.authorization_url;
       // Start the binding when authentication begins. Failed initiation and
       // GET requests for an error page preserve another tab's attempt.
-      startOidcLoginAttempt(event.cookies, destination, attemptId, statePayload.exp);
+      startOidcLoginAttempt(
+        event.cookies,
+        destination,
+        attemptId,
+        statePayload.exp,
+        binding.codeVerifier
+      );
     } catch (error) {
       console.error("[OIDC] Failed to initiate authentication", {
         reason: error instanceof Error ? error.message : "Unknown error"
       });
-      return fail(503, { oidcFailed: true });
+      return fail(503, { oidcFailed: true, unavailable });
     }
 
     redirect(303, authorizationUrl);
@@ -125,7 +140,6 @@ export const actions: Actions = {
 
 export const load = (async (event) => {
   let zitadelLink: string | undefined = undefined;
-  let mobilityguardLink: string | undefined = undefined;
   const requestedDestination = event.url.searchParams.get("next");
 
   // If user is logged in already: forward to base url, as login doesn't make sense
@@ -137,19 +151,23 @@ export const load = (async (event) => {
     zitadelLink = await getZitadelLink(event);
   }
 
-  if (env.MOBILITY_GUARD_AUTH) {
-    mobilityguardLink = await getMobilityguardLink(event);
-  }
-
   const { federationStatus } = event.locals.featureFlags;
   const hasSingleTenantOidc =
     !federationStatus.has_multi_tenant_federation &&
     (federationStatus.has_single_tenant_federation || federationStatus.has_global_oidc_config);
+  // The removed MobilityGuard link still being set means people are meant to
+  // sign in through their organisation, which this page cannot offer now
+  // unless another single sign-on is available.
+  const organisationSignInUnavailable =
+    Boolean(env.MOBILITY_GUARD_AUTH?.trim()) &&
+    !zitadelLink &&
+    !hasSingleTenantOidc &&
+    !federationStatus.has_multi_tenant_federation;
 
   return {
-    mobilityguardLink,
     zitadelLink,
     hasSingleTenantOidc,
+    organisationSignInUnavailable,
     featureFlags: event.locals.featureFlags
   };
 }) satisfies PageServerLoad;

@@ -30,6 +30,7 @@ import soundfile as sf
 from soundfile import SoundFile
 
 from eneo.files.text import MimeTypesBase
+from eneo.main import process_scratch
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.main.logging import get_logger
@@ -305,7 +306,9 @@ async def bounded_measurement(work: Callable[[], Awaitable[_T]]) -> _T:
 async def to_wav(
     filepath: str, *, limits: AudioDecodeLimits | None = None
 ) -> AsyncGenerator["AudioFile", None]:
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
+    tmp_file = tempfile.NamedTemporaryFile(
+        suffix=".wav", dir=process_scratch.directory()
+    )
     try:
         with joined_wav(
             tmp_file, limits=limits or AudioDecodeLimits.from_settings()
@@ -346,7 +349,9 @@ class AudioFile:
         with closing(blocks):
             pending = next(blocks, None)
             while pending is not None and not stop.is_set():
-                with tempfile.NamedTemporaryFile(suffix=".mp3") as temp_file:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".mp3", dir=process_scratch.directory()
+                ) as temp_file:
                     writer = cast(
                         AbstractContextManager[SoundFile],
                         SoundFile(

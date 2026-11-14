@@ -403,6 +403,7 @@ async def upload_file(
     """Starts a job, use the job operations to keep track of this job"""
     from eneo.audit.domain.action_types import ActionType
     from eneo.audit.domain.entity_types import EntityType
+    from eneo.audit.domain.removable_names import COLLECTION_UPLOAD_DESCRIPTION
 
     group_service = container.group_service()
     current_user = container.user()
@@ -436,7 +437,7 @@ async def upload_file(
         action=ActionType.FILE_UPLOADED,
         entity_type=EntityType.FILE,
         entity_id=id,  # Use group ID as entity
-        description=f"Uploaded file '{file.filename}' to collection/group",
+        description=COLLECTION_UPLOAD_DESCRIPTION,
         metadata={
             "actor": {
                 "id": str(current_user.id),
@@ -448,7 +449,6 @@ async def upload_file(
                 "group_name": group.name,
                 "space_id": str(group.space_id) if group.space_id else None,
                 "space_name": space.name if space else None,
-                "filename": file.filename,
                 "content_type": file.content_type,
             },
         },

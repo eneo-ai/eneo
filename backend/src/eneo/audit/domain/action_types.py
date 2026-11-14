@@ -46,6 +46,14 @@ class ActionType(str, Enum):
     PASSWORD_CHANGE_FAILED = "password_change_failed"
     SESSIONS_INVALIDATED = "sessions_invalidated"
     SESSION_EXTENDED = "session_extended"
+    # Which account a federated sign-in identity reaches (identity_bindings).
+    IDENTITY_BOUND = "identity_bound"
+    IDENTITY_CONFLICT = "identity_conflict"
+    # An org admin re-opening it: per account, or per provider pair.
+    IDENTITY_REBINDING_UPDATED = "identity_rebinding_updated"
+    IDENTITY_MIGRATION_WINDOW_UPDATED = "identity_migration_window_updated"
+    # The operator (super API key) took a token to act as a person.
+    USER_ACCESS_TOKEN_ISSUED = "user_access_token_issued"
 
     # User Actions (Priority 2)
     ASSISTANT_CREATED = "assistant_created"
@@ -237,6 +245,9 @@ class ActionType(str, Enum):
 
     # System Actions
     RETENTION_POLICY_APPLIED = "retention_policy_applied"
+    DATA_RETENTION_BATCH = "data_retention_batch"
+    DATA_RETENTION_RUN = "data_retention_run"
+    DATA_RETENTION_SKIPPED = "data_retention_skipped"
     ENCRYPTION_KEY_ROTATED = "encryption_key_rotated"
     SYSTEM_MAINTENANCE = "system_maintenance"
 
@@ -261,7 +272,16 @@ class ActionType(str, Enum):
 
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may
-# hide a change to how the organisation signs in or a session renewing itself.
+# hide a change to how the organisation signs in, a session renewing itself,
+# which account a sign-in identity reaches, or an admin re-opening that.
 ALWAYS_AUDITED_ACTIONS: frozenset[ActionType] = frozenset(
-    {ActionType.FEDERATION_UPDATED, ActionType.SESSION_EXTENDED}
+    {
+        ActionType.FEDERATION_UPDATED,
+        ActionType.SESSION_EXTENDED,
+        ActionType.IDENTITY_BOUND,
+        ActionType.IDENTITY_CONFLICT,
+        ActionType.IDENTITY_REBINDING_UPDATED,
+        ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
+        ActionType.USER_ACCESS_TOKEN_ISSUED,
+    }
 )

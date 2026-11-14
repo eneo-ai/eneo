@@ -45,6 +45,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.references import ReferencesService
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.help_assistants.domain.factory import HelperAssistantsFactory
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.help_assistants.domain.helper_run import HelperRun
@@ -312,6 +313,8 @@ class HelperRunService:
             run.session_id, self.user.tenant_id
         )
         if session is None:
+            if await self.session_repo.is_removed_copy(run.session_id):
+                raise DerivedSourceRemovedError()
             raise NotFoundException("Helper run session not found.")
 
         # PRD §6.5: helper runs use ONLY the helper assistant's tools/knowledge.

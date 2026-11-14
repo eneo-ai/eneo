@@ -1,14 +1,17 @@
 import base64
+import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
 
 import bcrypt
 import jwt
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import (
     WIDGET_MCP_AUDIENCE,
+    CredentialFacts,
     JWTCreds,
     JWTMeta,
     JWTPayload,
@@ -77,11 +80,18 @@ class AuthService:
         expires_in: float = JWT_EXPIRY_TIME_MINUTES,
         extra_claims: dict[str, object] | None = None,
         auth_method: Literal["password"] | None = None,
+        derived_from: CredentialFacts | None = None,
     ) -> str:
         """Mint an access token; ``expires_in`` is in minutes.
 
         ``auth_method`` records a local password login so the password
         lifecycle policy can gate that session without touching federated ones.
+
+        ``derived_from`` is the credential a derived token (a scoped MCP or
+        module token) is minted from. Its ``session_ref`` is signed into the
+        token as the claim of the same name, so the token stays tied to the
+        browser session it came from; with no session the claim is absent,
+        never null.
 
         ``extra_claims`` is shared by module and scoped MCP tokens:
         unknown claims ride through ``JWTPayload`` on decode and are read out
@@ -126,6 +136,8 @@ class AuthService:
                     f"extra_claims may not override reserved claims: {sorted(reserved)}"
                 )
             payload.update(extra_claims)
+        if derived_from is not None and derived_from.session_ref is not None:
+            payload["session_ref"] = str(derived_from.session_ref)
         # NOTE - previous versions of pyjwt ("<2.0") returned the token as bytes insted of a string.
         # That is no longer the case and the `.decode("utf-8")` has been removed.
         access_token = jwt.encode(payload, secret_key, algorithm=JWT_ALGORITHM)
@@ -140,6 +152,7 @@ class AuthService:
         mcp_server_id: UUID | None = None,
         table_tools: bool = False,
         expires_in: int = 15,
+        derived_from: CredentialFacts | None = None,
     ) -> str:
         """Mint a short-lived access token for a loopback MCP server.
 
@@ -162,6 +175,8 @@ class AuthService:
         cannot be chosen by the caller. ``table_tools`` records that the
         completion also attached the file-analysis tools, so the files server
         can point spreadsheets at them instead of dumping their text.
+        ``derived_from`` is the request's credential: a token minted in a
+        browser session carries that session's ``session_ref``.
         """
         visitor = getattr(user, "active_widget", None)
         if visitor is not None:
@@ -198,6 +213,7 @@ class AuthService:
             audience=INTERNAL_MCP_AUDIENCE,
             expires_in=expires_in,
             extra_claims=claims,
+            derived_from=derived_from,
         )
 
     @staticmethod
@@ -222,7 +238,7 @@ class AuthService:
         """Verified raw claims, including ones ``JWTPayload`` does not model.
 
         ``verify_exp=False`` still requires ``exp`` but accepts one that has
-        passed. Only sign-out uses it (``BrowserSessionService.end``).
+        passed. Only sign-out uses it (``BrowserSessionService.revoke``).
         """
         algs = algs or [JWT_ALGORITHM]
         try:
@@ -277,8 +293,11 @@ class AuthService:
 
         return payload, claims
 
-    def add_session_id(self, token: str, sid: str) -> str:
-        """A session token this process just issued, re-signed with ``sid``.
+    def add_session_id(
+        self, token: str, sid: str, session_ref: UUID | None = None
+    ) -> str:
+        """A session token this process just issued, re-signed with ``sid``
+        and, when given, the session's stable id as ``session_ref``.
 
         Every other claim stays, the expiry included. Only
         ``BrowserSessionService`` calls it: ``start`` after recording the
@@ -289,7 +308,10 @@ class AuthService:
         claims = self.get_verified_claims(
             token, key=key, aud=settings.jwt_audience, algs=[settings.jwt_algorithm]
         )
-        return jwt.encode({**claims, "sid": sid}, key, algorithm=settings.jwt_algorithm)
+        session: dict[str, object] = {"sid": sid}
+        if session_ref is not None:
+            session["session_ref"] = str(session_ref)
+        return jwt.encode({**claims, **session}, key, algorithm=settings.jwt_algorithm)
 
     def get_payload_from_openid_jwt(
         self,
@@ -454,10 +476,9 @@ class AuthService:
         # If at_hash NOT present → Skip validation (valid per OIDC spec)
         # This allows compatibility with both MobilityGuard (includes at_hash)
         # and Entra ID (may omit at_hash in authorization code flow)
-        expected_at_hash = payload.get("at_hash") if verify_at_hash else None
-
-        if expected_at_hash:
-            # at_hash present → MUST validate
+        if verify_at_hash and "at_hash" in payload:
+            # at_hash present → MUST validate, so an empty or null value fails
+            expected_at_hash = payload["at_hash"]
             logger.debug(
                 "at_hash present - validating",
                 extra={
@@ -467,11 +488,14 @@ class AuthService:
             )
 
             try:
-                # Get the pyjwt algorithm object
-                alg_obj = jwt.get_algorithm_by_name(header["alg"])
-
-                # Compute at_hash
-                digest = alg_obj.compute_hash_digest(access_token.encode())
+                # EdDSA names no hash; Ed25519 tokens hash with SHA-512
+                # (OpenID Connect Token Hash Algorithms 1.0).
+                if header["alg"] == "EdDSA" and isinstance(key, Ed25519PublicKey):
+                    digest = hashlib.sha512(access_token.encode()).digest()
+                else:
+                    digest = jwt.get_algorithm_by_name(
+                        header["alg"]
+                    ).compute_hash_digest(access_token.encode())
                 computed_at_hash = (
                     base64.urlsafe_b64encode(digest[: (len(digest) // 2)])
                     .rstrip(b"=")

@@ -16,7 +16,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 
 ## OIDC Protocol Flow
 
-Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`) and use server-signed state JWTs (HS256) for security.
+Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect, PKCE (`S256`) and a `nonce`. Both single-tenant and multi-tenant setups go through the same public endpoints (`/api/v1/auth/initiate` and `/api/v1/auth/callback`). Each sign-in is a one-time transaction in Redis, named by a server-signed state JWT (HS256). The provider contract is summarised in the [OIDC guide](/guides/oidc-federation#provider-contract).
 
 ### Overview
 
@@ -30,12 +30,14 @@ Eneo implements the **OAuth 2.0 Authorization Code Flow** with OpenID Connect. B
 
 <Steps>
 ### Authorization Request
-The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-tenant mode). The backend resolves the tenant's IdP configuration, computes the `redirect_uri` server-side and generates:
-- `state` - JWT signed with HS256, contains tenant context
-- `nonce` - 32 hex characters (`secrets.token_hex(16)`)
-- `correlation_id` - 16 hex characters (`secrets.token_hex(8)`) for request tracing
+The frontend calls `GET /api/v1/auth/initiate` (with `?tenant={slug}` in multi-tenant mode). The backend resolves the tenant's IdP configuration and discovery document, computes the `redirect_uri` server-side and starts a [sign-in transaction](#sign-in-transaction) holding a fresh `nonce` and PKCE `code_verifier`. The authorization URL carries:
+- `state` - JWT signed with HS256 that names the transaction
+- `nonce`
+- `code_challenge` (the verifier's SHA-256) with `code_challenge_method=S256`
 
-A copy of the state is cached in Redis under `oidc:state:{nonce}` on a best-effort basis (a cache failure is logged and the flow continues).
+A client that also sends `binding_challenge`, the S256 hash of a secret it keeps, binds the transaction to itself (see [Public OIDC Endpoints](#public-oidc-endpoints)). The Svelte login always does.
+
+A `correlation_id` (16 hex characters) traces the request. When Redis cannot store the transaction, initiation is refused with `503` (`oidc_login_unavailable`).
 
 ### User Authentication
 User authenticates with their Identity Provider.
@@ -44,12 +46,13 @@ User authenticates with their Identity Provider.
 IdP redirects to `{origin}/login/callback` with:
 - `code` - Authorization code (single-use)
 - `state` - Original state JWT for validation
+- `iss` - The provider's issuer, when it sends one ([RFC 9207](https://www.rfc-editor.org/rfc/rfc9207))
 
 ### Token Exchange
-The frontend posts `code` and `state` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, compares it with the cached state when Redis is available, validates the `redirect_uri`, then exchanges the code for tokens at the IdP's token endpoint.
+The frontend posts `code`, `state`, `iss` and, for a bound sign-in, `binding_verifier` to `POST /api/v1/auth/callback`. The backend validates the state JWT signature (HS256) and expiry, takes the transaction from Redis exactly once and only for the client that started it, checks that it belongs to the state's tenant, validates the `redirect_uri` and the `iss` parameter, then exchanges the code and the PKCE verifier for tokens at the IdP's token endpoint.
 
 ### ID Token Validation
-JWT signature verified against the IdP's JWKS (RS256). Claims validated: `aud` (audience), `exp` (expiration), `at_hash` when present.
+JWT signature verified against the IdP's JWKS with the allowed algorithms, then the claims listed under [ID Token Validation](#id-token-validation). Any failure is refused with `401` (`oidc_response_not_verified`).
 
 ### Session Creation
 After token validation, both OIDC entry points delegate tenant membership and JIT admission to `UserService.resolve_federated_user`. It checks the configured domain restriction, tenant and account state, and the additional JIT requirements below before an Eneo session JWT is issued.
@@ -70,6 +73,7 @@ Eneo-issued browser, internal MCP and module tokens share one identity contract:
 | `tenant_id` | UUID of the account's organization when the token was issued |
 | `credential_version` | Required integer matching the account's current credential version |
 | `auth_method` | `password` when the session started with the local password login; absent for federated and exchanged sessions |
+| `session_ref` | Optional stable id of the [server-side session](#server-side-sessions) the token belongs to: a lowercase UUID. A session token carries it beside `sid`; an internal MCP or module token minted in a browser session carries it alone, and a module token refresh keeps it. Without a session the claim is absent, never null |
 | `iss`, `aud`, `iat`, `exp` | Required issuer, audience, issue time and expiry |
 | `sub`, `username` | Email and optional display name; never used to select the account |
 
@@ -81,6 +85,43 @@ existing session to another account, including one with the same username.
 
 The identity contract belongs to Eneo session tokens. Identity-provider tokens
 are validated separately during OIDC login and exchanged for an Eneo session.
+
+#### Server-side sessions
+
+Every password sign-in and every OIDC sign-in through `POST /api/v1/auth/callback`,
+in the Svelte app and in the Vite app, starts one server-side session in
+PostgreSQL. The token it hands out names that session (`sid`), and it
+authenticates, as the cookie or as Bearer, only while the session exists.
+
+- **Sign-out** ends the session, so every copy of the token stops working at
+  once. When the end cannot be confirmed within 5 seconds, sign-out answers
+  503 and clears nothing: the session may already have ended, or may still
+  work, and trying again completes the sign-out. It does not end the identity
+  provider's session.
+- **Live updates** stop with the session. The job-event stream
+  (`GET /api/v1/jobs/events/`) and the `/ws` socket check their session at
+  most 30 seconds apart while they are open, and end at the token's expiry.
+  After sign-out, a password change, signing out everywhere, the account's
+  deactivation, the organisation's suspension or a required password change
+  they close at the next check; the socket closes with code 1008
+  and the client does not reconnect with that token. A check the database
+  cannot answer closes them too, but the socket closes with code 1013, and
+  the client reconnects once sign-in can be checked again.
+- **Expired sessions** admit nothing; a nightly job deletes them.
+- **No session**: provider access tokens, API keys, system tokens, and
+  internal MCP and module tokens. They work as before, and sign-out does not
+  affect them. An internal MCP or module token minted in a browser session
+  names that session (`session_ref`), but signing out does not end it.
+
+An API client that signs in with `POST /api/v1/users/login/token/` holds a
+session token as well. `POST /api/v1/users/logout/`, with that token as
+Bearer, ends its session. The route reads only the `Authorization` header,
+never a cookie.
+
+| Answer | Meaning |
+|--------|---------|
+| `204` | No session remains that this token can use: its session has ended, or it named none to end (no or an invalid token, a token without a session such as one issued before sessions, a provider token, or a token expired for longer than it was valid). A token without a session is not revoked and works until it expires. A token expired for less than that still ends its session |
+| `503` `sign_out_unavailable` | The end is not confirmed: the session may already have ended, or the token may still work. Keep the token and retry; once the session has ended, a retry answers `204` |
 
 #### Backend browser sessions
 
@@ -105,19 +146,11 @@ is present, including an expired cookie; without a cookie it still returns 204
 and clears any remaining authentication cookies.
 A document must never adopt a replacement generation to retry a refused write.
 
-Each browser sign-in also records a server-side session in PostgreSQL, which
-its token names in a `sid` claim. A token with `sid` authenticates, as the
-cookie or as Bearer, only while that session exists. Logout deletes it before
-clearing the cookie, so a copy of the cookie stops working at once; when the
-deletion cannot be confirmed within 5 seconds, logout returns 503 and keeps the
-cookie for a retry. Requests admitted before logout may finish. The job-event stream
-(`GET /api/v1/jobs/events/`) is the exception, since it stays open until the
-client leaves: for a browser session it authenticates the token again every
-30 seconds (each check waits at most 5 seconds) and ends at the token's
-expiry, so after logout, a password change, signing out everywhere or the
-account's deactivation it closes at the next check. A browser session's token cannot open a WebSocket. Logout does not
-end the identity provider's session, and a password change still ends every
-session of the user. Other Eneo tokens carry no `sid`.
+Logout (`POST /api/v1/auth/session/logout/`) ends the
+[server-side session](#server-side-sessions) before it clears the cookie, so a
+copy of the cookie stops working at once; when that cannot be confirmed, it
+returns 503 and keeps the cookie for a retry. Requests admitted before logout
+may finish. A password change still ends every session of the user.
 
 The Vite transport binds the document through `GET /api/v1/auth/session/`
 before rendering. Typed requests, raw fetches, job events and uploads share
@@ -235,25 +268,7 @@ the claim keep working during a rolling upgrade.
 
 ### Signed State Token
 
-The `state` parameter is a JWT signed with HS256:
-
-```python
-# federation_router.py
-state_payload: OIDCStatePayload = {
-    "tenant_id": str(tenant_obj.id),
-    "tenant_slug": tenant_obj.slug or tenant_obj.name,
-    "frontend_state": state or "",
-    "nonce": secrets.token_hex(16),
-    "redirect_uri": redirect_uri,
-    "correlation_id": correlation_id,
-    "exp": int(time.time()) + settings.oidc_state_ttl_seconds,
-    "iat": int(time.time()),
-    "config_version": tenant_config_version,
-}
-signed_state = pyjwt.encode(
-    cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
-)
-```
+The `state` parameter is a JWT signed with HS256 that names the sign-in transaction. It carries `tenant_id`, `tenant_slug`, `frontend_state`, `transaction_id`, `correlation_id`, `iat` and `exp`; the nonce and the PKCE verifier are never in it.
 
 **Key parameters:**
 | Parameter | Value | Source |
@@ -261,18 +276,18 @@ signed_state = pyjwt.encode(
 | Algorithm | HS256 | `federation_router.py` |
 | Signing key | `JWT_SECRET` | `config.py` |
 | TTL | 600 seconds (10 minutes) | `oidc_state_ttl_seconds` |
-| Nonce length | 32 hex chars (16 bytes) | `secrets.token_hex(16)` |
 | Correlation ID | 16 hex chars (8 bytes) | `secrets.token_hex(8)` |
 
-An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation is rejected with `400 Invalid state parameter`.
+An expired state is rejected with `400 Authorization session expired. Please try logging in again.`; a state that fails signature validation, or one issued by a version without sign-in transactions, is rejected with `400 Invalid state parameter`.
 
 ### Browser Login Binding
 
 Generic OIDC login also requires a browser-bound attempt. Starting authentication
-through the `/login` page's `oidc` POST action creates a random attempt ID and
-passes it as `frontend_state` to the backend. After successful initiation, the
-action stores the same ID in the HttpOnly `oidc-login-resume` cookie, even when no
-`next` destination was requested. Its expiry follows the backend-signed state's
+through the `/login` page's `oidc` POST action creates a random attempt ID and a
+binding verifier (32 random bytes). It passes the attempt ID as `frontend_state`
+and the verifier's S256 hash as `binding_challenge` to the backend. After
+successful initiation, the action stores both in the HttpOnly `oidc-login-resume`
+cookie, even when no `next` destination was requested. Its expiry follows the backend-signed state's
 `exp`: the default is 10 minutes from initiation, rather than from opening the
 login page. The cookie uses `Path=/`, `SameSite=Lax`, and `Secure` outside
 development. Single-tenant automatic login, tenant selection, and retries use
@@ -287,6 +302,12 @@ attempt is consumed, so a later callback without that cookie cannot exchange
 another code. The backend still verifies the state signature; reading its
 frontend payload for browser correlation does not replace that verification.
 
+The attempt ID travels in the state, which anyone who sees the callback URL can
+read, so it only tells tabs apart. The verifier stays in the cookie and the Svelte
+server: the callback sends it as `binding_verifier`, and the backend redeems the
+code only with it. A leaked code and state therefore cannot be finished in another
+browser or by calling the API directly.
+
 The optional local `next` destination is separate from the required binding.
 Unsafe or oversized destinations are omitted from the cookie without allowing
 an unbound login. Module handoff destinations retain their original encoding.
@@ -299,70 +320,42 @@ binding. Viewing the login page and a failed initiation do not replace an attemp
 starting authentication again does. After deploying this change, attempts started
 with an older cookie format must restart login.
 
-The legacy Zitadel and MobilityGuard flows continue to use their existing local
-PKCE verifier cookies.
+The legacy Zitadel flow continues to use its existing local PKCE verifier
+cookie and sends no nonce. It is deprecated and is removed in the next release;
+see [Migrate from the Zitadel settings](/guides/oidc-federation#migrate-from-the-zitadel-settings).
 
-### Redis State Cache
+### Sign-in Transaction
 
-```python
-# federation_router.py
-state_cache_payload: OIDCStateCache = {
-    "tenant_id": str(tenant_obj.id),
-    "tenant_slug": tenant_obj.slug or tenant_obj.name,
-    "redirect_uri": redirect_uri,
-    "config_version": tenant_config_version,
-    "iat": state_payload["iat"],
-}
-state_cache_key = f"oidc:state:{state_payload['nonce']}"
+`authentication/oidc/transaction.py` stores each sign-in in Redis under `oidc:transaction:{id}` for `oidc_state_ttl_seconds`. It holds the `nonce`, the PKCE `code_verifier`, the `redirect_uri`, the tenant and its config version, the provider's issuer and whether its discovery announced the `iss` parameter, the time the sign-in started, the channel that started it and, for a bound sign-in, the hash of the client's binding secret. The browser and the provider never see the verifier. The callback checks the `iss` parameter and the ID token's `iss` against the stored issuer, so a config or discovery change during a sign-in does not change what it accepts. If the provider's issuer has changed since, the callback refuses before the token exchange.
 
-await redis_client.setex(
-    state_cache_key,
-    settings.oidc_state_ttl_seconds,
-    json.dumps(state_cache_payload, separators=(",", ":")),
-)
-```
+There are two channels. `POST /api/v1/auth/callback` answers with a bearer token. The Vite web app's server-side sign-in (`GET /api/v1/auth/browser/initiate`) answers with an HttpOnly session cookie: it always binds the transaction to its transaction cookie, and only its own callback redeems it.
 
-The cache is **best-effort**:
+The callback first reads the transaction and checks the channel and the binding secret, comparing hashes in constant time. Only then does it take the transaction with `GETDEL`, so exactly one callback can use it. A channel or binding refusal removes nothing, so whoever holds a leaked code and state cannot use up a bound sign-in either:
 
 | Situation | Behaviour |
 |-----------|-----------|
-| Redis reachable, key present | Cached state is compared with the signed state (tamper detection) and used for the grace-period check |
-| Redis reachable, key missing (expired or already consumed) | `400 Authorization session is invalid or has expired. Please restart the sign-in flow.` |
-| Redis unavailable | Warning logged (`initiate.state_cache_failed` / `callback.state_cache_error`), the flow continues on the signed state alone |
+| Transaction present | Taken and removed; its tenant must match the state's, otherwise `400 Authorization state mismatch detected. Please restart the sign-in flow.` |
+| Started on the other channel; bound, but `binding_verifier` is missing or wrong; or unbound, but a `binding_verifier` was sent | `400` `oidc_transaction_invalid`. The transaction stays, so the client that started the sign-in can still finish it |
+| Transaction missing or unreadable (expired, already used, Redis restarted, or stored by a version without the sign-in binding), or the provider's issuer changed since the sign-in started | `400` `oidc_transaction_invalid`: "Authorization session is invalid or has expired. Please restart the sign-in flow." |
+| Redis unavailable, or no answer within 2 seconds | `503` `oidc_login_unavailable` at initiation or callback. The callback is refused and nothing writes the transaction back, so the sign-in must be started again |
 
-The key is deleted when the callback finishes, whether it succeeded or failed, so a state cannot be replayed while Redis is available.
+A state from a version without sign-in transactions is refused earlier with `400 Invalid state parameter`. None of these refusals writes a session or a user row.
 
 ### Redirect URI Grace Period
 
 When tenant federation configuration changes (e.g., updating `canonical_public_origin`), users mid-authentication could encounter redirect URI mismatches. The grace period mechanism prevents failed logins during configuration updates.
 
-**How it works:**
+**How it works:** `_require_registered_redirect_uri` in `federation_router.py` checks the stored `redirect_uri`, and `_changed_during_sign_in` decides whether the grace period applies. The grace period is the smaller of `oidc_redirect_grace_period_seconds` and `oidc_state_ttl_seconds`.
 
-```python
-# federation_router.py
-grace_period = min(
-    settings.oidc_redirect_grace_period_seconds,
-    settings.oidc_state_ttl_seconds,
-)
+The `redirect_uri` stored in the transaction is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
 
-if redirect_mismatch:
-    if not settings.strict_oidc_redirect_validation:
-        allow_redirect_mismatch = True
-    else:
-        # grace-period checks, see table below
-        ...
-```
-
-The `redirect_uri` carried in the state is first checked for well-formedness and then compared with the tenant's currently configured redirect URIs (canonical plus `additional_redirect_uris`). On a mismatch:
-
-- **`strict_oidc_redirect_validation = false`**: any well-formed `redirect_uri` from the state is accepted.
+- **`strict_oidc_redirect_validation = false`**: any well-formed `redirect_uri` from the transaction is accepted.
 - **`strict_oidc_redirect_validation = true`** (default): the old `redirect_uri` is accepted only if **all** of the following hold:
 
 | Condition | Check |
 |-----------|-------|
 | Config version changed | `current_config_version != state_config_version` |
 | Grace period configured | `grace_period > 0` |
-| Cached state available and consistent | `cached_state.redirect_uri == redirect_uri` (requires Redis) |
 | State issued within grace period | `seconds_since_issue <= grace_period` |
 | Config updated within grace period | `seconds_since_update <= grace_period` |
 | Config changed after state issued | `tenant_updated_at > state_config_dt` |
@@ -375,20 +368,7 @@ Otherwise the callback fails with `400 Redirect URI mismatch - authentication fl
 
 ### Token Auth Method Selection
 
-The backend automatically selects the token endpoint authentication method from IdP discovery:
-
-```python
-# federation_router.py
-def _select_auth_method(methods: list[str] | None) -> str | None:
-    if not methods:
-        return None
-    normalized = [str(m).lower() for m in methods if m]
-    if "client_secret_post" in normalized:
-        return "client_secret_post"
-    if "client_secret_basic" in normalized:
-        return "client_secret_basic"
-    return normalized[0]
-```
+At sign-in, `_token_auth_method` in `authentication/oidc/profile.py` selects the token endpoint authentication method. When a federation config is saved with a discovery document, the method this function selects is the one stored, so a saved config names `client_secret_post` or `client_secret_basic`.
 
 **Selection priority:**
 
@@ -419,34 +399,6 @@ Authentication is blocked for non-active tenants at both initiate and callback s
 <Callout type="warning">
   If a tenant becomes suspended during a user's authentication flow, the callback will fail even if initiate succeeded.
 </Callout>
-
-### State Tamper Detection
-
-When the cached state is available, the callback validates that the tenant context in the signed state matches the cached state to detect tampering:
-
-```python
-# federation_router.py
-expected_tenant_id = cached_state["tenant_id"]
-if expected_tenant_id and expected_tenant_id != str(tenant_id):
-    ...
-    raise HTTPException(
-        status_code=status.HTTP_400_BAD_REQUEST,
-        detail=(
-            "Authorization state mismatch detected. "
-            "Please restart the sign-in flow."
-        ),
-        headers={"X-Correlation-ID": correlation_id},
-    )
-```
-
-**Validation checks:**
-
-| Field | Comparison | Purpose |
-|-------|------------|---------|
-| `tenant_id` | Exact match | Prevents tenant ID substitution |
-| `tenant_slug` | Case-insensitive | Prevents tenant slug substitution |
-
-Both checks return `400` with the same detail and are logged as `callback.state_tampered` debug events with `reason` set to `tenant_id_mismatch` or `tenant_slug_mismatch`. The checks only run when Redis returned a cached state; the signed JWT itself is always verified.
 
 ---
 
@@ -486,11 +438,15 @@ Federation config is stored in the `federation_config` JSONB column of the `tena
 | `canonical_public_origin` | request (optional) | Tenant's access URL, falls back to `PUBLIC_ORIGIN` |
 | `redirect_path` | request (optional) | Defaults to `/login/callback` |
 | `additional_redirect_uris` | request (optional) | Extra fully-qualified redirect URIs accepted at callback |
+| `signing_algorithms` | request (optional) | ID token algorithms to accept; default from discovery, else `RS256` |
+| `email_verified_claims` | request (optional) | Claims that say the email is verified, in order; default `["email_verified", "xms_edov"]` |
 | `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `jwks_uri` | discovery | Resolved at PUT/PATCH time |
 | `token_endpoint_auth_method`, `token_endpoint_auth_methods_supported` | discovery | See [Token Auth Method Selection](#token-auth-method-selection) |
 | `scopes` | default | `["openid", "email", "profile"]` (not configurable via the API) |
-| `claims_mapping` | default | `{"email": "email", "username": "sub", "name": "name"}`; only `email` is read at login |
+| `claims_mapping` | default | `{"email": "email", "subject": "sub", "username": "sub", "name": "name"}`; only `subject` is configurable, as `subject_claim` on `PUT`, `PATCH` and the administrators' `PATCH /api/v1/admin/federation`; `email` and `subject` are read at login |
 | `encrypted_at` | server | Timestamp of the last secret encryption |
+
+A `PATCH` that sets `canonical_public_origin`, `redirect_path`, `additional_redirect_uris`, `signing_algorithms` or `email_verified_claims` to `null` removes the key, which restores its default. A `GET` returns `null` for a key that is not stored.
 
 ### Secret Encryption
 
@@ -518,41 +474,37 @@ uv run python -m eneo.cli.generate_encryption_key
 
 ### Claims Validated
 
-`auth_service.py` owns token validation; `FederatedIdentity` owns the validated email identity:
+`authentication/oidc/verification.py` owns the response check; `FederatedIdentity` owns the validated email identity. Every failure is refused with `401` (`oidc_response_not_verified`) and logged as `oidc_response_refused` with a reason, never with the token:
 
 | Claim | Validated? | Details |
 |-------|------------|---------|
-| `aud` | **Yes** | Must match `client_id` |
-| `exp` | **Yes** | Automatic PyJWT validation |
-| `iss` | **No** | Not checked (no `issuer` is passed to PyJWT); trust comes from the signature against the configured `jwks_uri` |
-| `iat` | **Yes** | A token issued more than the clock leeway in the future is rejected as not yet valid (`ImmatureSignatureError`); the drift is logged |
-| `nonce` | **No** | Not validated in ID token |
+| `alg` | **Yes** | One of the provider's [allowed algorithms](/guides/oidc-federation#provider-contract); `none` and symmetric algorithms never |
+| `iss` | **Yes** | Required; must equal the provider's issuer (the stored `issuer`, else discovery's) |
+| `aud` | **Yes** | Required; must contain `client_id` |
+| `azp` | Conditional | When present, must equal `client_id`; required when `aud` names several clients |
+| `exp` | **Yes** | Required; automatic PyJWT validation |
+| `iat` | **Yes** | Required; a token issued more than the clock leeway in the future is rejected as not yet valid |
+| `sub` | **Yes** | Required; a configured subject claim (`claims_mapping.subject`) is required as well |
+| `nonce` | **Yes** | Must equal the transaction's nonce |
+| `auth_time` | Conditional | When present, a number not in the future |
+| `acr`, `amr` | Conditional | When present, text and a list of text |
 | `at_hash` | Conditional | If present, must match access token hash |
-| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup; omission is allowed for existing active members, while JIT requires `true` |
+| `email_verified` | Conditional | For the standard `email`, explicit `false` rejects login before account lookup when this claim decides; omission is allowed for existing active members, while JIT requires `true` |
 | `xms_edov` | Conditional | Entra ID's "email domain owner verified" claim; a positive value verifies the standard `email` for JIT when `email_verified` is absent |
+
+The verification claims and their order come from the provider's `email_verified_claims` (default `["email_verified", "xms_edov"]`); the first one present decides. A claim left out of that list decides nothing, `email_verified` included.
 
 **Clock skew tolerance:** 120 seconds (2 minutes) - configurable via `oidc_clock_leeway_seconds`
 
 ### User Claims Extracted
 
-Only the email claim is used. The claim name comes from `claims_mapping.email` (default `email`); the ID token's `sub` is logged for diagnostics but not persisted:
-
-```python
-# federation_router.py
-claims_mapping: OIDCClaimsMapping = federation_config.get(
-    "claims_mapping"
-) or {"email": "email"}
-email_claim = claims_mapping.get("email", "email")
-...
-identity = FederatedIdentity.from_claims(payload, email_claim=email_claim)
-email = identity.email
-```
+Two claims are used: the email claim (`claims_mapping.email`, default `email`) and the subject claim (`claims_mapping.subject`, default `sub`). The issuer, the audience, the subject claim's name and its value select the account the identity is bound to; see [Account Binding](/guides/oidc-federation#account-binding).
 
 A missing claim is rejected with `401 Email claim not found in ID token`; a malformed address with `401 Email claim from identity provider is invalid. Contact your administrator.`
 
-An explicit boolean `email_verified: false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`; global MobilityGuard login also rejects the token. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
+When `email_verified` is the claim that decides, an explicit boolean `false` for the standard `email` claim is rejected before account lookup or JIT provisioning. The federation callback returns `401 Email is not verified by the identity provider`. A missing flag remains accepted for existing active members when enterprise IdPs issue administrator-controlled directory addresses without this claim. JIT creation still requires verified email, as described below.
 
-Eneo still links accounts by email, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory. This check does not introduce an issuer/subject account binding.
+The email binds an account to an identity on its first sign-in, so the configured IdP must control who can claim that address. If `claims_mapping.email` uses a different claim, such as `upn`, the standard `email_verified` flag does not describe that claim and is not applied to it. Administrators must choose a claim controlled by their organization's directory.
 
 ### Domain Validation
 
@@ -566,11 +518,11 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 
 ### JIT Provisioning
 
-`UserService.resolve_federated_user` is the single admission owner for the federation callback and the global OIDC/MobilityGuard login endpoint. It reuses the active account in the configured tenant, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
+`UserService.resolve_federated_user` is the single admission owner for every OIDC sign-in, with per-tenant federation or the global `OIDC_*` settings. It signs in to the account the identity is bound to, binds an active account in the configured tenant found by email when it has no binding yet, rejects inactive accounts and cross-tenant matches, and checks for removed rows before considering account creation. The removed-account lookup is tenant-scoped and tests for existence because several historical rows can share an email.
 
 | Account state | Result |
 |---|---|
-| Existing active member of the tenant | Sign in, subject to any configured domain restriction. No new email-verification requirement is applied. |
+| Existing active member of the tenant | Sign in, subject to any configured domain restriction and to [account binding](/guides/oidc-federation#account-binding) (`403` `identity_conflict` otherwise). No new email-verification requirement is applied. |
 | Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
 | No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
@@ -579,26 +531,13 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 
 Provisioning is a per-tenant flag set through the sysadmin API (`POST /api/v1/sysadmin/tenants/{id}/`). Keep it `false` when SCIM manages membership. A SCIM token does not implicitly change this setting. SCIM or an administrator can restore an account; login cannot.
 
-New accounts use `state=ACTIVE`, the email local part as username (falling back to the full email, then no username, on collisions), and the tenant's default role. Without a default role they have no roles and a warning is logged. Both paths write `USER_CREATED` with actor `SYSTEM` and `provisioning_method: jit_federation`; audit-log failure does not prevent account creation.
+New accounts use `state=ACTIVE`, the email local part as username (falling back to the full email, then no username, on collisions), and the tenant's default role. Without a default role they have no roles and a warning is logged. Creation writes `USER_CREATED` with actor `SYSTEM` and `provisioning_method: jit_federation`; audit-log failure does not prevent account creation.
 
 ---
 
 ## JWKS Handling
 
-The signing key is fetched with PyJWT's `PyJWKClient`, constructed anew for every callback:
-
-```python
-# federation_router.py
-jwk_client = JWKClient(jwks_uri)
-signing_key = jwk_client.get_signing_key_from_jwt(
-    id_token
-).key  # Extract raw key from PyJWK wrapper
-```
-
-**Caching:**
-- No JWKS caching across requests - each callback creates a fresh client and downloads the key set
-- No Redis/persistent caching for JWKS keys
-- Endpoints missing from the stored config (`authorization_endpoint`, `token_endpoint`, `jwks_uri`) are resolved by fetching the discovery document, also without caching. API-configured tenants have these stored at `PUT`/`PATCH` time; the environment-variable configuration only has `discovery_endpoint`, so discovery is fetched on every login
+The signing key is looked up by the token's `kid` among the signing keys in the provider's JWKS (`use` is `sig` or absent; a key marked `enc` is never used). The key set is cached per `jwks_uri`, shared by every issuer that uses that address, for `oidc_jwks_cache_ttl_seconds` (default one hour) and fetched again, at a limited rate, when a token names an unknown `kid`. The discovery document is cached per URL for the same time, and concurrent sign-ins share one fetch. When it cannot be fetched, sign-in fails rather than falling back to stored values, and the URL is tried again at most every 30 seconds.
 
 A JWKS fetch or key lookup failure is reported as `401 Failed to validate ID token signature`.
 
@@ -610,16 +549,17 @@ From `config.py`:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | `false`: IdP from `OIDC_*` env vars; `true`: per-tenant config via the sysadmin API |
+| `federation_enabled` (`FEDERATION_ENABLED`) | `false` | The only mode selector, read at startup. `true` (recommended for new installations): the IdP settings stored on the tenant, registered through the sysadmin API and changed by administrators under **Administration › Sign-in (SSO)**; the `OIDC_*` sign-in settings are ignored and logged by name at startup. `false`: the IdP from the `OIDC_*` env vars. There is no fallback between the modes |
 | `federation_per_tenant_enabled` (`FEDERATION_PER_TENANT_ENABLED`) | - | Deprecated alias for `FEDERATION_ENABLED`; logs a warning at startup, `FEDERATION_ENABLED` wins when both are set |
-| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when discovery endpoint and client secret are both set |
+| `oidc_discovery_endpoint`, `oidc_client_id`, `oidc_client_secret` | - | Global IdP used when `FEDERATION_ENABLED=false`; active when the discovery endpoint, client ID and client secret are all set (`has_env_oidc_client`) |
 | `oidc_allowed_domains` (`OIDC_ALLOWED_DOMAINS`) | `[]` | Global OIDC email-domain restriction; non-empty and matching domains are required for JIT |
 | `public_origin` (`PUBLIC_ORIGIN`) | - | Origin used to build `redirect_uri` when the tenant has no `canonical_public_origin`; must be `https://` (or `http://localhost`) without a path |
 | `encryption_key` (`ENCRYPTION_KEY`) | - | Fernet key; required when `FEDERATION_ENABLED=true` |
 | `eneo_super_api_key` (`ENEO_SUPER_API_KEY`) | - | Super admin key for the sysadmin API (sent as `X-API-Key`) |
-| `oidc_state_ttl_seconds` | 600 | State token TTL (10 minutes) |
+| `oidc_state_ttl_seconds` | 600 | State token and sign-in transaction TTL (10 minutes) |
 | `oidc_redirect_grace_period_seconds` | 900 | Config change grace period (15 min, capped at the state TTL) |
 | `oidc_clock_leeway_seconds` | 120 | Clock skew tolerance (2 minutes) |
+| `oidc_jwks_cache_ttl_seconds` | 3600 | How long a provider's JWKS and discovery document are cached |
 | `strict_oidc_redirect_validation` | true | Enforce exact redirect_uri match (with grace period) |
 
 ---
@@ -635,26 +575,25 @@ All paths are relative to `/api/v1/sysadmin` and return `404 Federation is not e
 | `PUT` | `/tenants/{tenant_id}/federation` | Provide a complete config (replaces the current one) |
 | `PATCH` | `/tenants/{tenant_id}/federation` | Update individual fields of an existing config |
 | `GET` | `/tenants/{tenant_id}/federation` | View config (secrets masked) |
-| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config |
+| `DELETE` | `/tenants/{tenant_id}/federation` | Remove config; turns single sign-on off for the tenant (no fallback to `OIDC_*`) |
 | `POST` | `/tenants/{tenant_id}/federation/test` | Test IdP discovery endpoint |
 
 **Authentication:** `X-API-Key` header with the super admin API key (`ENEO_SUPER_API_KEY`).
 
-`PUT` and `PATCH` (when `discovery_endpoint` changes) fetch the discovery document before saving and fail with `400` if it is unreachable or lacks `issuer`, `authorization_endpoint`, `token_endpoint` or `jwks_uri`. Every change writes a `FEDERATION_UPDATED` audit event.
+`PUT` and `PATCH` (when `discovery_endpoint` changes) fetch the discovery document before saving and build the profile from it with `build_profile` in `authentication/oidc/profile.py`, the function sign-in uses. They fail with `502` when the document cannot be read (unreachable, not HTTP 200, not JSON) and with `400`, naming the reason, when sign-in could not use the config. Other `PATCH` changes and the tenant administrator's edits apply `check_config`, the rules the config decides on its own, without contacting the provider. Every change writes a `FEDERATION_UPDATED` audit event.
 
 ### Test Endpoint Behavior
 
 `POST /tenants/{tenant_id}/federation/test` performs:
 
-- Fetches the discovery document from the stored `discovery_endpoint`
-- Validates HTTP 200 response
-- Verifies required OIDC fields are present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
+- Fetches the discovery document from the stored `discovery_endpoint`, bypassing the discovery cache
+- Builds the sign-in profile from the stored config and that document with `build_profile`: issuer and endpoints, templated issuer, signing algorithms and claims mapping
 - Returns `{"success": true, "message": "Federation config is valid and IdP is reachable", "issuer": "…"}`
 - Does NOT fetch the JWKS
 - Does NOT attempt authentication
 - Does NOT validate client credentials
 
-Failures are reported as `500` with the reason in `detail` (HTTP status from the IdP, missing fields, or connection error).
+A document that cannot be read answers `502` (`Failed to fetch discovery document: HTTP 503`, for example); a config sign-in could not use answers `400` with the reason in `detail`.
 
 ---
 
@@ -674,22 +613,20 @@ Generated with `secrets.token_hex(8)` → 16 hex characters.
 Enable debug logging via the observability API (`POST /api/v1/sysadmin/observability/oidc-debug/`). Events follow pattern `[OIDC DEBUG] {event}`:
 
 **Initiate phase:**
-- `initiate.state_cached`
-- `initiate.state_cache_failed` / `initiate.state_cache_skipped`
 - `initiate.authorization_ready`
 
 **Callback phase:**
 - `callback.state_decoded`
-- `callback.state_cache_hit` / `callback.state_cache_miss`
-- `callback.state_cache_error` / `callback.state_cache_unavailable` / `callback.state_cache_missing`
-- `callback.state_tampered` (with `reason`: `tenant_id_mismatch` or `tenant_slug_mismatch`)
-- `callback.tenant_loaded`
-- `callback.tenant_inactive`
-- `callback.email_extracted`
+- `callback.email_extracted` (the claim it was read from, not the address)
+- `callback.identity_conflict`
 - `callback.user_denied`
 - `callback.jit_provisioning`
 - `callback.success`
 - `callback.unexpected_error`
+
+The address appears only once the sign-in is admitted (`callback.jit_provisioning`, `callback.success`): no event of a refused sign-in carries it.
+
+A refused or failed sign-in is logged whether or not debug logging is on: `oidc_transaction_refused` and `oidc_response_refused` name the check that refused it, and `oidc_transaction_store_failed` means Redis is missing or failing.
 
 ---
 
@@ -715,7 +652,7 @@ Enable debug logging via the observability API (`POST /api/v1/sysadmin/observabi
     **Required permissions:** `openid`, `profile`, `email`, `User.Read`
 
     **Common issues:**
-    - Multi-tenant apps: Use `organizations` or `common` instead of specific tenant ID
+    - Use your organisation's own discovery URL, as above, never `common`, `organizations` or `consumers`: their issuer contains a placeholder, so every sign-in fails with `issuer_mismatch`. See [Upgrading](/guides/oidc-federation#upgrading)
     - Missing email: Ensure `email` scope and user has email set in Azure AD
     - JIT refused with "requires a verified email address": add `xms_edov` as an optional ID-token claim; Entra ID does not send `email_verified` for organisational accounts
   </Tabs.Tab>
@@ -755,5 +692,23 @@ These endpoints do NOT require authentication:
 |--------|------|---------|
 | `GET` | `/api/v1/auth/federation-status` | Tells the login page which mode is active (`has_single_tenant_federation`, `has_multi_tenant_federation`, `has_global_oidc_config`, `tenant_count`) |
 | `GET` | `/api/v1/auth/tenants` | List active tenants with a slug for the selector |
-| `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` query parameters) |
-| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`) and issue the Eneo session token |
+| `GET` | `/api/v1/auth/initiate` | Initiate OIDC authentication (`tenant`, `state`, optional `redirect_uri` and `binding_challenge` query parameters) |
+| `POST` | `/api/v1/auth/callback` | Handle OIDC callback (`code`, `state`, optional `iss` and `binding_verifier`) and issue the Eneo session token |
+
+`/auth/initiate` and `/auth/callback` refuse with a typed code in the error body:
+
+| Status | `code` | `eneo_error_code` | Meaning |
+|--------|--------|-------------------|---------|
+| `503` | `oidc_login_unavailable` | `9077` | Redis could not store or return the sign-in transaction |
+| `400` | `oidc_transaction_invalid` | `9078` | The sign-in transaction is missing, used, started by another client or no longer fits the provider |
+| `401` | `oidc_response_not_verified` | `9079` | The provider's response failed a check of the provider contract |
+
+Other refusals are plain `400` answers without a code: `Invalid state parameter`, `Authorization session expired. Please try logging in again.`, `Authorization state mismatch detected. Please restart the sign-in flow.` and the redirect URI mismatch.
+
+**Clients that call the API directly**, such as eneo-js, should bind each sign-in:
+
+1. Create a verifier from at least 32 random bytes, encoded as 43 to 128 characters of `A-Z`, `a-z`, `0-9`, `-`, `.`, `_` and `~` (like a PKCE verifier, [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636#section-4.1)). Keep it out of URLs and logs.
+2. Send `binding_challenge`, the unpadded base64url SHA-256 of the verifier, to `/initiate`.
+3. Send the verifier as `binding_verifier` to `/callback`.
+
+A bound sign-in is redeemed only with its verifier. An unbound one works as before and refuses a `binding_verifier`. Binding adds only the verifier: the callback's other requirements stay, including forwarding the provider's `iss` when it sends one. A malformed value is refused with `422`. `code_verifier` is still accepted and ignored.

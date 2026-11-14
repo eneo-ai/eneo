@@ -42,6 +42,7 @@ from eneo.flows.published_definition import (
     FLOW_DEFINITION_SCHEMA_VERSION,
     published_definition_checksum,
 )
+from eneo.main import process_scratch
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -1836,9 +1837,9 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
     body = response.json()
     if failure == "corrupt":
         assert body["code"] == "EXTRACTION_FAILED"
-        assert body["message"] == (
-            "PDF extraction failed for 'source.pdf': No /Root object! - Is this really a PDF?"
-        )
+        # The parser's own text can quote the file, so only a fixed message
+        # leaves the server.
+        assert body["message"] == "PDF extraction failed"
         assert "context" not in body
     elif failure == "capacity":
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
@@ -1850,6 +1851,13 @@ def test_runtime_pdf_upload_error_response(tmp_path, monkeypatch, failure):
     else:
         assert body["code"] == "flow_run_upload_pdf_exceeds_limit"
         assert body["context"] == {"limit": "pages", "measured": 2, "ceiling": 1}
-    assert list(upload_directory.iterdir()) == []
+    # Uploads are written into the process scratch directory under it; nothing
+    # is left there beside the directory's own lock marker.
+    assert process_scratch.directory().parent == upload_directory / "eneo-scratch"
+    assert [
+        path
+        for path in upload_directory.rglob("*")
+        if path.is_file() and path.name != "owner.lock"
+    ] == []
     service.runtime_upload_repo.create.assert_not_awaited()
     service.audit_service.log.assert_not_awaited()

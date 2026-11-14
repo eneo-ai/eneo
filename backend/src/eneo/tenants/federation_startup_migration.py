@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 from typing import Any
+
+from dependency_injector import providers
+from pydantic import ValidationError
 
 from eneo.database.database import sessionmanager
 from eneo.main.config import (
     Settings,
     canonicalize_legacy_redirect_path,
     get_settings,
-    validate_redirect_path,
+    has_env_oidc_client,
 )
+from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.settings.encryption_service import EncryptionService
+from eneo.tenants.tenant_federation_service import (
+    SetFederationRequest,
+    TenantFederationService,
+)
 from eneo.tenants.tenant_repo import TenantRepository
 
 logger = get_logger(__name__)
@@ -45,11 +52,13 @@ class FederationStartupMigrationService:
         self,
         tenant_repo: TenantRepository,
         encryption_service: EncryptionService,
+        federation_service: TenantFederationService,
         settings: Settings,
     ) -> None:
         super().__init__()
         self.tenant_repo = tenant_repo
         self.encryption_service = encryption_service
+        self.federation_service = federation_service
         self.settings = settings
 
     async def migrate_env_oidc_to_tenant_federation(self) -> bool:
@@ -59,7 +68,7 @@ class FederationStartupMigrationService:
             )
             return False
 
-        if not self._has_complete_env_config():
+        if not has_env_oidc_client(self.settings):
             logger.info(
                 "Skipping federation startup migration because OIDC env configuration is incomplete"
             )
@@ -90,14 +99,11 @@ class FederationStartupMigrationService:
             )
             return False
 
-        env_config = self._build_env_config()
-        merged_config = self._merge_with_existing_redirect_config(
-            tenant.federation_config,
-            env_config,
-        )
-        await self.tenant_repo.update_federation_config(
-            tenant_id=tenant.id,
-            federation_config=merged_config,
+        # The federation owner validates, encrypts, locks and audits the write.
+        await self.federation_service.store_env_settings(
+            tenant,
+            self._registration(tenant.federation_config),
+            expected=tenant.federation_config,
         )
 
         logger.info(
@@ -112,35 +118,37 @@ class FederationStartupMigrationService:
         )
         return True
 
-    def _has_complete_env_config(self) -> bool:
-        return bool(
-            self.settings.oidc_discovery_endpoint
-            and self.settings.oidc_client_id
-            and self.settings.oidc_client_secret
-        )
-
-    def _build_env_config(self) -> dict[str, Any]:
-        client_secret = self.settings.oidc_client_secret
-        if client_secret is None:
-            raise ValueError(
-                "OIDC client secret is required for federation startup migration"
-            )
-
-        encrypted_secret = self.encryption_service.encrypt(client_secret)
-        now = datetime.now(timezone.utc).isoformat()
-
-        config: dict[str, Any] = {
-            "provider": "default",
-            "discovery_endpoint": self.settings.oidc_discovery_endpoint,
-            "client_id": self.settings.oidc_client_id,
-            "client_secret": encrypted_secret,
-            "scopes": ["openid", "email", "profile"],
-            "encrypted_at": now,
+    def _registration(self, existing_config: dict[str, Any]) -> SetFederationRequest:
+        """The OIDC_* settings as the operator would register them, keeping the
+        tenant's redirect settings and the domains that decide who signs in."""
+        redirect = {
+            field: existing_config[field]
+            for field in _REDIRECT_ONLY_FIELDS
+            if field in existing_config
         }
-        if self.settings.oidc_tenant_id:
-            config["tenant_id"] = self.settings.oidc_tenant_id
-
-        return config
+        if isinstance(redirect.get("redirect_path"), str):
+            redirect["redirect_path"] = canonicalize_legacy_redirect_path(
+                redirect["redirect_path"]
+            )
+        try:
+            return SetFederationRequest(
+                provider="default",
+                discovery_endpoint=self.settings.oidc_discovery_endpoint or "",
+                client_id=self.settings.oidc_client_id or "",
+                client_secret=self.settings.oidc_client_secret or "",
+                allowed_domains=list(self.settings.oidc_allowed_domains),
+                **redirect,
+            )
+        except ValidationError as error:
+            # Names the setting and the kind of problem, never the value: the
+            # input may be the secret, and validator messages can quote it.
+            problems = "; ".join(
+                f"{'.'.join(str(part) for part in problem['loc'])} ({problem['type']})"
+                for problem in error.errors(include_input=False, include_url=False)
+            )
+            raise ValueError(
+                f"The OIDC_* settings cannot be registered: {problems}"
+            ) from None
 
     def _is_migration_eligible(self, federation_config: dict[str, Any]) -> bool:
         if not federation_config:
@@ -152,23 +160,6 @@ class FederationStartupMigrationService:
 
         return existing_keys <= _REDIRECT_ONLY_FIELDS
 
-    def _merge_with_existing_redirect_config(
-        self,
-        existing_config: dict[str, Any],
-        env_config: dict[str, Any],
-    ) -> dict[str, Any]:
-        merged_config = dict(env_config)
-        for field in _REDIRECT_ONLY_FIELDS:
-            if field not in existing_config:
-                continue
-
-            value = existing_config[field]
-            if field == "redirect_path" and isinstance(value, str):
-                value = validate_redirect_path(canonicalize_legacy_redirect_path(value))
-
-            merged_config[field] = value
-        return merged_config
-
 
 async def run_env_oidc_to_tenant_federation_migration() -> bool:
     settings = get_settings()
@@ -179,26 +170,18 @@ async def run_env_oidc_to_tenant_federation_migration() -> bool:
         )
         return False
 
-    if not (
-        settings.oidc_discovery_endpoint
-        and settings.oidc_client_id
-        and settings.oidc_client_secret
-    ):
+    if not has_env_oidc_client(settings):
         logger.info(
             "Skipping federation startup migration because OIDC env configuration is incomplete"
         )
         return False
 
-    encryption_service = EncryptionService(settings)
-
     async with sessionmanager.session() as session, session.begin():
-        tenant_repo = TenantRepository(
-            session=session,
-            encryption_service=encryption_service,
-        )
+        container = Container(session=providers.Object(session))
         service = FederationStartupMigrationService(
-            tenant_repo=tenant_repo,
-            encryption_service=encryption_service,
+            tenant_repo=container.tenant_repo(),
+            encryption_service=container.encryption_service(),
+            federation_service=container.tenant_federation_service(),
             settings=settings,
         )
         return await service.migrate_env_oidc_to_tenant_federation()

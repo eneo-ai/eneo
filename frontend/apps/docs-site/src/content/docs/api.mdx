@@ -122,7 +122,7 @@ The `429` response also carries a `Retry-After` header. The limit applies to pas
 
 Malformed login input returns `422` with `code: "request_validation_error"` and, in `details.errors`, the fields `location`, `type` and a static `message`; `location` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "internal_error"`, a generic message and an `error_id`. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
 
-Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
+Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). This flow returns `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
 
@@ -321,16 +321,19 @@ Handle errors by `code` or `eneo_error_code`, never by parsing the English `mess
 
 A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `9041` (`400`) with `code` naming the cause, for example `provider_unreachable` or `provider_rate_limited`, and `details.retryable` saying whether retrying can succeed. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) for the full list.
 
-| Status | Typical meaning                                                                  |
-| ------ | -------------------------------------------------------------------------------- |
-| 400    | Invalid request, including bad target combinations and policy violations         |
-| 401    | Missing, invalid, expired, revoked, or suspended credentials                     |
-| 403    | Authenticated but not permitted: scope, permission, ownership, or guard failures |
-| 404    | Resource not found or not visible to the caller                                  |
-| 409    | Conflict, for example a file still referenced by a conversation                  |
-| 422    | Request body or query parameters failed validation                               |
-| 429    | Rate limit exceeded                                                              |
-| 503    | A dependency such as Redis or the worker is unavailable                          |
+A conversation that holds content copied from a conversation that was removed answers `410` with `code` `derived_source_removed` and `eneo_error_code` `9085` on its detail, tool result, title, rename, conversation feedback, document, Assistant session, helper run, insight and message logging routes, once the caller passed the usual access checks, including an API key scoped to its Assistant or space; a caller without access gets the usual `403` or `404`. Conversation lists and their `total_count`, recent conversations, exports and insights leave such a conversation out, while aggregate insight statistics count it until it is removed. A follow-up question to it answers `404`. Deleting it works as for any conversation; the Assistant session delete returns it without its name and feedback. See [Copies of removed conversations](/audit-logging#copies-of-removed-conversations).
+
+| Status | Typical meaning |
+|--------|-----------------|
+| 400 | Invalid request, including bad target combinations and policy violations |
+| 401 | Missing, invalid, expired, revoked, or suspended credentials |
+| 403 | Authenticated but not permitted: scope, permission, ownership, or guard failures |
+| 404 | Resource not found or not visible to the caller |
+| 409 | Conflict, for example a file still referenced by a conversation |
+| 410 | The resource exists but can no longer be read, for example a conversation copied from one that was removed |
+| 422 | Request body or query parameters failed validation |
+| 429 | Rate limit exceeded |
+| 503 | A dependency such as Redis or the worker is unavailable |
 
 ---
 

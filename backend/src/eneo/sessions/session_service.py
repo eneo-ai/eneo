@@ -9,6 +9,7 @@ from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.assistants.assistant_service import AssistantService
 from eneo.authentication.auth_models import is_service_api_key, is_widget_visitor
 from eneo.completion_models.infrastructure.context_builder import count_tokens
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
@@ -361,6 +362,16 @@ class SessionService:
             session, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
 
+    async def refuse_removed_copy(self, id: UUID) -> None:
+        """Raise DerivedSourceRemovedError when ``get_session_by_uuid`` missed
+        this session because it is a copy whose source was removed.
+
+        Call only after the caller's ownership and current partner access were
+        checked on the session's facts, so nobody else learns that it exists.
+        """
+        if await self.session_repo.is_removed_copy(id):
+            raise DerivedSourceRemovedError()
+
     async def get_session_ownership(
         self,
         id: UUID,
@@ -408,8 +419,16 @@ class SessionService:
             name_filter=name_filter,
         )
 
-    async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
-        session = await self.session_repo.update(session_update)
+    async def update_session(
+        self, session_update: SessionUpdate, *, title_from_turns_at: int | None = None
+    ) -> SessionInDB:
+        session = await self.session_repo.update(
+            session_update, title_from_turns_at=title_from_turns_at
+        )
+        if session is None and title_from_turns_at is not None:
+            # A turn the title was made from was removed meanwhile: the title
+            # is dropped and the conversation keeps the name it has.
+            return await self.get_session_by_uuid(session_update.id)
         return self._check_exists_and_belongs_to_user(session)
 
     async def delete(
@@ -595,13 +614,19 @@ class SessionService:
         info_blob_chunks: list[InfoBlobChunkInDBWithScore],
         generated_files: Sequence[File] | None = None,
         logging_details: LoggingDetails | None = None,
+        history_revision: int | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
-        """Update a placeholder Question row with the final assistant answer."""
+        """Update a placeholder Question row with the final assistant answer.
+
+        A log needs `history_revision`, the conversation's revision when the
+        answer's history was read. A question removed meanwhile stays removed:
+        nothing is stored for it.
+        """
         completion_model_id = completion_model.id if completion_model else None
         async with self._write_transaction():
             await self.question_repo.update_with_answer(
@@ -619,6 +644,7 @@ class SessionService:
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,
                 logging_details=logging_details,
+                history_revision=history_revision,
                 mcp_tool_references=mcp_tool_references,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,
@@ -635,11 +661,14 @@ class SessionService:
         await self.get_session_ownership(
             session_id, assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        return await self.session_repo.add_feedback(
+        session = await self.session_repo.add_feedback(
             feedback=feedback,
             id=session_id,
             keep_existing_text=keep_existing_text,
         )
+        if session is None:
+            raise NotFoundException("Session not found")
+        return session
 
     async def get_message_partner(
         self, *, session_id: UUID, message_id: UUID

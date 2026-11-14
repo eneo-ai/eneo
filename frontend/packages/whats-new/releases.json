@@ -60,6 +60,45 @@
           }
         },
         {
+          "id": "sso-sign-in-refusal-reasons",
+          "type": "improved",
+          "area": "platform",
+          "title": {
+            "en": "See why signing in through your organisation failed",
+            "sv": "Se varför inloggningen via din organisation misslyckades"
+          },
+          "body": {
+            "en": "When signing in through your organisation does not work, the login page now tells you why: the attempt has expired and must be started again, sign-in is temporarily unavailable, or the sign-in could not be verified. Before, most of these cases showed the same general message.",
+            "sv": "När inloggningen via din organisation inte fungerar visar inloggningssidan nu varför: försöket har gått ut och behöver startas om, inloggningen är tillfälligt otillgänglig eller så kunde inloggningen inte verifieras. Tidigare visades oftast samma allmänna meddelande."
+          }
+        },
+        {
+          "id": "sign-out-ends-session",
+          "type": "improved",
+          "area": "account",
+          "title": {
+            "en": "End your session when you sign out",
+            "sv": "Avsluta sessionen när du loggar ut"
+          },
+          "body": {
+            "en": "Signing out now also ends your session on the server, so your sign-in stops working everywhere at once, even in a copy of it. If Eneo cannot confirm that the sign-out went through, you see a message and can try again.",
+            "sv": "När du loggar ut avslutas nu också sessionen på servern, så att inloggningen slutar gälla överallt på en gång, även i en kopia av den. Om Eneo inte kan bekräfta att utloggningen gick igenom får du ett meddelande och kan försöka igen."
+          }
+        },
+        {
+          "id": "conversation-names-follow-retention",
+          "type": "improved",
+          "area": "chat",
+          "title": {
+            "en": "See old conversations as Untitled when their time ends",
+            "sv": "Se gamla konversationer som Namnlös när tiden gått ut"
+          },
+          "body": {
+            "en": "When an assistant, space or your organisation removes conversations after a set time, a conversation's name and feedback comment now follow that time too: a name or comment you write counts from when you wrote it, and a title Eneo made counts from the oldest question it could quote. Once it has passed, the conversation shows as Untitled and the comment is removed; your thumbs up or down stays.",
+            "sv": "När en assistent, en yta eller organisationen gallrar konversationer efter en viss tid följer nu också konversationens namn och feedbackkommentar den tiden: ett namn eller en kommentar du skriver räknas från när du skrev den, och en rubrik som Eneo skapat räknas från den äldsta frågan den kan återge. När tiden har gått ut visas konversationen som Namnlös och kommentaren tas bort; din tumme upp eller ner finns kvar."
+          }
+        },
+        {
           "id": "sharepoint-credential-health",
           "type": "new",
           "area": "admin",
@@ -105,6 +144,66 @@
           "body": {
             "en": "In the import dialog, the folder tree follows the arrow keys, Home, End, Space and Enter. A folder with more items than the list shows says so, and the search still finds the rest.",
             "sv": "I importdialogen styrs mappträdet med piltangenterna, Home, End, mellanslag och Enter. När en mapp innehåller fler objekt än listan visar får du veta det, och sökningen hittar ändå resten."
+          }
+        },
+        {
+          "id": "retention-runs-in-audit-log",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Follow retention runs in the audit log",
+            "sv": "Följ gallringskörningar i granskningsloggen"
+          },
+          "body": {
+            "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
+            "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
+          }
+        },
+        {
+          "id": "admin-sign-in-settings",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Change your organisation's sign-in settings",
+            "sv": "Ändra organisationens inloggningsinställningar"
+          },
+          "body": {
+            "en": "Under Administration › Sign-in (SSO), you can replace the client ID, the client secret and the allowed email domains for single sign-on, and copy the redirect URIs to register at your identity provider. Every change is confirmed before it applies. While sign-in is still set in the server configuration, the page explains how your operator can move it into Eneo.",
+            "sv": "Under Administration › Inloggning (SSO) kan ni byta klient-ID, klienthemlighet och tillåtna e-postdomäner för enkel inloggning och kopiera omdirigerings-URI:erna som ska registreras hos identitetsleverantören. Varje ändring bekräftas innan den gäller. Så länge inloggningen är inställd i serverns konfiguration förklarar sidan hur er driftleverantör kan flytta den till Eneo."
+          },
+          "showMe": {
+            "href": "/admin/federation",
+            "anchor": "admin-federation"
+          }
+        },
+        {
+          "id": "insights-question-logs-follow-retention",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep removed questions out of question logs",
+            "sv": "Slipp gallrade frågor i frågeloggarna"
+          },
+          "body": {
+            "en": "When retention removes a question or someone deletes it, Eneo empties every log that held it, also the logs of later questions in the same conversation. Questions asked before this version have no log, and the question details in Insights tell you so instead of offering to try again.",
+            "sv": "När gallringen tar bort en fråga eller någon raderar den tömmer Eneo varje logg som innehöll den, även loggarna för senare frågor i samma konversation. Frågor som ställdes före den här versionen har ingen logg, och frågedetaljerna under Insikter talar om det för dig i stället för att erbjuda ett nytt försök."
+          }
+        },
+        {
+          "id": "audit-log-without-file-and-conversation-names",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Keep file and conversation names out of the audit log",
+            "sv": "Slipp fil- och konversationsnamn i granskningsloggen"
+          },
+          "body": {
+            "en": "A file's name often says what the file is about, and a conversation's name copies text that retention removes. In the audit log you now see a file by its id, size and file type, and a conversation by its id. Entries from before this version were changed the same way, so a search for a file name finds none of them.",
+            "sv": "Ett filnamn säger ofta vad filen handlar om, och en konversations namn kopierar text som gallras. I granskningsloggen ser du nu en fil med id, storlek och filtyp, och en konversation med sitt id. Rader från före den här versionen ändrades på samma sätt, så du hittar dem inte genom att söka på ett filnamn."
           }
         }
       ]

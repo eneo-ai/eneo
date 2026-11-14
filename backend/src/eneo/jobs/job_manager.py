@@ -1,4 +1,5 @@
-from uuid import UUID
+from typing import cast
+from uuid import UUID, uuid4
 
 from arq import create_pool
 from arq.connections import ArqRedis
@@ -11,6 +12,9 @@ from arq.constants import (
 )
 from arq.jobs import Job
 from arq.utils import timestamp_ms
+from redis.asyncio import ConnectionPool
+from redis.asyncio.client import Pipeline
+from redis.exceptions import ConnectionError as RedisConnectionError
 
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
@@ -32,6 +36,41 @@ def queue_name_for_task(task: Task) -> str:
     return DEFAULT_QUEUE_NAME
 
 
+class _Pipeline(Pipeline):
+    """A transaction that hands its connection back however its cleanup ends.
+
+    redis-py 5 hands it back only when the UNWATCH that ends a transaction is
+    answered or fails with ConnectionError. After a read timeout it stays
+    counted as in use for ever, so a few stalls leave a pool capped by
+    REDIS_MAX_CONNECTIONS with no connection, and an uncapped one growing.
+    """
+
+    # ponytail: works around redis-py 5.x; recheck whenever redis-py is
+    # upgraded, and drop it if the silent-Redis tests pass without it.
+    async def reset(self) -> None:
+        try:
+            await super().reset()
+        except BaseException:
+            connection, self.connection = self.connection, None
+            self.watching = False
+            if connection is not None:
+                await connection.disconnect(nowait=True)
+                await cast(ConnectionPool, self.connection_pool).release(connection)
+            raise
+
+
+class _QueueRedis(ArqRedis):
+    def pipeline(
+        self, transaction: bool = True, shard_hint: str | None = None
+    ) -> Pipeline:
+        return _Pipeline(
+            cast(ConnectionPool, self.connection_pool),
+            self.response_callbacks,
+            transaction,
+            shard_hint,
+        )
+
+
 class JobManager:
     def __init__(self) -> None:
         super().__init__()
@@ -39,8 +78,19 @@ class JobManager:
 
     async def init(self):
         settings = get_settings()
-        self._redis = await create_pool(
-            build_arq_redis_settings(settings),
+        # create_pool connects, with its retries, and checks Redis answers.
+        checked = await create_pool(build_arq_redis_settings(settings))
+        # arq's settings carry no read timeout. Without one, an enqueue on a
+        # Redis that accepts connections and never answers waits for ever, and
+        # so does the transaction cleanup after it. Every read now ends at the
+        # bound the other Redis clients use.
+        connections = cast(ConnectionPool, checked.connection_pool)
+        connections.connection_kwargs["socket_timeout"] = settings.redis_conn_timeout  # pyright: ignore[reportUnknownMemberType]
+        # The connection create_pool checked Redis with predates the bound.
+        await connections.disconnect()
+        connections.reset()
+        self._redis = _QueueRedis(
+            connections,
             job_serializer=serialize_job,
             job_deserializer=deserialize_job,
         )
@@ -53,23 +103,36 @@ class JobManager:
     async def close(self):
         if self._redis is None:
             return
-        await self._redis.aclose()
+        await self._redis.aclose(close_connection_pool=True)
         self._redis = None
 
     async def enqueue(self, task: Task, job_id: UUID, params: TaskParams) -> Job | None:
+        return await self._enqueue(task, job_id, params)
+
+    async def enqueue_jobless(self, task: Task) -> None:
+        """Queue a task that takes no parameters."""
+        await self._enqueue(task, uuid4())
+
+    async def _enqueue(
+        self, task: Task, job_id: UUID, *params: TaskParams
+    ) -> Job | None:
         if self._redis is None:
             raise NotReadyException("Job manager is not initialized!")
 
-        return await self._redis.enqueue_job(
+        job = await self._redis.enqueue_job(
             task,
-            params,
+            *params,
             _job_id=str(job_id),
             _queue_name=queue_name_for_task(task),
         )
-
-    async def enqueue_jobless(self, task: Task):
-        assert self._redis is not None
-        await self._redis.enqueue_job(task, _queue_name=queue_name_for_task(task))
+        # arq answers None for a job that is already queued, and also for a
+        # transaction a lost or timed-out connection ended. Only the first
+        # leaves the job behind.
+        if job is None and not await self._redis.exists(
+            job_key_prefix + str(job_id), result_key_prefix + str(job_id)
+        ):
+            raise RedisConnectionError(f"Redis did not confirm job {job_id}")
+        return job
 
     async def enqueue_named(
         self,

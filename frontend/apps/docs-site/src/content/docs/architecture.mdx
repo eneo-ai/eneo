@@ -408,9 +408,18 @@ async def log_audit_event(
 ```
 
 ```python
-# backend/src/eneo/data_retention/infrastructure/data_retention_worker.py
-@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+# backend/src/eneo/data_retention/infrastructure/retention_worker.py
+@worker.cron_job(
+    hour=_settings.retention_cron_hour,  # 03:30 by default
+    minute=_settings.retention_cron_minute,
+    manages_own_session=True,
+)
+async def run_retention(container: Container) -> list[RetentionRunReport]:
 ```
+
+`run_retention` runs every registered task once a day. `run_retention_frequent`,
+in the same file, starts every five minutes and runs only the tasks registered to
+run often whose due probe finds something due or fails.
 
 **Web Crawling:**
 

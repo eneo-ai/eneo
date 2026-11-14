@@ -319,45 +319,45 @@ class TestFailuresAreNotNoText:
         ("error", "expected"),
         [
             (
-                EncryptedFileError("a.docx"),
+                EncryptedFileError(),
                 ExtractionResult.error("Password-protected file", DOCX_MIME),
             ),
             (
-                CorruptFileError("a.docx"),
+                CorruptFileError(),
                 ExtractionResult.error("Corrupt or malformed file", DOCX_MIME),
             ),
             (
-                ExtractionError("Extraction failed for 'a.docx'"),
-                ExtractionResult.error("Extraction failed for 'a.docx'", DOCX_MIME),
+                ExtractionError("Extraction failed"),
+                ExtractionResult.error("Extraction failed", DOCX_MIME),
             ),
             (
                 RuntimeError("boom"),
                 ExtractionResult.error("RuntimeError while extracting docx", DOCX_MIME),
             ),
             (
-                UnsupportedFormatError("a.docx", "application/x-thing"),
+                UnsupportedFormatError("application/x-thing"),
                 ExtractionResult.skipped("Unsupported file type (.docx)", DOCX_MIME),
             ),
             (
-                PdfPageLimitError("a.docx", 1000),
+                PdfPageLimitError(1000),
                 ExtractionResult.skipped(
                     "Exceeds extraction limit (1000 PDF pages)", DOCX_MIME
                 ),
             ),
             (
-                ExtractionLimitError("a.docx", "text output limit"),
+                ExtractionLimitError("text output limit"),
                 ExtractionResult.skipped(
                     "Exceeds extraction limit (text output limit)", DOCX_MIME
                 ),
             ),
             (
-                ExtractionLimitError("a.docx", "document resource limit"),
+                ExtractionLimitError("document resource limit"),
                 ExtractionResult.skipped(
                     "Exceeds extraction limit (document resource limit)", DOCX_MIME
                 ),
             ),
             (
-                ExtractionLimitError("a.docx", "extraction deadline"),
+                ExtractionLimitError("extraction deadline"),
                 ExtractionResult.skipped(
                     "Exceeds extraction limit (extraction deadline)", DOCX_MIME
                 ),

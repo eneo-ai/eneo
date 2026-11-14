@@ -1,6 +1,7 @@
 import base64
 import binascii
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Final, Literal, Optional
@@ -47,6 +48,8 @@ class JWTMeta(BaseModel):
 
 # A browser session id: 256 random bits, as secrets.token_urlsafe(32) writes them.
 SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{43}$"
+# A browser session's stable id, in the one form str(UUID) writes.
+SESSION_REF_PATTERN = r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 
 
 class JWTCreds(BaseModel):
@@ -64,12 +67,16 @@ class JWTCreds(BaseModel):
     sub: EmailStr
     username: Optional[str] = None
     # The server-side browser session (eneo.authentication.
-    # browser_session_service). Only a browser sign-in adds it to a token, so
-    # minting never dumps it. A present claim is a session id: null or any
+    # browser_session_service). Only starting a session adds it to a token,
+    # so minting never dumps it. A present claim is a session id: null or any
     # other value is refused, never read as a token without one.
     sid: Optional[str] = Field(
         default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN
     )
+    # The same session's stable, non-secret id (browser_sessions.id), signed
+    # beside sid; tokens issued before it existed carry sid alone. Like sid,
+    # never dumped, and a present claim must be the form sign-in writes.
+    session_ref: Optional[UUID] = Field(default=None, exclude=True)
 
     @field_validator("sid", mode="before")
     @classmethod
@@ -78,11 +85,59 @@ class JWTCreds(BaseModel):
             raise ValueError("sid must not be null")
         return value
 
+    @field_validator("session_ref", mode="before")
+    @classmethod
+    def _refuse_other_session_ref_forms(cls, value: object) -> object:
+        if isinstance(value, UUID):
+            return value
+        if not isinstance(value, str) or not re.fullmatch(SESSION_REF_PATTERN, value):
+            raise ValueError("session_ref must be a session id")
+        return value
+
 
 class JWTPayload(JWTMeta, JWTCreds):
     """Verified Eneo session claims, including the required identity version."""
 
     pass
+
+
+CredentialKind = Literal["browser_session", "derived", "bearer", "api_key"]
+
+
+class CredentialFacts(BaseModel):
+    """What the credential a request was admitted with says about it.
+
+    The adapter that resolves the credential sets it on the user; the checks
+    that depend on how the request authenticated read it. Request-scoped:
+    never persisted or returned.
+
+    - ``browser_session``: an Eneo token with ``sid``; ``session`` holds its
+      verified claims.
+    - ``derived``: a token minted from another credential, a scoped MCP
+      token or a module token.
+    - ``bearer``: any other Eneo token, or a provider's access token.
+    - ``api_key``: a user or service API key.
+
+    ``session_ref`` names the browser session the credential belongs to, and
+    ``auth_method`` is the token's claim ("password" for a password sign-in).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    kind: CredentialKind
+    session_ref: Optional[UUID] = None
+    auth_method: Optional[str] = None
+    session: Optional[JWTPayload] = None
+
+    @classmethod
+    def of_token(cls, payload: JWTPayload) -> "CredentialFacts":
+        """An Eneo token's facts: a browser session when it carries ``sid``."""
+        return cls(
+            kind="browser_session" if payload.sid is not None else "bearer",
+            session_ref=payload.session_ref,
+            auth_method=payload.auth_method,
+            session=payload if payload.sid is not None else None,
+        )
 
 
 class AccessToken(BaseModel):
@@ -836,53 +891,78 @@ def _is_verified_claim(value: object) -> bool:
     return False
 
 
+# The claims that can vouch for the standard email, in order. The first one the
+# provider sends (not null) decides, so an explicit negative never falls
+# through to the next.
+DEFAULT_EMAIL_VERIFIED_CLAIMS = ("email_verified", "xms_edov")
+
+
 class FederatedIdentity(BaseModel):
-    """Email identity extracted only after the OIDC token has been validated."""
+    """Email identity extracted only after the OIDC token has been validated.
+
+    Issuer, audience, subject claim and subject are the key an account is
+    bound to (``identity_bindings``).
+    """
 
     model_config = ConfigDict(frozen=True)
 
+    issuer: str = Field(min_length=1)
+    # The verified audience the subject belongs to: the client id of a browser
+    # sign-in's ID token (aud/azp), or the accepted API audience of a
+    # provider's access token. Never invented for a path that proves neither.
+    audience: str = Field(min_length=1)
+    # The claim the subject was read from. Another claim's values are another
+    # namespace: the same value there may name someone else.
+    subject_claim: str = Field(default="sub", min_length=1)
+    subject: str = Field(min_length=1)
     email: EmailStr
     email_verified: bool = Field(strict=True)
 
     @classmethod
     def from_claims(
-        cls, claims: Mapping[str, object], email_claim: str = "email"
+        cls,
+        claims: Mapping[str, object],
+        *,
+        issuer: str,
+        audience: str,
+        # The claim that names the person: ``sub`` unless the provider's
+        # claims mapping names a stable id claim instead.
+        subject_claim: str = "sub",
+        email_claim: str = "email",
+        email_verified_claims: Sequence[str] = DEFAULT_EMAIL_VERIFIED_CLAIMS,
     ) -> "FederatedIdentity":
         email = claims.get(email_claim)
         if not isinstance(email, str) or not email:
             raise ValueError("Email claim not found in ID token")
-        if email_claim == "email" and claims.get("email_verified") is False:
-            raise ValueError("Email is not verified by the identity provider")
         # Entra ID omits email_verified for organisational accounts and sends
         # xms_edov ("email domain owner verified") instead. A domain the
         # tenant owner has verified is as authoritative for the address as the
         # standard flag, and the mandatory domain allowlist still applies.
-        # xms_edov is only a fallback for a missing email_verified: any value
+        # A later claim is only a fallback for missing earlier ones: any value
         # the IdP does send, negative or unrecognised, keeps its own verdict.
-        email_verified = claims.get("email_verified")
-        verified = (
-            _is_verified_claim(email_verified)
-            if email_verified is not None
-            else _is_verified_claim(claims.get("xms_edov"))
+        deciding = next(
+            (name for name in email_verified_claims if claims.get(name) is not None),
+            None,
         )
+        verdict = claims[deciding] if deciding is not None else None
+        if email_claim == "email" and deciding == "email_verified" and verdict is False:
+            raise ValueError("Email is not verified by the identity provider")
+        subject = claims.get(subject_claim)
+        if not isinstance(subject, str) or not subject:
+            raise ValueError("ID token is missing its subject")
         try:
             return cls(
+                issuer=issuer,
+                audience=audience,
+                subject_claim=subject_claim,
+                subject=subject,
                 email=email,
                 # The verification claims verify the standard email, not an
                 # unrelated address selected by a custom claims mapping.
-                email_verified=verified and claims.get("email") == email,
+                email_verified=_is_verified_claim(verdict)
+                and claims.get("email") == email,
             )
         except ValueError as exc:
             raise ValueError(
                 "Email claim from identity provider is invalid. Contact your administrator."
             ) from exc
-
-
-class OpenIdConnectLogin(BaseModel):
-    code: str
-    code_verifier: str
-    redirect_uri: str
-    client_id: str
-    grant_type: str = "authorization_code"
-    scope: str = "openid"
-    nonce: Optional[str] = None

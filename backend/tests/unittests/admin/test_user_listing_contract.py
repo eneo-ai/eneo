@@ -49,7 +49,12 @@ async def test_admin_listing_preserves_filters_and_counts(user, state):
         counts=counts,
     )
     service = AdminService(
-        user=user, user_repo=repo, tenant_service=AsyncMock(), user_service=AsyncMock()
+        user=user,
+        user_repo=repo,
+        tenant_service=AsyncMock(),
+        user_service=AsyncMock(),
+        identity_binding_repo=AsyncMock(),
+        audit_service=AsyncMock(),
     )
     response = await service.list_users_paginated(
         AdminUsersQueryParams(

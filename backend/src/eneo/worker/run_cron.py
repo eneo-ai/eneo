@@ -9,6 +9,13 @@ Run it inside a backend or worker container:
 
     run-cron --list
     run-cron crawl_all_websites
+
+With --until-complete the cron runs in this process instead, round after
+round, until it shows that nothing due is left; the exit code says whether it
+got there. Only a cron with a completion check accepts it (run_retention, the
+readback after a restore, with traffic closed and every worker stopped).
+
+    run-cron --until-complete run_retention
 """
 
 from __future__ import annotations
@@ -16,7 +23,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 
 from arq import create_pool
@@ -77,6 +84,15 @@ def _load_registry() -> list[RegisteredCron]:
     )
 
 
+def _completion_checks() -> dict[str, Callable[[], int]]:
+    """Crons that can run here until nothing due is left, by short name; each
+    check returns the process exit code."""
+    # Deferred: the check imports the database and object-content runtime.
+    from eneo.main.retention_readback import main as read_back_retention
+
+    return {"run_retention": read_back_retention}
+
+
 async def enqueue_cron(cron: RegisteredCron) -> str:
     """Enqueue the cron on its worker's queue and return the ARQ job id."""
     redis = await create_pool(build_arq_redis_settings())
@@ -100,6 +116,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--list", action="store_true", help="list registered cron jobs and exit"
     )
+    parser.add_argument(
+        "--until-complete",
+        action="store_true",
+        help="run the cron here until nothing due is left; exit 1 if it cannot",
+    )
     args = parser.parse_args(argv)
 
     crons = _load_registry()
@@ -115,6 +136,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except LookupError as exc:
         print(exc, file=sys.stderr)
         return 2
+
+    if args.until_complete:
+        check = _completion_checks().get(cron.name)
+        if check is None:
+            print(
+                f"{cron.name} has no completion check; --until-complete "
+                "supports: " + ", ".join(sorted(_completion_checks())),
+                file=sys.stderr,
+            )
+            return 2
+        return check()
 
     job_id = asyncio.run(enqueue_cron(cron))
     print(

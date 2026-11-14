@@ -183,6 +183,11 @@ CATEGORY_MAPPINGS = {
     ActionType.PASSWORD_CHANGE_FAILED.value: "security_events",
     ActionType.SESSIONS_INVALIDATED.value: "security_events",
     ActionType.SESSION_EXTENDED.value: "security_events",
+    ActionType.IDENTITY_BOUND.value: "security_events",
+    ActionType.IDENTITY_CONFLICT.value: "security_events",
+    ActionType.IDENTITY_REBINDING_UPDATED.value: "security_events",
+    ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED.value: "security_events",
+    ActionType.USER_ACCESS_TOKEN_ISSUED.value: "security_events",
     # File Operations
     ActionType.FILE_UPLOADED.value: "file_operations",
     ActionType.FILE_DELETED.value: "file_operations",
@@ -234,6 +239,9 @@ CATEGORY_MAPPINGS = {
     ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
     # System Actions
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
+    ActionType.DATA_RETENTION_BATCH.value: "system_actions",
+    ActionType.DATA_RETENTION_RUN.value: "system_actions",
+    ActionType.DATA_RETENTION_SKIPPED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",
     ActionType.SYSTEM_MAINTENANCE.value: "system_actions",
     # Audit Access

@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import MessageFeedback
+from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 
 
@@ -20,11 +21,12 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
     await repo._hydrate_sessions(
         [
             SimpleNamespace(
+                id=uuid4(),
                 questions=[
                     SimpleNamespace(
                         info_blobs=blobs, questions_files=[], tool_calls=None
                     )
-                ]
+                ],
             )
         ]
     )
@@ -35,19 +37,22 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
 async def test_update_hydrates_info_blob_availability(monkeypatch):
     blob = MagicMock()
     updated = SimpleNamespace(
+        id=uuid4(),
         questions=[
             SimpleNamespace(info_blobs=[blob], questions_files=[], tool_calls=None)
-        ]
+        ],
     )
     hydrate = AsyncMock()
     monkeypatch.setattr(
         "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
         hydrate,
     )
+    monkeypatch.setattr(SessionInDB, "model_validate", lambda row: row)
     repo = SessionRepository(AsyncMock())
-    repo.delegate.update = AsyncMock(return_value=updated)
+    repo.session.scalar = AsyncMock(return_value=updated)
+    repo.session.scalars = AsyncMock(return_value=[updated.id])
 
-    result = await repo.update(MagicMock())
+    result = await repo.update(SessionUpdate(id=updated.id, name="renamed"))
 
     assert result is updated
     hydrate.assert_awaited_once_with([blob])

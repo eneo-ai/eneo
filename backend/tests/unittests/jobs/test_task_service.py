@@ -37,13 +37,19 @@ def tmp_upload_dir(tmp_path):
 def file_size_service(tmp_upload_dir, monkeypatch):
     from types import SimpleNamespace
 
-    from eneo.files import file_size_service as fss_module
     from eneo.jobs import job_staging
+    from eneo.main import process_scratch
 
     settings = SimpleNamespace(upload_tmp_dir=tmp_upload_dir)
-    monkeypatch.setattr(fss_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(process_scratch, "get_settings", lambda: settings)
     monkeypatch.setattr(job_staging, "get_settings", lambda: settings)
-    return FileSizeService()
+    yield FileSizeService()
+    process_scratch.stop()
+
+
+def _staged(root):
+    """Files under root beside the scratch directory's own lock marker."""
+    return [p for p in root.rglob("*") if p.is_file() and p.name != "owner.lock"]
 
 
 @pytest.fixture
@@ -135,7 +141,7 @@ async def test_queue_upload_file_cleans_up_on_queue_failure(
             filename="test.txt",
         )
 
-    remaining = [path for path in tmp_upload_dir.rglob("*") if path.is_file()]
+    remaining = _staged(tmp_upload_dir)
     assert remaining == []
 
 
@@ -152,7 +158,7 @@ async def test_queue_upload_file_preserves_file_on_success(
         filename="test.txt",
     )
 
-    remaining = [path for path in tmp_upload_dir.rglob("*") if path.is_file()]
+    remaining = _staged(tmp_upload_dir)
     assert len(remaining) == 1
     assert remaining[0].read_bytes() == b"test data"
     call = job_service.queue_durable_knowledge_job.await_args
@@ -241,7 +247,7 @@ async def test_queue_upload_file_rejects_invalid_filename_before_staging(
             filename=filename,
         )
 
-    assert list(tmp_upload_dir.rglob("*")) == []
+    assert _staged(tmp_upload_dir) == []
     job_service.queue_durable_knowledge_job.assert_not_awaited()
     object_content.ensure_target_ready.assert_not_awaited()
 
@@ -263,5 +269,5 @@ async def test_queue_upload_file_checks_target_readiness_before_staging(
             filename="test.txt",
         )
 
-    assert list(tmp_upload_dir.rglob("*")) == []
+    assert _staged(tmp_upload_dir) == []
     job_service.queue_durable_knowledge_job.assert_not_awaited()

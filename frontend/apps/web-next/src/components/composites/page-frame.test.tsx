@@ -1,21 +1,10 @@
 // @vitest-environment jsdom
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { appSources } from "@/test/app-sources";
 import { PageFrame } from "./page-frame";
 
 afterEach(cleanup);
-
-const srcDir = path.resolve(import.meta.dirname, "../..");
-
-function sources(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) return sources(file);
-    return /\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name) ? [file] : [];
-  });
-}
 
 describe("PageFrame", () => {
   it("puts the page in one centred 1152 px column inside the page inset", () => {
@@ -47,10 +36,11 @@ describe("PageFrame", () => {
       "features/spaces/chat/",
       "features/workspace/preview/"
     ];
-    const centred = sources(srcDir)
-      .map((file) => path.relative(srcDir, file).split(path.sep).join("/"))
-      .filter((file) => !allowed.some((prefix) => file.startsWith(prefix)))
-      .filter((file) => /\bmx-auto\b/.test(readFileSync(path.join(srcDir, file), "utf8")));
+    const centred = appSources
+      .filter(({ file }) => file.endsWith(".tsx"))
+      .filter(({ file }) => !allowed.some((prefix) => file.startsWith(prefix)))
+      .filter(({ text }) => /\bmx-auto\b/.test(text))
+      .map(({ file }) => file);
     expect(centred).toEqual([]);
   });
 });

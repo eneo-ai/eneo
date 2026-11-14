@@ -24,6 +24,7 @@ import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
@@ -368,12 +369,7 @@ async def test_federation_client_secret_rotation_procedure(
     repo = TenantRepository(async_session)
     tenant = await repo.get(tenant_id)
 
-    resolver = CredentialResolver(
-        tenant=tenant,
-        settings=test_settings,
-        encryption_service=encryption_service,
-    )
-    fed_config = resolver.get_federation_config()
+    fed_config = sign_in_config(test_settings, tenant, encryption_service)
     decrypted_old_secret = fed_config["client_secret"]
     assert decrypted_old_secret == old_secret, "Old secret should decrypt correctly"
 
@@ -391,12 +387,7 @@ async def test_federation_client_secret_rotation_procedure(
 
     # Refresh tenant and verify new secret
     tenant = await repo.get(tenant_id)
-    resolver_new = CredentialResolver(
-        tenant=tenant,
-        settings=test_settings,
-        encryption_service=encryption_service,
-    )
-    fed_config_new = resolver_new.get_federation_config()
+    fed_config_new = sign_in_config(test_settings, tenant, encryption_service)
     decrypted_new_secret = fed_config_new["client_secret"]
     assert decrypted_new_secret == new_secret, "New secret should decrypt correctly"
 

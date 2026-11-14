@@ -1,15 +1,16 @@
+import contextlib
 import random
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Optional, cast
+from typing import TYPE_CHECKING, Any, Literal, NoReturn, Optional, cast
 from uuid import UUID
 
 import idna
-import jwt
 import sqlalchemy as sa
+from dependency_injector import providers
 from fastapi import HTTPException
-from starlette.requests import Request
+from starlette.requests import HTTPConnection, Request
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.application.audit_service import AuditService
@@ -34,13 +35,17 @@ from eneo.authentication.auth_models import (
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyV2InDB,
+    CredentialFacts,
     FederatedIdentity,
     JWTPayload,
     compute_effective_state,
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
+from eneo.authentication.oidc.profile import OidcProviderError, subject_claim
+from eneo.authentication.oidc.sign_in_source import selected_config
 from eneo.authentication.service_key_user import build_service_key_user
+from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
@@ -74,13 +79,16 @@ from eneo.settings.settings import SettingsUpsert
 from eneo.settings.settings_repo import SettingsRepository
 from eneo.tenants.tenant import TenantState
 from eneo.tenants.tenant_repo import TenantRepository
+from eneo.users.identity_binding_repo import (
+    IdentityBindingRepository,
+    IdentityConflictError,
+)
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
     PasswordReuseError,
     validate_new_local_password,
 )
-from eneo.users.password_lifecycle import PASSWORD_AUTH_METHOD
 from eneo.users.user import (
     PropUserInvite,
     UserAdd,
@@ -100,6 +108,12 @@ if TYPE_CHECKING:
 
 
 logger = get_logger(__name__)
+
+# Removed and inactive accounts are refused alike, so a refusal does not say
+# which of the two an account is.
+_INACTIVE_OR_REMOVED = (
+    "User is inactive or has been removed. Contact your administrator."
+)
 
 
 def _permission_allows(key: ApiKeyV2InDB, required: ApiKeyPermission) -> bool:
@@ -279,6 +293,7 @@ class UserService:
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
         browser_session_service: Optional["BrowserSessionService"] = None,
+        identity_binding_repo: Optional[IdentityBindingRepository] = None,
     ):
         super().__init__()
         self.repo = user_repo
@@ -295,6 +310,10 @@ class UserService:
         self._session = session
         # Without it, a browser session's token is refused.
         self.browser_session_service = browser_session_service
+        # Without it, no federated sign-in is admitted.
+        self.identity_binding_repo = identity_binding_repo
+        # The identity conflict this service decided, once it has.
+        self.refused: IdentityConflictError | None = None
 
     async def _validate_email(self, email: str | None):
         if email is None:
@@ -322,7 +341,7 @@ class UserService:
         password: str,
         correlation_id: str | None = None,
         source_ip: str | None = None,
-    ):
+    ) -> "UserInDB":
         """
         Authenticate user with username/password.
 
@@ -336,7 +355,7 @@ class UserService:
             source_ip: Client IP address for security logging
 
         Returns:
-            AccessToken with JWT bearer token
+            The admitted user; the caller starts its session.
 
         Raises:
             AuthenticationException: On authentication failure (generic message)
@@ -431,12 +450,7 @@ class UserService:
             },
         )
 
-        return AccessToken(
-            access_token=self.auth_service.create_access_token_for_user(
-                user=user, auth_method=PASSWORD_AUTH_METHOD
-            ),
-            token_type="bearer",
-        )
+        return user
 
     async def resolve_federated_user(
         self,
@@ -446,11 +460,19 @@ class UserService:
         allowed_domains: Sequence[str],
         correlation_id: str,
     ) -> tuple[UserInDB, bool]:
-        """Resolve an active tenant member, or admit a new one under JIT policy.
+        """Resolve the account a verified identity signs in to, or admit a new
+        one under JIT policy.
 
-        Both OIDC entry points use this decision. SCIM/admin own reactivation;
-        signing in must never undo deprovisioning or switch tenant membership.
+        Every OIDC entry point uses this decision. The identity's binding
+        (issuer, audience, subject claim, subject) decides first and the email
+        is not consulted: the email binds only an account that has no binding yet,
+        or one an admin opened (a migration window, a re-binding allowance),
+        so an address reassigned at the provider cannot take over the account
+        it used to name. SCIM/admin own reactivation; signing in must never
+        undo deprovisioning or switch tenant membership.
         """
+        if self.identity_binding_repo is None:
+            raise RuntimeError("Federated sign-in needs the identity binding store")
         tenant = await self.tenant_repo.get(tenant_id)
         if tenant is None or tenant.state != TenantState.ACTIVE:
             raise FederatedLoginDenied(
@@ -478,20 +500,69 @@ class UserService:
                     "Contact your administrator to add your domain."
                 )
 
-        user = await self.repo.get_user_by_email(identity.email)
-        if user is not None:
-            if user.tenant_id != tenant_id:
+        bindings = self.identity_binding_repo
+        holder_id = await bindings.holder(
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            audience=identity.audience,
+            subject_claim=identity.subject_claim,
+            subject=identity.subject,
+        )
+        if holder_id is not None:
+            # No lock: a resource server takes this path on every request. A
+            # removed account keeps its identity reserved: SCIM reactivation
+            # reuses the row, and nothing moves a binding off it.
+            user = await self.repo.get_user_by_id(holder_id)
+            if user is None or user.state != UserState.ACTIVE:
+                raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
+            return user, False
+
+        # The first binding of a subject: serialized per subject before the
+        # lookup by subject, and always before the account's row lock.
+        await bindings.lock_subject(
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            subject_claim=identity.subject_claim,
+            subject=identity.subject,
+        )
+        # OIDC never reassigns a subject within an issuer, so the subject
+        # bound under another audience is the same person, whatever the email.
+        holders = await bindings.holders_of_subject(
+            tenant_id=tenant_id,
+            issuer=identity.issuer,
+            subject_claim=identity.subject_claim,
+            subject=identity.subject,
+        )
+        if len(holders) > 1:
+            await self._refuse_identity(
+                "duplicate_subject", identity, tenant_id, holders, correlation_id
+            )
+        if holders:
+            user = await self._bind_identity(
+                identity, tenant_id, holders[0], "same_subject", correlation_id
+            )
+            return user, False
+
+        users = await self.repo.get_users_by_email(identity.email, limit=2)
+        if len(users) > 1:
+            # Case variants of one address: the email names no single account.
+            await self._refuse_identity(
+                "duplicate_email",
+                identity,
+                tenant_id,
+                [user.id for user in users],
+                correlation_id,
+            )
+        if users:
+            if users[0].tenant_id != tenant_id:
                 raise FederatedLoginDenied("Access denied for this organization.")
-            if user.state != UserState.ACTIVE or user.deleted_at is not None:
-                raise FederatedLoginDenied(
-                    "User is inactive or has been removed. Contact your administrator."
-                )
+            user = await self._bind_identity(
+                identity, tenant_id, users[0].id, "email", correlation_id
+            )
             return user, False
 
         if await self.repo.has_removed_user_by_email(identity.email, tenant_id):
-            raise FederatedLoginDenied(
-                "User is inactive or has been removed. Contact your administrator."
-            )
+            raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
         if not tenant.provisioning:
             raise FederatedLoginDenied(
                 "User not found. Provision the account through SCIM or contact your administrator for access."
@@ -535,8 +606,9 @@ class UserService:
                 )
             )
         except UniqueException:
-            # A concurrent first sign-in created the row between the lookup
-            # and the insert. Admit that row under the same membership checks.
+            # A concurrent first sign-in or SCIM created the row between the
+            # lookup and the insert. Admit that row under the same membership
+            # checks, and bind it like any account found by its email.
             user = await self.repo.get_user_by_email(identity.email)
             if (
                 user is None
@@ -545,6 +617,9 @@ class UserService:
                 or user.deleted_at is not None
             ):
                 raise FederatedLoginDenied("Access denied for this organization.")
+            user = await self._bind_identity(
+                identity, tenant_id, user.id, "email", correlation_id
+            )
             return user, False
         logger.info(
             "JIT provisioning: Created user",
@@ -578,132 +653,215 @@ class UserService:
                     extra={"user_id": str(user.id), "correlation_id": correlation_id},
                     exc_info=True,
                 )
+        user = await self._bind_identity(
+            identity, tenant_id, user.id, "jit", correlation_id
+        )
         return user, True
 
-    async def login_with_mobilityguard(
+    async def _bind_identity(
         self,
-        id_token: str,
-        access_token: str,
-        key: jwt.PyJWK,
-        signing_algos: list[str],
-        correlation_id: str | None = None,
-    ):
-        correlation_id = correlation_id or "no-correlation-id"
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        user_id: UUID,
+        found_by: Literal["same_subject", "email", "jit"],
+        correlation_id: str,
+    ) -> UserInDB:
+        """Bind the identity to this account, deciding under its row lock.
 
-        logger.debug(
-            "Starting OIDC user service login",
-            extra={
-                "correlation_id": correlation_id,
-                "client_id": get_settings().oidc_client_id,
-                "signing_algos": signing_algos,
-                "has_tenant_id": bool(get_settings().oidc_tenant_id),
-            },
-        )
-
-        try:
-            client_id = get_settings().oidc_client_id
-            if client_id is None:
-                raise AuthenticationException(
-                    "System configuration error: OIDC client ID not configured"
-                )
-
-            payload = self.auth_service.get_payload_from_openid_jwt(
-                id_token=id_token,
-                access_token=access_token,
-                key=key.key,
-                signing_algos=signing_algos,
-                client_id=client_id,
-                options={"verify_iat": False},
-                correlation_id=correlation_id,
+        The lock orders the decision with every other sign-in to the account
+        and with SCIM or admin deactivation: a waiter whose account was
+        removed meanwhile gets no row, and one whose account no longer holds
+        the subject, or whose email no longer names it, is refused. An
+        account already bound takes a new identity only where an admin
+        opened the way. Found by its email: a migration window from one of
+        its pairs adds the new pair, and a re-binding allowance adds the pair
+        or replaces the subject under it, and is used up. Found by its email or by the same subject under
+        another audience: a window from the pair to itself, opened after the
+        account was bound there, replaces the subject under it (a change of
+        subject claim). A binding under another subject claim is another
+        subject, even with the same value.
+        """
+        bindings = cast(IdentityBindingRepository, self.identity_binding_repo)
+        user = await self.repo.get_user_by_id_for_update(user_id)
+        if user is None or user.state != UserState.ACTIVE:
+            raise FederatedLoginDenied(_INACTIVE_OR_REMOVED)
+        pair = (identity.issuer, identity.audience)
+        bound = await bindings.of_user(user.id)
+        # The account was chosen before this lock was granted; a sign-in that
+        # held it may have re-bound the account, or SCIM changed its email.
+        # Refused rather than decided again: that could lock a second account
+        # while holding this one, and two such sign-ins would deadlock.
+        if (
+            found_by == "same_subject"
+            and not any(
+                (binding.issuer, binding.subject_claim, binding.subject)
+                == (identity.issuer, identity.subject_claim, identity.subject)
+                for binding in bound
             )
-
-            if not isinstance(payload.get("sub"), str) or not payload["sub"]:
-                raise ValueError("ID token is missing its subject")
-            identity = FederatedIdentity.from_claims(payload)
-
-        except jwt.ExpiredSignatureError as e:
-            logger.error(
-                "JWT token has expired",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error": str(e),
-                },
+        ) or (
+            found_by == "email"
+            and [
+                named.id
+                for named in await self.repo.get_users_by_email(identity.email, limit=2)
+            ]
+            != [user.id]
+        ):
+            await self._refuse_identity(
+                "account_changed", identity, tenant_id, [user.id], correlation_id
             )
-            raise AuthenticationException("Token has expired")
-        except jwt.InvalidAudienceError as e:
-            logger.error(
-                "JWT audience validation failed",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error": str(e),
-                    "expected_audience": get_settings().oidc_client_id,
-                },
-            )
-            raise AuthenticationException("Invalid token audience")
-        except jwt.InvalidTokenError as e:
-            logger.error(
-                "JWT token validation failed",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                },
-            )
-            raise AuthenticationException("Invalid token")
-        except Exception as e:
-            logger.error(
-                "Failed to extract user info from JWT",
-                extra={
-                    "correlation_id": correlation_id,
-                    "error_type": type(e).__name__,
-                    "error": str(e),
-                    "client_id": get_settings().oidc_client_id,
-                },
-            )
-            raise AuthenticationException("Failed to validate token")
-
-        # Look up user in database
-        logger.info(
-            "OIDC: Resolving tenant membership",
-            extra={"correlation_id": correlation_id},
-        )
-
-        settings = get_settings()
-        if not settings.oidc_tenant_id:
-            raise AuthenticationException("OIDC tenant ID is not configured")
-        try:
-            tenant_id = UUID(settings.oidc_tenant_id)
-        except ValueError as exc:
-            raise AuthenticationException("Invalid OIDC tenant ID") from exc
-
-        user_in_db, was_federated = await self.resolve_federated_user(
-            identity=identity,
-            tenant_id=tenant_id,
-            allowed_domains=settings.oidc_allowed_domains,
-            correlation_id=correlation_id,
-        )
-
-        # Create access token
-        issued_token = self.auth_service.create_access_token_for_user(user=user_in_db)
-
-        logger.info(
-            "OIDC login completed successfully",
-            extra={
-                "correlation_id": correlation_id,
-                "user_id": str(user_in_db.id),
-                "email": user_in_db.email,
-                "was_federated": was_federated,
-            },
-        )
-
-        return (
-            AccessToken(
-                access_token=issued_token,
-                token_type="bearer",
+        same_pair = next(
+            (
+                binding
+                for binding in bound
+                if (binding.issuer, binding.audience) == pair
             ),
-            was_federated,
-            user_in_db,
+            None,
         )
+        details: dict[str, str] = {}
+        if same_pair is not None:
+            if (same_pair.subject_claim, same_pair.subject) == (
+                identity.subject_claim,
+                identity.subject,
+            ):
+                # Bound by a sign-in that held the lock before this one.
+                return user
+            # Only a window opened after this binding replaces it, so each
+            # account moves once however long the window stays open. Found by
+            # the same subject under another audience, it is the same person
+            # (one issuer, one subject), so that is no weaker than the email.
+            window_id = await bindings.open_window(
+                tenant_id=tenant_id,
+                to_issuer=identity.issuer,
+                to_audience=identity.audience,
+                from_pairs=[pair],
+                opened_after=same_pair.created_at,
+            )
+            if window_id is not None:
+                method = "migration_window"
+                details["window_id"] = str(window_id)
+            elif found_by == "email" and await bindings.rebinding_open(user.id):
+                method = "admin_allowance"
+            else:
+                await self._refuse_identity(
+                    "subject_mismatch", identity, tenant_id, [user.id], correlation_id
+                )
+            await bindings.unbind(
+                user_id=user.id, issuer=identity.issuer, audience=identity.audience
+            )
+            details["replaced_subject_claim"] = same_pair.subject_claim
+            details["replaced_subject"] = same_pair.subject
+        elif bound and found_by == "email":
+            window_id = await bindings.open_window(
+                tenant_id=tenant_id,
+                to_issuer=identity.issuer,
+                to_audience=identity.audience,
+                from_pairs=[(binding.issuer, binding.audience) for binding in bound],
+            )
+            if window_id is not None:
+                method = "migration_window"
+                details["window_id"] = str(window_id)
+            elif await bindings.rebinding_open(user.id):
+                method = "admin_allowance"
+            else:
+                await self._refuse_identity(
+                    "account_bound", identity, tenant_id, [user.id], correlation_id
+                )
+        else:
+            method = "email_match" if found_by == "email" else found_by
+        key = {
+            "issuer": identity.issuer,
+            "audience": identity.audience,
+            "subject_claim": identity.subject_claim,
+            "subject": identity.subject,
+        }
+        if not await bindings.bind(tenant_id=tenant_id, user_id=user.id, **key):
+            # This account's lock is held, so another account took the
+            # identity after it was looked up.
+            holder = await bindings.holder(tenant_id=tenant_id, **key)
+            await self._refuse_identity(
+                "identity_taken",
+                identity,
+                tenant_id,
+                [user.id] + ([holder] if holder is not None else []),
+                correlation_id,
+            )
+        if found_by == "email":
+            await bindings.close_rebinding(user.id)
+        if self.audit_service is not None:
+            # In the sign-in's transaction: rolls back with it.
+            await self.audit_service.log(
+                tenant_id=tenant_id,
+                actor_id=None,
+                actor_type=ActorType.SYSTEM,
+                action=ActionType.IDENTITY_BOUND,
+                entity_type=EntityType.USER,
+                entity_id=user.id,
+                description=f"Sign-in identity bound to the account ({method})",
+                metadata={
+                    **key,
+                    "method": method,
+                    **details,
+                    "correlation_id": correlation_id,
+                },
+                required=True,
+            )
+        return user
+
+    async def _refuse_identity(
+        self,
+        reason: str,
+        identity: FederatedIdentity,
+        tenant_id: UUID,
+        account_ids: Sequence[UUID],
+        correlation_id: str,
+    ) -> NoReturn:
+        """Refuse a sign-in whose identity cannot be bound, logged and audited.
+
+        The audit goes through the worker queue, so it outlives the sign-in's
+        rollback; when the queue is unreachable the log event remains. Neither
+        names the email or carries a token. The refusal is recorded as
+        ``refused`` before the audit, so an admission whose deadline ends the
+        audit still refuses with it.
+        """
+        refused = self.refused = IdentityConflictError(reason)
+        fields: dict[str, object] = {
+            "reason": reason,
+            "issuer": identity.issuer,
+            "audience": identity.audience,
+            "subject_claim": identity.subject_claim,
+            "subject": identity.subject,
+            "account_ids": [str(account_id) for account_id in account_ids],
+        }
+        logger.warning(
+            "identity_conflict",
+            extra={
+                **fields,
+                "tenant_id": str(tenant_id),
+                "correlation_id": correlation_id,
+            },
+        )
+        if self.audit_service is not None:
+            try:
+                await self.audit_service.log_async(
+                    tenant_id=tenant_id,
+                    actor_id=None,
+                    actor_type=ActorType.SYSTEM,
+                    action=ActionType.IDENTITY_CONFLICT,
+                    entity_type=EntityType.USER,
+                    entity_id=account_ids[0],
+                    description="Sign-in refused: its identity cannot be bound to the account",
+                    metadata={**fields, "correlation_id": correlation_id},
+                    outcome=Outcome.FAILURE,
+                    error_message=reason,
+                )
+            except Exception:
+                # The refusal never depends on its audit.
+                logger.warning(
+                    "identity_conflict_audit_not_sent",
+                    extra={"reason": reason, "correlation_id": correlation_id},
+                    exc_info=True,
+                )
+        raise refused
 
     async def register(self, new_user: UserAddSuperAdmin):
         await self._validate_email(new_user.email)
@@ -791,11 +949,12 @@ class UserService:
             self.auth_service.validate_local_credential_version(
                 payload.credential_version, user
             )
-            user.session_auth_method = payload.auth_method
-            user.browser_session = payload if payload.sid is not None else None
+            user.credential = CredentialFacts.of_token(payload)
         return user
 
-    async def _get_user_from_token(self, token: str):
+    async def _get_user_from_token(
+        self, token: str, connection: HTTPConnection | None = None
+    ):
         settings = get_settings()
         try:
             payload = self._get_token_payload(token, aud=settings.jwt_audience)
@@ -803,17 +962,38 @@ class UserService:
             # In resource-server mode, the bearer token may be an IdP token.
             if not settings.oidc_resource_server_enabled:
                 raise
-            return await self._get_user_from_idp_access_token(token)
+            return await self._admit_idp_access_token(token, connection)
         return await self._get_user_from_payload(payload)
 
-    async def _get_user_from_idp_access_token(self, token: str) -> "UserInDB":
-        """Validate an IdP access token and resolve the user by email claim.
+    async def _admit_idp_access_token(
+        self, token: str, connection: HTTPConnection | None
+    ) -> "UserInDB":
+        """Admit an IdP access token once per request, in a transaction of its
+        own that commits before the request goes on.
 
-        Admission (allowed domains, JIT provisioning, tenant membership) is
-        the same ``resolve_federated_user`` decision the OIDC federation
-        callback takes. Any token problem raises ``AuthenticationException``
-        (401), never a 500.
+        The request's transaction commits after the response, so a first
+        binding or a JIT account written there would be served before it is
+        durable: a failed commit would leave a response for an account the
+        identity does not hold. Committed here, a failed commit fails the
+        request, and the binding's locks end before the route runs.
+
+        A request authenticates before its first query, but its dependencies
+        can authenticate again after one (a guard that loads the space, then
+        the route's container). Those take the account admitted for the same
+        token, so the request never waits for a second connection while its
+        own session holds one.
+
+        The token is validated before the transaction starts, since that can
+        fetch the provider's keys. The transaction ends within the store
+        deadline, so a lock held elsewhere or a slow database fails the
+        request instead of holding it. A refusal decided before the deadline
+        still answers as that refusal when the deadline ends its audit.
         """
+        state = connection.state if connection is not None else None
+        admitted = getattr(state, "idp_admission", None)
+        if admitted is not None and admitted[0] == token:
+            return admitted[1].model_copy(deep=True)
+
         from eneo.authentication.oidc_resource_server import (
             validate_idp_access_token,
         )
@@ -821,16 +1001,65 @@ class UserService:
         correlation_id = (
             get_request_context().get("correlation_id") or "oidc-resource-server"
         )
-
         payload = await validate_idp_access_token(
             token, auth_service=self.auth_service, correlation_id=correlation_id
         )
-
+        admission: UserService | None = None
         try:
-            identity = FederatedIdentity.from_claims(payload)
-        except ValueError as exc:
+            async with self._admission() as admission:
+                user = await admission._get_user_from_idp_claims(
+                    payload, correlation_id
+                )
+        except TimeoutError:
+            # The deadline's own expiry; a caller's cancellation propagates.
+            if admission is not None and admission.refused is not None:
+                raise admission.refused from None
+            raise
+        if state is not None:
+            state.idp_admission = (token, user.model_copy(deep=True))
+        return user
+
+    @contextlib.asynccontextmanager
+    async def _admission(self) -> AsyncGenerator["UserService"]:
+        """A user service on a database session of its own, in a transaction
+        that ends within ``STORE_DEADLINE_SECONDS``."""
+        # The container module imports this one.
+        from eneo.authentication.browser_session_service import store_transaction
+        from eneo.main.container.request_container import request_container
+
+        async with sessionmanager.session() as session, store_transaction(session):
+            yield request_container(session=providers.Object(session)).user_service()
+
+    async def _get_user_from_idp_claims(
+        self, payload: dict[str, Any], correlation_id: str
+    ) -> "UserInDB":
+        """Resolve the account a validated IdP access token signs in to.
+
+        Admission (allowed domains, JIT provisioning, tenant membership) is
+        the same ``resolve_federated_user`` decision the OIDC federation
+        callback takes. Unusable claims raise ``AuthenticationException``
+        (401), never a 500.
+        """
+        settings = get_settings()
+        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
+
+        # The config FEDERATION_ENABLED selects, as at sign-in: in env mode
+        # the OIDC_* settings, never a stored config left on the tenant.
+        federation_config = selected_config(settings, tenant)
+        try:
+            # validate_idp_access_token checked iss and aud against these
+            # settings. The subject claim is the selected config's, as at sign-in.
+            identity = FederatedIdentity.from_claims(
+                payload,
+                issuer=cast(str, settings.oidc_accepted_issuer),
+                audience=cast(str, settings.oidc_accepted_audience),
+                subject_claim=subject_claim(
+                    federation_config.get("claims_mapping"), email_claim="email"
+                ),
+            )
+        except (ValueError, OidcProviderError) as exc:
             logger.warning(
-                "IdP access token has no usable email claim",
+                "IdP access token has no usable email or subject claim",
                 extra={
                     "correlation_id": correlation_id,
                     "payload_keys": list(payload.keys()),
@@ -841,35 +1070,32 @@ class UserService:
                 "Could not validate token credentials."
             ) from exc
 
-        tenant = await self._resolve_tenant_for_idp_access_token(correlation_id)
-
-        # Resource-server mode is configured globally, like the global OIDC
-        # login: the tenant's federation config wins, the settings fill in.
-        federation_config = tenant.federation_config or {}
-        allowed_domains = (
-            cast("list[str] | None", federation_config.get("allowed_domains"))
-            or get_settings().oidc_allowed_domains
-        )
-
         try:
             user, _created = await self.resolve_federated_user(
                 identity=identity,
                 tenant_id=tenant.id,
-                allowed_domains=allowed_domains,
+                # The selected config's list and nothing else, as at sign-in:
+                # an empty stored list never falls back to OIDC_ALLOWED_DOMAINS.
+                allowed_domains=cast(
+                    list[str], federation_config.get("allowed_domains") or []
+                ),
                 correlation_id=correlation_id,
             )
+        except IdentityConflictError:
+            # Typed, as the federation callbacks answer it (403, its code).
+            raise
         except FederatedLoginDenied as exc:
             # The token is valid; the identity is not admitted. 403, as the
             # federation callback answers, not a credentials failure.
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        user.credential = CredentialFacts(kind="bearer")
         return user
 
     async def _resolve_tenant_for_idp_access_token(self, correlation_id: str):
         """Pick the tenant IdP-token users belong to.
 
-        ``OIDC_TENANT_ID`` wins when configured (same setting the global OIDC
-        login uses for user creation); otherwise the first active tenant —
-        resource-server mode targets single-tenant deployments.
+        ``OIDC_TENANT_ID`` wins when configured; otherwise the first active
+        tenant — resource-server mode targets single-tenant deployments.
         """
         settings = get_settings()
 
@@ -918,6 +1144,9 @@ class UserService:
             user = await self._get_service_principal_from_token(payload)
         if user is None:
             raise AuthenticationException("No authenticated user.")
+        user.credential = CredentialFacts(
+            kind="derived", session_ref=payload.session_ref
+        )
 
         await self._check_user_and_tenant_state(
             user, correlation_id="internal-mcp-auth"
@@ -1107,6 +1336,7 @@ class UserService:
         # Store the authenticating API key on the user so downstream layers
         # (e.g. SpaceAssembler) can reflect effective permissions accurately.
         user.active_api_key = resolved.key
+        user.credential = CredentialFacts(kind="api_key")
 
         # A route can compose multiple authentication dependencies. They all share
         # one Request, but each dependency may own a separate database session. Do
@@ -1953,7 +2183,7 @@ class UserService:
     ):
         user_in_db = None
         if token is not None:
-            user_in_db = await self._get_user_from_token(token)
+            user_in_db = await self._get_user_from_token(token, request)
 
         elif api_key is not None:
             user_in_db, _ = await self._resolve_api_key(api_key, request=request)
@@ -1968,14 +2198,14 @@ class UserService:
         return user_in_db
 
     async def authenticate_payload(
-        self, payload: JWTPayload, request: Request | None = None
+        self, payload: JWTPayload, request: HTTPConnection | None = None
     ) -> "UserInDB":
         """``authenticate`` for a local token verified earlier.
 
         A response that stays open after its request authenticated (the
-        job-event stream) asks again with the token's claims, so what refuses
-        a new request ends it too: its browser session ended, the user's
-        credentials were invalidated (a password change, signing out
+        job-event stream, a socket) asks again with the token's claims, so
+        what refuses a new request ends it too: its browser session ended, the
+        user's credentials were invalidated (a password change, signing out
         everywhere), or the account or tenant is restricted.
         """
         return await self._admit_user(
@@ -1983,7 +2213,7 @@ class UserService:
         )
 
     async def _admit_user(
-        self, user_in_db: "UserInDB | None", request: Request | None
+        self, user_in_db: "UserInDB | None", request: HTTPConnection | None
     ) -> "UserInDB":
         if user_in_db is None:
             raise AuthenticationException("No authenticated user.")
@@ -2077,7 +2307,7 @@ class UserService:
         assistant_space_id: UUID | None = None
         assistant_tenant_id: UUID | None = None
         if token is not None:
-            user_in_db = await self._get_user_from_token(token)
+            user_in_db = await self._get_user_from_token(token, request)
 
         elif api_key is not None:
             if assistant_id is not None:

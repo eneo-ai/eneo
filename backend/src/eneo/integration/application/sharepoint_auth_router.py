@@ -9,6 +9,7 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     SharePointCredentialsInvalidError,
 )
 from eneo.integration.infrastructure.oauth_token_service import OauthTokenService
+from eneo.observability.error_log import log_error
 
 if TYPE_CHECKING:
     from eneo.integration.application.user_integration_service import (
@@ -67,10 +68,12 @@ class SharePointAuthRouter:
                 )
             )
         except Exception as e:
-            logger.error(
-                f"Failed to fetch OAuth token from database: {type(e).__name__}: {str(e)}",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to fetch OAuth token from database",
+                error=e,
                 extra={"user_integration_id": str(user_integration.id)},
-                exc_info=True,
             )
             raise ValueError(
                 f"Failed to retrieve OAuth token for user integration {user_integration.id}"
@@ -140,13 +143,15 @@ class SharePointAuthRouter:
         except SharePointCredentialsInvalidError:
             raise
         except Exception as e:
-            logger.error(
-                f"Failed to acquire token: {type(e).__name__}: {str(e)}",
+            log_error(
+                logger,
+                logging.ERROR,
+                "Failed to acquire token",
+                error=e,
                 extra={
                     "tenant_app_id": str(tenant_app.id),
                     "auth_method": tenant_app.auth_method,
                 },
-                exc_info=True,
             )
             raise ValueError(
                 f"Failed to acquire access token for tenant app {tenant_app.id} "

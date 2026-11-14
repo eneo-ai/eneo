@@ -92,7 +92,9 @@ def request_operation(
     expect_admission: bool = False,
     body: dict[str, object] | None = None,
 ):
-    async def token_user(_self: UserService, token: str) -> UserInDB:
+    async def token_user(
+        _self: UserService, token: str, _connection: object = None
+    ) -> UserInDB:
         assert user is not None
         return user
 

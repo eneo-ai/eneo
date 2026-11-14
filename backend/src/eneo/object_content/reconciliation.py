@@ -4,6 +4,7 @@ import asyncio
 from dataclasses import dataclass, replace
 from secrets import token_hex
 from time import monotonic
+from typing import Literal
 from uuid import UUID
 
 from eneo.database.database import DatabaseSessionManager, sessionmanager
@@ -26,11 +27,13 @@ from eneo.object_content.object_store_provider import (
 )
 from eneo.object_content.reconciliation_repository import (
     InlineConversionResult,
+    InventoryListing,
     MultipartAbortLease,
     ObjectContentHealthFacts,
     ObjectContentReconciliationRepository,
     OrphanDeleteLease,
     ReconciliationWork,
+    RemovalReadback,
 )
 from eneo.object_content.s3_object_store import (
     ObjectStoreIntegrityError,
@@ -38,6 +41,12 @@ from eneo.object_content.s3_object_store import (
     ObjectStoreUnavailableError,
 )
 from eneo.object_content.store_binding import require_store_generation
+
+# What one orphan's delete did: deleted, left for a retry by the store, or
+# skipped because another reconciler holds or finished it.
+# What one cleanup of store bytes did: done, left for a retry because the
+# store did not confirm it, or skipped because another pass holds it.
+_StoreCleanup = Literal["done", "left", "skipped"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +62,12 @@ class ReconciliationResult:
     multipart_aborted: int
     orphan_objects_deleted: int
     inline_conversion: InlineConversionResult = InlineConversionResult()
+    # Store operations that failed and that the pass left for a later one: a
+    # delete, an orphan's delete, an abandoned upload's abort or a
+    # verification scheduled for retry, an upload or move whose stored bytes
+    # did not verify, a move the store refused, an inventory or move run cut
+    # short, an unready store. What the pass did commit stands.
+    store_failures: int = 0
 
     @classmethod
     def empty(cls) -> "ReconciliationResult":
@@ -194,6 +209,7 @@ class ObjectContentReconciler:
         content_processed = sum(
             1 for outcome in outcomes if not isinstance(outcome, BaseException)
         )
+        store_failures = sum(1 for outcome in outcomes if outcome is True)
         remote_work_available = True
         for outcome in outcomes:
             if isinstance(outcome, ObjectContentUnavailableError):
@@ -217,18 +233,22 @@ class ObjectContentReconciler:
             missing_objects = await self._mark_missing_from_completed_inventory(
                 store_lease
             )
-            multipart_aborted = await self._reconcile_multipart_page(store_lease)
-            orphan_objects_deleted = await self._delete_orphans(
+            multipart_aborted, aborts_left = await self._reconcile_multipart_page(
+                store_lease
+            )
+            store_failures += aborts_left
+            orphan_objects_deleted, orphans_left = await self._delete_orphans(
                 lease_owner,
                 store_lease=store_lease,
             )
+            store_failures += orphans_left
         except (ObjectStoreUnavailableError, ObjectContentUnavailableError):
             # Each preceding phase commits independently. Preserve its result
             # when a later object-store call becomes unavailable, or when a
             # rotation or destination switch advances the store generation, so
             # the worker summary agrees with the durable transitions already
             # recorded.
-            pass
+            store_failures += 1
         async with self._database.session() as session, session.begin():
             (
                 references_audited,
@@ -238,14 +258,17 @@ class ObjectContentReconciler:
             ).audit_reference_counts(
                 limit=self._core_settings.reconciliation_batch_size
             )
+        move_executor = ObjectContentMoveExecutor(
+            self._core_settings,
+            self._database,
+            store_lease=store_lease,
+        )
         try:
-            moves_processed = await ObjectContentMoveExecutor(
-                self._core_settings,
-                self._database,
-                store_lease=store_lease,
-            ).run_once()
+            moves_processed = await move_executor.run_once()
+            store_failures += move_executor.store_failures
         except ObjectContentUnavailableError:
             moves_processed = 0
+            store_failures += 1
         return ReconciliationResult(
             lifecycle_advanced=lifecycle_advanced,
             inline_deleted=inline_deleted,
@@ -257,11 +280,24 @@ class ObjectContentReconciler:
             object_cycle_completed=object_cycle_completed,
             multipart_aborted=multipart_aborted,
             orphan_objects_deleted=orphan_objects_deleted,
+            store_failures=store_failures,
         )
 
     async def health_facts(self) -> ObjectContentHealthFacts:
         async with self._database.session() as session, session.begin():
             return await ObjectContentReconciliationRepository(session).health_facts()
+
+    async def removal_readback(self) -> RemovalReadback:
+        async with self._database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).removal_readback()
+
+    async def inventory_listing(self) -> InventoryListing:
+        async with self._database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).inventory_listing()
 
     async def _process_content(
         self,
@@ -270,23 +306,21 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         if work.state is ContentState.PENDING:
-            await self._reconcile_pending(
+            return await self._reconcile_pending(
                 work,
                 lease_owner,
                 store_lease=store_lease,
                 lease_started_at=lease_started_at,
             )
-            return
         if work.state is ContentState.DELETE_PENDING:
-            await self._reconcile_delete(
+            return await self._reconcile_delete(
                 work,
                 lease_owner,
                 store_lease=store_lease,
                 lease_started_at=lease_started_at,
             )
-            return
         raise RuntimeError(f"Unsupported reconciliation state: {work.state}")
 
     async def _reconcile_pending(
@@ -296,7 +330,7 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         settings = store_lease.settings
         store = store_lease.store
 
@@ -339,25 +373,26 @@ class ObjectContentReconciler:
                     content_id=work.content_id,
                     lease_owner=lease_owner,
                 )
-            return
+            return False
         except ObjectStoreIntegrityError:
+            # The store holds other bytes than those written: a store failure.
             await self._record_integrity_failure(
                 work.content_id, lease_owner, store_lease=store_lease
             )
-            return
+            return True
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
-            return
+            return True
         except (ObjectContentBusyError, ObjectContentStateError):
             # An expired lease may legally move to another reconciler while a
             # stalled process resumes. The current lease owner will converge it.
-            return
+            return False
 
         if digest != work.sha256:
             await self._record_integrity_failure(
                 work.content_id, lease_owner, store_lease=store_lease
             )
-            return
+            return True
         try:
             async with self._database.session() as session, session.begin():
                 await require_store_generation(
@@ -371,7 +406,8 @@ class ObjectContentReconciler:
                 )
         except ObjectContentStateError:
             # A final owner detach can legally win while the remote verification runs.
-            return
+            return False
+        return False
 
     async def _reconcile_delete(
         self,
@@ -380,7 +416,7 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> None:
+    ) -> bool:
         settings = store_lease.settings
         store = store_lease.store
 
@@ -405,9 +441,9 @@ class ObjectContentReconciler:
             )
         except ObjectStoreUnavailableError:
             await self._record_retry(work, lease_owner)
-            return
+            return True
         except (ObjectContentBusyError, ObjectContentStateError):
-            return
+            return False
         try:
             async with self._database.session() as session, session.begin():
                 await require_store_generation(
@@ -423,7 +459,8 @@ class ObjectContentReconciler:
                     purge_after=None,
                 )
         except (ObjectContentBusyError, ObjectContentStateError):
-            return
+            return False
+        return False
 
     async def _record_integrity_failure(
         self,
@@ -548,7 +585,8 @@ class ObjectContentReconciler:
     async def _reconcile_multipart_page(
         self,
         store_lease: ObjectStoreLease,
-    ) -> int:
+    ) -> tuple[int, int]:
+        """Abandoned uploads aborted, and aborts left for a retry by the store."""
         settings = store_lease.settings
         store = store_lease.store
         async with self._database.session() as session, session.begin():
@@ -594,7 +632,7 @@ class ObjectContentReconciler:
                 for lease in abortable
             )
         )
-        return sum(results)
+        return results.count("done"), results.count("left")
 
     async def _abort_multipart(
         self,
@@ -602,7 +640,7 @@ class ObjectContentReconciler:
         lease_owner: str,
         *,
         store_lease: ObjectStoreLease,
-    ) -> int:
+    ) -> _StoreCleanup:
         settings = store_lease.settings
         store = store_lease.store
         lease_started_at = monotonic()
@@ -620,7 +658,7 @@ class ObjectContentReconciler:
                 lease_seconds=settings.reconciliation_lease_seconds,
             )
         if not confirmed:
-            return 0
+            return "skipped"
 
         async def renew_multipart_abort_lease() -> None:
             async with self._database.session() as session, session.begin():
@@ -652,9 +690,9 @@ class ObjectContentReconciler:
                     lease=lease,
                     lease_owner=lease_owner,
                 )
-            return 0
+            return "left"
         except (ObjectContentBusyError, ObjectContentStateError):
-            return 0
+            return "skipped"
         async with self._database.session() as session, session.begin():
             await require_store_generation(
                 session,
@@ -669,15 +707,16 @@ class ObjectContentReconciler:
                     lease_owner=lease_owner,
                 )
             except ObjectContentBusyError:
-                return 0
-        return 1
+                return "skipped"
+        return "done"
 
     async def _delete_orphans(
         self,
         lease_owner: str,
         *,
         store_lease: ObjectStoreLease,
-    ) -> int:
+    ) -> tuple[int, int]:
+        """Orphans deleted, and orphans left for a retry by the store."""
         settings = store_lease.settings
         lease_started_at = monotonic()
         async with self._database.session() as session, session.begin():
@@ -702,7 +741,7 @@ class ObjectContentReconciler:
                 for lease in leases
             )
         )
-        return sum(results)
+        return results.count("done"), results.count("left")
 
     async def _delete_orphan(
         self,
@@ -711,7 +750,7 @@ class ObjectContentReconciler:
         *,
         store_lease: ObjectStoreLease,
         lease_started_at: float,
-    ) -> int:
+    ) -> _StoreCleanup:
         settings = store_lease.settings
         store = store_lease.store
         async with self._database.session() as session, session.begin():
@@ -727,7 +766,7 @@ class ObjectContentReconciler:
                 lease_owner=lease_owner,
             )
         if not confirmed:
-            return 0
+            return "skipped"
 
         async def renew_orphan_delete_lease() -> None:
             async with self._database.session() as session, session.begin():
@@ -758,9 +797,9 @@ class ObjectContentReconciler:
                     object_key=lease.object_key,
                     lease_owner=lease_owner,
                 )
-            return 0
+            return "left"
         except (ObjectContentBusyError, ObjectContentStateError):
-            return 0
+            return "skipped"
         async with self._database.session() as session, session.begin():
             await require_store_generation(
                 session,
@@ -771,4 +810,4 @@ class ObjectContentReconciler:
                 object_key=lease.object_key,
                 lease_owner=lease_owner,
             )
-        return 1
+        return "done"

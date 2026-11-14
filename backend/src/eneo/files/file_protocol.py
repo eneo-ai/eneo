@@ -255,11 +255,7 @@ class FileProtocol:
                 # would stall every request and stream on this event loop.
                 processed = await _IMAGE_DECODER.run(
                     lambda: downscale_image(
-                        self.image_extractor.extract(
-                            filepath,
-                            media_type,
-                            upload_file.filename,
-                        ),
+                        self.image_extractor.extract(filepath, media_type),
                         media_type,
                     ),
                 )
@@ -295,7 +291,7 @@ class FileProtocol:
                 extracted_text = (
                     (
                         await self.text_extractor.extract_from_pdf_async(
-                            filepath, upload_file.filename, limits=pdf_limits
+                            filepath, limits=pdf_limits
                         )
                     )
                     .strip()

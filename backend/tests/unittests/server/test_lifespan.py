@@ -61,6 +61,42 @@ async def test_connection_table_outage_does_not_stop_startup(
 
 
 @pytest.mark.asyncio
+async def test_a_refused_object_store_is_logged_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The API server reports only that its worker failed to boot, so the
+    reason must be in the application's own log before startup fails."""
+    settings = SimpleNamespace(
+        openapi_only_mode=False,
+        database_url="postgresql+asyncpg://unused",
+        testing=True,
+        encryption_key="unused",
+    )
+    reason = "Object content storage bucket 'eneo-content' has versioning enabled"
+    monkeypatch.setattr(lifespan_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(lifespan_module.sessionmanager, "init", MagicMock())
+    monkeypatch.setattr(lifespan_module.sessionmanager, "close", AsyncMock())
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "start", MagicMock())
+    monkeypatch.setattr(
+        lifespan_module.object_content_runtime,
+        "validate_configuration",
+        AsyncMock(side_effect=ObjectContentConfigurationError(reason)),
+    )
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "stop", AsyncMock())
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "start", MagicMock())
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "stop", AsyncMock())
+
+    logger = MagicMock()
+    monkeypatch.setattr(lifespan_module, "logger", logger)
+
+    with pytest.raises(ObjectContentConfigurationError):
+        await lifespan_module.startup()
+
+    [(message, error)] = [call.args for call in logger.error.call_args_list]
+    assert reason in message % error
+
+
+@pytest.mark.asyncio
 async def test_shutdown_drains_streamed_turns_before_closing_what_they_use(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -141,6 +177,12 @@ def _patch_startup_dependencies(
 
     monkeypatch.setattr(lifespan_module, "get_settings", lambda: settings)
     monkeypatch.setattr(
+        lifespan_module.process_scratch, "start", record_sync("scratch.start")
+    )
+    monkeypatch.setattr(
+        lifespan_module.process_scratch, "stop", record_sync("scratch.stop")
+    )
+    monkeypatch.setattr(
         lifespan_module.sessionmanager, "init", record_sync("sessionmanager.init")
     )
     monkeypatch.setattr(
@@ -187,6 +229,7 @@ async def test_startup_and_shutdown_are_persistence_around_the_api_only_parts(
 
 
 _STARTED = [
+    "scratch.start",
     "sessionmanager.init",
     "runtime.start",
     "runtime.validate",
@@ -196,7 +239,7 @@ _STARTED = [
     "roles",
 ]
 # The websocket listeners leave their subscriptions before the Redis clients
-# behind them close.
+# behind them close, and the process's scratch directory goes last.
 _SHUT_DOWN = [
     "runtime.stop",
     "sessionmanager.close",
@@ -204,20 +247,28 @@ _SHUT_DOWN = [
     "jobs.close",
     "websockets.shutdown",
     "redis.stop",
+    "scratch.stop",
 ]
 
 
 # What a failed startup stops: only what it started, last started first. A
 # step that failed started nothing of its own.
 _UNWOUND_AFTER = {
-    "redis.start": ["runtime.stop", "sessionmanager.close"],
-    "jobs.init": ["aiohttp.stop", "redis.stop", "runtime.stop", "sessionmanager.close"],
+    "redis.start": ["runtime.stop", "sessionmanager.close", "scratch.stop"],
+    "jobs.init": [
+        "aiohttp.stop",
+        "redis.stop",
+        "runtime.stop",
+        "sessionmanager.close",
+        "scratch.stop",
+    ],
     "roles": [
         "jobs.close",
         "aiohttp.stop",
         "redis.stop",
         "runtime.stop",
         "sessionmanager.close",
+        "scratch.stop",
     ],
 }
 
@@ -332,11 +383,13 @@ async def test_a_configuration_error_stops_what_persistence_started(
         await lifespan_module.startup()
 
     assert order == [
+        "scratch.start",
         "sessionmanager.init",
         "runtime.start",
         "runtime.validate",
         "runtime.stop",
         "sessionmanager.close",
+        "scratch.stop",
     ]
 
 
