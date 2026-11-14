@@ -1,6 +1,4 @@
-import importlib.util
 from datetime import datetime, timezone
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -31,7 +29,7 @@ DEFAULTS = {
     "flow_pdf_max_pages": 2000,
     "flow_pdf_max_extracted_bytes": 134217728,
     "flow_pdf_extraction_timeout_seconds": 900,
-    "attachment_max_size_bytes": 268435456,
+    "attachment_max_size_bytes": 26214400,
     "attachment_max_files": 100,
 }
 
@@ -84,17 +82,12 @@ def test_inline_storage_rejects_invalid_sizes(value):
         ObjectContentCoreSettings(inline_maximum_bytes=value)
 
 
-def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
-    path = (
-        Path(__file__).parents[3]
-        / "alembic/versions/202609201300_raise_upload_policy_defaults.py"
-    )
-    spec = importlib.util.spec_from_file_location("upload_policy_defaults", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    limits_after_migration = {name: new for name, (_, new) in module._LIMITS.items()}
-    assert limits_after_migration == {
+def test_large_upload_limits_an_administrator_chooses_admit_large_workloads(
+    monkeypatch,
+):
+    # An upgrade leaves the policy as the organisation set it; these are the
+    # limits an administrator raises it to for long recordings and documents.
+    chosen_limits = {
         "session_file_limit_bytes": 268435456,
         "knowledge_file_limit_bytes": 268435456,
         "transcription_audio_limit_bytes": 402653184,
@@ -109,7 +102,7 @@ def test_migrated_upload_defaults_admit_large_workloads(monkeypatch):
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
         session_image_limit_bytes=10485760,
-        **limits_after_migration,
+        **chosen_limits,
     )
     projections = {
         item.use_case.value: item.effective_bytes

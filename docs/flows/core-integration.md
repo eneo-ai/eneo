@@ -3,11 +3,81 @@
 Status record for the integration branch `feat/flows-core-integration`. It
 keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
-a loopback MCP server and a web-next administration. Flows are on for every
-tenant: the `flows_core` feature flag is seeded off by 202610211900 and turned
-on by 202610220930, which also gives existing predefined Owner roles the four
-flow permissions (and AI Configurator roles `flows_trace`), as new tenants get
-them. A tenant row with `enabled = false` turns flows off for that tenant.
+a loopback MCP server and a web-next administration. While the global
+`flows_core` row is off, Flows are off until an organisation chooses them:
+202610211900 seeds the `flows_core` feature flag off, no upgrade turns it on or
+gives a role a flow permission, and the predefined roles of a new organisation
+carry none.
+
+## What changed from earlier builds of this branch
+
+Earlier builds of this branch switched Flows on for every organisation on
+upgrade, gave the Owner role the four flow permissions and the AI Configurator
+role `flows_trace`, gave every role with `admin` `retention_manage` and
+`retention_holds`, and raised the upload limits. An upgrade now does none of
+that. An installation that upgrades from 2.3 or installs fresh with this
+version therefore needs these steps before Flows and retention can be used:
+
+1. An operator switches Flows on for each organisation that uses them (below).
+2. An administrator grants the flow permissions and the retention permissions
+   to the roles that need them in **Admin > Roles**. Until then nobody can
+   change retention rules or legal holds; the retention endpoints answer 403
+   `retention_permission_required`.
+3. An administrator who wants larger uploads raises the limits in
+   **Admin > File storage**.
+
+A database that already ran the earlier revisions keeps what they did: Flows
+stay on through the global flag and existing roles keep their permissions.
+From this version on, a new organisation and a role reset to its template carry
+no flow or retention permission, so an administrator grants them there; and
+persistent assistant attachments default to 25 MiB unless
+`ATTACHMENT_MAX_SIZE_BYTES` is set.
+
+## Turning Flows on
+
+Switch Flows on for one organisation with that organisation's own flag row,
+then give the roles that should use them the flow permissions. The global row
+stays off, so no other organisation is affected. Replace `<organisation>` with
+the name in `tenants.name`:
+
+```sql
+INSERT INTO tenant_feature_flags (name, feature_id, tenant_id, enabled)
+SELECT 'flows_core', flag.id, tenant.id, true
+FROM global_feature_flags AS flag, tenants AS tenant
+WHERE flag.name = 'flows_core' AND tenant.name = '<organisation>'
+ON CONFLICT (feature_id, tenant_id)
+DO UPDATE SET enabled = true, updated_at = now();
+
+UPDATE roles
+SET permissions = permissions || ARRAY(
+    SELECT permission
+    FROM unnest('{flows_view,flows_run,flows_manage,flows_trace}'::varchar[])
+        AS permission
+    WHERE permission <> ALL (permissions)
+)
+WHERE predefined_source = 'Owner'
+  AND tenant_id = (SELECT id FROM tenants WHERE name = '<organisation>');
+```
+
+`flows_view` reads flows, `flows_run` runs them, `flows_manage` builds and
+publishes them, and `flows_trace` reads run traces. Grant other roles the
+permissions they need in the same way, selecting them by `name` instead of
+`predefined_source`. Resetting the Owner role to its template removes the flow
+permissions again. To switch Flows off for the organisation, set `enabled` on
+its row to `false`.
+
+### Retention permissions
+
+No role receives `retention_manage` or `retention_holds` automatically: not on
+upgrade (`202610041000` creates the hold table and grants nothing), not from a
+role template, and not the Owner role. An administrator grants them in role
+editing (Svelte and web-next). Startup never rewrites an existing role; a reset
+to the template removes them. The downgrade of `202610041000` removes both from
+every role, and upgrading again does not give them back. The web-next page
+`/admin/flow-data-retention` stays in the admin menu for `admin` when Flows
+are on, because its upload and debug windows are admin settings; the retention
+rules on it follow the two permissions, and the backend checks every request
+(`flow_retention_authz.py`).
 
 ## Starting points
 

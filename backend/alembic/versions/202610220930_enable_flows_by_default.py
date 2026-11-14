@@ -1,18 +1,14 @@
-"""Turn flows on by default and give existing predefined roles their permissions
+"""Leave the flows_core flag and the roles as the organisation chose them
 
-202610211900 seeded the ``flows_core`` flag off. Flows are now on for every
-tenant; the flag stays as a per-tenant off switch (a tenant row with
-``enabled = false``).
+This revision used to turn the ``flows_core`` flag on for every tenant and to
+give predefined Owner and AI Configurator roles the flow permissions. An
+upgrade must not make that choice for an organisation: Flows stay off, as
+202610211900 seeded the flag, until an administrator switches them on with the
+organisation's own row in ``tenant_feature_flags`` and grants the roles that
+should use them.
 
-Roles created before the flow permissions existed never received them, so an
-upgraded tenant would see nothing even with the flag on. Predefined Owner roles
-get the four flow permissions and predefined AI Configurator roles get
-``flows_trace``, as new tenants receive them from ``predefined_roles.yml``.
-Custom roles are left to their administrators.
-
-The downgrade turns the flag off again and leaves the permissions: while the
-flag is off they grant nothing, and Owner roles of tenants created after the
-permissions existed held them before this revision too.
+The revision stays in the chain with an empty body both ways, so databases
+already past it keep their revision history and the graph does not change.
 
 Revision ID: 202610220930
 Revises: 202610212300
@@ -23,40 +19,15 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-import sqlalchemy as sa
-
-from alembic import op
-
 revision: str = "202610220930"
 down_revision: str | None = "202610212300"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_GRANTS = {
-    "Owner": ("flows_view", "flows_run", "flows_manage", "flows_trace"),
-    "AI Configurator": ("flows_trace",),
-}
-
 
 def upgrade() -> None:
-    op.execute(
-        "UPDATE global_feature_flags SET enabled = true, updated_at = now() "
-        "WHERE name = 'flows_core'"
-    )
-    for source, permissions in _GRANTS.items():
-        for permission in permissions:
-            op.get_bind().execute(
-                sa.text(
-                    "UPDATE roles SET permissions = array_append(permissions, :permission) "
-                    "WHERE predefined_source = :source "
-                    "AND NOT (:permission = ANY(permissions))"
-                ),
-                {"permission": permission, "source": source},
-            )
+    pass
 
 
 def downgrade() -> None:
-    op.execute(
-        "UPDATE global_feature_flags SET enabled = false, updated_at = now() "
-        "WHERE name = 'flows_core'"
-    )
+    pass

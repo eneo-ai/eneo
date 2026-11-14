@@ -22,7 +22,7 @@ def _offline_sql(revision_range: str, *, downgrade: bool = False) -> str:
     return output.getvalue()
 
 
-def test_upgrade_renders_the_table_indexes_and_the_admin_role_grant() -> None:
+def test_upgrade_renders_the_table_and_indexes_and_grants_no_role() -> None:
     sql = _offline_sql("202610021015:202610041000")
 
     assert "SET LOCAL lock_timeout = '5s'" in sql
@@ -55,13 +55,9 @@ def test_upgrade_renders_the_table_indexes_and_the_admin_role_grant() -> None:
             f"CREATE INDEX ix_flow_retention_holds_{column} ON flow_retention_holds "
             f"({column}) WHERE {column} IS NOT NULL"
         ) in sql
-    for permission in ("retention_manage", "retention_holds"):
-        assert (
-            "UPDATE roles SET permissions = "
-            f"array_append(permissions, '{permission}') "
-            "WHERE 'admin' = ANY(permissions) "
-            f"AND NOT ('{permission}' = ANY(permissions))"
-        ) in sql
+    # No role is granted the retention permissions by the upgrade.
+    assert "UPDATE roles" not in sql
+    assert "array_append" not in sql
     assert "review_by TIMESTAMP WITH TIME ZONE NOT NULL" in sql
     assert "UPDATE alembic_version SET version_num='202610041000'" in sql
 
