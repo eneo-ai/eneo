@@ -207,12 +207,24 @@ export function RolesPage() {
         toast.success(t("roles_saved_toast", { name: trimmed }));
       }
       setEditor(null);
-      await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
+      await refreshRoles();
     } catch (error) {
       toastApiError(error, t);
     } finally {
       setSaving(false);
     }
+  }
+
+  /**
+   * The role list, and the signed-in user's own permissions: /users/me is held
+   * for the session, so a change to a role they hold reaches what they may do
+   * only through this.
+   */
+  function refreshRoles() {
+    return Promise.all([
+      queryClient.invalidateQueries({ queryKey: ROLES_KEY }),
+      queryClient.invalidateQueries({ queryKey: sessionKeys.me })
+    ]);
   }
 
   async function runPending() {
@@ -245,7 +257,7 @@ export function RolesPage() {
         toast.success(t("roles_default_toast", { name: role.name }));
       }
       setPending(null);
-      await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
+      await refreshRoles();
     } catch (error) {
       toastApiError(error, t);
     } finally {
