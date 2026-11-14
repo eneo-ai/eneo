@@ -382,9 +382,11 @@ class ObjectContentReconciliationRepository:
         return len(unowned_pending) + len(deletions)
 
     async def tombstone_inline_deletions(self, *, limit: int) -> int:
-        rows = (
-            await self._session.execute(
-                select(ObjectContents, InlineContentPayloads)
+        # Select only the control rows: the payload column holds whole files,
+        # and a batch may hold many. The join still locks each payload row.
+        contents = (
+            await self._session.scalars(
+                select(ObjectContents)
                 .join(
                     InlineContentPayloads,
                     InlineContentPayloads.content_id == ObjectContents.id,
@@ -400,12 +402,18 @@ class ObjectContentReconciliationRepository:
                 .with_for_update(skip_locked=True)
             )
         ).all()
-        if not rows:
+        if not contents:
             return 0
 
+        # No ORM listener or cascade hangs off the payload row; the database
+        # triggers that guard it run for this statement as for any other.
+        await self._session.execute(
+            delete(InlineContentPayloads)
+            .where(InlineContentPayloads.content_id.in_([row.id for row in contents]))
+            .execution_options(synchronize_session=False)
+        )
         now = await self._database_now()
-        for content, payload in rows:
-            await self._session.delete(payload)
+        for content in contents:
             content.state = ContentState.TOMBSTONED.value
             content.payload_deleted_at = now
             content.tombstone_purge_after = None
@@ -415,7 +423,7 @@ class ObjectContentReconciliationRepository:
             content.lease_owner = None
             content.lease_until = None
         await self._session.flush()
-        return len(rows)
+        return len(contents)
 
     async def claim_content_work(
         self,

@@ -2,7 +2,8 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import delete, event, select
+from sqlalchemy.engine import Engine
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.files_table import Files
@@ -129,11 +130,30 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
                 )
             )
 
-        result = await ObjectContentReconciler(
-            settings,
-            object_content_database,
-        ).run_once()
+        # Deleting a stored file must not load it: a reconciliation batch holds
+        # up to reconciliation_batch_size rows, and each payload can be as large
+        # as the inline ceiling.
+        statements: list[str] = []
+
+        def record(conn, cursor, statement, *args) -> None:  # noqa: ARG001
+            statements.append(statement)
+
+        event.listen(Engine, "before_cursor_execute", record)
+        try:
+            result = await ObjectContentReconciler(
+                settings,
+                object_content_database,
+            ).run_once()
+        finally:
+            event.remove(Engine, "before_cursor_execute", record)
         assert result.inline_deleted == 1
+        payload_reads = [
+            statement
+            for statement in statements
+            if statement.lstrip().upper().startswith("SELECT")
+            and "inline_content_payloads.payload" in statement
+        ]
+        assert payload_reads == []
 
         async with object_content_database.session() as session, session.begin():
             control = await session.get(ObjectContents, prepared.id)
