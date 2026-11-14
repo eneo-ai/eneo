@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@ae323d284645
+translationSource: guides/upgrade-notes.mdx@e36ec192af13
 ---
 
 import { Callout } from "nextra/components";
@@ -347,7 +347,7 @@ När policyn för oanvända nycklar (`auto_expire_unused_days`) lät en nyckel g
 - nycklar med statusen Utgången som fortfarande loggar in, oavsett vad policyn säger nu;
 - nycklar som policyn låter gå ut, också tjänstenycklar som modulernas, och nycklar utan slutdatum.
 
-En körning tar högst 500 nycklar ur varje urval: nycklar efter sitt slutdatum, nycklar registrerade som utgångna men fortfarande öppna, nycklar vars rotationsfrist har gått ut, och oanvända nycklar per organisation. Med fler nycklar slutar några att fungera några nätter senare. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningsloggen eller åtgärden.
+En körning tar högst 500 nycklar ur varje urval: nycklar efter sitt slutdatum, nycklar registrerade som utgångna men fortfarande öppna, nycklar vars rotationsfrist har gått ut, och oanvända nycklar per organisation. Nycklar utöver gränsen väntar till en senare natt. En oanvänd nyckel, eller en som är registrerad som utgången men fortfarande öppen, fungerar till dess; en nyckel efter sitt slutdatum eller sin rotationsfrist nekas redan vid inloggningen, och bara det registrerade läget och granskningsraden väntar. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningsloggen eller åtgärden.
 
 **Gör:** före uppgraderingen, leta i **Admin > API-nycklar** upp nycklarna med statusen Utgången som en integration eller modul fortfarande använder, och nycklarna som policyn kommer att låta gå ut. Skapa en ny nyckel och lägg in den i integrationen, eller i modulens konfiguration för en moduls tjänstenyckel. Sätt policyns antal dagar längre än det längsta uppehållet för en tjänst som använder en nyckel. En nyckel som har gått ut kommer inte tillbaka när policyn stängs av. Se [Nattligt underhåll](/docs/api-key-management#nightly-maintenance).
 
