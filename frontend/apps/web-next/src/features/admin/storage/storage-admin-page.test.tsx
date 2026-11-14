@@ -152,7 +152,7 @@ it("says the deprecated variable can hold the database storage limit below the p
   expect(await screen.findByText(databaseCeiling)).toBeTruthy();
   expect(
     screen.getByText(
-      "Lagringsgränsen är 10 MB, lägre än några av gränserna ovan, så de uppladdningarna stoppas vid 10 MB."
+      "Lagringsgränsen är 10 MB, lägre än några av gränserna ovan, så de uppladdningarna stoppas där."
     )
   ).toBeTruthy();
   expect(screen.getByText(databaseCost)).toBeTruthy();

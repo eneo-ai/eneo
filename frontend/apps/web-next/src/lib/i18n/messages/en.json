@@ -185,7 +185,7 @@
   "storage_constraint_admin_policy": "Admin policy",
   "storage_constraint_operator_ceiling": "Storage limit",
   "storage_limits_database_ceiling": "Files stored in the database also have a storage limit: the most PostgreSQL holds per file, or less if the deprecated environment variable OBJECT_CONTENT_INLINE_MAXIMUM_BYTES is still set. Operations removes that variable so that the limits above apply.",
-  "storage_limits_database_ceiling_applies": "The storage limit is {size}, lower than some limits above, so those uploads stop at {size}.",
+  "storage_limits_database_ceiling_applies": "The storage limit is {size}, lower than some limits above, so those uploads stop there.",
   "storage_limits_database_cost": "Each upload is read into memory in full, and every file is included in the database backup.",
   "storage_use_case_session_file": "Session file",
   "storage_use_case_session_image": "Session image",

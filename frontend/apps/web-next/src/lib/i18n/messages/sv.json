@@ -185,7 +185,7 @@
   "storage_constraint_admin_policy": "Administratörspolicy",
   "storage_constraint_operator_ceiling": "Lagringsgräns",
   "storage_limits_database_ceiling": "Filer som lagras i databasen har också en lagringsgräns: det mesta PostgreSQL rymmer per fil, eller mindre om den föråldrade miljövariabeln OBJECT_CONTENT_INLINE_MAXIMUM_BYTES fortfarande är satt. Driften tar bort variabeln så att gränserna ovan gäller.",
-  "storage_limits_database_ceiling_applies": "Lagringsgränsen är {size}, lägre än några av gränserna ovan, så de uppladdningarna stoppas vid {size}.",
+  "storage_limits_database_ceiling_applies": "Lagringsgränsen är {size}, lägre än några av gränserna ovan, så de uppladdningarna stoppas där.",
   "storage_limits_database_cost": "Varje uppladdning läses in helt i minnet, och varje fil hamnar i databasens säkerhetskopia.",
   "storage_use_case_session_file": "Sessionsfil",
   "storage_use_case_session_image": "Sessionsbild",

@@ -403,7 +403,7 @@ describe("admin storage settings page", () => {
     await expect
       .element(page.getByText(/^The storage limit is/))
       .toHaveTextContent(
-        "The storage limit is 8 storage_unit_mb, lower than some limits above, so those uploads stop at 8 storage_unit_mb."
+        "The storage limit is 8 storage_unit_mb, lower than some limits above, so those uploads stop there."
       );
     await expect
       .element(
