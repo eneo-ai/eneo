@@ -60,11 +60,12 @@ EMBEDDING_MODEL_NAME = "e2e-mock-embedding"
 OWNER_ROLE_SOURCE = "Owner"
 PERMISSIONS_ADAPTER = TypeAdapter(list[str])
 # Flows are off for an organisation until it is switched on, and no role gets
-# their permissions from the template. The E2E organisation runs the flow legs,
-# so the stack switches Flows on for it alone and grants its Owner, as an
-# administrator would.
+# the flow or retention permissions from the template. The E2E organisation
+# runs the flow legs and the retention rules, so the stack switches Flows on
+# for it alone and grants its Owner, as an administrator would.
 FLOWS_FLAG = "flows_core"
 FLOW_PERMISSIONS = ("flows_view", "flows_run", "flows_manage", "flows_trace")
+RETENTION_PERMISSIONS = ("retention_manage",)
 
 
 def _predefined_owner_permissions() -> list[str]:
@@ -104,7 +105,11 @@ async def _ensure_owner_permissions(session: AsyncSession, tenant_id: UUID) -> N
     if role is None:
         raise RuntimeError("E2E Owner role not found.")
 
-    wanted_permissions = [*_predefined_owner_permissions(), *FLOW_PERMISSIONS]
+    wanted_permissions = [
+        *_predefined_owner_permissions(),
+        *FLOW_PERMISSIONS,
+        *RETENTION_PERMISSIONS,
+    ]
     existing_permissions = list(role.permissions)
     missing_permissions = [
         permission

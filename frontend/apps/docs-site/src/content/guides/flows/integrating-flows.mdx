@@ -20,6 +20,8 @@ Use your Eneo deployment origin as the base URL. Eneo does not publish a shared 
 
 Paths in this guide are written under `/api/v1/`, which is the prefix the reference configuration ships. It is an operator setting (`API_PREFIX`), not a constant, so read the prefix once from the paths in that deployment's `/openapi.json`, build your base URL from it, and treat every path below as relative to that base.
 
+Flows are off for each organisation until an operator switches them on for it. Until then every flow route answers `404`, and `GET /api/v1/settings/` reports `flows_enabled: false`.
+
 ### Authenticate requests
 
 Authenticate every request with exactly one credential, unless you call as a module session:

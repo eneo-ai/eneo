@@ -120,9 +120,12 @@ encrypted as in production, with a fixed, public test `ENCRYPTION_KEY` set in bo
 encrypted by the backend, so specs can add providers too.
 
 **Flows on for the test tenant.** An installation has Flows off and gives no
-role the flow permissions, so `e2e/seed.py` switches Flows on for `E2ETenant`
-through the tenant's own flag row and grants its Owner role `flows_view`,
-`flows_run`, `flows_manage` and `flows_trace`.
+role the flow or retention permissions, so `e2e/seed.py` switches Flows on for
+`E2ETenant` through the tenant's own flag row and grants its Owner role
+`flows_view`, `flows_run`, `flows_manage`, `flows_trace` and
+`retention_manage`, so the specs reach the retention rules as an administrator
+who may change them. The page without a retention permission is covered by the
+component tests in `flow-retention-page.test.tsx`.
 
 > **Status:** the suite covers login, rejected credentials, unauthenticated
 > redirects, authenticated landing, primary navigation, account data, logout,

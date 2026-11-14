@@ -3,10 +3,11 @@
 Status record for the integration branch `feat/flows-core-integration`. It
 keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
-a loopback MCP server and a web-next administration. Flows are off until an
-organisation chooses them: 202610211900 seeds the `flows_core` feature flag
-off, no upgrade turns it on or gives a role a flow permission, and the
-predefined roles of a new organisation carry none.
+a loopback MCP server and a web-next administration. While the global
+`flows_core` row is off, Flows are off until an organisation chooses them:
+202610211900 seeds the `flows_core` feature flag off, no upgrade turns it on or
+gives a role a flow permission, and the predefined roles of a new organisation
+carry none.
 
 ## What changed from earlier builds of this branch
 
@@ -25,8 +26,12 @@ version therefore needs these steps before Flows and retention can be used:
 3. An administrator who wants larger uploads raises the limits in
    **Admin > File storage**.
 
-A database that already ran the earlier revisions keeps what they did and
-needs none of these steps; nothing reverts it.
+A database that already ran the earlier revisions keeps what they did: Flows
+stay on through the global flag and existing roles keep their permissions.
+From this version on, a new organisation and a role reset to its template carry
+no flow or retention permission, so an administrator grants them there; and
+persistent assistant attachments default to 25 MiB unless
+`ATTACHMENT_MAX_SIZE_BYTES` is set.
 
 ## Turning Flows on
 
@@ -69,9 +74,9 @@ role template, and not the Owner role. An administrator grants them in role
 editing (Svelte and web-next). Startup never rewrites an existing role; a reset
 to the template removes them. The downgrade of `202610041000` removes both from
 every role, and upgrading again does not give them back. The web-next page
-`/admin/flow-data-retention` stays in the admin menu for `admin`, because its
-upload and debug windows are admin settings; the retention rules on it follow
-the two permissions, and the backend checks every request
+`/admin/flow-data-retention` stays in the admin menu for `admin` when Flows
+are on, because its upload and debug windows are admin settings; the retention
+rules on it follow the two permissions, and the backend checks every request
 (`flow_retention_authz.py`).
 
 ## Starting points
