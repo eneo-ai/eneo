@@ -165,7 +165,9 @@ class ApiKeyMaintenanceService:
         reason: str,
         extra: dict[str, str] | None = None,
     ) -> None:
-        expires_at = key.expires_at or now
+        # Sign-in judges a key by its end date alone, so ending access means
+        # moving a later (or missing) end date to now; a passed one is kept.
+        expires_at = min(key.expires_at or now, now)
         updated = await self.api_key_repo.update(
             key_id=key.id,
             tenant_id=key.tenant_id,
@@ -180,6 +182,9 @@ class ApiKeyMaintenanceService:
                 target=updated_key,
                 extra={
                     "expires_at": expires_at.isoformat(),
+                    "previous_expires_at": key.expires_at.isoformat()
+                    if key.expires_at
+                    else None,
                     "reason": reason,
                     **(extra or {}),
                 },
