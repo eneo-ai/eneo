@@ -607,3 +607,45 @@ async def test_a_transition_rolled_back_with_its_audit_row_leaves_neither(
     assert [error["key_id"] for error in result["errors"]] == [str(key_id)]
     assert (await read_key(db_container, key_id)).state == "active"
     assert await audit_rows(db_container, key_id) == []
+
+
+async def test_keys_recorded_as_expired_but_still_working_are_closed(
+    client, db_container, token, admin_user
+):
+    """Earlier runs recorded unused keys as expired but left a later end
+    date, and an extension could clear the date of such a key. Whatever the
+    policy says now, the next run ends their access, once."""
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    dated_id, dated_secret = await create_key(client, token, name="dated")
+    open_id, open_secret = await create_key(client, token, name="open")
+    await set_key_columns(db_container, dated_id, state="expired", expires_at=future)
+    await set_key_columns(db_container, open_id, state="expired", expires_at=None)
+    await set_unused_days(db_container, admin_user.tenant_id, None)
+    assert await sign_in_status(client, dated_secret) == 200
+    assert await sign_in_status(client, open_secret) == 200
+
+    first = await run_maintenance(db_container)
+
+    assert first["expired_state_closed"] == 2
+    assert first["errors"] == []
+    assert await sign_in_status(client, dated_secret) == 401
+    assert await sign_in_status(client, open_secret) == 401
+    for key_id, previous in ((dated_id, future.isoformat()), (open_id, None)):
+        key = await read_key(db_container, key_id)
+        assert key.state == "expired"
+        assert key.expires_at is not None
+        assert key.expires_at <= datetime.now(timezone.utc)
+        [row] = await audit_rows(db_container, key_id)
+        assert row.action == ActionType.API_KEY_EXPIRED.value
+        assert row.actor_type == "system"
+        extra = row.log_metadata["extra"]
+        assert extra["reason"] == "stale_expired_state"
+        assert extra["previous_expires_at"] == previous
+        assert extra["expires_at"] == key.expires_at.isoformat()
+
+    second = await run_maintenance(db_container)
+
+    assert second["expired_state_closed"] == 0
+    assert second["expired"] == 0
+    assert len(await audit_rows(db_container, dated_id)) == 1
+    assert len(await audit_rows(db_container, open_id)) == 1

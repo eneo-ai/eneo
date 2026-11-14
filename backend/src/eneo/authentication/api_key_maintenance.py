@@ -28,9 +28,11 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Keys one selection takes per run, oldest first: per step for keys past their
-# end date and for rotated keys, per tenant for unused keys. A selection that
-# reaches the limit leaves the rest to the next night's run.
+# Keys one selection takes per run, oldest first. The unit is the selection:
+# per step for keys past their end date, for keys recorded as expired but
+# still open, and for rotated keys; per tenant for unused keys. It is not a
+# cap for the whole run. A selection that reaches it leaves the rest to the
+# next night's run.
 API_KEY_MAINTENANCE_BATCH_LIMIT = 500
 
 
@@ -86,6 +88,14 @@ class ApiKeyMaintenanceService:
             condition=repo.due_for_expiry(now=now),
             change=partial(self._mark_expired, now=now, reason="expires_at"),
         )
+        # Expiry already decided, whatever the policy says now; the key only
+        # kept working because its end date was left open.
+        expired_state_closed = await self._change_selected(
+            run,
+            step="stale_expired_state",
+            condition=repo.expired_but_open(now=now),
+            change=partial(self._mark_expired, now=now, reason="stale_expired_state"),
+        )
         auto_expired = await self._expire_unused(run, now=now)
         rotation_revoked = await self._change_selected(
             run,
@@ -96,6 +106,7 @@ class ApiKeyMaintenanceService:
 
         return {
             "expired": expired,
+            "expired_state_closed": expired_state_closed,
             "auto_expired": auto_expired,
             "rotation_revoked": rotation_revoked,
             "batch_limit_per_selection": API_KEY_MAINTENANCE_BATCH_LIMIT,

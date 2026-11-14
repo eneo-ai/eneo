@@ -608,6 +608,15 @@ class ApiKeysV2Repository:
             self.table.state != ApiKeyState.EXPIRED.value,
         )
 
+    def expired_but_open(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Keys recorded as expired whose end date still lets them sign in:
+        later than ``now`` or missing. Sign-in reads the date, not the state."""
+        return sa.and_(
+            self.table.state == ApiKeyState.EXPIRED.value,
+            self.table.revoked_at.is_(None),
+            sa.or_(self.table.expires_at.is_(None), self.table.expires_at > now),
+        )
+
     def unused_since(
         self, *, tenant_id: UUID, cutoff: datetime
     ) -> sa.ColumnElement[bool]:
