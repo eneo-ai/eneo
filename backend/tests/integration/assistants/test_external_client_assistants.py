@@ -376,6 +376,9 @@ async def provider_token(
                 "oidc_resource_server_enabled": True,
                 "oidc_accepted_issuer": provider.issuer,
                 "oidc_accepted_audience": API,
+                # The keys come from the issuer's own discovery here, whatever
+                # the environment the tests run in says.
+                "oidc_accepted_jwks_uri": None,
                 "oidc_tenant_id": str(test_tenant.id),
             }
         )

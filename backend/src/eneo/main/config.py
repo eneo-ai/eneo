@@ -564,6 +564,13 @@ class Settings(BaseSettings):
     oidc_resource_server_enabled: bool = False
     oidc_accepted_issuer: Optional[str] = None
     oidc_accepted_audience: Optional[str] = None
+    # Where the accepted issuer's signing keys are read from, when that is not
+    # where its discovery document says: a provider whose public name cannot be
+    # reached from this network (an internal address, a container's own name).
+    # The issuer is then only compared with the token's `iss`; nothing is
+    # fetched from it. Held to the rules of every key address: https, or this
+    # machine in development.
+    oidc_accepted_jwks_uri: Optional[str] = None
     oidc_jwks_cache_ttl_seconds: int = 3600
 
     # Global OIDC sign-in (FEDERATION_ENABLED=false)

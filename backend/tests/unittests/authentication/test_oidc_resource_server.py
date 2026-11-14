@@ -228,6 +228,7 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_resource_server_enabled=True,
         oidc_accepted_issuer=ISSUER,
         oidc_accepted_audience=AUDIENCE,
+        oidc_accepted_jwks_uri=None,
         oidc_jwks_cache_ttl_seconds=3600,
         oidc_tenant_id=None,
         # Stored mode: the tenant's config names the subject claim.
@@ -328,6 +329,32 @@ async def test_valid_idp_token_resolves_correct_user(setup):
     assert user.email == "user@example.com"
     # A provider's token authenticates on its own; it starts no session.
     assert user.credential == CredentialFacts(kind="bearer")
+
+
+@pytest.mark.asyncio
+async def test_keys_are_read_from_the_configured_address_and_the_issuer_is_only_compared(
+    setup,
+):
+    """OIDC_ACCEPTED_JWKS_URI: an issuer whose public name this network cannot reach."""
+    keys_url = "https://idp.internal.example/keys"
+    setup.settings.oidc_accepted_jwks_uri = keys_url
+    setup.http.routes = {keys_url: setup.http.routes[JWKS_URL]}
+
+    user = await setup.service.authenticate(
+        token=_make_idp_token(setup.private_pem, "kid-a")
+    )
+
+    assert user.id == setup.user.id
+    # Nothing was fetched from the issuer: not its discovery document, not its keys.
+    assert setup.http.calls == [keys_url]
+
+    # The issuer still has to be the token's.
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(
+            token=_make_idp_token(
+                setup.private_pem, "kid-a", iss="https://someone-else.example"
+            )
+        )
 
 
 @pytest.mark.asyncio
