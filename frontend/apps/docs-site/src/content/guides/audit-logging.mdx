@@ -49,6 +49,8 @@ Four security events record which account a provider identity reaches (see [Acco
 
 `user_access_token_issued` (Access Token Issued by Operator) is always logged too. It is written when the operator takes a token to act as a user with the super API key (`POST /api/v1/sysadmin/users/{user_id}/access-token/`), in the same transaction and before the token is issued: if the row cannot be stored, no token is issued. Its metadata names the `actor` (`type` `sysadmin`, `via` `eneo_super_api_key`) and the `target` user (`id`, `email`, `username`).
 
+The nightly [API key maintenance](/docs/api-key-management#nightly-maintenance) is always logged as well: `api_key_expired` for a key it expires and `api_key_revoked` for an old key it revokes after rotation, with the system as actor. Each row is written in the same transaction as the change to the key, so a change that is rolled back leaves no row.
+
 `identity_bound` is written in the sign-in's own transaction, so it exists only for a sign-in that completed. `identity_conflict` is queued and written by the worker, so it survives the refused sign-in; if the queue cannot be reached, the backend log warning `identity_conflict` remains. Neither of the two carries the email or a token.
 
 ## Viewing audit logs

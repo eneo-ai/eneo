@@ -26,6 +26,7 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 10. Plan downtime for `db-init`: migration `202611091200` locks `sessions` while it rewrites every row, and several migrations build indexes concurrently. If `db-init` is interrupted, run it again. See [Migration `202611091200`](#sessions-migration).
 11. Export the audit log first if you need file names: the upgrade removes them for good. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
 12. Run the sessions check against the 2.3 database: a session with both or neither of a user and an API key stops `db-init`. See [Web widgets](#widgets).
+13. Replace API keys that integrations or modules still use but that are listed as Expired, or that the unused-key policy will expire: they stop signing in at the first nightly run. See [API keys that should have expired](#api-keys-expire).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -129,6 +130,7 @@ flowchart TB
 | [One error format](#error-envelope) | API consumers, generated clients | Read `code` and `message` |
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
+| [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -332,6 +334,17 @@ A migration clears icons that point across tenants. Deleting an icon in use answ
 **Do:** deploy backend and both frontends together; re-upload cleared icons. See [Icons](/docs/api#icons).
 
 **Rollback:** the clearing cannot be undone.
+
+### API keys that should have expired stop working [#api-keys-expire]
+
+When the unused-key policy (`auto_expire_unused_days`) expired a key, the nightly maintenance recorded it as expired but kept its later end date, and sign-in reads only the dates. Such a key, or one without an end date, went on working. From the first run after the upgrade (01:00 UTC) the job ends access for:
+
+- keys listed as Expired that still sign in, whatever the policy says now;
+- keys the policy expires, including service keys such as the ones modules use, and keys without an end date.
+
+One run takes at most 500 keys from each selection (per step, and per tenant for unused keys), so with more keys some stop a few nights later. The job's audit rows (`api_key_expired`, and `api_key_revoked` after a rotation) are now written also when the tenant has turned auditing of the action off.
+
+**Do:** before the upgrade, find in **Admin > API keys** the keys listed as Expired that an integration or module still uses, and the keys the policy will expire. Create a new key and put it in the integration, or in the module's configuration for a module's service key. Set the policy's days longer than the longest pause of any service that uses a key. A key that has expired does not come back when the policy is turned off. See [Nightly maintenance](/docs/api-key-management#nightly-maintenance).
 
 ## Details: retention, logs and storage [#details-retention]
 
