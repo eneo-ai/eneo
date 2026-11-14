@@ -457,6 +457,37 @@ async def test_a_tenant_that_cannot_be_loaded_does_not_stop_the_others(
     assert await expired_ids(db_container, [unused_id]) == {unused_id}
 
 
+async def test_a_policy_out_of_range_stops_only_its_tenant(db_container, admin_user):
+    """A number of days the tenant could save but that reaches before year 1
+    fails that tenant's cutoff, not the night's run."""
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    broken_id = await add_tenant(db_container)
+    await set_unused_days(db_container, broken_id, 1_000_000)
+    await insert_key(db_container, broken_id, name="unused-broken", created_at=old)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    unused_id = await insert_key(
+        db_container, admin_user.tenant_id, name="unused", created_at=old
+    )
+    rotated_id = await insert_key(
+        db_container,
+        admin_user.tenant_id,
+        name="rotated",
+        created_at=old,
+        last_used_at=datetime.now(timezone.utc),
+        rotation_grace_until=datetime.now(timezone.utc) - timedelta(minutes=1),
+    )
+
+    result = await run_maintenance(db_container)
+
+    assert result["auto_expired"] == 1
+    assert result["rotation_revoked"] == 1
+    assert result["errors"] == [
+        {"step": "unused", "tenant_id": str(broken_id), "error": "OverflowError"}
+    ]
+    assert await expired_ids(db_container, [unused_id]) == {unused_id}
+    assert (await read_key(db_container, rotated_id)).state == "revoked"
+
+
 async def test_more_keys_than_the_limit_are_taken_over_several_runs(
     db_container, admin_user, monkeypatch
 ):

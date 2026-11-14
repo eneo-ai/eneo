@@ -132,13 +132,14 @@ class ApiKeyMaintenanceService:
             try:
                 async with session.begin_nested():
                     tenant = await self.tenant_repo.get(tenant_id)
+                days = None if tenant is None else self._get_auto_expire_days(tenant)
+                if days is None:
+                    continue
+                # A saved number of days can reach before year 1.
+                cutoff = now - timedelta(days=days)
             except Exception as exc:
                 run.failed(exc, step=step, tenant_id=str(tenant_id))
                 continue
-            days = None if tenant is None else self._get_auto_expire_days(tenant)
-            if days is None:
-                continue
-            cutoff = now - timedelta(days=days)
             expired += await self._change_selected(
                 run,
                 step=step,
