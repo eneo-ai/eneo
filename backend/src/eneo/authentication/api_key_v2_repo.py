@@ -639,3 +639,56 @@ class ApiKeysV2Repository:
     ) -> list[ApiKeyV2InDB]:
         records = await self.session.scalars(sa.select(self.table).where(condition))
         return [ApiKeyV2InDB.model_validate(record) for record in records]
+
+    async def expire_matching(
+        self,
+        condition: sa.ColumnElement[bool],
+        *,
+        key: ApiKeyV2InDB,
+        expires_at: datetime,
+    ) -> Optional[ApiKeyV2InDB]:
+        """Record ``key`` as expired at ``expires_at`` if it still matches
+        ``condition`` and still has the end date it was selected with.
+
+        None when no row changed: the key was used, revoked or given another
+        end date after it was selected, and the change belongs to that writer.
+        """
+        return await self._update_matching(
+            condition,
+            self.table.expires_at.is_not_distinct_from(key.expires_at),
+            key=key,
+            state=ApiKeyState.EXPIRED.value,
+            expires_at=expires_at,
+        )
+
+    async def revoke_matching(
+        self,
+        condition: sa.ColumnElement[bool],
+        *,
+        key: ApiKeyV2InDB,
+        **values: object,
+    ) -> Optional[ApiKeyV2InDB]:
+        """Revoke ``key`` if it still matches ``condition``; None when no row
+        changed, so a concurrent revocation or a new grace period stands."""
+        return await self._update_matching(
+            condition, key=key, state=ApiKeyState.REVOKED.value, **values
+        )
+
+    async def _update_matching(
+        self,
+        *conditions: sa.ColumnElement[bool],
+        key: ApiKeyV2InDB,
+        **values: object,
+    ) -> Optional[ApiKeyV2InDB]:
+        # When another transaction changed the row since this one's snapshot,
+        # Postgres waits for it and evaluates the conditions again on the
+        # committed row (READ COMMITTED), so no change is made on stale facts.
+        record = await self.session.scalar(
+            sa.update(self.table)
+            .where(self.table.id == key.id)
+            .where(self.table.tenant_id == key.tenant_id)
+            .where(*conditions)
+            .values(**values)
+            .returning(self.table)
+        )
+        return None if record is None else ApiKeyV2InDB.model_validate(record)

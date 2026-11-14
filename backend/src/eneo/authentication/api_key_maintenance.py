@@ -3,13 +3,14 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+import sqlalchemy as sa
+
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
-    ApiKeyState,
     ApiKeyStateReasonCode,
     ApiKeyV2InDB,
 )
@@ -54,18 +55,17 @@ class ApiKeyMaintenanceService:
     async def _expire_due_keys(
         self, *, now: datetime, errors: list[dict[str, str]]
     ) -> int:
-        keys = await self.api_key_repo.list_matching(
-            self.api_key_repo.due_for_expiry(now=now)
-        )
+        condition = self.api_key_repo.due_for_expiry(now=now)
+        keys = await self.api_key_repo.list_matching(condition)
         expired = 0
         for key in keys:
             try:
-                await self._mark_expired(
+                expired += await self._mark_expired(
+                    condition,
                     key=key,
                     now=now,
                     reason="expires_at",
                 )
-                expired += 1
             except Exception as exc:  # pragma: no cover - defensive
                 errors.append(
                     {
@@ -90,18 +90,19 @@ class ApiKeyMaintenanceService:
             if days is None:
                 continue
             cutoff = now - timedelta(days=days)
-            keys = await self.api_key_repo.list_matching(
-                self.api_key_repo.unused_since(tenant_id=tenant.id, cutoff=cutoff)
+            condition = self.api_key_repo.unused_since(
+                tenant_id=tenant.id, cutoff=cutoff
             )
+            keys = await self.api_key_repo.list_matching(condition)
             for key in keys:
                 try:
-                    await self._mark_expired(
+                    expired += await self._mark_expired(
+                        condition,
                         key=key,
                         now=now,
                         reason="unused",
                         extra={"cutoff": cutoff.isoformat(), "days": str(days)},
                     )
-                    expired += 1
                 except Exception as exc:  # pragma: no cover - defensive
                     errors.append(
                         {
@@ -122,14 +123,14 @@ class ApiKeyMaintenanceService:
     async def _revoke_rotation_grace(
         self, *, now: datetime, errors: list[dict[str, str]]
     ) -> int:
-        keys = await self.api_key_repo.list_matching(
-            self.api_key_repo.rotation_grace_over(now=now)
-        )
+        condition = self.api_key_repo.rotation_grace_over(now=now)
+        keys = await self.api_key_repo.list_matching(condition)
         revoked = 0
         for key in keys:
             try:
-                await self._mark_revoked_for_rotation(key=key, now=now)
-                revoked += 1
+                revoked += await self._mark_revoked_for_rotation(
+                    condition, key=key, now=now
+                )
             except Exception as exc:  # pragma: no cover - defensive
                 errors.append(
                     {
@@ -163,22 +164,23 @@ class ApiKeyMaintenanceService:
 
     async def _mark_expired(
         self,
+        condition: sa.ColumnElement[bool],
         *,
         key: ApiKeyV2InDB,
         now: datetime,
         reason: str,
         extra: dict[str, str] | None = None,
-    ) -> None:
+    ) -> int:
+        """Expire ``key`` if it still matches ``condition``: 1 if it did,
+        0 if it changed after it was selected."""
         # Sign-in judges a key by its end date alone, so ending access means
         # moving a later (or missing) end date to now; a passed one is kept.
         expires_at = min(key.expires_at or now, now)
-        updated = await self.api_key_repo.update(
-            key_id=key.id,
-            tenant_id=key.tenant_id,
-            state=ApiKeyState.EXPIRED.value,
-            expires_at=expires_at,
+        updated_key = await self.api_key_repo.expire_matching(
+            condition, key=key, expires_at=expires_at
         )
-        updated_key = updated or key
+        if updated_key is None:
+            return 0
 
         if self.audit_service is not None:
             metadata = AuditMetadata.system_action(
@@ -203,22 +205,26 @@ class ApiKeyMaintenanceService:
                 description=f"Expired API key '{updated_key.name}'",
                 metadata=metadata,
             )
+        return 1
 
     async def _mark_revoked_for_rotation(
         self,
+        condition: sa.ColumnElement[bool],
         *,
         key: ApiKeyV2InDB,
         now: datetime,
-    ) -> None:
-        updated = await self.api_key_repo.update(
-            key_id=key.id,
-            tenant_id=key.tenant_id,
-            state=ApiKeyState.REVOKED.value,
+    ) -> int:
+        """Revoke ``key`` if its grace period has still ended: 1 if it did,
+        0 if it was revoked or given a new grace period after selection."""
+        updated_key = await self.api_key_repo.revoke_matching(
+            condition,
+            key=key,
             revoked_at=now,
             revoked_reason_code=ApiKeyStateReasonCode.ROTATION_COMPLETED.value,
             revoked_reason_text="Rotation grace period ended.",
         )
-        updated_key = updated or key
+        if updated_key is None:
+            return 0
 
         if self.audit_service is not None:
             metadata = AuditMetadata.system_action(
@@ -241,3 +247,4 @@ class ApiKeyMaintenanceService:
                 description=f"Revoked API key '{updated_key.name}' after rotation grace",
                 metadata=metadata,
             )
+        return 1

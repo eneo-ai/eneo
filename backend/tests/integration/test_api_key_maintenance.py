@@ -6,6 +6,7 @@ because sign-in judges a key by its dates, never by the stored ``state``.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
@@ -13,8 +14,12 @@ from uuid import UUID
 import pytest
 import sqlalchemy as sa
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication import api_key_maintenance
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import ApiKeyV2InDB
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.tenant_table import Tenants
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -89,6 +94,44 @@ async def sign_in_status(client, secret: str) -> int:
     return response.status_code
 
 
+async def audit_actions(db_container, key_id: UUID) -> list[str]:
+    async with db_container() as container:
+        rows = await container.session().scalars(
+            sa.select(AuditLog.action)
+            .where(AuditLog.entity_id == key_id)
+            .order_by(AuditLog.timestamp)
+        )
+        return list(rows)
+
+
+def after_selection(
+    monkeypatch, key_id: UUID, action: Callable[[], Awaitable[None]]
+) -> None:
+    """Run ``action``, committed in its own session, right after the job has
+    selected ``key_id`` and before it changes the key."""
+    original = ApiKeysV2Repository.list_matching
+    pending = True
+
+    async def list_then_act(self, *args, **kwargs):
+        nonlocal pending
+        keys = await original(self, *args, **kwargs)
+        if pending and any(key.id == key_id for key in keys):
+            pending = False
+            await action()
+        return keys
+
+    monkeypatch.setattr(ApiKeysV2Repository, "list_matching", list_then_act)
+
+
+def pin_job_clock(monkeypatch, at: datetime) -> None:
+    class PinnedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # noqa: ARG003 - the job always asks for UTC
+            return at
+
+    monkeypatch.setattr(api_key_maintenance, "datetime", PinnedDatetime)
+
+
 async def test_an_unused_key_with_a_future_end_date_stops_working(
     client, db_container, token, admin_user
 ):
@@ -144,3 +187,88 @@ async def test_a_rotated_key_is_revoked_when_its_grace_period_ends(
     assert await sign_in_status(client, old_secret) == 401
     assert await sign_in_status(client, new_secret) == 200
     assert (await read_key(db_container, new_id)).state == "active"
+
+
+async def test_a_key_used_after_selection_keeps_working(
+    client, db_container, token, admin_user, monkeypatch
+):
+    used_id, used_secret = await create_key(client, token, name="used")
+    idle_id, idle_secret = await create_key(client, token, name="idle")
+    await make_unused(db_container, used_id, days=10)
+    await make_unused(db_container, idle_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+
+    async def use() -> None:
+        assert await sign_in_status(client, used_secret) == 200
+
+    after_selection(monkeypatch, used_id, use)
+    result = await run_maintenance(db_container)
+
+    assert result["auto_expired"] == 1
+    used = await read_key(db_container, used_id)
+    assert used.state == "active"
+    assert await sign_in_status(client, used_secret) == 200
+    assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
+        db_container, used_id
+    )
+    assert await sign_in_status(client, idle_secret) == 401
+
+
+async def test_a_key_revoked_after_selection_keeps_its_revocation(
+    client, db_container, token, admin_user, monkeypatch
+):
+    key_id, secret = await create_key(client, token, name="revoked")
+    await make_unused(db_container, key_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+
+    async def revoke() -> None:
+        response = await client.post(
+            f"/api/v1/api-keys/{key_id}/revoke",
+            json={"reason_code": "key_compromised", "reason_text": "Leaked"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200, response.text
+
+    after_selection(monkeypatch, key_id, revoke)
+    result = await run_maintenance(db_container)
+
+    assert result["auto_expired"] == 0
+    key = await read_key(db_container, key_id)
+    assert key.state == "revoked"
+    assert key.revoked_reason_code == "key_compromised"
+    assert key.revoked_reason_text == "Leaked"
+    assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
+        db_container, key_id
+    )
+    assert await sign_in_status(client, secret) == 401
+
+
+async def test_a_new_grace_period_after_selection_keeps_the_old_key_working(
+    client, db_container, token, monkeypatch
+):
+    """A key inside its grace period can be rotated again, which moves the
+    grace period; a run that selected it under the earlier period must not
+    revoke it."""
+    old_id, old_secret = await create_key(client, token, name="rotating")
+    await rotate(client, token, old_id)
+    now = datetime.now(timezone.utc)
+    await set_key_columns(
+        db_container, old_id, rotation_grace_until=now + timedelta(hours=1)
+    )
+    pin_job_clock(monkeypatch, now + timedelta(hours=2))
+
+    async def rotate_again() -> None:
+        await rotate(client, token, old_id)
+
+    after_selection(monkeypatch, old_id, rotate_again)
+    result = await run_maintenance(db_container)
+
+    assert result["rotation_revoked"] == 0
+    old = await read_key(db_container, old_id)
+    assert old.revoked_at is None
+    assert old.rotation_grace_until is not None
+    assert old.rotation_grace_until > now + timedelta(hours=2)
+    assert ActionType.API_KEY_REVOKED.value not in await audit_actions(
+        db_container, old_id
+    )
+    assert await sign_in_status(client, old_secret) == 200
