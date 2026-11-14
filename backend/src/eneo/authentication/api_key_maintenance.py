@@ -66,7 +66,7 @@ class ApiKeyMaintenanceService:
         self,
         api_key_repo: ApiKeysV2Repository,
         tenant_repo: TenantRepository,
-        audit_service: "AuditService | None",
+        audit_service: "AuditService",
     ):
         super().__init__()
         self.api_key_repo = api_key_repo
@@ -222,8 +222,17 @@ class ApiKeyMaintenanceService:
         if updated_key is None:
             return 0
 
-        if self.audit_service is not None:
-            metadata = AuditMetadata.system_action(
+        # Written in the key's savepoint whatever the tenant's audit settings,
+        # so the transition and its audit row commit or roll back together.
+        await self.audit_service.log(
+            required=True,
+            tenant_id=updated_key.tenant_id,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.API_KEY_EXPIRED,
+            entity_type=EntityType.API_KEY,
+            entity_id=updated_key.id,
+            description=f"Expired API key '{updated_key.name}'",
+            metadata=AuditMetadata.system_action(
                 description="API key expired",
                 target=updated_key,
                 extra={
@@ -234,17 +243,8 @@ class ApiKeyMaintenanceService:
                     "reason": reason,
                     **(extra or {}),
                 },
-            )
-            await self.audit_service.log_async(
-                tenant_id=updated_key.tenant_id,
-                actor_id=None,
-                actor_type=ActorType.SYSTEM,
-                action=ActionType.API_KEY_EXPIRED,
-                entity_type=EntityType.API_KEY,
-                entity_id=updated_key.id,
-                description=f"Expired API key '{updated_key.name}'",
-                metadata=metadata,
-            )
+            ),
+        )
         return 1
 
     async def _mark_revoked_for_rotation(
@@ -266,8 +266,15 @@ class ApiKeyMaintenanceService:
         if updated_key is None:
             return 0
 
-        if self.audit_service is not None:
-            metadata = AuditMetadata.system_action(
+        await self.audit_service.log(
+            required=True,
+            tenant_id=updated_key.tenant_id,
+            actor_type=ActorType.SYSTEM,
+            action=ActionType.API_KEY_REVOKED,
+            entity_type=EntityType.API_KEY,
+            entity_id=updated_key.id,
+            description=f"Revoked API key '{updated_key.name}' after rotation grace",
+            metadata=AuditMetadata.system_action(
                 description="API key revoked after rotation",
                 target=updated_key,
                 extra={
@@ -276,15 +283,6 @@ class ApiKeyMaintenanceService:
                     if updated_key.rotation_grace_until
                     else None,
                 },
-            )
-            await self.audit_service.log_async(
-                tenant_id=updated_key.tenant_id,
-                actor_id=None,
-                actor_type=ActorType.SYSTEM,
-                action=ActionType.API_KEY_REVOKED,
-                entity_type=EntityType.API_KEY,
-                entity_id=updated_key.id,
-                description=f"Revoked API key '{updated_key.name}' after rotation grace",
-                metadata=metadata,
-            )
+            ),
+        )
         return 1

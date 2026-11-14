@@ -15,7 +15,9 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 from eneo.authentication import api_key_maintenance
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
@@ -173,6 +175,28 @@ async def audit_actions(db_container, key_id: UUID) -> list[str]:
             .order_by(AuditLog.timestamp)
         )
         return list(rows)
+
+
+async def audit_rows(db_container, key_id: UUID) -> list[sa.Row[Any]]:
+    async with db_container() as container:
+        result = await container.session().execute(
+            sa.select(
+                AuditLog.action,
+                AuditLog.actor_type,
+                AuditLog.actor_id,
+                AuditLog.log_metadata.label("log_metadata"),
+            )
+            .where(AuditLog.entity_id == key_id)
+            .order_by(AuditLog.timestamp)
+        )
+        return list(result.all())
+
+
+async def turn_off_admin_action_audit(db_container, tenant_id: UUID) -> None:
+    async with db_container() as container:
+        await container.audit_config_service().update_config(
+            tenant_id, [CategoryUpdate(category="admin_actions", enabled=False)]
+        )
 
 
 def after_selection(
@@ -513,3 +537,73 @@ async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
     assert isinstance(failure.value, DBAPIError)
     assert failure.value.connection_invalidated
     assert await expired_ids(db_container, [first, second]) == set()
+
+
+async def test_every_transition_is_audited_even_with_the_action_turned_off(
+    client, db_container, token, admin_user
+):
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    unused_id, _ = await create_key(client, token, name="unused", expires_at=future)
+    await make_unused(db_container, unused_id, days=10)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    past_id, _ = await create_key(client, token, name="past", expires_at=past)
+    rotated_id, _ = await create_key(client, token, name="rotated")
+    await rotate(client, token, rotated_id)
+    grace_ended = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await set_key_columns(db_container, rotated_id, rotation_grace_until=grace_ended)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    await turn_off_admin_action_audit(db_container, admin_user.tenant_id)
+
+    result = await run_maintenance(db_container)
+
+    assert (result["expired"], result["auto_expired"], result["rotation_revoked"]) == (
+        1,
+        1,
+        1,
+    )
+    [unused_row] = await audit_rows(db_container, unused_id)
+    assert unused_row.action == ActionType.API_KEY_EXPIRED.value
+    assert unused_row.actor_type == "system"
+    assert unused_row.actor_id is None
+    extra = unused_row.log_metadata["extra"]
+    assert extra["reason"] == "unused"
+    assert extra["days"] == "7"
+    assert extra["previous_expires_at"] == future.isoformat()
+    assert datetime.fromisoformat(extra["expires_at"]) <= datetime.now(timezone.utc)
+
+    [past_row] = await audit_rows(db_container, past_id)
+    assert past_row.log_metadata["extra"]["reason"] == "expires_at"
+    assert past_row.log_metadata["extra"]["expires_at"] == past.isoformat()
+
+    rotated_rows = [
+        row
+        for row in await audit_rows(db_container, rotated_id)
+        if row.action == ActionType.API_KEY_REVOKED.value
+    ]
+    assert len(rotated_rows) == 1
+    assert rotated_rows[0].actor_type == "system"
+    assert rotated_rows[0].log_metadata["extra"] == {
+        "reason_code": "rotation_completed",
+        "rotation_grace_until": grace_ended.isoformat(),
+    }
+
+
+async def test_a_transition_rolled_back_with_its_audit_row_leaves_neither(
+    db_container, admin_user, monkeypatch
+):
+    [key_id] = await insert_due_keys(db_container, admin_user.tenant_id, 1)
+    original = AuditService.log
+
+    async def log_then_fail(self, **kwargs):
+        written = await original(self, **kwargs)
+        await self.repository.session.execute(sa.text("SELECT 1/0"))
+        return written
+
+    monkeypatch.setattr(AuditService, "log", log_then_fail)
+
+    result = await run_maintenance(db_container)
+
+    assert result["expired"] == 0
+    assert [error["key_id"] for error in result["errors"]] == [str(key_id)]
+    assert (await read_key(db_container, key_id)).state == "active"
+    assert await audit_rows(db_container, key_id) == []
