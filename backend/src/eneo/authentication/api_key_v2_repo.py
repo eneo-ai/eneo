@@ -595,56 +595,47 @@ class ApiKeysV2Repository:
 
         return items, total
 
-    async def list_expired_candidates(
-        self,
-        *,
-        now: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.expires_at.is_not(None))
-            .where(self.table.expires_at <= now)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.EXPIRED.value)
-        )
-        records = await self.session.scalars(query)
-        return [ApiKeyV2InDB.model_validate(record) for record in records]
+    # Each maintenance step selects keys by one condition. The same condition
+    # guards the step's change to each key, so a key that stopped matching
+    # after it was selected is left as it is.
 
-    async def list_rotation_grace_candidates(
-        self,
-        *,
-        now: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.rotation_grace_until.is_not(None))
-            .where(self.table.rotation_grace_until <= now)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.REVOKED.value)
+    def due_for_expiry(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Keys past their end date that are not yet recorded as expired."""
+        return sa.and_(
+            self.table.expires_at.is_not(None),
+            self.table.expires_at <= now,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.EXPIRED.value,
         )
-        records = await self.session.scalars(query)
-        return [ApiKeyV2InDB.model_validate(record) for record in records]
 
-    async def list_unused_before(
-        self,
-        *,
-        tenant_id: UUID,
-        cutoff: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.tenant_id == tenant_id)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.EXPIRED.value)
-            .where(
-                sa.or_(
-                    self.table.last_used_at < cutoff,
-                    sa.and_(
-                        self.table.last_used_at.is_(None),
-                        self.table.created_at < cutoff,
-                    ),
-                )
-            )
+    def unused_since(
+        self, *, tenant_id: UUID, cutoff: datetime
+    ) -> sa.ColumnElement[bool]:
+        """The tenant's keys not used, or never used and created, since ``cutoff``."""
+        return sa.and_(
+            self.table.tenant_id == tenant_id,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.EXPIRED.value,
+            sa.or_(
+                self.table.last_used_at < cutoff,
+                sa.and_(
+                    self.table.last_used_at.is_(None),
+                    self.table.created_at < cutoff,
+                ),
+            ),
         )
-        records = await self.session.scalars(query)
+
+    def rotation_grace_over(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Rotated keys whose grace period has ended and that are not revoked."""
+        return sa.and_(
+            self.table.rotation_grace_until.is_not(None),
+            self.table.rotation_grace_until <= now,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.REVOKED.value,
+        )
+
+    async def list_matching(
+        self, condition: sa.ColumnElement[bool]
+    ) -> list[ApiKeyV2InDB]:
+        records = await self.session.scalars(sa.select(self.table).where(condition))
         return [ApiKeyV2InDB.model_validate(record) for record in records]

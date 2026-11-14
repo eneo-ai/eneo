@@ -54,7 +54,9 @@ class ApiKeyMaintenanceService:
     async def _expire_due_keys(
         self, *, now: datetime, errors: list[dict[str, str]]
     ) -> int:
-        keys = await self.api_key_repo.list_expired_candidates(now=now)
+        keys = await self.api_key_repo.list_matching(
+            self.api_key_repo.due_for_expiry(now=now)
+        )
         expired = 0
         for key in keys:
             try:
@@ -88,8 +90,8 @@ class ApiKeyMaintenanceService:
             if days is None:
                 continue
             cutoff = now - timedelta(days=days)
-            keys = await self.api_key_repo.list_unused_before(
-                tenant_id=tenant.id, cutoff=cutoff
+            keys = await self.api_key_repo.list_matching(
+                self.api_key_repo.unused_since(tenant_id=tenant.id, cutoff=cutoff)
             )
             for key in keys:
                 try:
@@ -120,7 +122,9 @@ class ApiKeyMaintenanceService:
     async def _revoke_rotation_grace(
         self, *, now: datetime, errors: list[dict[str, str]]
     ) -> int:
-        keys = await self.api_key_repo.list_rotation_grace_candidates(now=now)
+        keys = await self.api_key_repo.list_matching(
+            self.api_key_repo.rotation_grace_over(now=now)
+        )
         revoked = 0
         for key in keys:
             try:

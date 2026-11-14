@@ -113,3 +113,34 @@ async def test_an_unused_key_with_a_future_end_date_stops_working(
     assert await sign_in_status(client, unused_secret) == 401
     # A key whose end date had already passed keeps that date.
     assert (await read_key(db_container, past_id)).expires_at == past
+
+
+async def rotate(client, token: str, key_id: UUID) -> tuple[UUID, str]:
+    response = await client.post(
+        f"/api/v1/api-keys/{key_id}/rotate",
+        json={},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    return UUID(payload["api_key"]["id"]), payload["secret"]
+
+
+async def test_a_rotated_key_is_revoked_when_its_grace_period_ends(
+    client, db_container, token
+):
+    old_id, old_secret = await create_key(client, token, name="rotated")
+    new_id, new_secret = await rotate(client, token, old_id)
+    ended = datetime.now(timezone.utc) - timedelta(minutes=1)
+    await set_key_columns(db_container, old_id, rotation_grace_until=ended)
+
+    result = await run_maintenance(db_container)
+
+    assert result["rotation_revoked"] == 1
+    old = await read_key(db_container, old_id)
+    assert old.state == "revoked"
+    assert old.revoked_reason_code == "rotation_completed"
+    assert old.rotation_grace_until == ended
+    assert await sign_in_status(client, old_secret) == 401
+    assert await sign_in_status(client, new_secret) == 200
+    assert (await read_key(db_container, new_id)).state == "active"
