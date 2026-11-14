@@ -23,7 +23,6 @@
   import SharePointSetupFixtureLauncher from "$lib/features/integrations/sharepoint/SharePointSetupFixtureLauncher.svelte";
   import { SharePointSubscriptionList } from "$lib/features/integrations/sharepoint/SharePointSubscriptionList.svelte";
   import SharePointSubscriptions from "./SharePointSubscriptions.svelte";
-  import ConnectorInstallations from "./ConnectorInstallations.svelte";
 
   const { data }: PageProps = $props();
 
@@ -223,16 +222,6 @@
               </ul>
             </Alert.Description>
           </Alert.Root>
-        </Settings.Row>
-      </Settings.Group>
-
-      <Settings.Group title={m.connector_installations_title()}>
-        <Settings.Row
-          fullWidth
-          title={m.connector_installations_title()}
-          description={m.connector_installations_description()}
-        >
-          <ConnectorInstallations eneo={data.eneo} />
         </Settings.Row>
       </Settings.Group>
     </Settings.Page>

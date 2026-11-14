@@ -27,7 +27,6 @@ function initAssistantEditor(data: {
     defaults: {
       prompt: { description: "", text: "" },
       insight_enabled: false as boolean,
-      external_clients_enabled: false as boolean,
       // Widened so the editor's inverted "open files" switch can write false.
       inline_file_text: true as boolean,
       // On-demand knowledge is opt-in. Missing values must preserve the
@@ -51,7 +50,6 @@ function initAssistantEditor(data: {
       name: true,
       description: true,
       insight_enabled: true,
-      external_clients_enabled: true,
       inline_file_text: true,
       knowledge_mode: true,
       completion_model: { id: true },

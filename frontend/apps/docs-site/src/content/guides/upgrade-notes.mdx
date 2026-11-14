@@ -130,7 +130,7 @@ flowchart TB
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | Assistants can be made [available to other clients](/docs/api#assistants-for-other-clients): the assistant field `external_clients_enabled` (off for every existing assistant), `GET /api/v1/assistants/external/`, and `context` on `POST /api/v1/conversations/` | API consumers, space admins | Nothing |
-| Eneo serves the connector protocol itself, so a [connected system](/docs/api#connected-systems) can list and ask the available assistants without an adapter: routes under `/api/v1/connector/`, off until an administrator adds a system under Administration › Integrations. New table `connector_installations` | Operators, tenant admins | Nothing. To use it, set `OIDC_RESOURCE_SERVER_ENABLED` and add the system |
+| Eneo serves the connector protocol itself, so a [connected system](/docs/api#connected-systems) can list and ask the available assistants without an adapter: routes under `/api/v1/connector/`, off until an administrator adds a system under Administration › Integrations in the React beta. New table `connector_installations` | Operators, tenant admins | Nothing. To use it, set `OIDC_RESOURCE_SERVER_ENABLED` and add the system |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
