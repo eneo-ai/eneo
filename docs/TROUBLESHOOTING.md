@@ -758,8 +758,8 @@ be reached rather than that the password was wrong.
      effective values in **Admin > File storage**. Policy changes apply without
      restarting backend or worker.
    - For PostgreSQL-inline session uploads, the effective limit is the smaller
-     of the admin policy and the operator-owned
-     `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+     of the admin policy and the
+     [storage limit for files stored in PostgreSQL](deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql).
    - For object-store session uploads, the effective limit is the smaller of
      the admin policy and the configured portable multipart envelope. The
      constraining source is visible in **Admin > File storage**.

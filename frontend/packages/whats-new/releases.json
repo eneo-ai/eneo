@@ -205,6 +205,20 @@
             "en": "A file's name often says what the file is about, and a conversation's name copies text that retention removes. In the audit log you now see a file by its id, size and file type, and a conversation by its id. Entries from before this version were changed the same way, so a search for a file name finds none of them.",
             "sv": "Ett filnamn säger ofta vad filen handlar om, och en konversations namn kopierar text som gallras. I granskningsloggen ser du nu en fil med id, storlek och filtyp, och en konversation med sitt id. Rader från före den här versionen ändrades på samma sätt, så du hittar dem inte genom att söka på ett filnamn."
           }
+        },
+        {
+          "id": "file-storage-explains-the-database-limit",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "See what limits files stored in the database",
+            "sv": "Se vad som begränsar filer i databasen"
+          },
+          "body": {
+            "en": "In Admin > File storage, the upload limits now explain the storage limit for files kept in the database and what large files cost there. Limits above 200 MB now apply, up to that storage limit, unless operations still sets a lower limit on the server.",
+            "sv": "Under Admin > Fillagring förklarar uppladdningsgränserna nu lagringsgränsen för filer som sparas i databasen och vad stora filer kostar där. Gränser över 200 MB gäller nu, upp till lagringsgränsen, om inte driften fortfarande sätter en lägre gräns på servern."
+          }
         }
       ]
     },

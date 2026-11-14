@@ -72,6 +72,13 @@ vi.mock("$lib/core/Eneo", () => ({
 
 vi.mock("$lib/paraglide/messages", async () => {
   const { default: englishMessages } = await import("../../../../../messages/en.json");
+  // These render as real English so a test can read what an administrator reads.
+  const realTextKeys = new Set([
+    "storage_settings_target_description",
+    "storage_limits_database_ceiling",
+    "storage_limits_database_ceiling_applies",
+    "storage_limits_database_cost"
+  ]);
 
   return {
     m: new Proxy<Record<string, unknown>>(
@@ -80,8 +87,11 @@ vi.mock("$lib/paraglide/messages", async () => {
         get: (_target, key) => {
           const label = String(key);
           return (params?: Record<string, unknown>) => {
-            if (label === "storage_settings_target_description")
-              return englishMessages.storage_settings_target_description;
+            if (realTextKeys.has(label))
+              return Object.entries(params ?? {}).reduce(
+                (text, [name, value]) => text.replaceAll(`{${name}}`, String(value)),
+                englishMessages[label as keyof typeof englishMessages]
+              );
             return params ? `${label} ${JSON.stringify(params)}` : label;
           };
         }
@@ -377,6 +387,82 @@ describe("admin storage settings page", () => {
           .first()
       )
       .toBeVisible();
+  });
+
+  test("says the deprecated variable can hold the database storage limit below the policy", async () => {
+    // The fixture's 8 MiB ceiling is what a set OBJECT_CONTENT_INLINE_MAXIMUM_BYTES gives.
+    getPolicy.mockResolvedValue(policy());
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByText(/^Files stored in the database also have a storage limit/))
+      .toHaveTextContent(
+        "Files stored in the database also have a storage limit: the most PostgreSQL holds per file, or less if the deprecated environment variable OBJECT_CONTENT_INLINE_MAXIMUM_BYTES is still set. Operations removes that variable so that the limits above apply."
+      );
+    await expect
+      .element(page.getByText(/^The storage limit is/))
+      .toHaveTextContent(
+        "The storage limit is 8 storage_unit_mb, lower than some limits above, so those uploads stop there."
+      );
+    await expect
+      .element(
+        page.getByText(
+          "Each upload is read into memory in full, and every file is included in the database backup."
+        )
+      )
+      .toBeVisible();
+  });
+
+  test("explains the database storage limit without a lower limit once the variable is gone", async () => {
+    const capacity = 536_870_399;
+    const current = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        limits: current.limits.map((limit) => ({
+          ...limit,
+          effective_bytes: limit.configured_bytes,
+          operator_ceiling_bytes: capacity,
+          constraining_source: "admin_policy"
+        }))
+      })
+    );
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByText(/^Files stored in the database also have a storage limit/))
+      .toBeVisible();
+    await expect.element(page.getByText(/^Each upload is read into memory/)).toBeVisible();
+    await expect.element(page.getByText(/^The storage limit is/)).not.toBeInTheDocument();
+  });
+
+  test("keeps the database storage notes away from object storage", async () => {
+    const current = policy();
+    getPolicy.mockResolvedValue(
+      policy({
+        policy: { ...current.policy, new_write_storage_target: "object_store" },
+        limits: current.limits.map((limit) => ({
+          ...limit,
+          storage_target: "object_store",
+          effective_bytes: limit.configured_bytes,
+          operator_ceiling_bytes: 83_886_080_000,
+          constraining_source: "admin_policy"
+        }))
+      })
+    );
+
+    render(StoragePage);
+
+    await expect
+      .element(page.getByRole("heading", { name: "storage_settings_limits_title" }))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(/^Files stored in the database also have a storage limit/))
+      .not.toBeInTheDocument();
+    await expect
+      .element(page.getByText(/^Each upload is read into memory/))
+      .not.toBeInTheDocument();
   });
 
   test("explains knowledge-original routing and shows its effective limits", async () => {

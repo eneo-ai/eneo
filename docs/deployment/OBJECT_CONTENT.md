@@ -48,7 +48,7 @@ expandable technical details.
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the applicable storage limit can still make the
 effective limit lower.
 
 The default deployment uses PostgreSQL-inline storage and does not start
@@ -276,9 +276,8 @@ When readiness reports `ready`, an administrator can select **Object store** in
 external endpoints; there is no provider or vendor product branch.
 
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
-leave every remote-only variable absent. Core settings such as
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` and reconciliation bounds are valid
-without an endpoint. Any remote endpoint, credential, transport, multipart, or
+leave every remote-only variable absent. Core settings such as reconciliation
+bounds are valid without an endpoint. Any remote endpoint, credential, transport, multipart, or
 object-inventory value activates strict object-store validation.
 
 If active `object_store` rows exist, removing the endpoint configuration fails
@@ -305,13 +304,36 @@ external private CA read-only into both backend and worker, then set
 `OBJECT_CONTENT_CA_BUNDLE` in `env_backend.env`. Do not put credentials in the
 endpoint URL, command line, image, repository, logs, or backup manifest.
 
-Inline capacity and common reconciliation tuning live in `env_backend.env`.
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
-bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
-business limit. Lowering it affects new inline writes, not reads of existing
-rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
-of the admin policy and this ceiling. **Admin > File storage** shows the configured
-limit, effective limit, and constraining source. Object-store session uploads
+Common reconciliation tuning lives in `env_backend.env`.
+
+### Storage limit for files stored in PostgreSQL
+
+A file stored in PostgreSQL can be at most 536,870,399 bytes, just under
+512 MiB. PostgreSQL writes a `bytea` value as hex text, two characters per byte,
+and `pg_dump` must fit that text and the rest of the row in one COPY row of at
+most 1 GiB, so a larger file could be stored but not backed up. This capacity
+is the storage limit for PostgreSQL-inline content; the upload policy in
+**Admin > File storage** is the business limit below it. The capacity assumes
+PostgreSQL's default `bytea_output = hex`: do not change it at server, database
+or role level, because with `escape` a COPY row takes up to five characters per
+byte and `pg_dump` fails for large files (the backup command below also sets
+it for its own session).
+
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated; leave it unset. A value
+that is still set keeps working as a lower storage limit, startup logs a
+warning, and a value above the capacity is capped at the capacity instead of
+stopping startup. To let the policy govern, remove the line from
+`env_backend.env` and recreate the backend and worker. The limit applies to new
+writes and to moves from object storage into PostgreSQL, never to reads of
+existing rows.
+
+Each PostgreSQL-inline upload is read into process memory in full, and every
+file is part of the database backup, WAL and replicas. Size the upload policy
+with that in mind, or choose object storage for large files.
+
+For PostgreSQL-inline session uploads, the effective limit is the smaller of
+the admin policy and this storage limit. **Admin > File storage** shows the
+configured limit, effective limit, and constraining source. Object-store session uploads
 use the same rule with the portable multipart envelope derived from configured
 transport settings. FastAPI/Starlette multipart parsing happens before route
 admission and may use temporary disk. Eneo rejects an oversized File or Icon
@@ -321,7 +343,7 @@ to protect that earlier parsing boundary.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants may be larger and are bounded by the selected
-backend's operator ceiling instead of a second business limit.
+backend's storage limit instead of a second business limit.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -457,7 +479,8 @@ removing configuration.
 ### Change the S3-compatible destination
 
 Changing hosting provider does not require staging content in PostgreSQL — and
-cannot, once any object exceeds the inline admission ceiling. Eneo does not
+cannot, once any object exceeds the
+[storage limit for files stored in PostgreSQL](#storage-limit-for-files-stored-in-postgresql). Eneo does not
 copy buckets; the operator copies with their own tooling and Eneo performs the
 guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
 readable immediately.
@@ -470,8 +493,9 @@ readable immediately.
 2. Select `postgres_inline` for new writes in **Admin > File storage**, let queued
    moves and in-flight uploads finish, then select **Pause moves**. Both are
    required: an empty queue does not by itself stop a new move from starting
-   mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
-   during this window.
+   mid-copy. New uploads above the
+   [storage limit for files stored in PostgreSQL](#storage-limit-for-files-stored-in-postgresql)
+   fail during this window.
 3. Copy only `v1/<deployment-id-hex>/` with `rclone copy --checksum` (never
    `sync`, which deletes at the destination) and preserve object metadata;
    Eneo enforces the stored media type on every read. Read the hex id from
@@ -566,8 +590,8 @@ size, not provider-reported bucket usage, free capacity, version history, or
 billing size. Use provider and host monitoring for those operational measures.
 
 For PostgreSQL-inline content, monitor database size, WAL generation, backup
-duration, connection-pool pressure, and the documented inline admission
-ceiling. Reads are linear in payload size and use bounded chunks after the
+duration, connection-pool pressure, and the
+[storage limit for files stored in PostgreSQL](#storage-limit-for-files-stored-in-postgresql). Reads are linear in payload size and use bounded chunks after the
 database driver returns the bounded BYTEA value.
 
 For the bundled single-node reference, durable capacity is the
@@ -604,7 +628,7 @@ backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
 docker compose stop backend worker
-docker compose exec -T db pg_dump -U postgres -Fc eneo \
+docker compose exec -T -e PGOPTIONS='-c bytea_output=hex' db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content
 
@@ -887,11 +911,14 @@ the deployment:
 docker compose up -d --force-recreate --no-deps worker
 ```
 
-Keep every item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte
-bound does not override that per-content ceiling. An `inline_payload_too_large`
-failure halts the campaign. After confirming capacity, raise the inline ceiling
-and `FILE_ICON_BACKFILL_RESUME_REVISION` together in `env_backend.env`, then
-recreate every backend and worker replica so both use the same safety ceiling.
+Every item must fit the
+[storage limit for files stored in PostgreSQL](#storage-limit-for-files-stored-in-postgresql);
+the batch byte bound does not override that per-content limit. An
+`inline_payload_too_large` failure halts the campaign. When a deprecated
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` set the lower limit, confirm capacity,
+remove that line and raise `FILE_ICON_BACKFILL_RESUME_REVISION` together in
+`env_backend.env`, then recreate every backend and worker replica so both use
+the same limit.
 
 ```bash
 docker compose up -d --force-recreate --no-deps backend worker
@@ -949,11 +976,15 @@ the broader integration fixture's existing default unchanged.
 Only one worker replica may run a batch at a time. A PostgreSQL advisory lock
 prevents minute jobs from overlapping and multiplying the configured byte and
 memory bounds. Memory is bounded by one item rather than the campaign or batch
-byte total. A separate five-item benchmark at the 200 MiB inline ceiling kept
-worker RSS near 140 MiB but briefly raised PostgreSQL to about 620 MiB while it
-hashed and copied one large `bytea`. Treat the inline ceiling as a database
-memory-safety bound and measure the exact peak on the deployment's PostgreSQL
-version before raising it.
+byte total. A separate five-item benchmark with 200 MiB items kept worker RSS
+near 140 MiB but briefly raised PostgreSQL to about 620 MiB while it hashed and
+copied one large `bytea`. One upload of a 511 MiB file at a time in local
+Docker, with `docker stats` sampled every 1–2 seconds so shorter peaks may be
+missing, raised the backend about 1 GiB and PostgreSQL about 1.8 GiB above
+idle, and PostgreSQL used about 3.7 GiB while `pg_restore` restored that file;
+concurrent uploads add up. Treat large PostgreSQL-inline items as a database
+memory concern and measure the exact peak on the deployment's PostgreSQL
+version before allowing larger files.
 After correcting a halted campaign's stated cause, increase
 `FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` and recreate the worker
 with the deployment's normal Compose files and profile. Do not reuse or lower a

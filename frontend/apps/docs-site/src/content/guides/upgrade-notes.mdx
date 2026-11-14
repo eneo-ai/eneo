@@ -143,6 +143,7 @@ flowchart TB
 | Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
 | A question whose log holds no request answers `400` instead of `500` | API consumers | Treat `400` as no log |
 | [`UPLOAD_TMP_DIR` must be a local filesystem](#upload-tmp-dir-local) | Operators | Keep it local |
+| [`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated](#inline-maximum-deprecated) | Operators who store files in PostgreSQL | Remove the line. Breaking only for a value above about 512 MiB |
 | [Migration `202611091200` rewrites every conversation row](#sessions-migration) | Operators | Plan downtime |
 | [Names and feedback text follow the retention period](#names-and-feedback-follow-retention) | Administrators, API consumers | Tell users |
 | Failed jobs carry `failure_code` instead of error text | API consumers of failed jobs | Read `failure_code` |
@@ -374,6 +375,20 @@ Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`
 **Do:** keep `UPLOAD_TMP_DIR` (default `/tmp`) on a local filesystem; NFS or SMB is not supported. See [Temporary files](/guides/deployment#temporary-files).
 
 **Rollback:** stop every process, then remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
+
+### `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated [#inline-maximum-deprecated]
+
+Upload limits are set in **Admin > File storage**. A file stored in PostgreSQL can now be as large as PostgreSQL holds and backs up per file, just under 512 MiB: the [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql). A value that is still set keeps working up to that capacity, and startup logs a warning. Only a value above the capacity is a breaking change.
+
+- **Set to `10485760` (10 MiB), as in the old reference template:** uploads above 10 MiB stop with `413` as before.
+- **Not set:** uploads can go up to the capacity instead of 200 MiB. That changes uploads only where an administrator has set a policy above 200 MiB. Moves from object storage into PostgreSQL, the online adoption of existing File and Icon bytes, and its [preflight](/guides/file-icon-storage-upgrade#run-preflight-while-eneo-21-is-running) also take items up to the capacity. If the preflight counts `extra_large` items (above 200 MiB), measure PostgreSQL memory with one such item first.
+- **Set above the capacity (breaking):** startup continues, the limit is capped at the capacity, and the warning says so. Uploads between the capacity and your value are now refused with `413`, and moves of such files from object storage into PostgreSQL fail. Such files could be stored before but `pg_dump` could not back them up. **Do:** keep files that large in object storage (select it in **Admin > File storage**), or accept the lower limit.
+
+**Do:** remove the line from `env_backend.env` and recreate the backend and worker; the policy then applies.
+
+**Check:** startup logs no warning about the variable, and **Admin > File storage** shows a storage limit below the policy only where the policy is above the capacity.
+
+**Rollback:** the earlier release reads the variable again and uses 200 MiB without it; files stored in the meantime stay readable.
 
 ### Migration `202611091200` rewrites every conversation row [#sessions-migration]
 
