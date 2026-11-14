@@ -47,7 +47,8 @@ def _connection_lost(exc: BaseException) -> bool:
 
 
 class _Run:
-    """What one run did: counts per step, failures and full selections."""
+    """What one run reports beside its counts: the failures, and the
+    selections that reached the limit."""
 
     def __init__(self) -> None:
         self.errors: list[dict[str, str]] = []
