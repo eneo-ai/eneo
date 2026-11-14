@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@f8e43b647ca3
+translationSource: guides/upgrade-notes.mdx@d6a78ffc39cf
 ---
 
 import { Callout } from "nextra/components";
@@ -148,6 +148,7 @@ flowchart TB
 | Den medföljande SeaweedFS-avbilden är `4.40-eneo.8` | Medföljande SeaweedFS | Sätt `ENEO_SEAWEEDFS_IMAGE` till digesten i `IMAGE-DIGESTS.txt` ([Lås versionens avbild](/guides/object-content-storage#pin-the-release-image)) |
 | En fråga vars logg inte innehåller något anrop svarar `400` i stället för `500` | API-konsumenter | Behandla `400` som ingen logg |
 | [`UPLOAD_TMP_DIR` måste vara ett lokalt filsystem](#upload-tmp-dir-local) | Driftansvariga | Håll den lokal |
+| [`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` är föråldrad](#inline-maximum-deprecated) | Driftansvariga som lagrar filer i PostgreSQL | Ta bort raden |
 | [Migreringen `202611091200` skriver om varje konversationsrad](#sessions-migration) | Driftansvariga | Planera driftstopp |
 | [Namn och feedbacktext följer gallringstiden](#names-and-feedback-follow-retention) | Administratörer, API-konsumenter | Informera användarna |
 | Misslyckade jobb har `failure_code` i stället för feltext | API-konsumenter av misslyckade jobb | Läs `failure_code` |
@@ -379,6 +380,20 @@ Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`,
 **Gör:** håll `UPLOAD_TMP_DIR` (standard `/tmp`) på ett lokalt filsystem; NFS eller SMB stöds inte. Se avsnittet om temporära filer i den engelska versionen av driftsättningsguiden.
 
 **Återställning:** stoppa varje process och ta sedan bort `$UPLOAD_TMP_DIR/eneo-scratch/`.
+
+### `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` är föråldrad [#inline-maximum-deprecated]
+
+Uppladdningsgränserna ställs in i **Admin > File storage**. En fil som lagras i PostgreSQL får nu vara så stor som PostgreSQL rymmer och kan säkerhetskopiera per fil, strax under 512 MiB: [lagringsgränsen](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) (på engelska). Det är ingen bakåtinkompatibel ändring: ett värde som fortfarande är satt fungerar som förut upp till den kapaciteten, och starten loggar en varning.
+
+- **Satt till `10485760` (10 MiB), som i den gamla referensmallen:** uppladdningar över 10 MiB stoppas med `413` som förut.
+- **Inte satt:** gränsen går från 200 MiB till kapaciteten. Det ändrar uppladdningar bara där en administratör har satt policyn över 200 MiB, och flyttar från objektlagring till PostgreSQL tar emot större filer.
+- **Satt över kapaciteten:** starten går, gränsen kapas till kapaciteten och varningen säger det.
+
+**Gör:** ta bort raden ur `env_backend.env` och skapa om backend och worker; sedan gäller policyn.
+
+**Kontroll:** starten loggar ingen varning om variabeln, och **Admin > File storage** visar ingen lagringsgräns under policyn.
+
+**Återställning:** den tidigare versionen läser variabeln igen och använder 200 MiB utan den; filer som lagrats under tiden går fortfarande att läsa.
 
 ### Migreringen `202611091200` skriver om varje konversationsrad [#sessions-migration]
 

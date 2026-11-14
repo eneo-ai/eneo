@@ -135,7 +135,7 @@ for view semantics, query bounds and rollback behavior.
 | OIDC_CLIENT_ID                   |          | Single sign-on: the client registered for Eneo           |
 | OIDC_CLIENT_SECRET               |          | Single sign-on: that client's secret                     |
 | OIDC_TENANT_ID                   |          | Resource-server mode: the tenant its users belong to     |
-| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
+| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Deprecated; leave unset. A set value still lowers the [storage limit for files stored in PostgreSQL](../docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |

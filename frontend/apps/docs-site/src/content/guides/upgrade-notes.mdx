@@ -143,6 +143,7 @@ flowchart TB
 | Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
 | A question whose log holds no request answers `400` instead of `500` | API consumers | Treat `400` as no log |
 | [`UPLOAD_TMP_DIR` must be a local filesystem](#upload-tmp-dir-local) | Operators | Keep it local |
+| [`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated](#inline-maximum-deprecated) | Operators who store files in PostgreSQL | Remove the line |
 | [Migration `202611091200` rewrites every conversation row](#sessions-migration) | Operators | Plan downtime |
 | [Names and feedback text follow the retention period](#names-and-feedback-follow-retention) | Administrators, API consumers | Tell users |
 | Failed jobs carry `failure_code` instead of error text | API consumers of failed jobs | Read `failure_code` |
@@ -374,6 +375,20 @@ Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`
 **Do:** keep `UPLOAD_TMP_DIR` (default `/tmp`) on a local filesystem; NFS or SMB is not supported. See [Temporary files](/guides/deployment#temporary-files).
 
 **Rollback:** stop every process, then remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
+
+### `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated [#inline-maximum-deprecated]
+
+Upload limits are set in **Admin > File storage**. A file stored in PostgreSQL can now be as large as PostgreSQL holds and backs up per file, just under 512 MiB: the [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql). This is not a breaking change: a value that is still set keeps working up to that capacity, and startup logs a warning.
+
+- **Set to `10485760` (10 MiB), as in the old reference template:** uploads above 10 MiB stop with `413` as before.
+- **Not set:** the limit goes from 200 MiB to the capacity. That changes uploads only where an administrator has set a policy above 200 MiB, and moves from object storage into PostgreSQL accept larger files.
+- **Set above the capacity:** startup continues, the limit is capped at the capacity, and the warning says so.
+
+**Do:** remove the line from `env_backend.env` and recreate the backend and worker; the policy then applies.
+
+**Check:** startup logs no warning about the variable, and **Admin > File storage** shows no storage limit below the policy.
+
+**Rollback:** the earlier release reads the variable again and uses 200 MiB without it; files stored in the meantime stay readable.
 
 ### Migration `202611091200` rewrites every conversation row [#sessions-migration]
 

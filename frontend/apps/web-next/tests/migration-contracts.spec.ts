@@ -187,9 +187,10 @@ test(
         knowledge_file_limit_bytes: 32 * MIB
       });
       const projection = raised.limits.find((limit) => limit.use_case === "knowledge_file");
+      // The policy alone governs: the storage limit sits above 32 MiB.
       expect(projection).toMatchObject({
         effective_bytes: 32 * MIB,
-        operator_ceiling_bytes: 32 * MIB,
+        constraining_source: "admin_policy",
         storage_target: "postgres_inline"
       } satisfies Partial<Schema<"UploadLimitProjection">>);
       const space = await createSpace(page, uniqueName("E2E Native original"));

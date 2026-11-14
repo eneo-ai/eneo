@@ -282,10 +282,12 @@ state first. Target changes, upload limits, and existing-content moves remain
 separate actions, while detailed limits and PostgreSQL allocation are available
 under technical details.
 
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
-safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
-upload limit. For PostgreSQL-inline session uploads and knowledge originals,
-Eneo uses the smaller of the admin policy and this ceiling. **Admin > File storage**
+Files stored in PostgreSQL also have a
+[storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql): the most PostgreSQL holds and backs up per file, or lower
+while the deprecated `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is still set. Leave
+that variable unset. For PostgreSQL-inline session uploads and knowledge
+originals, Eneo uses the smaller of the admin policy and this storage limit.
+**Admin > File storage**
 shows the configured limit, effective limit, and constraining source for
 knowledge files and transcription audio as well as File and Icon. Object-store
 uploads use the same rule with the portable multipart envelope derived from
@@ -344,10 +346,10 @@ curl -fsS https://eneo.example.eu/api/readyz \
 the control records and bounded payload bytes, so the normal PostgreSQL backup
 is the complete content backup.
 
-Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
-deployment ceiling. Admin policy may exceed this value, but inline session
-writes use the lower effective limit and report the ceiling as the constraining
-source.
+Leave the deprecated `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` unset. Each file
+stored in PostgreSQL is read into memory in full on upload and is part of every
+database backup; the [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) caps it at what PostgreSQL holds per
+file.
 
 In **Admin > File storage**, keep the target for new files set to **PostgreSQL**
 and set the four business limits. The update applies to backend and worker
