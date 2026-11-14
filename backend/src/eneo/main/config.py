@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlsplit
 
+import email_validator
 from pydantic import (
     Field,
     ValidationError,
@@ -1563,7 +1564,18 @@ def get_settings() -> Settings:
                 UPGRADE_GUIDE_URL,
             )
             raise InvalidConfiguration() from None
+        _apply_email_rules(_settings)
     return _settings
+
+
+def _apply_email_rules(settings: Settings) -> None:
+    """Accept addresses under ``.test`` in development, and only there.
+
+    The domain is reserved for testing (RFC 2606), so no real mailbox is under
+    it and e-mail validation refuses it. A development setup's accounts, such
+    as the people of a local identity provider, use it for that reason.
+    """
+    email_validator.TEST_ENVIRONMENT = settings.is_development
 
 
 def set_settings(settings: Settings) -> None:
@@ -1574,6 +1586,7 @@ def set_settings(settings: Settings) -> None:
     """
     global _settings
     _settings = settings
+    _apply_email_rules(settings)
 
 
 def reset_settings() -> None:
