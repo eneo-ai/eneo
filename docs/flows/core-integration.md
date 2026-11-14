@@ -8,6 +8,26 @@ organisation chooses them: 202610211900 seeds the `flows_core` feature flag
 off, no upgrade turns it on or gives a role a flow permission, and the
 predefined roles of a new organisation carry none.
 
+## What changed from earlier builds of this branch
+
+Earlier builds of this branch switched Flows on for every organisation on
+upgrade, gave the Owner role the four flow permissions and the AI Configurator
+role `flows_trace`, gave every role with `admin` `retention_manage` and
+`retention_holds`, and raised the upload limits. An upgrade now does none of
+that. An installation that upgrades from 2.3 or installs fresh with this
+version therefore needs these steps before Flows and retention can be used:
+
+1. An operator switches Flows on for each organisation that uses them (below).
+2. An administrator grants the flow permissions and the retention permissions
+   to the roles that need them in **Admin > Roles**. Until then nobody can
+   change retention rules or legal holds; the retention endpoints answer 403
+   `retention_permission_required`.
+3. An administrator who wants larger uploads raises the limits in
+   **Admin > File storage**.
+
+A database that already ran the earlier revisions keeps what they did and
+needs none of these steps; nothing reverts it.
+
 ## Turning Flows on
 
 Switch Flows on for one organisation with that organisation's own flag row,
