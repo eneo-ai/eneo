@@ -177,6 +177,10 @@ INTENTIONALLY_UNGUARDED = {
     "and Permission.ADMIN. The visitor routes (/widgets/{public_id}/...) authenticate "
     "with short-lived visitor tokens and never resolve an Eneo user, so API-key "
     "resource guards have nothing to gate.",
+    "/connector": "The connector protocol's routes authenticate a calling installation "
+    "(shared key and a signed, request-bound assertion) and then the person by their "
+    "own identity-provider token (Authentication.CONNECTOR). No API key is read, so "
+    "API-key resource guards have nothing to gate.",
     "/widget-templates": "Session-only read of the tenant's widget templates; "
     "WidgetTemplateService checks Permission.WIDGETS or Permission.ADMIN and tenant.",
 }
@@ -205,6 +209,8 @@ INTENTIONALLY_SCOPE_FREE = {
     "sessions, feedback) are authenticated by widget visitor tokens bound to one "
     "widget; no API key context exists. The admin routes under the same prefix are "
     "session-only and skipped by route_is_session_only.",
+    "/connector": "The connector protocol's routes take a calling installation's "
+    "credentials and the person's identity-provider token; no API key context exists.",
 }
 
 
@@ -968,6 +974,7 @@ MUTATING_ALLOWLIST_PREFIXES: dict[str, str] = {
     "/users/provision/": "Public provisioning endpoint guarded by its own flow",
     "/integrations/auth/": "External OAuth callback endpoints — no API key context",
     "/integrations/sharepoint/": "External SharePoint webhook — verified by signature, not API key",
+    "/connector/": "Connector protocol routes — a calling installation's signed assertion plus the person's identity-provider token, never an API key",
 }
 
 # Specific (method, path) pairs without resource_permission / api_key_permission

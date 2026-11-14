@@ -306,6 +306,35 @@ An assistant is listed when it is available to other clients, is published, has 
 
 The flag does not grant access. It only says that the assistant may be offered outside Eneo; asking it goes through [`POST /api/v1/conversations/`](#chat) with the same checks as any other question, and the conversation appears in Eneo like one started there. Send what the person is looking at in [`context`](#context-sent-with-a-question).
 
+### Connected systems
+
+A system that speaks the connector protocol (version 3), such as a start page for staff, does not need an adapter in front of Eneo: Eneo serves the protocol itself. An administrator adds the system under **Administration › Integrations › Connected systems** with a name and the system's own https address. Eneo answers with two values to enter in that system: Eneo's connector address, `https://<your-eneo>/api/v1/connector`, and a shared key. The key is shown once; Eneo keeps only a digest of it. Removing the system there refuses its key from the next call on. Until a system has been added, every route below answers `404`.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/connector/clew/manifest` | The manifest: protocol version, the id `eneo`, and the reads Eneo offers. No credentials. |
+| `POST /api/v1/connector/clew/capabilities/eneo.assistants` | The assistants the person may ask, as `{ "output": { "assistants": [{ "ref", "name", "description" }] } }`. The same list as `GET /api/v1/assistants/external/`, at most 50, without the space. |
+| `POST /api/v1/connector/clew/ask` | One question from the person to one assistant, answered as a stream of events. |
+
+Every `POST` carries two credentials:
+
+- **The calling system's.** The shared key in `X-Clew-Connector-Key`, and in `Authorization: Bearer` an assertion the system signed for exactly this request: an `RS256` JWT for the audience `eneo` that lives at most two minutes and holds the SHA-256 of the request body and, on a capability route, the capability's name. Eneo verifies it against the public keys at `/api/connectors/jwks` under the address the administrator registered, never against an address the token names. Anything wrong here answers `401`, and nothing is read for an unverified request.
+- **The person's.** Their own access token from the identity provider, issued for Eneo, in `X-Clew-Delegated-Token`. Eneo admits it as it admits a bearer token in resource-server mode, so `OIDC_RESOURCE_SERVER_ENABLED` must be set (see [OIDC federation](/guides/oidc-federation)); without it the routes answer `503`. A missing or refused token answers `403`. What the calling system says about the person is never used to decide access: the person lists and asks exactly what they could in Eneo, in the tenant that added the system.
+
+The body of `POST …/clew/ask` is `{ "actor": {…}, "ask": { "assistant", "session"?, "question", "context"? } }`: the assistant's id, the session to continue on a follow-up, the question as typed (1 to 4,000 characters) and up to 8 [`context`](#context-sent-with-a-question) items. The assistant must be one the listing offers the person, and a session must be the person's own with that assistant; otherwise the answer is `404`. The whole assistant answers, with its prompt, knowledge and tools, and the conversation appears in the person's history in Eneo. Tools that produce files (images, documents, analysis, charts, calculations) are left out of the turn, and no tool approval is requested.
+
+The answer is `text/event-stream`, one JSON object per `data:` line:
+
+```text
+data: {"type":"text","delta":"You have 25 days "}
+data: {"type":"source","source":{"label":"Holiday rules","link":"https://intra.example/holiday"}}
+data: {"type":"done","session":"<session id>","link":"https://<your-eneo>/dashboard/<assistant id>/<session id>"}
+```
+
+`text` is the answer as it is written, without Eneo's citation tags. `source` follows the text, once for each source the answer cites and at most ten, with a `link` only when it is an https address. The stream ends with one `done`, carrying the session to continue in and, when `PUBLIC_ORIGIN` is an https address, a link that opens the conversation in Eneo, or with one `{"type":"error","code":…}` (`unavailable` or `unknown`). Comment lines are sent as keep-alives. An answer that takes longer than 170 seconds ends as `unavailable`.
+
+Errors before the stream starts are `{ "error": { "code", "message" } }` with the code `invalid` (400), `denied` (401 or 403), `not-found` (404) or `unavailable` (503); the message is in Swedish and may be shown to the person. Adding and removing a system, and each question asked through one (which system, which assistant and session, never the text), are recorded in the audit log.
+
 ---
 
 ## Pagination

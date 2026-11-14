@@ -70,6 +70,8 @@ from eneo.completion_models.domain.completion_model_service import (
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.completion_models.presentation import CompletionModelAssembler
+from eneo.connector_protocol.installation_repo import ConnectorInstallationRepository
+from eneo.connector_protocol.installation_service import ConnectorInstallationService
 from eneo.conversations.application.conversation_service import ConversationService
 from eneo.conversations.application.recent_conversations_service import (
     RecentConversationsService,
@@ -742,6 +744,9 @@ class Container(containers.DeclarativeContainer):
     info_blob_repo = providers.Factory(InfoBlobRepository, session=session)
     job_repo = providers.Factory(JobRepository, session=session)
     allowed_origin_repo = providers.Factory(AllowedOriginRepository, session=session)
+    connector_installation_repo = providers.Factory(
+        ConnectorInstallationRepository, session=session
+    )
     role_repo = providers.Factory(RolesRepository, session=session)
     completion_model_repo = providers.Factory(
         CompletionModelsRepository, session=session
@@ -1210,6 +1215,11 @@ class Container(containers.DeclarativeContainer):
         AllowedOriginService,
         user=user,
         repo=allowed_origin_repo,
+    )
+    connector_installation_service = providers.Factory(
+        ConnectorInstallationService,
+        user=user,
+        repo=connector_installation_repo,
     )
     whats_new_service = providers.Factory(
         WhatsNewService,

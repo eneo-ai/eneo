@@ -16,6 +16,7 @@ from eneo.authentication.oidc.errors import (
     OidcResponseNotVerifiedError,
     OidcTransactionInvalidError,
 )
+from eneo.connector_protocol.errors import ConnectorProtocolError
 from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.files.file_models import (
     FileInUseError,
@@ -686,3 +687,16 @@ def add_exception_handlers(app: FastAPI):
         )
 
     app.add_exception_handler(WidgetPublicError, widget_public_error_handler)
+
+    async def connector_protocol_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # The protocol's own error shape, not Eneo's: the caller validates it.
+        error = cast(ConnectorProtocolError, exc)
+        return JSONResponse(
+            status_code=error.status_code,
+            content=error.body(),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    app.add_exception_handler(ConnectorProtocolError, connector_protocol_error_handler)

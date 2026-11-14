@@ -221,6 +221,20 @@
             "en": "A file's name often says what the file is about, and a conversation's name copies text that retention removes. In the audit log you now see a file by its id, size and file type, and a conversation by its id. Entries from before this version were changed the same way, so a search for a file name finds none of them.",
             "sv": "Ett filnamn säger ofta vad filen handlar om, och en konversations namn kopierar text som gallras. I granskningsloggen ser du nu en fil med id, storlek och filtyp, och en konversation med sitt id. Rader från före den här versionen ändrades på samma sätt, så du hittar dem inte genom att söka på ett filnamn."
           }
+        },
+        {
+          "id": "connected-systems",
+          "type": "new",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Connect a system that asks your assistants",
+            "sv": "Anslut ett system som frågar era assistenter"
+          },
+          "body": {
+            "en": "Under Administration › Integrations you can now add a connected system, such as a start page for staff. People then find and ask the assistants made available to other clients from that system, signed in as themselves, and the conversations appear in their history in Eneo. Eneo shows its address and a shared key to enter in the system, once.",
+            "sv": "Under Administration › Integrationer kan du nu lägga till ett anslutet system, till exempel en startsida för medarbetare. Därifrån hittar och frågar personer de assistenter som gjorts tillgängliga för andra klienter, inloggade som sig själva, och konversationerna syns i deras historik i Eneo. Eneo visar sin adress och en delad nyckel att ange i systemet, en gång."
+          }
         }
       ]
     },

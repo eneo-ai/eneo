@@ -4149,6 +4149,50 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/admin/connector-installations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Installations
+     * @description List the installations of other systems the tenant lets call Eneo over the connector protocol.
+     */
+    get: operations["list_installations_api_v1_admin_connector_installations__get"];
+    put?: never;
+    /**
+     * Add Installation
+     * @description Let an installation call Eneo. The answer carries the shared key to enter in that installation; it is shown this once.
+     */
+    post: operations["add_installation_api_v1_admin_connector_installations__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/connector-installations/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove Installation
+     * @description Stop an installation from calling Eneo. Its shared key is refused from the next call on.
+     */
+    delete: operations["remove_installation_api_v1_admin_connector_installations__id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/completion-models/": {
     parameters: {
       query?: never;
@@ -10493,7 +10537,10 @@ export interface components {
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
-      | "widget_template_published";
+      | "widget_template_published"
+      | "connector_installation_added"
+      | "connector_installation_removed"
+      | "connector_question_asked";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -13633,6 +13680,62 @@ export interface components {
      * @enum {string}
      */
     ConnectionCheckStatus: "ok" | "failed";
+    /** ConnectorInstallationCreate */
+    ConnectorInstallationCreate: {
+      /**
+       * Name
+       * @description What administrators call the installation.
+       */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address, for example `https://start.example`. Must use https.
+       */
+      base_url: string;
+    };
+    /** ConnectorInstallationCreated */
+    ConnectorInstallationCreated: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address. Its public signing keys are read from `/api/connectors/jwks` under it.
+       */
+      base_url: string;
+      /**
+       * Key
+       * @description The shared key to enter in the installation, beside Eneo's connector address. Shown this once: Eneo keeps only a digest of it.
+       */
+      key: string;
+    };
+    /** ConnectorInstallationPublic */
+    ConnectorInstallationPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address. Its public signing keys are read from `/api/connectors/jwks` under it.
+       */
+      base_url: string;
+    };
     /**
      * ConstrainingSource
      * @enum {string}
@@ -19517,6 +19620,19 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["CompletionModelPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
+    /** PaginatedResponse[ConnectorInstallationPublic] */
+    PaginatedResponse_ConnectorInstallationPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ConnectorInstallationPublic"][];
       /**
        * Count
        * @description Number of items returned in the response
@@ -43532,6 +43648,133 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_installations_api_v1_admin_connector_installations__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ConnectorInstallationPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  add_installation_api_v1_admin_connector_installations__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectorInstallationCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConnectorInstallationCreated"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_installation_api_v1_admin_connector_installations__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

@@ -211,6 +211,11 @@ class ActionType(str, Enum):
     WIDGET_TEMPLATE_DELETED = "widget_template_deleted"
     WIDGET_TEMPLATE_PUBLISHED = "widget_template_published"
 
+    # Connector Protocol Actions (other systems calling Eneo as a connector)
+    CONNECTOR_INSTALLATION_ADDED = "connector_installation_added"
+    CONNECTOR_INSTALLATION_REMOVED = "connector_installation_removed"
+    CONNECTOR_QUESTION_ASKED = "connector_question_asked"
+
 
 # Logged whatever the tenant's audit configuration says: a tenant admin can
 # switch off categories, actions and the whole audit log, and none of those may

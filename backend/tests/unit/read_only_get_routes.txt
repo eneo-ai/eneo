@@ -11,6 +11,7 @@ GET /api/v1/admin/api-keys/expiring-soon
 GET /api/v1/admin/api-keys/notification-policy
 GET /api/v1/admin/api-keys/{id}
 GET /api/v1/admin/api-keys/{id}/usage
+GET /api/v1/admin/connector-installations/
 GET /api/v1/admin/crawler/
 GET /api/v1/admin/crawler/runs/{id}/
 GET /api/v1/admin/crawler/runs/{id}/failures/
