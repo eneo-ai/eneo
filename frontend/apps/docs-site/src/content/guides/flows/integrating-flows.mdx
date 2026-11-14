@@ -2075,6 +2075,8 @@ Structured output uses the same 8 MiB ceiling, measured as serialized JSON inclu
 
 The 8-hour invocation default must land after heartbeat-based recovery; release orchestration enforces this dependency. For longer recordings, a tenant admin raises **Longest recording** in Flow settings, up to what `FLOW_AUDIO_MAX_DECODED_BYTES` holds, and operators raise **`TASK_EXECUTION_TIMEOUT_SECONDS`** with it. The invocation budget still reserves 60 seconds for finalization, giving steps a maximum of 28,740 seconds within the remaining shared budget; the minimum invocation budget remains 65 seconds. Upload bytes, decoded bytes, and model/provider capacity must also admit the recording. These duration and execution defaults are provisional and may be revised after measurement.
 
+`FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS` is no longer read. A deployment that still sets it starts and logs that the variable is ignored; remove it. Its 8-hour cap is gone, so administrators can now set up to what `FLOW_AUDIO_MAX_DECODED_BYTES` holds. To keep them below that, lower `FLOW_AUDIO_MAX_DECODED_BYTES`, which also bounds audio transcribed outside Flows.
+
 Within that budget, a step's `timeout_seconds` is bounded by the organisation's step timeout limits. `GET /api/v1/flows/execution-limits/` (`get_flow_execution_limits`) returns `default_step_timeout_seconds`, used when a step sets none, and `max_step_timeout_seconds`, above which a save or run is refused with `flow_step_timeout_exceeds_tenant_max`. Anyone who may manage flows can read it; administrators change it with `PATCH /api/v1/settings/flow-runtime-policy`.
 
 ### Workload receipt
