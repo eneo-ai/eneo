@@ -24,14 +24,26 @@ if TYPE_CHECKING:
 
 
 def audit_snapshot(widget: Widget) -> dict[str, Any]:
-    """The settings every widget audit entry records."""
+    """The settings every widget audit entry records: what governs where the
+    widget runs and what visitors are told and shown. Texts other than the
+    AI disclosure, the theme and the persona are presentation and stay out."""
+    ack = widget.external_tools_acknowledgement
     return {
+        "name": widget.name,
         "status": widget.status.value,
         "token_generation": widget.token_generation,
+        "language": widget.language.value,
         "allowed_origins": list(widget.allowed_origins),
         "limits": widget.limits.model_dump(mode="json"),
         "privacy": widget.privacy.model_dump(mode="json"),
         "bot_protection": widget.bot_protection.value,
+        "subtitle": widget.texts.subtitle,
+        "show_sources": widget.show_sources,
+        "show_tool_activity": widget.show_tool_activity,
+        "template_id": str(widget.template_id) if widget.template_id else None,
+        "external_tools_acknowledgement": (
+            ack.model_dump(mode="json") if ack is not None else None
+        ),
     }
 
 

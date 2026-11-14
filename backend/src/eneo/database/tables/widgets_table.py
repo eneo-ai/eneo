@@ -64,6 +64,12 @@ class Widgets(BasePublic):
     template_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(WidgetTemplates.id, ondelete="SET NULL"), nullable=True
     )
+    # ExternalToolsAcknowledgement: the admin's acknowledgement at activation
+    # that the assistant's external MCP servers run on visitor input, with
+    # the server ids it was given for. NULL until an activation records one.
+    external_tools_acknowledgement: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
     created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
     )

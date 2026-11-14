@@ -93,23 +93,38 @@ class WidgetLimiter:
             message="Too many session requests. Try again shortly.",
         )
 
-    async def hold_turn(self, widget: Widget, session_id: UUID) -> None:
+    # Delete the hold only while it is still the caller's own: a request that
+    # outlived TURN_HOLD_SECONDS must not release the next holder's turn.
+    _RELEASE = """
+    if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
+    return 0
+    """
+
+    async def hold_turn(self, widget: Widget, session_id: UUID) -> Optional[str]:
         """Admit one follow-up at a time per conversation.
 
         The turn cap is read and the question stored in separate transactions,
         so two follow-ups arriving together could both see one slot left. The
-        second waits for the first answer instead.
+        second waits for the first answer instead. Callers check that the
+        visitor owns the conversation first: the key is the session id, which
+        another visitor could otherwise hold against its owner.
+
+        Returns the hold's owner marker for ``release_turn``, or None when
+        Redis was unavailable and the limiter is set to fail open.
         """
         key = _widget_key(widget, "session", str(session_id), "turn")
+        owner = uuid4().hex
         try:
-            fresh = await self.redis.set(key, b"1", nx=True, ex=TURN_HOLD_SECONDS)
+            fresh = await self.redis.set(
+                key, owner.encode(), nx=True, ex=TURN_HOLD_SECONDS
+            )
         except Exception as exc:
             if self.settings.widget_rate_limit_fail_open:
                 logger.warning(
                     "Widget turn hold skipped: Redis unavailable",
                     extra={"key": key, "error": str(exc)},
                 )
-                return
+                return None
             raise WidgetProtectionUnavailableError() from exc
         if not fresh:
             raise WidgetRateLimitedError(
@@ -117,11 +132,18 @@ class WidgetLimiter:
                 retry_after=3,
                 message="An answer is still being written in this conversation.",
             )
+        return owner
 
-    async def release_turn(self, widget: Widget, session_id: UUID) -> None:
+    async def release_turn(
+        self, widget: Widget, session_id: UUID, owner: Optional[str]
+    ) -> None:
+        """Release the hold ``hold_turn`` returned ``owner`` for; a hold that
+        was never taken (None) or has since passed to another turn is left."""
+        if owner is None:
+            return
         key = _widget_key(widget, "session", str(session_id), "turn")
         try:
-            await self.redis.delete(key)
+            await self.redis.eval(self._RELEASE, 1, key, owner)
         except Exception as exc:
             # The hold expires on its own; the next follow-up only waits longer.
             logger.warning(

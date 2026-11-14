@@ -475,14 +475,19 @@ describe("WidgetEditor", () => {
   });
 
   test("visitor access lists what visitors get and what they never get", async () => {
-    renderEditor(widget(), {
-      mcp_servers: [
-        { id: "m1", name: "Kommunens ärenden", purpose: "general", is_enabled: true },
-        { id: "m2", name: "Avstängd server", purpose: "general", is_enabled: false },
-        { id: "m3", name: "Sökleverantören", purpose: "web_search", is_enabled: true }
-      ],
-      enabled_capabilities: ["web_search", "image_generation"]
-    } as unknown as Partial<Assistant>);
+    // The servers come from the widget as the API lists them (what an admin
+    // acknowledges), with the tools switched on there.
+    renderEditor(
+      widget({
+        external_tools: [
+          { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+        ],
+        external_tools_acknowledged: true
+      } as unknown as Partial<Widget>),
+      {
+        enabled_capabilities: ["web_search", "image_generation"]
+      } as unknown as Partial<Assistant>
+    );
     await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
     const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
     await expect.element(access).toBeVisible();
@@ -493,11 +498,52 @@ describe("WidgetEditor", () => {
         .map((item) => item.textContent?.trim())
     ).toEqual([
       "widget_admin_visitor_access_knowledge",
-      "Kommunens ärenden",
+      "widget_admin_visitor_access_server_tools(Kommunens ärenden|Sök ärende)",
       "widget_admin_visitor_access_capability(web_search)"
     ]);
     await expect.element(access.getByText("widget_admin_visitor_access_never")).toBeVisible();
   });
+
+  test.each([
+    {
+      case: "the organisation does not allow them",
+      blockers: ["external_tools_not_allowed"],
+      items: ["widget_admin_visitor_access_knowledge", "widget_admin_visitor_access_not_allowed"]
+    },
+    {
+      case: "newer ones wait for an admin",
+      blockers: ["external_tools_unacknowledged"],
+      items: [
+        "widget_admin_visitor_access_knowledge",
+        "widget_admin_visitor_access_server_tools(Kommunens ärenden|Sök ärende)",
+        "widget_admin_visitor_access_unacknowledged",
+        "widget_admin_visitor_access_hidden"
+      ]
+    }
+  ])(
+    "visitor access lists only the tools visitors reach when $case",
+    async ({ blockers, items }) => {
+      renderEditor(
+        widget({
+          external_tools: [
+            { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+          ],
+          external_tools_acknowledged: false,
+          activation_blockers: blockers,
+          show_tool_activity: false
+        } as unknown as Partial<Widget>)
+      );
+      await userEvent.click(page.getByRole("tab", { name: /widget_admin_tab_publish/ }));
+      const access = page.getByRole("region", { name: "widget_admin_visitor_access" });
+      await expect.element(access).toBeVisible();
+      expect(
+        access
+          .getByRole("listitem")
+          .elements()
+          .map((item) => item.textContent?.trim())
+      ).toEqual(items);
+    }
+  );
 
   test("image generation alone is not reported as a hidden tool", async () => {
     renderEditor(widget({ show_tool_activity: false }), {

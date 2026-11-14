@@ -44,7 +44,8 @@ export const policy: WidgetPolicy = {
   max_daily_token_budget: 1000,
   min_retention_days: 0,
   max_retention_days: 365,
-  allow_bot_protection_none: false
+  allow_bot_protection_none: false,
+  allow_external_tools: true
 };
 
 export function overviewItem(overrides: Partial<WidgetOverviewItem> = {}): WidgetOverviewItem {
@@ -59,6 +60,8 @@ export function overviewItem(overrides: Partial<WidgetOverviewItem> = {}): Widge
     assistant_name: "Kontakt",
     allowed_origins: ["https://www.kommun.se"],
     activation_blockers: [],
+    external_tools: [],
+    external_tools_acknowledged: true,
     updated_at: "2026-10-28T08:00:00Z",
     daily_token_budget: 1000,
     budget_used_today: 0,

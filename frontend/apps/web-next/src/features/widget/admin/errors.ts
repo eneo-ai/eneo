@@ -1,6 +1,7 @@
 import { EneoApiError } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import type { Widget } from "./queries";
 import { blockerLabel } from "./blockers";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -51,8 +52,17 @@ const CODE_FIELDS: Record<string, string> = {
   retention_above_policy_maximum: "privacy.retention_days",
   bot_protection_none_not_allowed: "bot_protection",
   allowed_origins_empty: "allowed_origins",
+  allowed_origin_too_broad: "allowed_origins",
   subtitle_empty: "texts.subtitle",
   subtitle_required_for_legal_texts_lock: "texts.subtitle"
+};
+
+// Where each setting a tenant admin reviewed at activation sits in the form;
+// the API names them in `admin_required_while_active`.
+const GOVERNED_FIELDS: Record<string, string> = {
+  allowed_origins: "allowed_origins",
+  privacy: "privacy.retention_days",
+  bot_protection: "bot_protection"
 };
 
 function refusedValueMessage(path: string, t: Translate): string {
@@ -77,6 +87,12 @@ function refusedValueMessage(path: string, t: Translate): string {
  */
 export function widgetFieldErrors(error: unknown, t: Translate): Record<string, string> {
   const fields: Record<string, string> = {};
+  if (widgetErrorCode(error) === "admin_required_while_active") {
+    for (const name of codes(detail(error)?.fields)) {
+      const path = GOVERNED_FIELDS[name];
+      if (path) fields[path] ??= t("widget_admin_error_admin_required_while_active");
+    }
+  }
   for (const code of refusalCodes(error)) {
     const path = CODE_FIELDS[code];
     if (path) fields[path] ??= blockerLabel(code, t);
@@ -92,6 +108,18 @@ export function widgetFieldErrors(error: unknown, t: Translate): Record<string, 
     }
   }
   return fields;
+}
+
+/**
+ * The assistant's current servers and tools outside Eneo, when an
+ * acknowledgement or an activation was refused because the admin saw another
+ * list; null for any other error.
+ */
+export function currentExternalTools(error: unknown): Widget["external_tools"] | null {
+  const code = widgetErrorCode(error);
+  if (code !== "external_tools_changed" && code !== "external_tools_unacknowledged") return null;
+  const servers = detail(error)?.servers;
+  return Array.isArray(servers) ? (servers as Widget["external_tools"]) : null;
 }
 
 export function widgetErrorMessage(error: unknown, t: Translate): string | null {
@@ -114,6 +142,17 @@ export function widgetErrorMessage(error: unknown, t: Translate): string | null 
       return t("widget_admin_error_serving_blocked", { reasons: reasons() });
     case "template_locks_unenforceable":
       return t("widget_admin_error_template_locks", { reasons: reasons() });
+    case "admin_required_while_active":
+      // Leaving a template drops the locks it held on the live widget.
+      return codes(detail(error)?.fields).includes("template")
+        ? t("widget_admin_template_detach_admin_only")
+        : t("widget_admin_error_admin_required_while_active");
+    case "external_tools_unacknowledged":
+      return t("widget_admin_error_external_tools_unacknowledged");
+    case "external_tools_changed":
+      return t("widget_admin_external_tools_changed");
+    case "preview_unavailable_while_paused":
+      return t("widget_admin_preview_paused");
   }
   if (error instanceof EneoApiError && error.status === 422) {
     if (Object.keys(widgetFieldErrors(error, t)).length > 0) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { apiErrorFromResponse } from "@/lib/api/errors";
 import {
+  currentExternalTools,
   isStaleEditorError,
   widgetErrorCode,
   widgetErrorMessage,
@@ -43,6 +44,41 @@ describe("widget admin errors", () => {
     expect(widgetErrorMessage(apiError(500, "other"), t)).toBeNull();
   });
 
+  it("names the template when leaving it is what a live widget needs an admin for", () => {
+    const adminOnly = (fields: string[]) =>
+      refusal(403, { code: "admin_required_while_active", message: "raw", fields });
+    expect(widgetErrorMessage(adminOnly(["template"]), t)).toBe(
+      "widget_admin_template_detach_admin_only"
+    );
+    expect(widgetErrorMessage(adminOnly(["allowed_origins"]), t)).toBe(
+      "widget_admin_error_admin_required_while_active"
+    );
+  });
+
+  it("explains the refusals about tools outside Eneo and a paused preview", () => {
+    expect(widgetErrorMessage(apiError(400, "external_tools_unacknowledged"), t)).toBe(
+      "widget_admin_error_external_tools_unacknowledged"
+    );
+    expect(widgetErrorMessage(apiError(409, "external_tools_changed"), t)).toBe(
+      "widget_admin_external_tools_changed"
+    );
+    expect(widgetErrorMessage(apiError(400, "preview_unavailable_while_paused"), t)).toBe(
+      "widget_admin_preview_paused"
+    );
+  });
+
+  it("hands back the current external tools when the admin saw another list", () => {
+    const servers = [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }];
+    const withServers = (status: number, code: string) =>
+      refusal(status, { code, message: "raw", servers });
+    expect(currentExternalTools(withServers(409, "external_tools_changed"))).toEqual(servers);
+    expect(currentExternalTools(withServers(400, "external_tools_unacknowledged"))).toEqual(
+      servers
+    );
+    expect(currentExternalTools(withServers(400, "widget_serving_blocked"))).toBeNull();
+    expect(currentExternalTools(new Error("x"))).toBeNull();
+  });
+
   it("treats a published lock like a revision conflict", () => {
     expect(isStaleEditorError(apiError(409, "widget_revision_conflict"))).toBe(true);
     expect(isStaleEditorError(apiError(400, "field_locked_by_template"))).toBe(true);
@@ -75,6 +111,27 @@ describe("refused values", () => {
     // An unpublished assistant is not something the widget form can fix.
     expect(widgetFieldErrors(servingBlocked, t)).toEqual({
       allowed_origins: "widget_admin_blocker_allowed_origins_empty"
+    });
+  });
+
+  it("pins what a live widget needs an admin for to the fields it names", () => {
+    const adminOnly = refusal(403, {
+      code: "admin_required_while_active",
+      message: "raw",
+      fields: ["allowed_origins", "privacy", "bot_protection", "template"]
+    });
+    expect(widgetFieldErrors(adminOnly, t)).toEqual({
+      allowed_origins: "widget_admin_error_admin_required_while_active",
+      "privacy.retention_days": "widget_admin_error_admin_required_while_active",
+      bot_protection: "widget_admin_error_admin_required_while_active"
+    });
+    const tooBroad = refusal(400, {
+      code: "widget_serving_blocked",
+      message: "raw",
+      blockers: ["allowed_origin_too_broad"]
+    });
+    expect(widgetFieldErrors(tooBroad, t)).toEqual({
+      allowed_origins: "widget_admin_blocker_origin_too_broad"
     });
   });
 

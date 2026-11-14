@@ -5,6 +5,8 @@
  * runner image needs neither package directory at runtime.
  */
 
+import { createHash } from "node:crypto";
+
 type Manifest = {
   version: string;
   channel: string;
@@ -28,6 +30,11 @@ export type WidgetLoaderBundle = {
 };
 
 type RawFile = () => Promise<string>;
+
+/** The SRI value of a served file, as the manifest records it. */
+export function integrityOf(source: string): string {
+  return `sha384-${createHash("sha384").update(source).digest("base64")}`;
+}
 
 const sources = import.meta.glob("../../../../../packages/widget-loader/dist/eneo.js", {
   query: "?raw",
@@ -78,19 +85,41 @@ export function readManifest(raw: string): Omit<WidgetLoaderBundle, "source" | "
   };
 }
 
+/**
+ * A release from its manifest and files, or null when a file does not hash to
+ * what the manifest promises. The ETag and the snippet's `integrity` are the
+ * manifest's values, so a file that drifted from them must not be served:
+ * browsers would refuse it, and the backend's loader route refuses it too.
+ */
+export function assembleBundle(
+  rawManifest: string,
+  source: string,
+  css: string | undefined
+): WidgetLoaderBundle | null {
+  const release = readManifest(rawManifest);
+  if (!release || (release.cssIntegrity && css === undefined)) return null;
+  if (integrityOf(source) !== release.integrity) {
+    console.error(`Widget loader ${release.version} eneo.js does not match its manifest`);
+    return null;
+  }
+  if (release.cssIntegrity && css !== undefined && integrityOf(css) !== release.cssIntegrity) {
+    console.error(`Widget loader ${release.version} eneo.css does not match its manifest`);
+    return null;
+  }
+  return {
+    ...release,
+    source,
+    ...(release.cssIntegrity && css !== undefined ? { cssSource: css } : {})
+  };
+}
+
 async function loadBundle(
   manifest: RawFile | undefined,
   source: RawFile | undefined,
   css: RawFile | undefined
 ): Promise<WidgetLoaderBundle | null> {
   if (!manifest || !source) return null;
-  const release = readManifest(await manifest());
-  if (!release || (release.cssIntegrity && !css)) return null;
-  return {
-    ...release,
-    source: await source(),
-    ...(release.cssIntegrity && css ? { cssSource: await css() } : {})
-  };
+  return assembleBundle(await manifest(), await source(), css ? await css() : undefined);
 }
 
 function current(): Promise<WidgetLoaderBundle | null> {

@@ -3741,6 +3741,12 @@ class AssistantService:
             ]
 
         if self.user.active_widget is not None:
+            # Anonymous input reaches only the external tools an admin
+            # acknowledged for the widget (WidgetService), whatever the
+            # assistant has since been given.
+            mcp_servers_override = self.user.active_widget.reachable_servers(
+                mcp_servers_override
+            )
             await self._inline_attachments_for_visitor(
                 assistant_to_ask, effective_completion_model, skill_composition.prompt
             )

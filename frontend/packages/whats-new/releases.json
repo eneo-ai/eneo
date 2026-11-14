@@ -21,6 +21,22 @@
           }
         },
         {
+          "id": "web-widgets-external-tools",
+          "permissions": {
+            "anyOf": ["widgets", "admin"]
+          },
+          "type": "improved",
+          "area": "assistants",
+          "title": {
+            "en": "Acknowledge the tools outside Eneo a widget reaches",
+            "sv": "Bekräfta verktygen utanför Eneo som en widget når"
+          },
+          "body": {
+            "en": "When a widget's assistant uses tools on MCP servers outside Eneo, visitors reach only the tools an administrator has acknowledged on the widget page; tools switched on later wait for the same acknowledgement without the widget being paused, and every call is written to the audit log. The widget policy can refuse such tools altogether, and while a widget is active only an administrator can change its allowed websites, privacy, bot protection or template.",
+            "sv": "När en widgets assistent använder verktyg på MCP-servrar utanför Eneo når besökarna bara de verktyg som en administratör har bekräftat på widgetsidan; verktyg som slås på senare väntar på samma bekräftelse utan att widgeten behöver pausas, och varje anrop skrivs till granskningsloggen. Widgetpolicyn kan avböja sådana verktyg helt, och medan en widget är aktiv kan bara en administratör ändra dess tillåtna webbplatser, integritet, botskydd eller mall."
+          }
+        },
+        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",

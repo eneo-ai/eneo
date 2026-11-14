@@ -75,7 +75,9 @@ export function initWidgets(client) {
     },
 
     /**
-     * Tenant admins only; fails with the blockers when configuration is incomplete.
+     * Tenant admins only. Fails with the blockers when configuration is
+     * incomplete, and with `external_tools_unacknowledged` (listing `servers`)
+     * while tools on MCP servers outside Eneo wait for an acknowledgement.
      * @param {{id: string}} widget
      * @returns {Promise<Widget>}
      * @throws {EneoError}
@@ -84,6 +86,33 @@ export function initWidgets(client) {
       const res = await client.fetch("/api/v1/widgets/{id}/activate/", {
         method: "post",
         params: { path: { id } }
+      });
+      return res;
+    },
+
+    /**
+     * Tenant admins only: acknowledges that anonymous visitors can make the
+     * assistant call the tools it reaches on MCP servers outside Eneo, as
+     * `external_tools` listed them. Fails with `external_tools_changed`
+     * (listing the current `servers`) when that list has since changed.
+     * @param {Object} params
+     * @param {{id: string}} params.widget
+     * @param {Widget["external_tools"]} params.servers The servers and tools the admin was shown
+     * @returns {Promise<Widget>}
+     * @throws {EneoError}
+     */
+    acknowledgeExternalTools: async ({ widget, servers }) => {
+      const res = await client.fetch("/api/v1/widgets/{id}/acknowledge-external-tools/", {
+        method: "post",
+        params: { path: { id: widget.id } },
+        requestBody: {
+          "application/json": {
+            servers: servers.map((server) => ({
+              id: server.id,
+              tool_ids: server.tools.map((tool) => tool.id)
+            }))
+          }
+        }
       });
       return res;
     },

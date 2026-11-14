@@ -5,7 +5,7 @@
 
 import re
 import secrets
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Optional, cast
@@ -24,7 +24,10 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
-from eneo.allowed_origins.origin_matching import normalize_origin_pattern
+from eneo.allowed_origins.origin_matching import (
+    is_too_broad_wildcard,
+    normalize_origin_pattern,
+)
 from eneo.main.exceptions import BadRequestException
 
 PUBLIC_ID_PREFIX = "wgt_"
@@ -63,12 +66,24 @@ TOKEN_GENERATION_FIELDS = frozenset(
 # they bypass the revision check: a kill switch must not lose to an autosave.
 LIFECYCLE_FIELDS = frozenset({"status", "paused_at", "token_generation"})
 
+# The settings a tenant admin reviewed at activation: where the widget may be
+# framed, what it keeps and how visitors are admitted. On an active widget
+# only an admin changes them; an editor pauses first (WidgetService). The
+# limits stay with the editor: each has a hard maximum, and the policy caps
+# the token budget on every visitor request (WidgetPolicy.serving).
+GOVERNED_FIELDS = frozenset({"allowed_origins", "privacy", "bot_protection"})
+
 
 # What each configuration blocker is about: the widget cannot serve while the
-# setting is empty.
+# setting is empty (or, for the wildcard check, while it is not met).
 _SERVING_REQUIREMENTS: dict[str, Callable[["Widget"], Any]] = {
     "allowed_origins_empty": lambda widget: widget.allowed_origins,
     "subtitle_empty": lambda widget: widget.texts.subtitle,
+    # A `*.se` saved before the two-label rule: the visitor surface drops it
+    # (WidgetPolicy.serving), so the widget is not framed where it was meant.
+    "allowed_origin_too_broad": lambda widget: not any(
+        is_too_broad_wildcard(origin) for origin in widget.allowed_origins
+    ),
 }
 
 
@@ -298,10 +313,49 @@ class WidgetPrivacy(BaseModel):
         return self.retention_days == 0
 
 
-def normalize_allowed_origins(origins: list[str]) -> list[str]:
+class AcknowledgedExternalServer(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    id: UUID
+    tool_ids: list[UUID]
+
+
+class ExternalToolsAcknowledgement(BaseModel):
+    """A tenant admin's acknowledgement that anonymous visitor input may make
+    the assistant call these tools on MCP servers outside Eneo.
+
+    It is also the limit of what a visitor turn reaches (``grant``): a server
+    or tool added to the assistant afterwards stays out of visitor turns
+    until an admin acknowledges the new set.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    servers: list[AcknowledgedExternalServer]
+    acknowledged_at: datetime
+    acknowledged_by_user_id: Optional[UUID] = None
+
+    def grant(self) -> dict[UUID, frozenset[UUID]]:
+        return {server.id: frozenset(server.tool_ids) for server in self.servers}
+
+    def covers(self, servers: Mapping[UUID, Iterable[UUID]]) -> bool:
+        """Every server and tool in ``servers`` was acknowledged. A server or
+        tool since removed or switched off does not ask again."""
+        granted = self.grant()
+        return all(
+            server_id in granted and set(tool_ids) <= granted[server_id]
+            for server_id, tool_ids in servers.items()
+        )
+
+
+def normalize_allowed_origins(
+    origins: list[str], *, allow_too_broad: bool = False
+) -> list[str]:
+    """Canonical, de-duplicated patterns. ``allow_too_broad`` is for reading a
+    stored list; a saved pattern must name at least two labels after ``*.``."""
     seen: list[str] = []
     for origin in origins:
-        normalized = normalize_origin_pattern(origin)
+        normalized = normalize_origin_pattern(origin, allow_too_broad=allow_too_broad)
         if normalized not in seen:
             seen.append(normalized)
     if len(seen) > MAX_ALLOWED_ORIGINS:
@@ -424,6 +478,9 @@ class Widget(BaseModel):
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
+    # Set only by a tenant admin's acknowledgement (WidgetService); None until
+    # one is given. Visitor turns reach no external tool outside it.
+    external_tools_acknowledgement: Optional[ExternalToolsAcknowledgement] = None
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
@@ -461,7 +518,9 @@ class Widget(BaseModel):
     @field_validator("allowed_origins")
     @classmethod
     def _origins(cls, value: list[str]) -> list[str]:
-        return normalize_allowed_origins(value)
+        # Lenient: a row saved before the two-label wildcard rule must still
+        # load, so it can be shown and fixed. Saving is strict (apply_update).
+        return normalize_allowed_origins(value, allow_too_broad=True)
 
     @model_validator(mode="after")
     def _status_consistency(self) -> "Widget":
@@ -527,6 +586,45 @@ class Widget(BaseModel):
             if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
         ]
 
+    def external_tools_acknowledged(
+        self, servers: Mapping[UUID, Iterable[UUID]]
+    ) -> bool:
+        """Whether the stored acknowledgement covers these servers (server id
+        to enabled tool ids). True when there are none."""
+        if not servers:
+            return True
+        ack = self.external_tools_acknowledgement
+        return ack is not None and ack.covers(servers)
+
+    def external_tool_grant(self) -> dict[UUID, frozenset[UUID]]:
+        """The external servers and tools a visitor turn may reach, before
+        the tenant policy has its say; empty without an acknowledgement."""
+        ack = self.external_tools_acknowledgement
+        return ack.grant() if ack is not None else {}
+
+    def acknowledge_external_tools(
+        self,
+        servers: Mapping[UUID, Iterable[UUID]],
+        *,
+        by: Optional[UUID],
+        now: Optional[datetime] = None,
+    ) -> None:
+        """Replace the acknowledgement with one for exactly ``servers``."""
+        self.external_tools_acknowledgement = (
+            ExternalToolsAcknowledgement(
+                servers=[
+                    AcknowledgedExternalServer(
+                        id=server_id, tool_ids=sorted(set(servers[server_id]))
+                    )
+                    for server_id in sorted(servers)
+                ],
+                acknowledged_at=now or datetime.now(timezone.utc),
+                acknowledged_by_user_id=by,
+            )
+            if servers
+            else None
+        )
+
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):
             raise BadRequestException(
@@ -579,8 +677,13 @@ class Widget(BaseModel):
         for field, value in changes.items():
             before = getattr(self, field)
             try:
+                if field == "allowed_origins":
+                    # The entity reads too-broad wildcards; a save refuses them.
+                    value = normalize_allowed_origins(cast(list[str], value))
                 setattr(self, field, value)
-            except ValidationError as exc:
+            except (ValidationError, ValueError) as exc:
+                if not isinstance(exc, ValidationError):
+                    raise BadRequestException(f"Invalid {field}: {exc}") from exc
                 raise BadRequestException(
                     f"Invalid {field}: {validation_messages(exc)}"
                 ) from exc

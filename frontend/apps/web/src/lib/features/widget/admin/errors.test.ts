@@ -21,6 +21,7 @@ vi.mock("$lib/paraglide/messages", () => ({
 
 import { EneoError } from "@eneo/eneo-js";
 import {
+  currentExternalTools,
   isStaleEditorError,
   widgetErrorCode,
   widgetErrorMessage,
@@ -46,6 +47,45 @@ describe("widget admin errors", () => {
     expect(widgetErrorMessage(apiError(409, "template_in_use"))).toBe("in use");
     expect(widgetErrorMessage(apiError(409, "widget_revision_conflict"))).toBe("conflict");
     expect(widgetErrorMessage(apiError(500, "other"))).toBeNull();
+  });
+
+  it("names the template when leaving it is what a live widget needs an admin for", () => {
+    const refusal = (fields: string[]) =>
+      new EneoError("raw", "RESPONSE", 403, 0, {
+        detail: { code: "admin_required_while_active", message: "raw", fields }
+      });
+    expect(widgetErrorMessage(refusal(["template"]))).toBe(
+      "widget_admin_template_detach_admin_only"
+    );
+    expect(widgetErrorMessage(refusal(["allowed_origins"]))).toBe(
+      "widget_admin_error_admin_required_while_active"
+    );
+  });
+
+  it("pins a live widget's admin-only settings to the fields that hold them", () => {
+    const refusal = new EneoError("raw", "RESPONSE", 403, 0, {
+      detail: {
+        code: "admin_required_while_active",
+        message: "raw",
+        fields: ["allowed_origins", "privacy", "bot_protection", "template"]
+      }
+    });
+    // The template has no field of its own: leaving it is refused in the picker.
+    expect(widgetFieldErrors(refusal)).toEqual({
+      allowed_origins: "widget_admin_error_admin_required_while_active",
+      "privacy.retention_days": "widget_admin_error_admin_required_while_active",
+      bot_protection: "widget_admin_error_admin_required_while_active"
+    });
+  });
+
+  it("hands back the current external tools when the admin saw another list", () => {
+    const servers = [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }];
+    const refusal = (status: number, code: string) =>
+      new EneoError("raw", "RESPONSE", status, 0, { detail: { code, message: "raw", servers } });
+    expect(currentExternalTools(refusal(409, "external_tools_changed"))).toEqual(servers);
+    expect(currentExternalTools(refusal(400, "external_tools_unacknowledged"))).toEqual(servers);
+    expect(currentExternalTools(refusal(400, "widget_serving_blocked"))).toBeNull();
+    expect(currentExternalTools(new Error("x"))).toBeNull();
   });
 
   it("treats a published lock like a revision conflict", () => {

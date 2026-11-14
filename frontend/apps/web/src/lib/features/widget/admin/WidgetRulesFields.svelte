@@ -19,11 +19,19 @@
   type Props = {
     autosave: WidgetAutosave;
     policy: WidgetPolicy | null;
+    isAdmin?: boolean;
   };
 
-  let { autosave, policy }: Props = $props();
+  let { autosave, policy, isAdmin = true }: Props = $props();
 
   const widget = $derived(autosave.widget);
+  // Allowed websites, privacy and bot protection are what a tenant admin
+  // reviewed at activation. The API refuses an editor's change to them on an
+  // active widget; the fields say so instead of failing a save.
+  const governedLocked = $derived(widget.status === "active" && !isAdmin);
+  // A locked field is described by why it is locked too.
+  const governed = (ids: string | undefined) =>
+    [governedLocked && "widget-rules-governed", ids].filter(Boolean).join(" ") || undefined;
 
   function limits(change: Partial<Widget["limits"]>) {
     autosave.patch({ limits: { ...widget.limits, ...change } });
@@ -113,25 +121,36 @@
       parsedOrigins.invalid.length === 0
   );
   let originsTouched = $state(false);
+  const savedOrigins = $derived((widget.allowed_origins ?? []).join("\n"));
+  // Typed back to the saved list, the field is explained as the saved list.
+  const originsEdited = $derived(origins.text !== savedOrigins);
   const originsProblem = $derived.by(() => {
-    if (originsTouched && parsedOrigins.invalid.length > 0) {
-      return m.widget_admin_origins_invalid({ origins: parsedOrigins.invalid.join(", ") });
+    if (originsTouched && originsEdited) {
+      if (parsedOrigins.invalid.length > 0) {
+        return m.widget_admin_origins_invalid({ origins: parsedOrigins.invalid.join(", ") });
+      }
+      if (parsedOrigins.tooMany) {
+        return m.widget_admin_origins_too_many({ max: String(MAX_ALLOWED_ORIGINS) });
+      }
+      if (emptiedWhileActive) return blockerLabel("allowed_origins_empty");
     }
-    if (originsTouched && parsedOrigins.tooMany) {
-      return m.widget_admin_origins_too_many({ max: String(MAX_ALLOWED_ORIGINS) });
-    }
-    if (originsTouched && emptiedWhileActive) return blockerLabel("allowed_origins_empty");
     if (autosave.refusals["allowed_origins"]) return autosave.refusals["allowed_origins"];
+    // Saved before the rule was tightened; the API keeps it but never serves it.
+    if (blockers.includes("allowed_origin_too_broad")) {
+      return blockerLabel("allowed_origin_too_broad");
+    }
     if ((widget.allowed_origins ?? []).length === 0) return blockerLabel("allowed_origins_empty");
     return undefined;
   });
   // Lines that cannot be sent yet hold back the valid ones with them, and a
-  // valid list typed but not yet committed (blur) is an edit too.
+  // valid list typed but not yet committed (blur) is an edit too. The saved
+  // list as it stands is no edit, even with a line the API no longer accepts.
   $effect(() => {
     const held =
-      parsedOrigins.invalid.length > 0 ||
-      parsedOrigins.tooMany ||
-      parsedOrigins.origins.join("\n") !== (widget.allowed_origins ?? []).join("\n");
+      originsEdited &&
+      (parsedOrigins.invalid.length > 0 ||
+        parsedOrigins.tooMany ||
+        parsedOrigins.origins.join("\n") !== savedOrigins);
     autosave.markDraft("allowed_origins", held);
     return () => autosave.markDraft("allowed_origins", false);
   });
@@ -169,6 +188,15 @@
 </script>
 
 <div class="grid gap-6">
+  {#if governedLocked}
+    <p
+      id="widget-rules-governed"
+      role="note"
+      class="bg-secondary text-secondary rounded-lg px-3 py-2 text-sm"
+    >
+      {m.widget_admin_governed_while_active()}
+    </p>
+  {/if}
   <Card.Root>
     <Card.Header>
       <Card.Title><h2>{m.widget_admin_placement()}</h2></Card.Title>
@@ -182,10 +210,11 @@
           rows={3}
           class="font-mono"
           placeholder={m.widget_admin_allowed_origins_placeholder()}
+          disabled={governedLocked}
           aria-invalid={!!originsProblem}
-          aria-describedby={originsProblem
-            ? "widget-origins-help widget-origins-error"
-            : "widget-origins-help"}
+          aria-describedby={governed(
+            originsProblem ? "widget-origins-help widget-origins-error" : "widget-origins-help"
+          )}
           bind:value={origins.text}
           onfocus={origins.focus}
           onblur={origins.blur}
@@ -325,12 +354,15 @@
             id="widget-retention"
             type="number"
             class="max-w-40"
+            disabled={governedLocked}
             min={policy?.min_retention_days ?? 0}
             max={policy?.max_retention_days ?? 3650}
             value={widget.privacy.retention_days}
             oninput={typedNumber("retention", widget.privacy.retention_days)}
             aria-invalid={!!retentionProblem}
-            aria-describedby={describedBy("retention", "widget-retention-help", retentionProblem)}
+            aria-describedby={governed(
+              describedBy("retention", "widget-retention-help", retentionProblem)
+            )}
             onchange={(event) =>
               commitNumber(
                 event,
@@ -363,7 +395,8 @@
           </Field.Content>
           <Switch
             id="widget-feedback-text"
-            aria-describedby="widget-feedback-text-help"
+            aria-describedby={governed("widget-feedback-text-help")}
+            disabled={governedLocked}
             checked={widget.privacy.store_feedback_text ?? false}
             onCheckedChange={(checked) => privacy({ store_feedback_text: checked })}
           />
@@ -383,6 +416,7 @@
         <Select.Root
           type="single"
           value={widget.bot_protection ?? "altcha"}
+          disabled={governedLocked}
           onValueChange={(value) =>
             autosave.patch({ bot_protection: value as NonNullable<Widget["bot_protection"]> })}
         >
@@ -390,12 +424,14 @@
             id="widget-protection"
             class="w-full sm:max-w-md"
             aria-invalid={!!protectionProblem}
-            aria-describedby={[
-              !noneAllowed && !protectionProblem && "widget-protection-help",
-              protectionProblem && "widget-protection-error"
-            ]
-              .filter(Boolean)
-              .join(" ") || undefined}
+            aria-describedby={governed(
+              [
+                !noneAllowed && !protectionProblem && "widget-protection-help",
+                protectionProblem && "widget-protection-error"
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
+            )}
           >
             <span data-slot="select-value"
               >{protectionLabels[widget.bot_protection ?? "altcha"]}</span

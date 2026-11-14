@@ -19,7 +19,8 @@ const MAX_TIMEOUT = 2_147_483_647;
 /**
  * The real embed page in an iframe, driven by a preview token so drafts work
  * too. Reloads after every saved change; re-mints the token when a change
- * bumps the widget's token generation and shortly before it expires.
+ * bumps the widget's token generation and shortly before it expires, or once
+ * the page is shown again if it was hidden then.
  */
 export function WidgetPreview({ widget }: { widget: Widget }) {
   const t = useTranslations();
@@ -33,6 +34,15 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
   const appScheme = useAppScheme();
 
   const lang = widget.language === "en" ? "en" : "sv";
+  // A pause is the kill switch: the API mints no preview token for a paused
+  // widget, so nothing is asked for and the frame says why it is empty.
+  const paused = widget.status === "paused";
+  // The preview's turns reach external tools as visitors' do: only those an
+  // admin acknowledged, and none while the tenant policy forbids them.
+  const externalToolsWithheld =
+    (widget.external_tools ?? []).length > 0 &&
+    (!(widget.external_tools_acknowledged ?? true) ||
+      (widget.activation_blockers ?? []).includes("external_tools_not_allowed"));
   // A widget pinned to light or dark previews that way whatever the toggle says.
   const pinnedScheme =
     widget.theme.color_scheme === "light" || widget.theme.color_scheme === "dark"
@@ -49,8 +59,20 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
     live.current = { id: widget.id, generation: widget.token_generation, status: widget.status };
   }, [widget.id, widget.token_generation, widget.status]);
   const destroyed = useRef(false);
+  // Every mint is audited, so a page nobody looks at mints nothing: a
+  // renewal that falls due while it is hidden waits until it is shown.
+  const renewalDue = useRef(false);
 
   const mint = useRef(async (): Promise<void> => {});
+  const renew = useRef(() => {
+    const status = live.current.status;
+    if (status === "archived" || status === "paused") return;
+    if (document.visibilityState === "hidden") {
+      renewalDue.current = true;
+      return;
+    }
+    void mint.current();
+  });
   async function mintNow() {
     // A token is minted for the generation current when it was requested. A
     // rules save can advance the generation (and start another mint) before
@@ -61,6 +83,7 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
     const current = () =>
       requested.id === live.current.id && requested.generation === live.current.generation;
     clearTimeout(renewal.current);
+    renewalDue.current = false;
     setFailed(false);
     try {
       const minted = await widgetApi.previewToken(requested.id);
@@ -71,12 +94,7 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
       // a minute before it expires rather than left to die in the frame.
       clearTimeout(renewal.current);
       const renewIn = Math.max(minted.expires_in - 60, minted.expires_in / 2);
-      renewal.current = setTimeout(
-        () => {
-          if (live.current.status !== "archived") void mint.current();
-        },
-        Math.min(renewIn * 1000, MAX_TIMEOUT)
-      );
+      renewal.current = setTimeout(() => renew.current(), Math.min(renewIn * 1000, MAX_TIMEOUT));
     } catch (error) {
       if (!current() || destroyed.current) return;
       setFailed(true);
@@ -95,7 +113,7 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
   // keystroke.
   const attempted = useRef<number | null>(null);
   useEffect(() => {
-    if (widget.status === "archived") return;
+    if (widget.status === "archived" || widget.status === "paused") return;
     const generation = widget.token_generation;
     if (tokenGeneration === generation || attempted.current === generation) return;
     attempted.current = generation;
@@ -103,14 +121,21 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
   }, [widget.status, widget.token_generation, tokenGeneration]);
   useEffect(() => {
     destroyed.current = false;
+    const shown = () => {
+      if (renewalDue.current && document.visibilityState === "visible") renew.current();
+    };
+    document.addEventListener("visibilitychange", shown);
     return () => {
       destroyed.current = true;
       clearTimeout(renewal.current);
+      document.removeEventListener("visibilitychange", shown);
     };
   }, []);
 
   let src: string | null = null;
-  if (token) {
+  // A save that advanced the generation revoked the token; the frame waits
+  // for the new one instead of loading a chat that is refused.
+  if (token && tokenGeneration === widget.token_generation) {
     const path = previewEmbedPath(widget.public_id, token, lang);
     const effective = pinnedScheme ?? (scheme === "auto" ? appScheme : scheme);
     // updated_at forces a reload after every saved change.
@@ -172,6 +197,7 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
           <Button
             size="sm"
             label={t("widget_admin_preview_reload")}
+            isDisabled={paused}
             onClick={() => void mint.current()}
           />
         </div>
@@ -186,9 +212,16 @@ export function WidgetPreview({ widget }: { widget: Widget }) {
             })
           : t("widget_admin_preview_description")}
       </p>
+      {externalToolsWithheld && (
+        <p className="text-ax-text-secondary text-sm">
+          {t("widget_admin_preview_external_tools_withheld")}
+        </p>
+      )}
 
       <div className="bg-ax-muted flex justify-center rounded-lg p-3">
-        {failed ? (
+        {paused ? (
+          <p className="text-ax-text-secondary py-10 text-sm">{t("widget_admin_preview_paused")}</p>
+        ) : failed ? (
           <p role="alert" className="text-ax-red py-10 text-sm">
             {t("widget_admin_preview_failed")}
           </p>

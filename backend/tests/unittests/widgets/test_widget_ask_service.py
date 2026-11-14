@@ -1,9 +1,11 @@
+import asyncio
 import json
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
+import anyio
 import pytest
 from starlette.types import Message
 
@@ -15,7 +17,10 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.api import assistant_protocol
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobInDBWithScore
+from eneo.main import stream_lifecycle
 from eneo.main.exceptions import (
     BadRequestException,
     ModelNotAvailableException,
@@ -66,8 +71,9 @@ def _widget(**overrides) -> Widget:
     return widget.model_copy(update={"id": uuid4(), **overrides})
 
 
-def _principal(widget: Widget) -> WidgetPrincipal:
+def _principal(widget: Widget, *, preview: bool = False) -> WidgetPrincipal:
     claims = MagicMock(spec=VisitorClaims)
+    claims.preview = preview
     return WidgetPrincipal(widget=widget, visitor_id=uuid4(), claims=claims)
 
 
@@ -743,9 +749,14 @@ async def test_follow_up_requires_owned_session_and_respects_turn_limit(fake_db)
             _principal(widget), question="q", session_id=uuid4(), client_ip=None
         )
     assert exc.value.code == "session_turns_exceeded"
-    # The conversation's turn hold never outlives a refused follow-up.
+    # The conversation's turn hold never outlives a refused follow-up, and it
+    # is released to the marker the hold returned.
     deps.limiter.hold_turn.assert_awaited_once()
     deps.limiter.release_turn.assert_awaited_once()
+    assert (
+        deps.limiter.release_turn.await_args.args[2]
+        is deps.limiter.hold_turn.return_value
+    )
 
     for error in (NotFoundException(), UnauthorizedException("other principal")):
         deps.session_service.get_session_by_uuid = AsyncMock(side_effect=error)
@@ -755,7 +766,402 @@ async def test_follow_up_requires_owned_session_and_respects_turn_limit(fake_db)
             )
         with pytest.raises(SessionNotOwnedError):
             await service.get_session(_principal(widget), uuid4())
-    assert deps.limiter.release_turn.await_count == 3
+    # A conversation the visitor does not own is refused before any hold is
+    # taken on it: the key is the session id, which its owner's follow-ups use.
+    assert deps.limiter.hold_turn.await_count == 1
+    assert deps.limiter.release_turn.await_count == 1
+
+
+async def test_the_turn_hold_is_taken_after_ownership_and_released_to_its_owner():
+    widget = _widget()
+    service, deps = _service(session_questions=0)
+    deps.limiter.hold_turn = AsyncMock(return_value="owner-1")
+    session_id = deps.session.id
+
+    response = await service.ask(
+        _principal(widget), question="q", session_id=session_id, client_ip=None
+    )
+    # Read once to check ownership, held, then read again for the turn count.
+    assert deps.session_service.get_session_by_uuid.await_count == 2
+    deps.limiter.release_turn.assert_not_awaited()
+    await _drain(response)
+    deps.limiter.release_turn.assert_awaited_once_with(widget, session_id, "owner-1")
+
+
+def _external_call(**overrides) -> ToolCallMetadata:
+    call = dict(
+        server_name="casefiles",
+        tool_name="create_case",
+        tool_call_id="call_9",
+        result_status="succeeded",
+        is_internal=False,
+        purpose=None,
+        arguments={"title": "Trasig lampa", "body": "Gatlyktan vid torget är trasig"},
+        mcp_tool_name="casefiles__create_case",
+    )
+    call.update(overrides)
+    return ToolCallMetadata(**call)
+
+
+def _external_event(*calls: ToolCallMetadata) -> Completion:
+    return Completion(
+        text="", response_type=ResponseType.TOOL_CALL, tool_calls_metadata=list(calls)
+    )
+
+
+async def _external_turn():
+    # The model asks for the tool (pending), it is sent to the server
+    # (approved, without asking anyone on a visitor turn), the server runs it,
+    # the round is reported again, then the answer.
+    yield _external_event(_external_call(result_status="pending"))
+    yield _external_event(_external_call(result_status="approved"))
+    yield _external_event(
+        _external_call(),
+        _external_call(
+            tool_call_id="call_k",
+            server_name="knowledge",
+            tool_name="search_knowledge",
+            is_internal=True,
+        ),
+        _external_call(
+            tool_call_id="call_w",
+            server_name="Sökleverantören",
+            tool_name="search",
+            purpose="web_search",
+        ),
+        _external_call(tool_call_id="call_d", result_status="denied"),
+    )
+    yield _external_event(_external_call())
+    yield Completion(text="Ärendet är registrerat.", response_type=ResponseType.TEXT)
+
+
+async def test_every_external_tool_call_of_a_visitor_turn_is_audited_once():
+    # Retention 0: nothing of the turn is kept, so the entry is the only trace.
+    widget = _widget(privacy=WidgetPrivacy(retention_days=0))
+    service, deps = _service(
+        ask_result=_ask_result(_stored_session(0), _external_turn())
+    )
+    principal = _principal(widget)
+
+    response = await service.ask(
+        principal, question="Anmäl en trasig lampa", session_id=None, client_ip=None
+    )
+    assert [text for text in await _drain(response) if text] == [
+        "Ärendet är registrerat."
+    ]
+
+    deps.audit.log_async.assert_awaited_once()
+    kwargs = deps.audit.log_async.await_args.kwargs
+    assert kwargs["action"] == ActionType.WIDGET_EXTERNAL_TOOL_CALLED
+    assert kwargs["actor_type"] == ActorType.WIDGET_VISITOR
+    assert kwargs["actor_id"] is None
+    assert kwargs["tenant_id"] == widget.tenant_id
+    assert kwargs["entity_id"] == widget.id
+    assert kwargs["record_client"] is False
+    metadata = kwargs["metadata"]
+    assert metadata["public_id"] == widget.public_id
+    assert metadata["visitor_id"] == str(principal.visitor_id)
+    assert metadata["session_id"] == str(response.session.id)
+    assert metadata["question_id"] == str(response.question_id)
+    assert metadata["preview"] is False
+    assert (
+        metadata["tool_call_id"],
+        metadata["server_name"],
+        metadata["tool_name"],
+        metadata["mcp_tool_name"],
+        metadata["result_status"],
+    ) == ("call_9", "casefiles", "create_case", "casefiles__create_case", "succeeded")
+    # The visitor's input is not copied into the trail; the external system
+    # has its own record of what it received.
+    assert metadata["argument_names"] == ["body", "title"]
+    assert "Trasig lampa" not in json.dumps(metadata, ensure_ascii=False)
+    deps.usage.delete_session.assert_awaited_once()
+
+
+async def test_a_failed_external_tool_call_is_audited_too():
+    async def turn():
+        yield _external_event(_external_call(result_status="approved"))
+        yield _external_event(_external_call(result_status="failed"))
+        yield Completion(text="Det gick inte.", response_type=ResponseType.TEXT)
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    deps.audit.log_async.assert_awaited_once()
+    assert (
+        deps.audit.log_async.await_args.kwargs["metadata"]["result_status"] == "failed"
+    )
+
+
+async def test_a_call_refused_at_the_round_limit_is_not_audited():
+    # The last round's calls are refused without being sent, so they fail
+    # without ever being approved. Only the call that reached its server counts.
+    async def turn():
+        yield _external_event(_external_call(result_status="approved"))
+        yield _external_event(_external_call())
+        yield _external_event(
+            _external_call(tool_call_id="call_10", result_status="failed"),
+            _external_call(tool_call_id=None, result_status="failed"),
+        )
+        yield Completion(
+            text="Ärendet är registrerat.", response_type=ResponseType.TEXT
+        )
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    deps.audit.log_async.assert_awaited_once()
+    metadata = deps.audit.log_async.await_args.kwargs["metadata"]
+    assert (metadata["tool_call_id"], metadata["result_status"]) == (
+        "call_9",
+        "succeeded",
+    )
+
+
+async def test_a_call_id_reused_in_a_later_round_is_audited_per_call():
+    # Some providers number their calls per round, so one id can name two calls.
+    async def turn():
+        for status in ("succeeded", "failed"):
+            yield _external_event(_external_call(result_status="approved"))
+            yield _external_event(_external_call(result_status=status))
+        yield Completion(text="Klart.", response_type=ResponseType.TEXT)
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    assert [
+        (
+            call.kwargs["metadata"]["tool_call_id"],
+            call.kwargs["metadata"]["result_status"],
+        )
+        for call in deps.audit.log_async.await_args_list
+    ] == [("call_9", "succeeded"), ("call_9", "failed")]
+
+
+async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
+    close_case = {"tool_name": "close_case", "mcp_tool_name": "casefiles__close_case"}
+
+    async def turn():
+        yield _external_event(
+            _external_call(result_status="approved"),
+            _external_call(**close_case, result_status="approved"),
+        )
+        yield _external_event(_external_call())
+        yield _external_event(_external_call(**close_case, result_status="failed"))
+        yield Completion(text="Klart.", response_type=ResponseType.TEXT)
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    await _drain(response)
+    assert [
+        (call.kwargs["metadata"]["tool_name"], call.kwargs["metadata"]["result_status"])
+        for call in deps.audit.log_async.await_args_list
+    ] == [("create_case", "succeeded"), ("close_case", "failed")]
+
+
+async def test_a_call_the_turn_never_saw_end_is_audited_as_unknown():
+    async def turn():
+        yield _external_event(_external_call(result_status="approved"))
+        yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+        yield _external_event(_external_call())
+
+    widget = _widget()
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    response = await service.ask(
+        _principal(widget, preview=True), question="q", session_id=None, client_ip=None
+    )
+    # The visitor leaves while the server runs the call.
+    await anext(response.answer)
+    deps.audit.log_async.assert_not_awaited()
+    await response.answer.aclose()
+
+    deps.audit.log_async.assert_awaited_once()
+    metadata = deps.audit.log_async.await_args.kwargs["metadata"]
+    assert (metadata["tool_call_id"], metadata["result_status"]) == (
+        "call_9",
+        "unknown",
+    )
+    assert metadata["preview"] is True
+
+
+@pytest.mark.parametrize(
+    "lost",
+    [
+        pytest.param(AsyncMock(side_effect=RuntimeError("bug")), id="raised"),
+        pytest.param(AsyncMock(return_value=None), id="not enqueued"),
+    ],
+)
+async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
+    lost, monkeypatch
+):
+    widget = _widget()
+    service, deps = _service(
+        ask_result=_ask_result(_stored_session(0), _external_turn())
+    )
+    deps.audit.log_async = lost
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    assert [text for text in await _drain(response) if text] == [
+        "Ärendet är registrerat."
+    ]
+    deps.audit.log_async.assert_awaited_once()
+    deps.budget.settle.assert_awaited_once()
+    # The log keeps what the trail lost, without the visitor's input.
+    (record,) = logger.exception.call_args_list + logger.error.call_args_list
+    assert record.kwargs["extra"]["tool_call_id"] == "call_9"
+    assert record.kwargs["extra"]["argument_names"] == ["body", "title"]
+
+
+async def _left_with_a_stalled_audit_queue(
+    monkeypatch, widget, *, follow_up=False, delete=None, close_failure=None
+):
+    """The visitor leaves while two external calls run, and the audit queue
+    then hangs past the cleanup budget."""
+
+    async def turn():
+        try:
+            yield _external_event(
+                _external_call(result_status="approved"),
+                _external_call(tool_call_id="call_10", result_status="approved"),
+            )
+            yield Completion(text="Jag registrerar", response_type=ResponseType.TEXT)
+        finally:
+            if close_failure is not None:
+                raise close_failure
+
+    async def stalled(**_kwargs):
+        await anyio.sleep_forever()
+
+    done: list[str] = []
+
+    def write(name):
+        async def written(*_args):
+            # A real write waits on the database or Redis, where a spent
+            # budget cuts it off.
+            await asyncio.sleep(0.001)
+            done.append(name)
+
+        return written
+
+    monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.2)
+    logger = MagicMock()
+    monkeypatch.setattr(module, "logger", logger)
+    service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
+    deps.audit.log_async = AsyncMock(side_effect=stalled)
+    deps.usage.delete_session = AsyncMock(side_effect=delete or write("delete"))
+    deps.limiter.hold_turn = AsyncMock(return_value="owner-1")
+    deps.limiter.release_turn = AsyncMock(side_effect=write("release"))
+    response = await service.ask(
+        _principal(widget),
+        question="q",
+        session_id=deps.session.id if follow_up else None,
+        client_ip=None,
+    )
+    await anext(response.answer)
+    await response.answer.aclose()
+    return deps, logger, done
+
+
+async def test_a_stalled_audit_queue_cannot_keep_a_zero_retention_conversation(
+    monkeypatch,
+):
+    widget = _widget(privacy=WidgetPrivacy(retention_days=0))
+    _deps, _logger, done = await _left_with_a_stalled_audit_queue(monkeypatch, widget)
+    assert done == ["delete"]
+
+
+async def test_a_stalled_audit_queue_does_not_hold_the_conversation(monkeypatch):
+    widget = _widget()
+    deps, _logger, done = await _left_with_a_stalled_audit_queue(
+        monkeypatch, widget, follow_up=True
+    )
+    assert done == ["release"]
+    deps.limiter.release_turn.assert_awaited_once_with(
+        widget, deps.session.id, "owner-1"
+    )
+
+
+async def test_a_stalled_audit_queue_does_not_hide_a_failed_deletion(monkeypatch):
+    async def failed(*_args):
+        await asyncio.sleep(0.001)
+        raise RuntimeError("delete failed")
+
+    # The failure rolls back the chat write, so it must reach the caller.
+    with pytest.raises(RuntimeError, match="delete failed"):
+        await _left_with_a_stalled_audit_queue(
+            monkeypatch,
+            _widget(privacy=WidgetPrivacy(retention_days=0)),
+            delete=failed,
+        )
+    assert [
+        record.kwargs["extra"]["tool_call_id"]
+        for record in module.logger.error.call_args_list
+    ] == ["call_9", "call_10"]
+
+
+async def test_a_stalled_audit_queue_does_not_hide_a_failed_close(monkeypatch):
+    deleted: list[bool] = []
+
+    async def delete(*_args):
+        await asyncio.sleep(0.001)
+        deleted.append(True)
+
+    # The pipeline's own cleanup failed, which must reach the caller as well.
+    with pytest.raises(RuntimeError, match="close failed"):
+        await _left_with_a_stalled_audit_queue(
+            monkeypatch,
+            _widget(privacy=WidgetPrivacy(retention_days=0)),
+            delete=delete,
+            close_failure=RuntimeError("close failed"),
+        )
+    assert deleted == [True]
+    assert [
+        record.kwargs["extra"]["tool_call_id"]
+        for record in module.logger.error.call_args_list
+    ] == ["call_9", "call_10"]
+
+
+async def test_calls_a_stalled_audit_queue_never_recorded_reach_the_log(monkeypatch):
+    _deps, logger, _done = await _left_with_a_stalled_audit_queue(
+        monkeypatch, _widget()
+    )
+    extras = [record.kwargs["extra"] for record in logger.error.call_args_list]
+    assert [(extra["tool_call_id"], extra["result_status"]) for extra in extras] == [
+        ("call_9", "unknown"),
+        ("call_10", "unknown"),
+    ]
+    for extra in extras:
+        assert extra["argument_names"] == ["body", "title"]
+        assert "Trasig lampa" not in json.dumps(extra, ensure_ascii=False)
+
+
+async def test_a_turn_without_an_audit_service_still_answers():
+    widget = _widget()
+    service, _deps = _service(
+        ask_result=_ask_result(_stored_session(0), _external_turn())
+    )
+    service.audit_service = None
+    response = await service.ask(
+        _principal(widget), question="q", session_id=None, client_ip=None
+    )
+    assert [text for text in await _drain(response) if text] == [
+        "Ärendet är registrerat."
+    ]
 
 
 async def test_feedback_text_is_dropped_unless_stored():

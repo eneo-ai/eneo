@@ -10,6 +10,7 @@ from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB, UserState
 from eneo.widgets.domain.visitor import WidgetVisitorContext
 from eneo.widgets.domain.widget import Widget
+from eneo.widgets.domain.widget_policy import WidgetPolicy
 
 
 def build_visitor_user(
@@ -21,8 +22,12 @@ def build_visitor_user(
     and ``active_widget`` is the only thing the space actor and the session
     service key on. The id is the visitor id so logs correlate with the
     session's ``visitor_id`` without ever being persisted as ``user_id``.
+
+    The visitor reaches the external tools an admin acknowledged for the
+    widget, and none while the tenant policy allows none; previews too.
     """
     assert widget.id is not None
+    allowed = WidgetPolicy.from_tenant(tenant.widget_policy).allow_external_tools
     role = RoleInDB(
         id=widget.id,
         tenant_id=widget.tenant_id,
@@ -45,6 +50,7 @@ def build_visitor_user(
             token_generation=widget.token_generation,
             preview=preview,
             never_persist=widget.privacy.never_persists,
+            external_tools=widget.external_tool_grant() if allowed else {},
         ),
         roles=[role],
         used_tokens=0,

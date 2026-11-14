@@ -373,18 +373,20 @@ async def test_public_and_internal_calls_share_widget_lifecycle(
     with pytest.raises(WidgetNotActiveError):
         await case.service.get_active_widget(widget.public_id)
     preview_token, _ = VisitorTokenService().mint(widget, case.user.id, preview=True)
-    if status == WidgetStatus.ARCHIVED:
-        with pytest.raises(WidgetNotActiveError):
-            await case.service.get_active_widget(
-                widget.public_id, preview_token=preview_token
-            )
-    else:
+    if status == WidgetStatus.DRAFT:
         assert (
             await case.service.get_active_widget(
                 widget.public_id, preview_token=preview_token
             )
             == widget
         )
+    else:
+        # A pause is the kill switch: a preview token minted before it does
+        # not admit the embed page behind it, any more than for an archive.
+        with pytest.raises(WidgetNotActiveError):
+            await case.service.get_active_widget(
+                widget.public_id, preview_token=preview_token
+            )
 
 
 async def test_public_widget_rejects_unpublished_assistant(case: WidgetAuthCase):

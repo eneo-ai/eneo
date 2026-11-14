@@ -132,9 +132,61 @@ describe("WidgetsAdminPage", () => {
     );
     expect(within(blocked).getByText(/Kan inte aktiveras: /)).toBeTruthy();
   });
+
+  it("names the MCP servers outside Eneo a widget reaches", async () => {
+    showPage({ items: [overviewItem({ external_tools: ["Ärendesystemet", "Bokningen"] })] });
+    expect(
+      await screen.findByText("MCP-servrar utanför Eneo: Ärendesystemet, Bokningen")
+    ).toBeTruthy();
+  });
+
+  it("a paused widget with unacknowledged tools is resumed from the widget page", async () => {
+    showPage({
+      items: [
+        overviewItem({
+          name: "Bygglov",
+          status: "paused",
+          external_tools: ["Ärendesystemet"],
+          external_tools_acknowledged: false
+        })
+      ]
+    });
+    const actions = await screen.findByRole("group", { name: "Åtgärder för Bygglov" });
+    const resume = within(actions).getByRole("button", { name: "Återuppta" });
+    expect(resume.getAttribute("aria-disabled") ?? String(resume.hasAttribute("disabled"))).toBe(
+      "true"
+    );
+    expect(
+      within(actions).getByText(
+        "Kan inte aktiveras: Aktivera från widgetsidan för att bekräfta dess verktyg på MCP-servrar utanför Eneo."
+      )
+    ).toBeTruthy();
+    fireEvent.click(resume);
+    expect(api.POST).not.toHaveBeenCalled();
+  });
 });
 
 describe("WidgetsAdminPage policy", () => {
+  it("an organisation can refuse widgets whose assistant uses tools outside Eneo", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok({ ...policy, ...init.body })
+    );
+    showPage({ route: "/admin/widgets?tab=policy" });
+    const allow = await screen.findByRole("switch", {
+      name: /^Tillåt widgetar med verktyg på MCP-servrar utanför Eneo/
+    });
+    expect((allow as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(allow);
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          "/api/v1/admin/widget-policy/",
+          expect.objectContaining({ body: { allow_external_tools: false } })
+        ),
+      { timeout: 2000 }
+    );
+  });
+
   it("a policy change refreshes the overview, whose blockers fold the policy in", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok({ ...policy, ...init.body })

@@ -45,7 +45,8 @@ const policy: WidgetPolicy = {
   max_daily_token_budget: 5000,
   min_retention_days: 7,
   max_retention_days: 90,
-  allow_bot_protection_none: false
+  allow_bot_protection_none: false,
+  allow_external_tools: true
 };
 
 type Save = (update: WidgetUpdate) => Promise<Widget>;
@@ -53,12 +54,51 @@ type Save = (update: WidgetUpdate) => Promise<Widget>;
 function setup(
   start: Widget,
   save: Save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>)),
-  rules: WidgetPolicy | null = policy
+  rules: WidgetPolicy | null = policy,
+  isAdmin = true
 ) {
   const autosave = new WidgetAutosave(start, save, { delay: 10 });
-  render(WidgetRulesFields, { autosave, policy: rules });
+  render(WidgetRulesFields, { autosave, policy: rules, isAdmin });
   return { autosave, save };
 }
+
+describe("WidgetRulesFields governed settings", () => {
+  test("an editor cannot change what the admin reviewed while the widget is active", async () => {
+    setup(widget({ status: "active" }), undefined, policy, false);
+    await expect
+      .element(page.getByRole("note"))
+      .toHaveTextContent("widget_admin_governed_while_active");
+    await expect.element(origins()).toBeDisabled();
+    await expect.element(retention()).toBeDisabled();
+    await expect.element(page.getByRole("switch")).toBeDisabled();
+    // A locked field says why when it is reached.
+    for (const field of [
+      origins(),
+      retention(),
+      page.getByRole("switch"),
+      page.getByLabelText("widget_admin_bot_protection", { exact: true })
+    ]) {
+      await expect.element(field).toHaveAccessibleDescription(/widget_admin_governed_while_active/);
+    }
+    // The budget is policy-capped at run time and stays editable.
+    await expect.element(budget()).toBeEnabled();
+    await expect
+      .element(budget())
+      .not.toHaveAccessibleDescription(/widget_admin_governed_while_active/);
+  });
+
+  test("an admin, or anyone on a draft, edits every rule", async () => {
+    setup(widget({ status: "active" }), undefined, policy, true);
+    await expect.element(origins()).toBeEnabled();
+    expect(page.getByRole("note").elements()).toHaveLength(0);
+  });
+
+  test("a non-admin edits the rules of a draft", async () => {
+    setup(widget(), undefined, policy, false);
+    await expect.element(origins()).toBeEnabled();
+    await expect.element(retention()).toBeEnabled();
+  });
+});
 
 const origins = () => page.getByLabelText("widget_admin_allowed_origins", { exact: true });
 const budget = () => page.getByLabelText("widget_admin_daily_budget", { exact: true });
@@ -93,6 +133,48 @@ describe("WidgetRulesFields origins", () => {
     await expect.element(origins()).toHaveValue("https://www.kommun.se\nhttps://*.kommun.se");
     await expect.element(origins()).toHaveAttribute("aria-invalid", "false");
     expect(autosave.stranded).toBe(false);
+  });
+
+  test("a saved wildcard the API no longer accepts is explained, and is no edit until changed", async () => {
+    const save = vi.fn(async (update: WidgetUpdate) => widget(update as Partial<Widget>));
+    const { autosave } = setup(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      }),
+      save
+    );
+    await expect.element(origins()).toHaveAttribute("aria-invalid", "true");
+    await expect
+      .element(origins())
+      .toHaveAccessibleDescription(/widget_admin_blocker_origin_too_broad/);
+    // Leaving the page asks nothing: nothing was typed.
+    expect(autosave.stranded).toBe(false);
+
+    await userEvent.fill(origins(), "https://*.kommun.se");
+    await userEvent.tab();
+    await vi.waitFor(() =>
+      expect(save).toHaveBeenCalledWith({ allowed_origins: ["https://*.kommun.se"], revision: 0 })
+    );
+    await expect.element(origins()).toHaveAttribute("aria-invalid", "false");
+  });
+
+  test("a list typed back to the saved one is explained as the saved one", async () => {
+    setup(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      })
+    );
+    await userEvent.fill(origins(), "https://*.se\nkontakt");
+    await userEvent.tab();
+    await expect.element(origins()).toHaveAccessibleDescription(/widget_admin_origins_invalid/);
+
+    await userEvent.fill(origins(), "https://*.se");
+    await userEvent.tab();
+    await expect
+      .element(origins())
+      .toHaveAccessibleDescription(/widget_admin_blocker_origin_too_broad/);
   });
 
   test("follows the saved list after a reload instead of keeping a stale copy", async () => {

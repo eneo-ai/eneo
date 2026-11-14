@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@018d24133d42
+translationSource: guides/embed-widget.mdx@24f8810c3092
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -50,7 +50,11 @@ separat verktygsinställning per widget. En besökare får:
   som ytans säkerhetsklassificering tillåter, med verktygen så som de är
   konfigurerade. Besökaren är anonym: en server med _Vidarebefordra
   användaridentitet_ får inga identitetsrubriker, och inget verktygsanrop
-  väntar på godkännande.
+  väntar på godkännande. På servrar utanför Eneo når besökarna bara de
+  verktyg som en organisationsadministratör har bekräftat för widgeten, varje
+  anrop som en besökares tur gör till ett sådant verktyg skrivs till
+  granskningsloggen, och organisationens policy kan förbjuda dem; se
+  [MCP-servrar utanför Eneo](#external-mcp-servers).
 - **Webbsökning**, när både ytan och assistenten har den påslagen och modellen
   kan anropa verktyg. Webbsökningen körs på organisationens externa sökserver
   (se [Webbsökning och bildgenerering](/guides/capabilities)).
@@ -69,11 +73,13 @@ Publicera bara kunskap och verktyg som är lämpliga för anonyma besökare.
 
 <Callout type="warning">
   En ändring av assistentens MCP-servrar eller funktioner ändrar direkt vad en
-  aktiv widget exponerar, utan ny aktivering. Allt som en servers verktyg kan
-  läsa eller göra kan en anonym besökare be assistenten att använda. Medan en
-  aktiv widget publicerar assistenten visar redigeringssidan det överst i
-  avsnittet **Verktyg** ("Publicerad som webbwidget") för alla som kan redigera
-  assistenten, med en länk till widgeten för dem som hanterar widgetar.
+  aktiv widget exponerar, utan ny aktivering; bara ett verktyg på en MCP-server
+  utanför Eneo väntar på en organisationsadministratörs bekräftelse. Allt som en
+  servers nåbara verktyg kan läsa eller göra kan en anonym besökare be
+  assistenten att använda. Medan en aktiv widget publicerar assistenten visar
+  redigeringssidan det överst i avsnittet **Verktyg** ("Publicerad som
+  webbwidget") för alla som kan redigera assistenten, med en länk till widgeten
+  för dem som hanterar widgetar.
 </Callout>
 
 Fliken **Publicera** i widgeten listar vad besökare får av assistenten så som
@@ -136,20 +142,28 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
      visas. Förhandsvisningen följer det tema du använder i Eneo om inte
      widgeten låser ljust eller mörkt läge.
    - **Regler**: tillåtna webbplatser (en origin per rad, exempelvis
-     `https://www.kommun.se` eller `https://*.kommun.se`; minst en och högst 20),
-     begränsningar, integritet (lagringstid i dagar och om fritextåterkoppling
-     sparas) och botskydd. Lagringstid `0` innebär att konversationen inte
-     behålls efter svaret; chatten besvarar då en fråga i taget, utan
-     följdfrågor eller återkoppling. Organisationens policygränser visas vid de
-     fält de begränsar.
+     `https://www.kommun.se` eller `https://*.kommun.se`; minst en och högst 20;
+     ett jokertecken kräver minst två led efter asterisken, så `https://*.se`
+     avvisas), begränsningar, integritet (lagringstid i dagar och om
+     fritextåterkoppling sparas) och botskydd. Lagringstid `0` innebär att
+     konversationen inte behålls efter svaret; chatten besvarar då en fråga i
+     taget, utan följdfrågor eller återkoppling. Organisationens policygränser
+     visas vid de fält de begränsar. Medan widgeten är aktiv kan webbplatserna,
+     integriteten och botskyddet bara ändras av en organisationsadministratör,
+     eftersom det är dem administratören granskade vid aktiveringen; pausa
+     widgeten för att ändra dem själv.
    - **Publicera**: aktiveringskontroll, vad besökare får tillgång till,
      installationskod, **Testa i Eneo** och användningsstatistik.
 4. Prova förhandsvisningen (den riktiga chattsidan) och gärna **Testa i Eneo**,
    som visar den riktiga knappen och chatten på administrationssidan innan
-   något har installerats.
+   något har installerats. Båda fungerar för utkast och aktiva widgetar, inte
+   medan widgeten är pausad: pausen stänger alla vägar in till chattsidan.
 5. När statusraden inte visar några hinder aktiverar en
    organisationsadministratör widgeten. Fram till dess är den ett utkast och
-   visas inte på den externa webbplatsen.
+   visas inte på den externa webbplatsen. När assistenten använder verktyg på
+   MCP-servrar utanför Eneo listar aktiveringen först dem och ber
+   administratören bekräfta att anonyma besökare kan få assistenten att anropa
+   dem ([MCP-servrar utanför Eneo](#external-mcp-servers)).
 6. Kopiera installationskoden och lämna den till webbansvarig. Den läggs in en
    gång, helst strax före `</body>`:
 
@@ -197,6 +211,17 @@ inaktuell sparning kan inte upphäva en paus eller arkivering.
 
 En redaktör kan **pausa** widgeten direkt för alla besökare. **Arkivering**
 kräver administratör och är permanent.
+
+Medan en widget är aktiv är tillåtna webbplatser, integritet, botskydd och
+mallkopplingen organisationsadministratörens beslut: en redaktörs ändring av
+dem avvisas med en notering vid fältet. Pausa widgeten för att ändra dem själv;
+en administratör granskar sedan widgeten igen vid aktiveringen. Att koppla loss
+mallen från en aktiv widget, eller byta till en annan mall, avvisas av samma
+skäl, eftersom en malls låsningar bara gäller medan widgeten följer den. Att
+tillämpa samma mall igen, eller koppla en första mall, lägger bara till
+låsningar och får redaktörer göra. Begränsningarna stannar också hos
+redaktörerna: var och en har ett hårt tak, och policyn begränsar den dagliga
+budgeten vid varje besökaranrop.
 
 ### Källor, verktygsaktivitet och återkoppling [#sources-tool-activity-and-feedback]
 
@@ -391,8 +416,10 @@ organisationens widgetar (var de finns, om de är aktiva, frågor och token de
 senaste 7 och 30 dagarna, blockerade anrop och dagens budget). Under fliken
 **Policy** sätter administratören de tak som alla widgetar måste hålla sig inom:
 högsta dagliga tokenbudget (standard 2 000 000, högst 2 000 000 000),
-intervallet för lagringstid (standard 0–365 dagar) och om widgetar får köras
-utan botskydd (av som standard). Bara administratörer ändrar policyn. Alla med
+intervallet för lagringstid (standard 0–365 dagar), om widgetar får köras
+utan botskydd (av som standard) och om widgetar får publicera assistenter med
+verktyg på MCP-servrar utanför Eneo (på som standard; se
+[MCP-servrar utanför Eneo](#external-mcp-servers)). Bara administratörer ändrar policyn. Alla med
 behörigheten för webbwidgetar kan läsa den, så widgetredigeraren visar gränserna
 under fliken **Regler** och markerar värden utanför dem innan de sparas;
 kvarstående policybrott visas som aktiveringshinder. Antalet widgetar är inte
@@ -454,8 +481,10 @@ att ladda om när mallen har ändrat deras widget.
 ### När assistenten ändras [#when-the-assistant-changes]
 
 - **Verktyg och funktioner.** En ändring av assistentens MCP-servrar eller
-  funktioner når besökarna direkt; se
-  [Vad besökare kommer åt](#what-visitors-can-reach).
+  funktioner når besökarna direkt, utom att ett verktyg på en MCP-server
+  utanför Eneo väntar på en organisationsadministratörs bekräftelse; se
+  [Vad besökare kommer åt](#what-visitors-can-reach) och
+  [MCP-servrar utanför Eneo](#external-mcp-servers).
 - **Avpublicering** av assistenten tar en aktiv widget offline. Besökare ser
   meddelandet om att chatten inte är tillgänglig, och widgeten visar vad som
   behöver åtgärdas.
@@ -467,10 +496,74 @@ att ladda om när mallen har ändrat deras widget.
   loggar varje arkivering i granskningsloggen. En mall som widgetarna följde
   kan därefter tas bort.
 
+### MCP-servrar utanför Eneo [#external-mcp-servers]
+
+En widget publicerar assistenten med dess MCP-servrar
+([Vad besökare kommer åt](#what-visitors-can-reach)). För en server utanför
+Eneo innebär det:
+
+- **Besökare är anonyma och deras frågor är obetrodd indata.** En fråga kan
+  bära instruktioner till assistenten (promptinjektion är trivial på en publik
+  sida), och ingen människa godkänner ett verktygsanrop i en besökares tur:
+  godkännandesteget som inloggade användare har finns inte på widgetytan. Allt
+  ett verktyg kan läsa eller göra kan en besökare få assistenten att göra, med
+  argument besökaren själv väljer.
+- **Välj helst verktyg som bara läser**, eller servrar som själva prövar vad
+  de ombeds göra. En MCP-server som nås från en widget måste behandla varje
+  argument som obetrodd indata: validera det, auktorisera åtgärden på sin egen
+  sida och föra sin egen logg över vad den gjorde.
+- **Besökare når bara bekräftade verktyg.** När assistenten har verktyg
+  påslagna på sådana servrar säger widgetens statusrad det, och **Aktivera**
+  öppnar en dialog som listar servrarna med de verktygen.
+  Organisationsadministratören bekräftar att hen förstår och godtar detta
+  innan widgeten går live. Bekräftelsen gäller exakt de listade verktygen; den
+  sparas på widgeten och skrivs till granskningsloggen. Har listan ändrats
+  medan dialogen var öppen visar dialogen den aktuella listan och frågar igen.
+- **Nya verktyg väntar på samma bekräftelse.** Ett verktyg som slås på senare,
+  eller en ny server, når inte besökarna förrän en organisationsadministratör
+  har bekräftat det. Under tiden fortsätter den aktiva widgeten att svara utan
+  det, och statusraden och översikten flaggar den ("behöver åtgärdas").
+  Administratören bekräftar de nya verktygen från widgetens statusrad utan att
+  pausa den. Att stänga av verktyg kräver ingen ny bekräftelse.
+  Förhandsvisningen följer samma regel, så ett obekräftat verktyg saknas även
+  där.
+- **Översikten visar vilka widgetar som når utanför Eneo**, med servrarnas
+  namn, så att organisationens publika yta kan granskas utan att öppna varje
+  widget.
+- **Varje anrop som en besökares tur gör till ett verktyg på en sådan server
+  skrivs till granskningsloggen** (`widget_external_tool_called`), oavsett
+  widgetens lagringstid och organisationens granskningsinställningar. Posten
+  anger widgeten, det pseudonyma besökar-id:t, konversationen, servern och
+  verktyget, om anropet kom från förhandsvisningen, samt argumentens namn men
+  inte deras värden, som kan innehålla besökarens personuppgifter. Resultatet
+  är `succeeded` eller `failed`, eller `unknown` när turen avslutades innan
+  anropet var klart, till exempel för att besökaren lämnade; servern kan då
+  ändå ha utfört det. En skrivning i ett externt system som en anonym besökare
+  utlöst lämnar därmed ett spår även när konversationen i sig aldrig sparas.
+  Når posten inte granskningskön loggar backend den som ett fel med samma
+  uppgifter.
+- **Policyreglaget "Tillåt widgetar med verktyg på MCP-servrar utanför Eneo"**
+  (på som standard) låter en organisation avböja detta helt: avstängt kan en
+  sådan widget inte aktiveras, och en aktiv svarar utan de verktygen och
+  flaggas i översikten tills den pausas eller assistenten förlorar dem.
+  Reglaget är på som standard eftersom en assistent vars syfte är att skriva
+  till ett externt system (ett ärendesystem, en bokning) fortfarande måste
+  fungera som widget; bekräftelsen, flaggan och granskningsspåret är
+  skyddsräckena för det valet.
+
+Webbsökleverantörer är inte externa servrar i den här meningen: organisationen
+valde leverantören för alla, och den läser bara. Det är inte heller Eneos egna
+kunskaps- och filservrar, och en server där assistenten inte har något verktyg
+påslaget kontaktas aldrig från en besökares tur.
+
 ### Säkerhet [#security-properties]
 
 - **Vem som får rama in chatten** avgörs av besökarens webbläsare utifrån
-  widgetens tillåtna origins. En webbplats som inte är listad får en tom ram.
+  widgetens tillåtna origins. Ett jokertecken kräver minst två led efter
+  asterisken (`https://*.kommun.se`); ett jokertecken över en hel toppdomän
+  (`https://*.se`) avvisas när det sparas, och ett som sparades före den regeln
+  rapporteras som hinder och serveras aldrig. En webbplats som inte är listad
+  får en tom ram.
   En pausad widget visar ingen chattknapp på nyligen inlästa sidor. En chatt
   som öppnades före pausen visar ett kort meddelande om att den inte är
   tillgänglig vid nästa anrop. Chattsidan är den enda delen av Eneo som kan
@@ -494,18 +587,45 @@ att ladda om när mallen har ändrat deras widget.
   besökartoken godtas aldrig som en användares inloggning. Paus eller
   ändringar av tillåtna webbplatser, begränsningar, integritetsinställningar
   eller botskydd gör alla utfärdade token ogiltiga, liksom en policyändring som
-  förbjuder widgetar utan botskydd.
-- **ALTCHA** är en beräkningsuppgift som körs i er egen installation, utan
-  CAPTCHA-leverantör, kakor eller fingeravtryck. En widget utan botskydd kräver
-  att organisationens policy tillåter det. En utmaning signeras för den widget
-  som utfärdade den, och bara den widgeten godtar lösningen.
-  Beräkningsuppgiften gör det dyrare att skapa besökaridentiteter; den bevisar
-  inte att besökaren är en människa och ger ingen rätt att läsa privat
-  information. Serverns anropsgränser och dagliga budget gäller fortfarande.
-  Verifieringen använder ALTCHA:s solver i en worker från samma origin, utan
-  dolt formulär eller tredjepartstjänst. Hela försöket har en tidsgräns på
-  30 sekunder; vid fel kan besökaren försöka igen, och workern avslutas när
-  chattsidan lämnas.
+  förbjuder widgetar utan botskydd. Token bakom förhandsvisningen och **Testa i
+  Eneo** är också en besökartoken: den gäller i 15 minuter (förhandsvisningen
+  förnyar den medan sidan visas, så en sida som lämnas öppen i bakgrunden
+  utfärdar inga fler), utfärdas för utkast och aktiva widgetar men aldrig för
+  en pausad, och varje utfärdande skrivs till granskningsloggen som
+  `widget_preview_token_minted`, om inte organisationens
+  granskningsinställningar stänger av den händelsen.
+- **ALTCHA är en kostnadsbarriär, inte ett botskydd.** Det är en
+  beräkningsuppgift som körs i er egen installation, utan CAPTCHA-leverantör,
+  kakor eller fingeravtryck. En widget utan botskydd kräver att organisationens
+  policy tillåter det. En utmaning signeras för den widget som utfärdade den,
+  och bara den widgeten godtar lösningen, en gång.
+  Beräkningsuppgiften gör att varje besökaridentitet kostar några hundra
+  millisekunder beräkning i en webbläsare (ungefär 16 000 hashiterationer med
+  standardvärdena, uppmätt till 0,24 s per försök i headless Chromium); en
+  specialbyggd klient löser samma uppgift på millisekunder. Den stoppar naiva
+  skript och ingenting mer: den bevisar inte att besökaren är en människa och
+  ger ingen rätt till någonting. Skyddet som håller mot en motståndare är
+  serverns anropsgränser och den dagliga tokenbudgeten, som standardvärdena
+  också är byggda kring; höj `WIDGET_ALTCHA_COST` och
+  `WIDGET_ALTCHA_KEY_PREFIX` för en widget som missbrukas. Verifieringen
+  använder ALTCHA:s solver i en worker från samma origin, utan dolt formulär
+  eller tredjepartstjänst. Hela försöket har en tidsgräns på 30 sekunder; vid
+  fel kan besökaren försöka igen, och workern avslutas när chattsidan lämnas.
+- **Administrationsgränssnittet för widgetar kräver inloggad session.**
+  Widgetar, organisationens policy, mallar (en publicering skriver på varje
+  aktiv widget) och översikten kan bara läsas och ändras från en inloggad
+  webbläsarsession. Ingen API-nyckel, hur begränsad den än är, når något av
+  det.
+- **En aktiv widgets styrda inställningar är administratörens beslut.**
+  Tillåtna webbplatser, integritet, botskydd och mallkopplingen är det
+  organisationsadministratören granskade vid aktiveringen; en redaktör ändrar
+  dem genom att först pausa widgeten, vilket gör nästa aktivering till en ny
+  granskning. Begränsningarna lämnas åt redaktörerna eftersom var och en har
+  ett hårt tak och policyn begränsar den dagliga budgeten vid varje anrop.
+- **Externa verktyg hålls till bekräftelsen vid varje tur.** En besökares tur,
+  förhandsvisningen inräknad, når inget verktyg på en MCP-server utanför Eneo
+  som en organisationsadministratör inte har bekräftat för widgeten, och inget
+  alls medan policyn förbjuder dem, vad assistenten än har fått sedan dess.
 
 - **Begränsningarna stänger vid fel som standard.** Redis skyddar
   anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
@@ -531,19 +651,19 @@ att ladda om när mallen har ändrat deras widget.
 Driftsansvariga kan justera den publika widgetytan med miljövariabler på
 backend. Standardvärdena passar de flesta installationer.
 
-| Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                    |
-| ---------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                              |
-| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `900`              | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift. Högst livslängden; föregångaren till en förnyad token slutar gälla direkt.                 |
-| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `3600`             | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen. |
-| `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                      |
-| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare.                                                                                          |
-| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                                |
-| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Anrop efter utmaningar, och separat efter besökartoken, per widget, IP-adress och minut.                                                                                                                     |
-| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | Vad som händer när Redis inte svarar: `false` nekar widgettrafik (`503`); `true` hoppar över begränsningarna och kontrollen av återanvända utmaningar, så en löst uppgift kan användas igen under tiden.     |
-| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Tidszon vars midnatt startar ett nytt budgetdygn.                                                                                                                                                            |
-| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Token som reserveras mot den dagliga budgeten före varje svar och avräknas mot den uppmätta användningen efteråt. En uppskattning för att släppa in anrop, inte ett tak för ett svar.                        |
-| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Antal kunskapsavsnitt som hämtas för varje besökarfråga.                                                                                                                                                     |
+| Variabel                                 | Standard           | Betydelse                                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WIDGET_VISITOR_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för en besökartoken. Chatten förnyar den automatiskt.                                                                                                                                                                                                                                                                                                                              |
+| `WIDGET_VISITOR_TOKEN_GRACE_SECONDS`     | `900`              | Hur länge en utgången token fortfarande kan styrka besökarens identitet vid förnyelse, utan ny beräkningsuppgift. Högst livslängden; föregångaren till en förnyad token slutar gälla direkt.                                                                                                                                                                                                 |
+| `WIDGET_PREVIEW_TOKEN_TTL_SECONDS`       | `900`              | Livslängd för token bakom förhandsvisningen och **Testa i Eneo**. Förhandsvisningen får en ny token strax innan den går ut, eller när sidan visas igen om den var dold då. Det gör inte **Testa i Eneo**, så ta bort widgeten från sidan och visa den igen.                                                                                                                                  |
+| `WIDGET_ALTCHA_COST`                     | `1000`             | Hashiterationer per försök i beräkningsuppgiften (minst 1000). Höj värdet för en widget som missbrukas.                                                                                                                                                                                                                                                                                      |
+| `WIDGET_ALTCHA_KEY_PREFIX`               | `0`                | Ett till fyra hexadecimala tecken som varje försök måste träffa; varje extra tecken gör uppgiften 16 gånger dyrare. Standardvärdet håller det första meddelandet under några sekunder på en telefon; `00` skulle kosta besökarna ungefär 4 s medan en specialbyggd klient ändå löser uppgiften på millisekunder, så höj värdet per installation när en widget missbrukas, inte som standard. |
+| `WIDGET_ALTCHA_CHALLENGE_TTL_SECONDS`    | `300`              | Hur länge en utmaning gäller.                                                                                                                                                                                                                                                                                                                                                                |
+| `WIDGET_CHALLENGE_RATE_LIMIT_PER_MINUTE` | `60`               | Anrop efter utmaningar, och separat efter besökartoken, per widget, IP-adress och minut.                                                                                                                                                                                                                                                                                                     |
+| `WIDGET_RATE_LIMIT_FAIL_OPEN`            | `false`            | Vad som händer när Redis inte svarar: `false` nekar widgettrafik (`503`); `true` hoppar över begränsningarna och kontrollen av återanvända utmaningar, så en löst uppgift kan användas igen under tiden.                                                                                                                                                                                     |
+| `WIDGET_BUDGET_TIMEZONE`                 | `Europe/Stockholm` | Tidszon vars midnatt startar ett nytt budgetdygn.                                                                                                                                                                                                                                                                                                                                            |
+| `WIDGET_BUDGET_RESERVATION_TOKENS`       | `8000`             | Token som reserveras mot den dagliga budgeten före varje svar och avräknas mot den uppmätta användningen efteråt. En uppskattning för att släppa in anrop, inte ett tak för ett svar.                                                                                                                                                                                                        |
+| `WIDGET_RETRIEVAL_CHUNKS`                | `30`               | Antal kunskapsavsnitt som hämtas för varje besökarfråga.                                                                                                                                                                                                                                                                                                                                     |
 
 Begränsningarna per widget (meddelanden per besökare och per IP-adress,
 frågelängd, konversationslängd och daglig budget) sätts under fliken **Regler**
@@ -637,6 +757,10 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
   användning: det verktygen kan läsa eller göra kan en besökare be om, och
   senare ändringar av assistenten gäller direkt
   ([Vad besökare kommer åt](#what-visitors-can-reach));
+- varje bekräftat verktyg på en MCP-server utanför Eneo är ett beslut ni står
+  för: verktygen behandlar sina argument som obetrodd indata, läsning föredras
+  framför skrivning, och granskningsposterna för deras anrop följs upp
+  ([MCP-servrar utanför Eneo](#external-mcp-servers));
 - namnen på assistentens MCP-servrar tål att visas offentligt: besökaren ser
   dem som källa till verktygsaktiviteten ("via TimeMCP"), och verktyg utan
   katalogtitel visas med sitt tekniska namn. Stäng av _Visa
@@ -644,8 +768,12 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
   används ändå;
 - den dagliga tokenbudgeten motsvarar den kostnad ni accepterar och att
   användningen följs upp regelbundet;
-- granskningsloggning är påslagen: skapande, ändringar, aktivering, paus,
-  arkivering och förbrukad budget loggas.
+- granskningsloggning är påslagen: skapande, ändringar (med inställningarna
+  före och efter), aktivering, bekräftelser av verktyg utanför Eneo (med de
+  servrar och verktyg de gäller), paus, arkivering, förbrukad budget och varje
+  utfärdad förhandsgranskningstoken loggas. Varje anrop som en besökares tur
+  gör till ett verktyg på en MCP-server utanför Eneo loggas oavsett
+  granskningsinställningarna.
 
 ## Tillgänglighet [#accessibility]
 

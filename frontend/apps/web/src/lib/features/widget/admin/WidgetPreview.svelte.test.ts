@@ -54,6 +54,20 @@ function renderPreview() {
 }
 
 const frameSrc = () => document.querySelector("iframe")?.getAttribute("src") ?? "";
+
+describe("WidgetPreview of a paused widget", () => {
+  test("asks for no token and says why there is nothing to show", async () => {
+    const previewToken = vi.fn();
+    const eneo = { widgets: { previewToken } } as unknown as Eneo;
+    render(WidgetPreview, { widget: { ...widget, status: "paused" } as Widget, eneo });
+    await expect.element(page.getByText("widget_admin_preview_paused")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: "widget_admin_preview_reload" }))
+      .toBeDisabled();
+    expect(previewToken).not.toHaveBeenCalled();
+    expect(document.querySelector("iframe")).toBeNull();
+  });
+});
 const settle = () => new Promise((resolve) => setTimeout(resolve, 50));
 
 describe("WidgetPreview tokens", () => {
@@ -117,6 +131,46 @@ describe("WidgetPreview tokens", () => {
     }
   });
 
+  test("a renewal that falls due on a hidden page waits until it is shown", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const visibility = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    try {
+      const { mints, previewToken } = renderPreview();
+      await vi.advanceTimersByTimeAsync(0);
+      mints[0].resolve({ token: "first", expires_in: 3600 });
+
+      // Every mint is audited: an unattended page mints no more.
+      await vi.advanceTimersByTimeAsync(7200_000);
+      expect(previewToken).toHaveBeenCalledTimes(1);
+
+      visibility.mockReturnValue("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(previewToken).toHaveBeenCalledTimes(2);
+    } finally {
+      visibility.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  test("a save that rotates the tokens loads no frame on the revoked one", async () => {
+    const { screen, mints, previewToken } = renderPreview();
+    await expect.poll(() => previewToken.mock.calls.length).toBe(1);
+    mints[0].resolve({ token: "first", expires_in: 3600 });
+    await expect.poll(frameSrc).toContain("preview=first");
+
+    // The save's new updated_at would reload the frame on the old token.
+    await screen.rerender({
+      widget: { ...widget, token_generation: 2, updated_at: "2026-09-21T10:05:00Z" }
+    });
+    await expect.poll(() => previewToken.mock.calls.length).toBe(2);
+    expect(document.querySelector("iframe")).toBeNull();
+    await expect.element(page.getByText("widget_preview_loading")).toBeVisible();
+
+    mints[1].resolve({ token: "second", expires_in: 3600 });
+    await expect.poll(frameSrc).toContain("preview=second");
+  });
+
   test("a stale mint that fails does not fail the current preview", async () => {
     const { screen, mints, previewToken } = renderPreview();
     await expect.poll(() => previewToken.mock.calls.length).toBe(1);
@@ -130,6 +184,34 @@ describe("WidgetPreview tokens", () => {
     expect(toastError).not.toHaveBeenCalled();
     expect(frameSrc()).toContain("preview=current");
     expect(document.querySelector("[role=alert]")).toBeNull();
+  });
+});
+
+describe("WidgetPreview external tools", () => {
+  test.each([
+    { case: "unacknowledged tools", overrides: { external_tools_acknowledged: false }, note: true },
+    {
+      case: "tools the policy forbids",
+      overrides: { activation_blockers: ["external_tools_not_allowed"] },
+      note: true
+    },
+    { case: "acknowledged, allowed tools", overrides: {}, note: false }
+  ])("says when the preview runs without $case", async ({ overrides, note }) => {
+    const eneo = { widgets: { previewToken: vi.fn(() => new Promise(() => {})) } };
+    render(WidgetPreview, {
+      widget: {
+        ...widget,
+        external_tools: [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }],
+        external_tools_acknowledged: true,
+        activation_blockers: [],
+        ...overrides
+      } as unknown as Widget,
+      eneo: eneo as unknown as Eneo
+    });
+    await expect.element(page.getByText("widget_admin_preview_description")).toBeVisible();
+    expect(
+      document.body.textContent?.includes("widget_admin_preview_external_tools_withheld")
+    ).toBe(note);
   });
 });
 

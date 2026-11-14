@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  assembleBundle,
   getWidgetLoaderBundle,
+  integrityOf,
   readManifest,
   resolveLoaderVariant,
   type WidgetLoaderBundle
@@ -59,6 +61,47 @@ describe("readManifest", () => {
       integrity: "sha384-abc",
       cssIntegrity: "sha384-css"
     });
+  });
+});
+
+describe("assembleBundle", () => {
+  const source = "!function(){}();";
+  const css = ".eneo{display:block}";
+  const manifest = (overrides: Record<string, unknown> = {}) =>
+    JSON.stringify({
+      version: "2.0.0",
+      channel: "v1",
+      file: "eneo.js",
+      integrity: integrityOf(source),
+      bytes: source.length,
+      gzip_bytes: 10,
+      ...overrides
+    });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("serves a file that hashes to what its manifest promises", () => {
+    expect(assembleBundle(manifest(), source, undefined)).toEqual({
+      version: "2.0.0",
+      channel: "v1",
+      integrity: integrityOf(source),
+      source
+    });
+  });
+
+  it("refuses a script that drifted from its manifest, as the backend route does", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(assembleBundle(manifest(), `${source}//tampered`, undefined)).toBeNull();
+    expect(error).toHaveBeenCalledOnce();
+  });
+
+  it("refuses a stylesheet that drifted from its manifest", () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const withCss = manifest({ css_file: "eneo.css", css_integrity: integrityOf(css) });
+    expect(assembleBundle(withCss, source, css)?.cssSource).toBe(css);
+    expect(assembleBundle(withCss, source, `${css}/**/`)).toBeNull();
   });
 });
 

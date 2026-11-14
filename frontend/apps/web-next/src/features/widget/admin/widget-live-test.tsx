@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import type { Widget } from "./autosave";
 import { widgetApi } from "./queries";
@@ -39,6 +39,8 @@ export function WidgetLiveTest({
   const appScheme = useAppScheme();
   const [element, setElement] = useState<HTMLElement | null>(null);
   const [loading, setLoading] = useState(false);
+  // No preview token is minted for a paused widget (the pause is the kill switch).
+  const paused = widget.status === "paused";
   // A start that is still waiting for its token and loader when the editor
   // stops it or leaves the page must not mount anything afterwards: the
   // launcher would land on whatever page the admin navigated to, with the
@@ -46,6 +48,25 @@ export function WidgetLiveTest({
   // unmounting move on.
   const generation = useRef(0);
   const mounted = useRef<HTMLElement | null>(null);
+
+  // Pausing invalidates the preview token, so a test started before it could
+  // only answer that the widget is unavailable: it ends with the pause.
+  const [pausedBefore, setPausedBefore] = useState(paused);
+  if (paused !== pausedBefore) {
+    setPausedBefore(paused);
+    if (paused) {
+      setElement(null);
+      setLoading(false);
+    }
+  }
+  // At commit, not after paint: a start answered in between would mount a
+  // widget the pause already removed from this render.
+  useLayoutEffect(() => {
+    if (!paused) return;
+    generation.current += 1;
+    mounted.current?.remove();
+    mounted.current = null;
+  }, [paused]);
 
   useEffect(() => {
     return () => {
@@ -56,7 +77,7 @@ export function WidgetLiveTest({
   }, []);
 
   async function start() {
-    if (!release || loading) return;
+    if (!release || loading || paused) return;
     const run = ++generation.current;
     setLoading(true);
     try {
@@ -114,6 +135,11 @@ export function WidgetLiveTest({
           {t("widget_admin_snippet_not_built")}
         </p>
       )}
+      {paused && !element && (
+        <p id={`${titleId}-paused`} className="text-ax-text-secondary text-sm">
+          {t("widget_admin_live_test_paused")}
+        </p>
+      )}
       <div>
         {element ? (
           <Button label={t("widget_admin_live_test_stop")} onClick={stop} />
@@ -123,7 +149,8 @@ export function WidgetLiveTest({
             label={t("widget_admin_live_test_start")}
             isLoading={loading}
             isInterruptible
-            isDisabled={!release}
+            isDisabled={!release || paused}
+            aria-describedby={paused ? `${titleId}-paused` : undefined}
             clickAction={start}
           />
         )}

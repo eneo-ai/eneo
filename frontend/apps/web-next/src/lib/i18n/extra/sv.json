@@ -1728,6 +1728,7 @@
   "editor_summary_sources": "{count, plural, one {# källa} other {# källor}}",
   "editor_summary_space_retention": "Ytans gallring",
   "form_problem_confirm_migration_warning": "Bekräfta att du vill fortsätta trots kompatibilitetsvarningarna.",
+  "form_problem_acknowledge_external_tools": "Kryssa i rutan för att bekräfta verktygen.",
   "form_problem_number_between": "Ange ett tal från {min} till {max}.",
   "help_about": "Hjälp: {topic}",
   "insights_chart_grouping": "Gruppera aktivitet",

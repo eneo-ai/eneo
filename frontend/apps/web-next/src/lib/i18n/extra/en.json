@@ -1728,6 +1728,7 @@
   "editor_summary_sources": "{count, plural, one {# source} other {# sources}}",
   "editor_summary_space_retention": "Space retention",
   "form_problem_confirm_migration_warning": "Confirm that you want to continue despite the compatibility warnings.",
+  "form_problem_acknowledge_external_tools": "Tick the box to acknowledge the tools.",
   "form_problem_number_between": "Enter a number from {min} to {max}.",
   "help_about": "Help: {topic}",
   "insights_chart_grouping": "Group activity",

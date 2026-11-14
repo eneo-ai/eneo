@@ -169,7 +169,16 @@ function parseUrl(baseUrl, endpoint, params) {
           `Missing path parameter "${param}" for endpoint "${endpoint}" (got ${value === undefined ? "undefined" : JSON.stringify(value)}).`
         );
       }
-      endpoint = endpoint.replace(`{${param}}`, value);
+      // Encoded, so a value with "/" (a route parameter SvelteKit has
+      // already decoded) stays one path segment and cannot address another
+      // endpoint once the pathname setter normalises the path. A value that
+      // is itself a dot segment is resolved by that setter encoded or not.
+      if (String(value) === "." || String(value) === "..") {
+        throw new Error(
+          `Path parameter "${param}" for endpoint "${endpoint}" cannot be ${JSON.stringify(value)}.`
+        );
+      }
+      endpoint = endpoint.replace(`{${param}}`, encodeURIComponent(value));
     });
   }
 

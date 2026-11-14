@@ -33,7 +33,7 @@ class AuditLogTaskParams(BaseModel):
 
     @model_validator(mode="after")
     def validate_actor_id(self) -> "AuditLogTaskParams":
-        if self.actor_type != ActorType.SYSTEM and self.actor_id is None:
+        if self.actor_type.requires_actor_id and self.actor_id is None:
             raise ValueError("actor_id required for non-system actions")
         return self
 

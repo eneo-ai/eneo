@@ -158,6 +158,15 @@ export function WidgetPolicyForm({ policy: initial }: { policy: WidgetPolicy }) 
         width="100%"
         onChange={(checked) => autosave.patch({ allow_bot_protection_none: checked })}
       />
+      <Switch
+        label={t("widget_admin_policy_allow_external_tools")}
+        description={t("widget_admin_policy_allow_external_tools_description")}
+        value={policy.allow_external_tools ?? true}
+        labelPosition="start"
+        labelSpacing="spread"
+        width="100%"
+        onChange={(checked) => autosave.patch({ allow_external_tools: checked })}
+      />
     </SettingsGroup>
   );
 }
