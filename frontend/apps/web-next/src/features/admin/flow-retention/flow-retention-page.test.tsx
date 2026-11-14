@@ -122,6 +122,13 @@ describe("FlowRetentionPage", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("makes the link to Roles 44 px tall on touch", async () => {
+    page(["admin"]);
+    // jsdom applies no CSS: the coarse-pointer height is asserted as its class.
+    const link = await screen.findByRole("link", { name: "Gå till Roller" });
+    expect(link.className).toContain("pointer-coarse:min-h-11");
+  });
+
   it("lets someone who manages retention change the rules", async () => {
     page(["admin", "retention_manage"]);
     const radio = await screen.findByRole("radio", { name: /^Gallringstid för organisationen/ });

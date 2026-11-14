@@ -83,7 +83,7 @@ export function FlowRetentionPage() {
                 manage: t("permission_retention_manage"),
                 holds: t("permission_retention_holds")
               })}{" "}
-              <Link href="/admin/roles" hasUnderline>
+              <Link href="/admin/roles" hasUnderline className="pointer-coarse:min-h-11">
                 {t("flow_retention_admin_roles_link")}
               </Link>
             </>
