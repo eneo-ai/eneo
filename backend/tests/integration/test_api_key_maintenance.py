@@ -6,6 +6,7 @@ because sign-in judges a key by its dates, never by the stored ``state``.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -19,20 +20,24 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.schemas.audit_config_schemas import CategoryUpdate
 from eneo.authentication import api_key_maintenance
+from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
+    ApiKeyExtendRequest,
     ApiKeyHashVersion,
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
+    ApiKeyUpdateRequest,
     ApiKeyV2InDB,
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.tenant_table import Tenants
 from eneo.tenants.tenant import TenantBase
+from tests.integration.fixtures.locks import wait_until_blocked
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -649,3 +654,78 @@ async def test_keys_recorded_as_expired_but_still_working_are_closed(
     assert second["expired"] == 0
     assert len(await audit_rows(db_container, dated_id)) == 1
     assert len(await audit_rows(db_container, open_id)) == 1
+
+
+class _RollBack(Exception):
+    pass
+
+
+def _extend(db_container, key_id: UUID, until: datetime):
+    async def change() -> None:
+        async with db_container() as container:
+            await container.api_key_lifecycle_service().extend_expiration(
+                key_id=key_id, request=ApiKeyExtendRequest(expires_at=until)
+            )
+
+    return change
+
+
+def _edit(db_container, key_id: UUID, until: datetime):
+    async def change() -> None:
+        async with db_container() as container:
+            await container.api_key_lifecycle_service().update_key(
+                key_id=key_id, request=ApiKeyUpdateRequest(expires_at=until)
+            )
+
+    return change
+
+
+@pytest.mark.parametrize("change", [_extend, _edit], ids=["extend", "edit"])
+async def test_a_change_during_the_run_does_not_reopen_the_key(
+    client, db_container, token, admin_user, change
+):
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    key_id, secret = await create_key(client, token, name="unused", expires_at=future)
+    await make_unused(db_container, key_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    later = datetime.now(timezone.utc) + timedelta(days=60)
+
+    async with db_container() as job:
+        result = await job.api_key_maintenance_service().run_daily_maintenance()
+        assert result["auto_expired"] == 1
+        # Written, not committed: everyone else still sees an active key.
+        assert (await read_key(db_container, key_id)).expires_at == future
+        racer = asyncio.create_task(change(db_container, key_id, later)())
+        await wait_until_blocked(job.session(), racer)
+
+    with pytest.raises(ApiKeyValidationError) as refused:
+        await racer
+    assert refused.value.status_code == 400
+    key = await read_key(db_container, key_id)
+    assert key.state == "expired"
+    assert key.expires_at is not None
+    assert key.expires_at <= datetime.now(timezone.utc)
+    assert await sign_in_status(client, secret) == 401
+
+
+async def test_a_change_waiting_on_a_run_that_rolls_back_goes_ahead(
+    client, db_container, token, admin_user
+):
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    key_id, secret = await create_key(client, token, name="unused", expires_at=future)
+    await make_unused(db_container, key_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    later = datetime.now(timezone.utc) + timedelta(days=60)
+
+    with pytest.raises(_RollBack):
+        async with db_container() as job:
+            await job.api_key_maintenance_service().run_daily_maintenance()
+            racer = asyncio.create_task(_extend(db_container, key_id, later)())
+            await wait_until_blocked(job.session(), racer)
+            raise _RollBack
+
+    await racer
+    key = await read_key(db_container, key_id)
+    assert key.state == "active"
+    assert key.expires_at == later
+    assert await sign_in_status(client, secret) == 200

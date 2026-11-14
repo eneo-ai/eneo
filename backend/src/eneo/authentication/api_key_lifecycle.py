@@ -948,7 +948,12 @@ class ApiKeyLifecycleService:
         return ApiKeyV2.model_validate(updated_key)
 
     async def _get_key_or_404(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2InDB:
-        key = await self.api_key_repo.get(key_id=key_id, tenant_id=tenant_id)
+        # Every change reads the key through here. The lock makes it validate
+        # and write the row as it is after a concurrent change commits (the
+        # nightly maintenance among them), instead of overwriting that change.
+        key = await self.api_key_repo.get(
+            key_id=key_id, tenant_id=tenant_id, for_update=True
+        )
         if key is None:
             raise ApiKeyValidationError(
                 status_code=404,
