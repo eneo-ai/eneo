@@ -19,7 +19,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { sessionKeys } from "@/lib/api/session";
-import { TaskWorkersStatus } from "./task-workers-status";
+import { TaskWorkersStatus, taskWorkersQuery } from "./task-workers-status";
 import { useSettingSwitch } from "./use-setting-switch";
 
 type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new" | "flows";
@@ -75,7 +75,17 @@ function SettingRow({
             ]);
           }
         }
-      : undefined
+      : setting === "flows"
+        ? {
+            // Switched on, the admin sees at once whether the workers run.
+            onSaved: async (enabled) => {
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: sessionKeys.settings }),
+                enabled && queryClient.invalidateQueries({ queryKey: taskWorkersQuery.queryKey })
+              ]);
+            }
+          }
+        : undefined
   );
   return (
     <div className="flex min-w-0 items-start gap-3">

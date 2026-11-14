@@ -1,13 +1,15 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Link } from "@astryxdesign/core/Link";
 import { Text } from "@astryxdesign/core/Text";
 import { queryOptions, useQuery, type QueryObserverResult } from "@tanstack/react-query";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { docsUrl } from "@/lib/docs";
 
 type TaskWorkers = Schema<"TaskWorkersStatusPublic">;
 
@@ -15,7 +17,7 @@ type TaskWorkers = Schema<"TaskWorkersStatusPublic">;
 const EXECUTION_WORKER = "task-execution-worker";
 const MAINTENANCE_WORKER = "task-maintenance-worker";
 
-const taskWorkersQuery = queryOptions({
+export const taskWorkersQuery = queryOptions({
   queryKey: ["admin-task-workers"],
   queryFn: () => unwrap(browserApi.GET("/api/v1/settings/task-workers"))
 });
@@ -23,8 +25,8 @@ const taskWorkersQuery = queryOptions({
 /**
  * Whether the two task workers Flows run on are up, from their latest health
  * signal. A failed check, or a probe that could not reach the signal, always
- * reads "could not be checked", never an earlier "running": a failed refetch
- * keeps the old data, so the error is looked at first.
+ * reads "could not be checked" (tone `warning`), never an earlier "running":
+ * a failed refetch keeps the old data, so the error is looked at first.
  */
 function workersState(
   result: Pick<QueryObserverResult<TaskWorkers>, "status" | "data">,
@@ -56,10 +58,24 @@ function workersState(
 /** The workers' state beside the Flows switch: it warns, it never blocks the switch. */
 export function TaskWorkersStatus() {
   const t = useTranslations();
+  const locale = useLocale();
   const announce = useAnnounce();
   const query = useQuery(taskWorkersQuery);
   const state = workersState(query, t);
   const checkedAt = Math.max(query.dataUpdatedAt, query.errorUpdatedAt);
+  // Not running, or not known to run: the setup guide moves up beside the state.
+  const needsSetup = state.tone === "error" || state.tone === "warning";
+  const guide = (
+    <Link
+      href={docsUrl("guides/flows/integrating-flows", locale, "switch-flows-on")}
+      isExternalLink
+      hasUnderline
+      newTabLabel={t("chat_opens_in_new_tab")}
+      className="pointer-coarse:min-h-11"
+    >
+      {needsSetup ? t("flows_switch_guide_workers") : t("flows_switch_guide")}
+    </Link>
+  );
 
   return (
     <div className="mt-3 flex flex-col gap-1">
@@ -70,9 +86,16 @@ export function TaskWorkersStatus() {
         />
         {checkedAt > 0 ? (
           <Text type="supporting">
-            {t.rich("flows_switch_workers_checked_at", {
-              time: () => <ClientTime value={new Date(checkedAt).toISOString()} format="relative" />
-            })}
+            {t.rich(
+              state.tone === "warning"
+                ? "flows_switch_workers_attempted_at"
+                : "flows_switch_workers_checked_at",
+              {
+                time: () => (
+                  <ClientTime value={new Date(checkedAt).toISOString()} format="relative" />
+                )
+              }
+            )}
           </Text>
         ) : null}
         <Button
@@ -92,8 +115,11 @@ export function TaskWorkersStatus() {
         >
           {t("refresh")}
         </Button>
+        {needsSetup ? guide : null}
       </div>
-      <Text type="supporting">{t("flows_switch_workers_basis")}</Text>
+      <Text type="supporting">
+        {t("flows_switch_workers_basis")} {needsSetup ? null : guide}
+      </Text>
     </div>
   );
 }

@@ -223,6 +223,64 @@ it("shows a failed check after a green one as not checked, never as still runnin
   expect(await within(row).findByText("Arbetarna: Kunde inte kontrolleras")).toBeTruthy();
   expect(within(row).queryByText("Arbetarna: Kör")).toBeNull();
   expect(api.GET).toHaveBeenCalledTimes(2);
+  expect(row.textContent).toContain("Senaste försök");
+  expect(row.textContent).not.toContain("Kontrollerad");
+});
+
+it("dates a probe that could not read the workers as an attempt, not a check", async () => {
+  answerWorkers({
+    probe_ok: false,
+    execution_worker_ready: false,
+    maintenance_worker_ready: false
+  });
+  renderToggles();
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kunde inte kontrolleras")).toBeTruthy();
+  expect(row.textContent).toContain("Senaste försök");
+  expect(row.textContent).not.toContain("Kontrollerad");
+});
+
+const FLOWS_GUIDE = "https://docs.eneo.ai/dev/sv/guides/flows/integrating-flows#switch-flows-on";
+
+it("links the Flows setup guide, and points to it for the workers when they do not run", async () => {
+  renderToggles();
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
+  const guide = within(row).getByRole("link", { name: /Så sätter du upp Flöden/ });
+  expect(guide.getAttribute("href")).toBe(FLOWS_GUIDE);
+  expect(within(row).queryByRole("link", { name: /Så får du arbetarna att köra/ })).toBeNull();
+
+  cleanup();
+  answerWorkers({ ...bothRunning, execution_worker_ready: false });
+  renderToggles();
+  const stopped = flowsRow();
+  expect(
+    await within(stopped).findByText("Arbetarna: Kör inte: task-execution-worker")
+  ).toBeTruthy();
+  const workersGuide = within(stopped).getByRole("link", { name: /Så får du arbetarna att köra/ });
+  expect(workersGuide.getAttribute("href")).toBe(FLOWS_GUIDE);
+  // In the state's own line, beside the state and Refresh, not further down.
+  const stateLine = within(stopped).getByRole("button", {
+    name: "Uppdatera arbetarnas läge"
+  }).parentElement!;
+  expect(stateLine.contains(workersGuide)).toBe(true);
+  expect(stateLine.contains(within(stopped).getByText(/Kör inte: task-execution-worker/))).toBe(
+    true
+  );
+  await expectNoAxeViolations(document.body);
+});
+
+it("checks the workers again as soon as Flows are switched on", async () => {
+  api.PATCH.mockResolvedValue({ data: {}, response: new Response("{}") });
+  renderToggles();
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
+  answerWorkers({ ...bothRunning, execution_worker_ready: false });
+
+  fireEvent.click(within(row).getByRole("switch", { name: "Flöden" }));
+
+  expect(await within(row).findByText("Arbetarna: Kör inte: task-execution-worker")).toBeTruthy();
+  expect(api.GET.mock.calls.filter(([path]) => path === WORKERS_PATH)).toHaveLength(2);
 });
 
 it("asks before switching Flows off, and Cancel sends nothing", async () => {
