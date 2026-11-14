@@ -41,6 +41,19 @@ permissions they need in the same way, selecting them by `name` instead of
 permissions again. To switch Flows off for the organisation, set `enabled` on
 its row to `false`.
 
+### Retention permissions
+
+No role receives `retention_manage` or `retention_holds` automatically: not on
+upgrade (`202610041000` creates the hold table and grants nothing), not from a
+role template, and not the Owner role. An administrator grants them in role
+editing (Svelte and web-next). Startup never rewrites an existing role; a reset
+to the template removes them. The downgrade of `202610041000` removes both from
+every role, and upgrading again does not give them back. The web-next page
+`/admin/flow-data-retention` stays in the admin menu for `admin`, because its
+upload and debug windows are admin settings; the retention rules on it follow
+the two permissions, and the backend checks every request
+(`flow_retention_authz.py`).
+
 ## Starting points
 
 | What | Commit |

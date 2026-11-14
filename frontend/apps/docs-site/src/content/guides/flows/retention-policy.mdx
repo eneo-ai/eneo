@@ -242,11 +242,14 @@ Two role permissions, granted per role, separate the duties:
 | `retention_holds`  | Retention – legal holds  | Placing, reviewing and releasing legal holds                                |
 
 Either permission can read the shared views (Flow targets, effective rules,
-holds). One person may hold both. Neither is implied by `admin`: when this
-version is installed, the predefined Owner role receives both, as it does in a
-new organization. Other roles, including roles with `admin`, receive neither
-until an administrator grants them. An organization can then create a role
-such as "Arkivansvarig" with only these.
+holds). One person may hold both. Neither is implied by `admin`, and no role
+receives them automatically: not on upgrade, not in a new organization, and not
+the predefined Owner role. An administrator grants them to a role in
+**Admin > Roles**, for example a role such as "Arkivansvarig" with only these,
+or to the Owner role. Resetting a role to its template removes them again.
+When Flows are on, an administrator without either permission still sees
+**Admin > Flow retention** with its upload and debug windows; the page says
+which permission the rules need.
 Only signed-in people decide: a request made with any API key is refused
 (`retention_person_required`, 403) whatever its permissions; a missing
 permission is refused with `retention_permission_required` (403).
@@ -256,12 +259,12 @@ through the endpoints above: rules with `retention_manage`, legal holds with
 `retention_holds`. It does not open the admin area. The server checks every
 request.
 
-**Operator note (rolling deploy):** the upgrade adds `retention_manage` and
-`retention_holds` to the predefined Owner role. Servers still on the previous
-release do not know these values and reject those roles until the rollout
-completes. Deploy this release with a short stop of the old servers. A
-downgrade past this version removes both values from every role; grant them
-again to roles other than Owner after upgrading once more.
+**Operator note (downgrade):** a downgrade past this version removes both
+values from every role, because the previous release cannot read a role that
+holds them. Upgrading again does not give them back; an administrator grants
+them again. Servers still on the previous release do not know these values and
+reject a role that holds them, so grant them only after the rollout has
+completed.
 
 ## Audit and authorization
 
