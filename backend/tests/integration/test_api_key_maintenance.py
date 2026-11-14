@@ -37,6 +37,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.audit_log_table import AuditLog
+from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
 from eneo.database.tables.tenant_table import Tenants
 from eneo.tenants.tenant import TenantBase
 from tests.integration.fixtures.locks import wait_until_blocked
@@ -202,10 +203,27 @@ async def audit_rows(db_container, key_id: UUID) -> list[sa.Row[Any]]:
         return list(result.all())
 
 
-async def turn_off_admin_action_audit(db_container, tenant_id: UUID) -> None:
+async def turn_off_audit_logging_and_admin_actions(
+    db_container, tenant_id: UUID
+) -> None:
+    """What a tenant admin can turn off: audit logging as a whole, and the
+    category the job's actions belong to."""
     async with db_container() as container:
+        flag_id = await container.session().scalar(
+            sa.select(GlobalFeatureFlag.id).where(
+                GlobalFeatureFlag.name == "audit_logging_enabled"
+            )
+        )
+        assert flag_id is not None
+        await container.feature_flag_service().disable_tenant(
+            feature_id=flag_id, tenant_id=tenant_id
+        )
         await container.audit_config_service().update_config(
             tenant_id, [CategoryUpdate(category="admin_actions", enabled=False)]
+        )
+    async with db_container() as container:
+        assert not await container.feature_flag_service().check_is_feature_enabled(
+            feature_name="audit_logging_enabled", tenant_id=tenant_id
         )
 
 
@@ -632,7 +650,7 @@ async def test_every_transition_is_audited_even_with_the_action_turned_off(
     grace_ended = datetime.now(timezone.utc) - timedelta(minutes=1)
     await set_key_columns(db_container, rotated_id, rotation_grace_until=grace_ended)
     await set_unused_days(db_container, admin_user.tenant_id, 7)
-    await turn_off_admin_action_audit(db_container, admin_user.tenant_id)
+    await turn_off_audit_logging_and_admin_actions(db_container, admin_user.tenant_id)
 
     result = await run_maintenance(db_container)
 
