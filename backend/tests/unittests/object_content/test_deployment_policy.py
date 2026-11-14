@@ -819,8 +819,13 @@ _MIB = 1024 * 1024
     ],
 )
 def test_database_storage_lets_the_policy_govern_unless_the_old_variable_is_lower(
-    environment_limit: int | None, ceiling: int, source: ConstrainingSource
+    monkeypatch: pytest.MonkeyPatch,
+    environment_limit: int | None,
+    ceiling: int,
+    source: ConstrainingSource,
 ) -> None:
+    if environment_limit is None:
+        monkeypatch.delenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", raising=False)
     overrides = (
         {} if environment_limit is None else {"inline_maximum_bytes": environment_limit}
     )

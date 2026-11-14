@@ -129,7 +129,7 @@ def test_inline_limit_at_or_above_capacity_starts_at_the_capacity(
 
 
 def test_every_settings_path_caps_the_inline_limit_at_the_capacity() -> None:
-    """Direct construction (preflight, legacy object store) caps like the loader."""
+    """Direct construction (as the preflight does) caps like the loader."""
 
     settings = ObjectContentCoreSettings(
         _env_file=None, inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES + 1
