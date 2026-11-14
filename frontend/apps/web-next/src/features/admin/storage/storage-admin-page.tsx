@@ -140,6 +140,14 @@ function StoragePolicyEditor({
         ? "storage_target_postgres_inline"
         : "storage_target_object_store"
     );
+  // New files go to the database: its storage limit sits under the policy.
+  const databaseLimits = baseline.limits.filter(
+    (limit) => limit.storage_target === "postgres_inline"
+  );
+  const databaseStorageLimit = databaseLimits[0]?.operator_ceiling_bytes ?? null;
+  const databaseStorageLimitApplies = databaseLimits.some(
+    (limit) => limit.constraining_source === "operator_ceiling"
+  );
   const bytesLabel = (value: number) => {
     const unit =
       value % 1024 ** 3 === 0
@@ -462,6 +470,19 @@ function StoragePolicyEditor({
               </div>
             ))}
           </dl>
+        )}
+        {databaseStorageLimit !== null && (
+          <div className="text-muted-foreground flex flex-col gap-2 text-sm">
+            <p>{t("storage_limits_database_ceiling")}</p>
+            {databaseStorageLimitApplies && (
+              <p>
+                {t("storage_limits_database_ceiling_applies", {
+                  size: bytesLabel(databaseStorageLimit)
+                })}
+              </p>
+            )}
+            <p>{t("storage_limits_database_cost")}</p>
+          </div>
         )}
         <div>
           <Button
