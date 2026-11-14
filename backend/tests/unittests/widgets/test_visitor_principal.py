@@ -38,6 +38,7 @@ def _session_service(user) -> SessionService:
         session_repo=SimpleNamespace(session=session, add=AsyncMock()),
         question_repo=AsyncMock(),
         user=user,
+        include_user_uploads=True,
     )
 
 
@@ -106,7 +107,12 @@ async def test_ownership_projection_requires_both_widget_and_visitor():
     visitor_id = uuid4()
     user = build_visitor_user(widget, visitor_id, _tenant(widget.tenant_id))
     repo = AsyncMock()
-    service = SessionService(session_repo=repo, question_repo=AsyncMock(), user=user)
+    service = SessionService(
+        session_repo=repo,
+        question_repo=AsyncMock(),
+        user=user,
+        include_user_uploads=True,
+    )
     owned = SessionOwnership(
         user_id=None,
         api_key_id=None,
@@ -158,11 +164,11 @@ def _placeholder_harness(monkeypatch):
     manager.session = lambda: _Ctx()
     record = SimpleNamespace(id=uuid4(), created_at=None, questions=[])
 
-    def session_repo(session, loader=None):
+    def session_repo(session, loader=None, **_):
         seen["session_repo"] = session
         return SimpleNamespace(add=AsyncMock(return_value=record))
 
-    def question_repo(session, loader=None):
+    def question_repo(session, loader=None, **_):
         seen["question_repo"] = session
         return SimpleNamespace(add=AsyncMock(return_value=record))
 

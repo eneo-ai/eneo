@@ -67,6 +67,7 @@ def _make_session_service(*, question_id: UUID | None = None) -> SessionService:
         session_repo=session_repo,
         question_repo=question_repo,
         user=_make_user(),
+        include_user_uploads=True,
     )
 
 
@@ -285,8 +286,9 @@ async def test_persist_partial_question_answer_uses_fresh_session():
         update_called.update(kwargs)
 
     class FakeRepo:
-        def __init__(self, _session: object) -> None:
+        def __init__(self, _session: object, *, include_user_uploads: bool) -> None:
             captured["repo_session"] = _session
+            captured["include_user_uploads"] = include_user_uploads
 
         async def update_with_answer(self, **kwargs: object) -> None:
             await fake_update(**kwargs)
@@ -313,6 +315,7 @@ async def test_persist_partial_question_answer_uses_fresh_session():
     assert captured.get("entered") is True
     assert captured.get("txn_opened") is True
     assert captured.get("repo_session") is fresh_session
+    assert captured.get("include_user_uploads") is False
     assert update_called["question_id"] == question_id
     assert update_called["tenant_id"] == tenant_id
     assert update_called["answer"] == "part"

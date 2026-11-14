@@ -9,6 +9,24 @@ from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 
 
+async def test_turn_details_follow_the_principals_file_grant(monkeypatch):
+    attach = AsyncMock()
+    monkeypatch.setattr("eneo.sessions.sessions_repo.attach_question_files", attach)
+    monkeypatch.setattr(
+        "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
+        AsyncMock(),
+    )
+    loader = MagicMock()
+    repo = SessionRepository(AsyncMock(), loader, include_user_uploads=False)
+    question = SimpleNamespace(info_blobs=[], questions_files=[], tool_calls=None)
+
+    await repo._attach_turn_details([SimpleNamespace(id=uuid4(), questions=[question])])
+
+    attach.assert_awaited_once_with(
+        [question], loader=loader, include_user_uploads=False
+    )
+
+
 async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
     blobs = [MagicMock(), MagicMock()]
     hydrate = AsyncMock()
@@ -16,7 +34,7 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
         "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
         hydrate,
     )
-    repo = SessionRepository(AsyncMock())
+    repo = SessionRepository(AsyncMock(), include_user_uploads=True)
 
     await repo._hydrate_sessions(
         [
@@ -48,7 +66,7 @@ async def test_update_hydrates_info_blob_availability(monkeypatch):
         hydrate,
     )
     monkeypatch.setattr(SessionInDB, "model_validate", lambda row: row)
-    repo = SessionRepository(AsyncMock())
+    repo = SessionRepository(AsyncMock(), include_user_uploads=True)
     repo.session.scalar = AsyncMock(return_value=updated)
     repo.session.scalars = AsyncMock(return_value=[updated.id])
 
@@ -71,7 +89,9 @@ async def test_owned_chat_partner_read_is_scalar_tenant_and_owner_scoped():
     )
     session.execute.return_value = result
     file_loader = MagicMock()
-    repo = SessionRepository(session, file_content_loader=file_loader)
+    repo = SessionRepository(
+        session, file_content_loader=file_loader, include_user_uploads=True
+    )
 
     partner = await repo.get_owned_chat_partner(
         session_id=session_id,
@@ -100,7 +120,7 @@ async def test_owned_chat_partner_returns_none_for_an_inaccessible_session():
     result = MagicMock()
     result.one_or_none.return_value = None
     session.execute.return_value = result
-    repo = SessionRepository(session)
+    repo = SessionRepository(session, include_user_uploads=True)
 
     partner = await repo.get_owned_chat_partner(
         session_id=uuid4(),
@@ -116,7 +136,7 @@ def _repo_returning(row: object) -> tuple[SessionRepository, AsyncMock]:
     result = MagicMock()
     result.one_or_none.return_value = row
     session.execute.return_value = result
-    return SessionRepository(session), session
+    return SessionRepository(session, include_user_uploads=True), session
 
 
 def _compiled(session: AsyncMock):
@@ -233,7 +253,7 @@ async def test_set_message_feedback_writes_nothing_for_a_foreign_message():
 async def test_delete_message_feedback_is_scoped_to_the_owner():
     user_id, message_id = uuid4(), uuid4()
     session = AsyncMock()
-    repo = SessionRepository(session)
+    repo = SessionRepository(session, include_user_uploads=True)
 
     await repo.delete_message_feedback(
         session_id=uuid4(),

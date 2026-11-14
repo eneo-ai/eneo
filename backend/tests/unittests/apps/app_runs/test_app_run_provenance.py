@@ -122,6 +122,7 @@ async def test_app_run_file_projection_is_one_deduplicated_batch() -> None:
         session=MagicMock(),
         factory=factory,
         file_repo=file_repo,
+        include_user_uploads=True,
     )
 
     await repository._to_domain_many([first_run, second_run])
@@ -130,4 +131,26 @@ async def test_app_run_file_projection_is_one_deduplicated_batch() -> None:
     assert factory.create_app_run_from_db.call_args_list == [
         call(first_run, input_files=[first_info, second_info]),
         call(second_run, input_files=[first_info]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_app_run_inputs_are_left_out_without_the_files_grant() -> None:
+    run = SimpleNamespace(input_files=[SimpleNamespace(file_id=uuid4())])
+    file_repo = SimpleNamespace(get_infos_by_ids=AsyncMock())
+    factory = MagicMock()
+    repository = AppRunRepository(
+        session=MagicMock(),
+        factory=factory,
+        file_repo=file_repo,
+        include_user_uploads=False,
+    )
+
+    await repository._to_domain(run)
+    await repository._to_domain_many([run])
+
+    file_repo.get_infos_by_ids.assert_not_awaited()
+    assert factory.create_app_run_from_db.call_args_list == [
+        call(run, input_files=[]),
+        call(run, input_files=[]),
     ]
