@@ -506,22 +506,27 @@ def seed_default_tenant_user() -> Callable[[PostgresConnection], None]:
                 # first-login change is covered by its own tests.
                 password_change_required=False,
             )
-        _grant_owner_flow_permissions(conn, tenant_name="test_tenant")
+        _grant_owner_permissions(conn, tenant_name="test_tenant")
 
     return seed
 
 
-# No role receives the flow permissions on its own: an organisation that turns
-# Flows on grants them. The baseline Owner runs the flow tests, so it gets them
-# here, as an administrator would grant them.
-_OWNER_FLOW_PERMISSIONS = ("flows_view", "flows_run", "flows_manage", "flows_trace")
+# No role receives the flow or retention permissions on its own: an
+# administrator grants them. The baseline Owner runs the flow and retention
+# tests, so it gets them here, as an administrator would grant them.
+_OWNER_GRANTED_PERMISSIONS = (
+    "flows_view",
+    "flows_run",
+    "flows_manage",
+    "flows_trace",
+    "retention_manage",
+    "retention_holds",
+)
 
 
-def _grant_owner_flow_permissions(
-    conn: PostgresConnection, *, tenant_name: str
-) -> None:
+def _grant_owner_permissions(conn: PostgresConnection, *, tenant_name: str) -> None:
     with conn.cursor() as cursor:
-        for permission in _OWNER_FLOW_PERMISSIONS:
+        for permission in _OWNER_GRANTED_PERMISSIONS:
             cursor.execute(
                 "UPDATE roles SET permissions = array_append(permissions, %(p)s) "
                 "WHERE predefined_source = 'Owner' AND NOT (%(p)s = ANY(permissions)) "
@@ -536,7 +541,7 @@ def _grant_owner_flow_permissions(
         rows = cursor.fetchall()
     conn.commit()
     # add_tenant_user prints and rolls back its own errors; fail here instead.
-    assert len(rows) == 1 and set(_OWNER_FLOW_PERMISSIONS) <= set(rows[0][0]), rows
+    assert len(rows) == 1 and set(_OWNER_GRANTED_PERMISSIONS) <= set(rows[0][0]), rows
 
 
 @pytest.fixture(scope="session")
