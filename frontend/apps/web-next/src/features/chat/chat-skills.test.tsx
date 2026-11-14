@@ -498,6 +498,49 @@ describe("ChatSkills", () => {
     expect(within(rowOf(answersMode)).getByText("Spärrad av administratör")).toBeTruthy();
   });
 
+  it("shares one control with the tools: both counts as one, and a tab for each", async () => {
+    const onDisabled = vi.fn();
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [
+            { id: "lou", name: "LOU-register", description: null, icon_url: null },
+            { id: "diarium", name: "Diarium", description: null, icon_url: null }
+          ],
+          disabledServerIds: new Set(["diarium"]),
+          autoAcceptTools: false,
+          onDisabledServerIdsChange: onDisabled,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    const name = "Verktyg: 3 aktiva (1 verktyg, 2 skills)";
+    const trigger = await screen.findByRole("button", { name });
+    expectNameToHoldVisibleText(trigger, name);
+    expect(screen.queryByRole("button", { name: /^Skills/ })).toBeNull();
+
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    expect(
+      within(popover)
+        .getByRole("tab", { name: /^Verktyg/ })
+        .getAttribute("aria-selected")
+    ).toBe("true");
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    expect(onDisabled).toHaveBeenLastCalledWith(new Set());
+    expect(within(popover).queryByRole("radiogroup")).toBeNull();
+
+    fireEvent.click(within(popover).getByRole("tab", { name: /^Skills/ }));
+    const skillsPanel = within(popover).getByRole("tabpanel", { name: "Skills" });
+    await waitFor(() => expect(skillsPanel.querySelector('[aria-busy="true"]')).toBeNull());
+    expect(
+      within(skillsPanel).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+    ).toBeTruthy();
+    expect(within(popover).queryByRole("switch", { name: "Diarium" })).toBeNull();
+    await expectNoAxeViolations(popover);
+  });
+
   it("opens the same choices in a bottom sheet on a phone, with search only beyond seven skills", async () => {
     setViewport("phone");
     renderSkills();

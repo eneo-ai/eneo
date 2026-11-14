@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ComposerAttachments } from "./attachments";
 import type { Capability } from "@/features/capabilities/capabilities";
 import type { ChatCapability } from "./chat-capabilities";
@@ -90,6 +91,18 @@ describe("ChatTools", () => {
     fireEvent.click(auto);
     expect(within(popover).getByText("Verktyg körs automatiskt utan godkännande")).toBeTruthy();
     await expectNoAxeViolations(popover);
+  });
+
+  it("opens the tools in a bottom sheet on a phone, with its own close button", async () => {
+    setViewport("phone");
+    renderInChat(<McpHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" }));
+    const sheet = await screen.findByRole("dialog", { name: "Verktyg" });
+    expect(sheet.tagName).toBe("DIALOG");
+    expect(within(sheet).getByRole("switch", { name: "LOU-register" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Verktyg" })).toBeNull());
+    setViewport("desktop");
   });
 
   it("renders every tool unavailable when the model cannot call tools", async () => {

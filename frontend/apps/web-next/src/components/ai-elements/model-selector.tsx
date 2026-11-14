@@ -18,7 +18,7 @@ import { ProviderLogo } from "./provider-logo";
 type CompletionModel = Schema<"CompletionModelPublic">;
 
 /** Thin reference (e.g. a policy `locked_model`) needs only these fields. */
-type ModelRef = {
+export type ModelRef = {
   id: string;
   name: string;
   nickname?: string | null;
@@ -36,7 +36,7 @@ function prettifyProviderType(type: string | null | undefined): string | null {
     .join(" ");
 }
 
-function vendorLabel(model: CompletionModel, fallback: string): string {
+export function vendorLabel(model: CompletionModel, fallback: string): string {
   return (
     model.org?.trim() ||
     model.provider_name?.trim() ||
@@ -45,7 +45,7 @@ function vendorLabel(model: CompletionModel, fallback: string): string {
   );
 }
 
-function modelName(model: ModelRef): string {
+export function modelName(model: ModelRef): string {
   return modelDisplayName(model);
 }
 
@@ -53,7 +53,7 @@ function modelName(model: ModelRef): string {
  * What a row says under the model's name, as text: context window,
  * capabilities and (when the organisation shows them) prices per 1M tokens.
  */
-function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate): string {
+export function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate): string {
   const facts: string[] = [];
   if (model.max_input_tokens > 0) {
     facts.push(t("model_context_tokens", { tokens: formatTokens(model.max_input_tokens) }));

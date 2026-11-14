@@ -263,15 +263,15 @@ describe("SpaceChat", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("lets the personal assistant's reasoning effort be picked beside the model and saves it on the assistant", async () => {
+  it("lets the personal assistant's reasoning effort be picked in the model picker and saves it on the assistant", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
-    const effort = await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
-    // Beside the model picker, in the composer's send actions.
-    expect(screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })).toBeTruthy();
-    fireEvent.click(effort);
-    fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
+    // One control for both: the level has no button of its own.
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
+    fireEvent.click(within(levels).getByRole("radio", { name: "Hög" }));
 
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
@@ -303,7 +303,8 @@ describe("SpaceChat", () => {
       }
     });
     renderRoute("/spaces/personal/chat");
-    await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ });
-    expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    await screen.findByRole("option", { name: /GPT-5/ });
+    expect(screen.queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
   });
 });

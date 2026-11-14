@@ -11,43 +11,48 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
-import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
-import { reasoningEffortOptions } from "@/features/chat/reasoning-effort";
-import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
+import { ModelReasoningPicker } from "@/features/chat/model-reasoning-picker";
 import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
 
-/** The composer's compact (ghost) trigger look, shared by the model and reasoning pickers. */
+/** The composer's compact (ghost) trigger look of the model picker. */
 const COMPOSER_PICKER_CLASS =
   "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
 
 /**
- * Default-assistant completion model switcher (personal chat only). Switching
- * persists on the personal space's default assistant — a global change (see the
- * "personal chat model is global" contract) — and honours the admin governance
- * policy: a pinned model shows a locked label, an enforced allow-list filters
- * the list, and the effective pick is resolved when the saved one is disallowed.
+ * The personal chat's model and reasoning-level choices, with their saves.
+ * Both are stored on the personal space's default assistant, a global change
+ * (see the "personal chat model is global" contract): the model as
+ * `completion_model`, the level as `completion_model_kwargs.reasoning_effort`
+ * (null = the organisation default), exactly as the Svelte app does. The
+ * backend reads them from the stored assistant when it answers, so nothing
+ * travels with the question itself. The admin governance policy is honoured:
+ * a pinned model is locked, an enforced allow-list filters the list, and the
+ * effective pick is resolved when the saved one is disallowed.
  */
-function ModelSwitcher() {
+function usePersonalChatModel() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
-  const { tenant } = useAppContext();
   const queryClient = useQueryClient();
   const assistant = space.default_assistant;
   const config = assistant?.effective_config ?? null;
 
   const update = useMutation({
-    mutationFn: (modelId: string) =>
+    mutationFn: (
+      body:
+        | { completion_model: { id: string } }
+        | { completion_model_kwargs: { reasoning_effort: string | null } }
+    ) =>
       queuePartnerUpdate(() =>
         unwrap(
           // RB-5(b): assistants use POST-as-update.
           browserApi.POST("/api/v1/assistants/{id}/", {
             params: { path: { id: assistant!.id } },
-            body: { completion_model: { id: modelId } }
+            body
           })
         )
       ),
@@ -62,91 +67,64 @@ function ModelSwitcher() {
       ? (space.completion_models.find((model) => model.id === config.locked_model!.id) ??
         config.locked_model)
       : null;
-
   const allowedIds = config?.models_enforced
     ? new Set(config.available_models.map((model) => model.id))
     : null;
-  const visibleModels = allowedIds
-    ? space.completion_models.filter((model) => allowedIds.has(model.id))
-    : space.completion_models;
 
-  const selectedId =
-    selectEffectiveModelId(assistant.completion_model?.id, config) ??
-    assistant.completion_model?.id ??
-    null;
+  return {
+    models: allowedIds
+      ? space.completion_models.filter((model) => allowedIds.has(model.id))
+      : space.completion_models,
+    selectedId:
+      selectEffectiveModelId(assistant.completion_model?.id, config) ??
+      assistant.completion_model?.id ??
+      null,
+    lockedModel,
+    // The picker shows the new choice while it saves and keeps focus; a
+    // disabled trigger would drop focus to the page.
+    selectModel: (id: string) => update.mutateAsync({ completion_model: { id } }),
+    /** Whether the governance policy lets people choose the reasoning level. */
+    levelConfigurable: config?.reasoning_effort_user_configurable ?? false,
+    storedLevel: assistant.completion_model_kwargs?.reasoning_effort ?? null,
+    policyDefaultLevel: config?.default_reasoning_effort ?? null,
+    selectLevel: (effort: string | null) =>
+      update.mutateAsync({ completion_model_kwargs: { reasoning_effort: effort } })
+  };
+}
 
+/**
+ * The personal assistant's composer picker: the model, and in the same
+ * control the reasoning level where the governance policy lets people choose it.
+ */
+function ComposerPickers() {
+  const { tenant } = useAppContext();
+  const choice = usePersonalChatModel();
+  if (!choice) return null;
+
+  if (choice.levelConfigurable) {
+    return (
+      <ModelReasoningPicker
+        models={choice.models}
+        selectedId={choice.selectedId}
+        onSelectModel={choice.selectModel}
+        locked={choice.lockedModel}
+        showPricing={tenant.show_model_pricing}
+        storedLevel={choice.storedLevel}
+        policyDefaultLevel={choice.policyDefaultLevel}
+        onSelectLevel={choice.selectLevel}
+      />
+    );
+  }
   return (
     <ModelSelector
-      models={visibleModels}
-      selectedId={selectedId}
-      // The picker shows the new model while it saves and keeps focus; a
-      // disabled trigger would drop focus to the page.
-      onSelect={(id) => update.mutateAsync(id)}
-      locked={lockedModel}
+      models={choice.models}
+      selectedId={choice.selectedId}
+      onSelect={choice.selectModel}
+      locked={choice.lockedModel}
       size="sm"
       showPricing={tenant.show_model_pricing}
       className={COMPOSER_PICKER_CLASS}
     />
-  );
-}
-
-/**
- * Reasoning-effort switcher beside the model picker (personal chat only),
- * for models that offer a choice of level and when the governance policy
- * lets users change it. The pick is saved on the personal space's default
- * assistant as `completion_model_kwargs.reasoning_effort` (null = the
- * organisation default), exactly as the Svelte app does; the backend reads
- * it from the stored assistant when it answers, so nothing travels with the
- * question itself.
- */
-function ReasoningSwitcher() {
-  const t = useTranslations();
-  const { space, routeId } = useSpace();
-  const queryClient = useQueryClient();
-  const assistant = space.default_assistant;
-  const config = assistant?.effective_config ?? null;
-
-  const update = useMutation({
-    mutationFn: (effort: string | null) =>
-      queuePartnerUpdate(() =>
-        unwrap(
-          browserApi.POST("/api/v1/assistants/{id}/", {
-            params: { path: { id: assistant!.id } },
-            body: { completion_model_kwargs: { reasoning_effort: effort } }
-          })
-        )
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
-    onError: (error) => toastApiError(error, t)
-  });
-
-  if (!assistant || !config?.reasoning_effort_user_configurable) return null;
-  const effectiveId =
-    selectEffectiveModelId(assistant.completion_model?.id, config) ??
-    assistant.completion_model?.id;
-  const options = reasoningEffortOptions(
-    space.completion_models.find((model) => model.id === effectiveId)
-  );
-  if (options.length === 0) return null;
-
-  return (
-    <ReasoningEffortSelector
-      options={options}
-      stored={assistant.completion_model_kwargs?.reasoning_effort ?? null}
-      policyDefault={config.default_reasoning_effort ?? null}
-      onSelect={(effort) => update.mutateAsync(effort)}
-      className={COMPOSER_PICKER_CLASS}
-    />
-  );
-}
-
-/** The personal assistant's composer pickers: model, then reasoning effort when the model offers it. */
-function ComposerPickers() {
-  return (
-    <span className="flex min-w-0 items-center gap-0.5">
-      <ModelSwitcher />
-      <ReasoningSwitcher />
-    </span>
   );
 }
 
@@ -328,7 +306,7 @@ export function SpaceChat() {
         activeId: partner.id
       })}
       modelSelector={partner.type === "default-assistant" ? <ComposerPickers /> : undefined}
-      skills={partner.type === "default-assistant" && space.personal ? <ChatSkills /> : undefined}
+      withSkills={partner.type === "default-assistant" && space.personal}
       editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);
