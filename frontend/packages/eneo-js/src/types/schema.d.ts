@@ -20081,7 +20081,7 @@ export interface components {
     /**
      * FlowInputLimitsPublic
      * @example {
-     *       "audio_max_duration_ceiling_seconds": 28800,
+     *       "audio_max_duration_ceiling_seconds": 67108,
      *       "audio_max_duration_seconds": 18000,
      *       "audio_max_files_per_run": 5,
      *       "audio_max_size_bytes": 104857600,
@@ -20092,7 +20092,7 @@ export interface components {
     FlowInputLimitsPublic: {
       /**
        * Audio Max Duration Ceiling Seconds
-       * @description The deployment's ceiling for audio_max_duration_seconds. Tenant values above it are rejected on write and clamped on read.
+       * @description The longest audio_max_duration_seconds an admin can set: what the deployment's decoded-audio bound (FLOW_AUDIO_MAX_DECODED_BYTES, 16 kHz mono 16-bit, 32 000 bytes a second) holds, and at most 134 217 seconds, what one WAV file holds. Tenant values above it are rejected on write and clamped on read.
        */
       audio_max_duration_ceiling_seconds: number;
       /**
@@ -20125,7 +20125,7 @@ export interface components {
     FlowInputLimitsUpdate: {
       /**
        * Audio Max Duration Seconds
-       * @description Set the longest recording in seconds (up to the deployment ceiling), or send null to use the deployment default.
+       * @description Set the longest recording in seconds (up to audio_max_duration_ceiling_seconds), or send null to use the deployment default.
        */
       audio_max_duration_seconds?: number | null;
       /**

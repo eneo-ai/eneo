@@ -89,6 +89,17 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
         removed_in="Eneo 2.3",
         guide_url=None,
     ),
+    # Flows is unreleased, and an admin sets the longest recording in Flow
+    # settings, so a value left here never blocks startup.
+    RemovedVariable(
+        "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS",
+        note=(
+            "The longest recording an admin can set in Admin > Flow settings is "
+            "what FLOW_AUDIO_MAX_DECODED_BYTES holds."
+        ),
+        removed_in="Eneo 2.3",
+        guide_url=None,
+    ),
     RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY"),
     RemovedVariable("INTRIC_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),
     RemovedVariable("ENEO_SUPER_DUPER_API_KEY", note=_MODULES_PERMISSION_NOTE),

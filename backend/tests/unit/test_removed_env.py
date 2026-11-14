@@ -316,3 +316,22 @@ def test_settings_refuses_a_mobilityguard_variable_from_an_env_file(
 
     with pytest.raises(SystemExit):
         Settings(_env_file=env_file)
+
+
+@pytest.mark.parametrize("value", ["28800", "86400"])
+def test_the_retired_flow_recording_ceiling_starts_and_says_what_governs_it(
+    value: str, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS={value}\n", encoding="utf-8"
+    )
+
+    # Required settings may be missing here; they are validated after the
+    # removed-variable check, which must not exit.
+    with contextlib.suppress(ValidationError):
+        Settings(_env_file=env_file)
+
+    assert "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS is no longer read" in caplog.text
+    assert "FLOW_AUDIO_MAX_DECODED_BYTES" in caplog.text
