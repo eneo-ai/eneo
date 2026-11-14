@@ -1049,6 +1049,16 @@ class SpaceActor:
             resource_type=SpaceResourceType.ASSISTANT,
         )
 
+    def can_toggle_external_clients(self) -> bool:
+        """Whether the caller may offer the space's assistants to other clients.
+
+        The same rule as insights: an administrator of the space decides.
+        """
+        return self.can_perform_action(
+            action=SpaceAction.INSIGHT_TOGGLE,
+            resource_type=SpaceResourceType.ASSISTANT,
+        )
+
     def can_access_insight_group_chat(self, group_chat: InsightResource):
         return self.can_perform_action(
             action=SpaceAction.INSIGHT_VIEW,

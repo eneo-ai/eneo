@@ -686,6 +686,54 @@
               {/if}
             </div>
           </Settings.Row>
+
+          <!-- A Help Assistant is never asked from another client; the API refuses the change. -->
+          {#if !isHelpAssistant}
+            <Settings.Row
+              hasChanges={$currentChanges.diff.external_clients_enabled !== undefined}
+              title={m.external_clients()}
+              description={m.external_clients_description()}
+              let:aria
+            >
+              <div class="border-default flex h-14 border-b py-2">
+                {#snippet externalClientsSwitch()}
+                  <RadioGroup.Root
+                    value={$update.external_clients_enabled ? "on" : "off"}
+                    onValueChange={(v) => ($update.external_clients_enabled = v === "on")}
+                    disabled={!data.assistant.permissions?.includes("insight_toggle")}
+                    class="grid w-full grid-cols-2 gap-2"
+                    {...aria}
+                  >
+                    <Field.Label for={`${uid}-external-clients-on`} class="font-normal">
+                      <Field.Field orientation="horizontal">
+                        <RadioGroup.Item value="on" id={`${uid}-external-clients-on`} />
+                        <span>{m.enable_external_clients()}</span>
+                      </Field.Field>
+                    </Field.Label>
+                    <Field.Label for={`${uid}-external-clients-off`} class="font-normal">
+                      <Field.Field orientation="horizontal">
+                        <RadioGroup.Item value="off" id={`${uid}-external-clients-off`} />
+                        <span>{m.disable_external_clients()}</span>
+                      </Field.Field>
+                    </Field.Label>
+                  </RadioGroup.Root>
+                {/snippet}
+                <!-- The right to decide this is the space admin's, as for insights. -->
+                {#if data.assistant.permissions?.includes("insight_toggle")}
+                  {@render externalClientsSwitch()}
+                {:else}
+                  <Tooltip.Root>
+                    <Tooltip.Trigger>
+                      {#snippet child({ props })}
+                        <div {...props} class="w-full">{@render externalClientsSwitch()}</div>
+                      {/snippet}
+                    </Tooltip.Trigger>
+                    <Tooltip.Content>{m.only_space_admins_external_clients()}</Tooltip.Content>
+                  </Tooltip.Root>
+                {/if}
+              </div>
+            </Settings.Row>
+          {/if}
         </Settings.Group>
       {/if}
 

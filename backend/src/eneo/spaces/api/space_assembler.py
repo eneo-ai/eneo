@@ -115,6 +115,7 @@ class SpaceAssembler:
                         else None
                     ),
                     insight_enabled=assistant.insight_enabled,
+                    external_clients_enabled=assistant.external_clients_enabled,
                 )
                 for assistant in space.assistants
             ),

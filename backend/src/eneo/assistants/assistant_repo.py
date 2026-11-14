@@ -584,6 +584,7 @@ class AssistantRepository:
                 type=assistant.type,
                 description=assistant.description,
                 insight_enabled=assistant.insight_enabled,
+                external_clients_enabled=assistant.external_clients_enabled,
                 inline_file_text=assistant.inline_file_text,
                 knowledge_mode=assistant.knowledge_mode,
                 data_retention_days=assistant.data_retention_days,

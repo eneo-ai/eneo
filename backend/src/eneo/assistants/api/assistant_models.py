@@ -293,6 +293,14 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    external_clients_enabled: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether people who may use this assistant can find and ask it from "
+            "other clients (it is then listed by GET /assistants/external/). "
+            "Only a space admin can change it."
+        ),
+    )
     inline_file_text: Optional[bool] = Field(
         default=None,
         description=(
@@ -484,6 +492,13 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    external_clients_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether people who may use this assistant can find and ask it from "
+            "other clients (it is then listed by GET /assistants/external/)."
+        ),
+    )
     inline_file_text: bool = Field(
         description=(
             "Whether attached file text is inlined into the prompt (True) or the file "
@@ -522,6 +537,30 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "GET endpoint computes it; other responses default to False."
         ),
     )
+
+
+class ExternalAssistantSpace(BaseModel):
+    """The space an assistant offered to other clients belongs to."""
+
+    id: UUID
+    name: str
+
+
+class ExternalAssistant(BaseModel):
+    """An assistant another client may offer the caller.
+
+    Deliberately small: enough to show a choice and to ask it. The prompt,
+    the knowledge and the model stay inside Eneo.
+    """
+
+    id: UUID
+    name: str
+    description: Optional[str]
+    space: ExternalAssistantSpace
+
+
+class ExternalAssistantList(BaseModel):
+    items: list[ExternalAssistant]
 
 
 class DefaultAssistant(AssistantPublic):

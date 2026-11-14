@@ -99,6 +99,22 @@
           }
         },
         {
+          "id": "assistants-for-other-clients",
+          "type": "new",
+          "area": "assistants",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
+          "title": {
+            "en": "Make an assistant available to other clients",
+            "sv": "Gör en assistent tillgänglig för andra klienter"
+          },
+          "body": {
+            "en": "As an admin of a space you can now let the people who may use a published assistant ask it from other connected systems as well. Turn on Available to other clients under Publishing in the assistant's settings. Nobody gets access to an assistant they could not already use in Eneo.",
+            "sv": "Som administratör för en yta kan du nu låta dem som får använda en publicerad assistent ställa frågor till den även från andra anslutna system. Slå på Tillgänglig för andra klienter under Publicering i assistentens inställningar. Ingen får tillgång till en assistent som de inte redan kan använda i Eneo."
+          }
+        },
+        {
           "id": "sharepoint-credential-health",
           "type": "new",
           "area": "admin",

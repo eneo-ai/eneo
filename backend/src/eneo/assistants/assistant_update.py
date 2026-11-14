@@ -20,6 +20,7 @@ class AssistantUpdate:
     published: bool | NotProvided = NOT_PROVIDED
     description: str | None | NotProvided = NOT_PROVIDED
     insight_enabled: bool | NotProvided = NOT_PROVIDED
+    external_clients_enabled: bool | NotProvided = NOT_PROVIDED
     inline_file_text: bool | NotProvided = NOT_PROVIDED
     knowledge_mode: KnowledgeMode | NotProvided = NOT_PROVIDED
     data_retention_days: int | None | NotProvided = NOT_PROVIDED
@@ -46,6 +47,7 @@ class AssistantUpdate:
                 "published": self.published,
                 "description": self.description,
                 "insight_enabled": self.insight_enabled,
+                "external_clients_enabled": self.external_clients_enabled,
                 "inline_file_text": self.inline_file_text,
                 "knowledge_mode": self.knowledge_mode,
                 "data_retention_days": self.data_retention_days,

@@ -191,6 +191,7 @@ class SpaceFactory:
                     completion_model.id if completion_model is not None else None
                 ),
                 insight_enabled=assistant.insight_enabled,
+                external_clients_enabled=assistant.external_clients_enabled,
             )
 
         all_assistants = _build_or_skip(

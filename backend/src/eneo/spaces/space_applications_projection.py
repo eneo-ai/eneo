@@ -23,6 +23,7 @@ class AssistantApplicationsProjection:
     icon_id: UUID | None
     completion_model_id: UUID | None
     insight_enabled: bool
+    external_clients_enabled: bool = False
 
 
 @dataclass(frozen=True, slots=True)

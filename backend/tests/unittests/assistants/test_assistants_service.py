@@ -889,6 +889,7 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"attachments": []},
         {"description": None},
         {"insight_enabled": False},
+        {"external_clients_enabled": False},
         {"inline_file_text": False},
         {"knowledge_mode": KnowledgeMode.INJECT},
         {"data_retention_days": None},
@@ -1316,3 +1317,102 @@ async def test_partial_update_leaves_the_rerank_model_alone(setup: Setup):
     setup.service.rerank_service.selectable.assert_not_awaited()
     update = setup.service.repo.apply_update.await_args.args[2]
     assert "rerank_model_id" not in update.scalar_values()
+
+
+# Availability to other clients (external_clients_enabled).
+
+
+def _space_actor(setup: Setup) -> MagicMock:
+    actor = MagicMock()
+    actor.get_assistant_permissions.return_value = []
+    setup.service.actor_manager.get_space_actor_from_space.return_value = actor
+    return actor
+
+
+@pytest.mark.parametrize("value", [True, False])
+async def test_only_a_space_admin_changes_availability_to_other_clients(
+    setup: Setup, value: bool
+):
+    actor = _space_actor(setup)
+    actor.can_toggle_external_clients.return_value = False
+
+    with pytest.raises(UnauthorizedException) as refused:
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, external_clients_enabled=value
+        )
+
+    assert refused.value.code == "forbidden_action"
+    assert refused.value.context == {
+        "resource_type": "assistant",
+        "action": "update_external_clients",
+        "auth_layer": "domain_policy",
+    }
+    setup.service.repo.apply_update.assert_not_awaited()
+
+
+async def test_an_update_that_leaves_availability_alone_does_not_ask_for_the_right(
+    setup: Setup,
+):
+    actor = _space_actor(setup)
+    actor.can_toggle_external_clients.return_value = False
+
+    await setup.service.update_assistant(assistant_id=TEST_UUID, name="Renamed")
+
+    actor.can_toggle_external_clients.assert_not_called()
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert "external_clients_enabled" not in update.scalar_values()
+
+
+@pytest.mark.parametrize("value", [True, False])
+async def test_a_space_admin_changes_availability_to_other_clients(
+    setup: Setup, value: bool
+):
+    actor = _space_actor(setup)
+    actor.can_toggle_external_clients.return_value = True
+    assistant = setup.service.space_repo.get_space_by_assistant.return_value.get_assistant.return_value
+
+    await setup.service.update_assistant(
+        assistant_id=TEST_UUID, external_clients_enabled=value
+    )
+
+    assert assistant.update.call_args.kwargs["external_clients_enabled"] is value
+    update = setup.service.repo.apply_update.await_args.args[2]
+    assert update.scalar_values()["external_clients_enabled"] is value
+
+
+async def test_a_default_assistant_cannot_be_made_available_to_other_clients(
+    setup: Setup,
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=True
+    )
+
+    with pytest.raises(BadRequestException, match="Default assistants"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, external_clients_enabled=True
+        )
+
+    assistant.update.assert_not_called()
+    setup.service.repo.apply_update.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "helper_repo, check",
+    [
+        ("org_space_assistant_role_repo", "exists_active_for_assistant"),
+        ("help_assistant_assignment_history_repo", "exists_for_assistant"),
+    ],
+    ids=["current helper", "former helper"],
+)
+async def test_a_help_assistant_cannot_be_made_available_to_other_clients(
+    setup: Setup, helper_repo: str, check: str
+):
+    _space_actor(setup)
+    getattr(getattr(setup.service, helper_repo), check).return_value = True
+
+    with pytest.raises(BadRequestException, match="Help Assistants"):
+        await setup.service.update_assistant(
+            assistant_id=TEST_UUID, external_clients_enabled=True
+        )
+
+    setup.service.repo.apply_update.assert_not_awaited()

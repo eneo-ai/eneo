@@ -21,6 +21,7 @@ def _assistant(attachments: list[SimpleNamespace], inline: dict[object, bool]) -
         completion_model_kwargs=None,
         description=None,
         insight_enabled=False,
+        external_clients_enabled=False,
         data_retention_days=None,
         collections=[],
         websites=[],
@@ -60,3 +61,44 @@ def test_attachment_changes_keep_ids_and_modes_without_names() -> None:
     assert [item["id"] for item in attachments["removed"]] == [str(removed.id)]
     assert attachments["mode_changed"] == [{"id": str(kept.id), "mode": "lookup"}]
     assert NAME not in json.dumps(changes, default=str)
+
+
+def test_a_change_of_availability_to_other_clients_records_old_and_new() -> None:
+    old = _assistant([], {})
+    updated = _assistant([], {})
+    updated.external_clients_enabled = True
+    request = cast(
+        Any,
+        SimpleNamespace(
+            name=None,
+            prompt=None,
+            insight_enabled=False,
+            external_clients_enabled=True,
+            data_retention_days=None,
+            mcp_tools=None,
+        ),
+    )
+
+    changes, summary = _build_assistant_update_changes(
+        assistant=request,
+        old_assistant=old,
+        updated_assistant=updated,
+        completion_model_id=None,
+        description=None,
+        old_mcp_tool_overrides=None,
+    )
+
+    assert changes["external_clients_enabled"] == {"old": False, "new": True}
+    assert "availability to other clients" in summary
+
+    # A request that leaves the field out records nothing about it.
+    request.external_clients_enabled = None
+    unchanged, _ = _build_assistant_update_changes(
+        assistant=request,
+        old_assistant=updated,
+        updated_assistant=updated,
+        completion_model_id=None,
+        description=None,
+        old_mcp_tool_overrides=None,
+    )
+    assert "external_clients_enabled" not in unchanged

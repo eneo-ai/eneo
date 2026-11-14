@@ -101,6 +101,31 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
           />
         </Label>
       </SettingsRow>
+      {/* A Help Assistant is never asked from another client; the API refuses the change. */}
+      {!assistant.is_help_assistant && (
+        <SettingsRow
+          title={t("external_clients")}
+          description={
+            // The right to decide this is the space admin's, as for insights.
+            canToggleInsights
+              ? t("external_clients_description")
+              : `${t("external_clients_description")} ${t("only_space_admins_external_clients")}`
+          }
+        >
+          <Label className="flex items-center justify-between gap-2 py-1 font-normal">
+            {t("enable_external_clients")}
+            <Switch
+              checked={assistant.external_clients_enabled ?? false}
+              disabled={!canToggleInsights}
+              aria-busy={update.isPending || undefined}
+              onCheckedChange={(checked) => {
+                if (!update.isPending)
+                  void autosave(() => update.mutateAsync({ external_clients_enabled: checked }));
+              }}
+            />
+          </Label>
+        </SettingsRow>
+      )}
     </SettingsGroup>
   );
 }

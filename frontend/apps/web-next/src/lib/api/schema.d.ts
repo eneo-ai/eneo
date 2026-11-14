@@ -1293,6 +1293,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/external/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get External Assistants
+     * @description List the assistants the caller may use that a space admin has made available to other clients. Only published assistants with a completion model are listed, each with its name, description and space.
+     */
+    get: operations["get_external_assistants_api_v1_assistants_external__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/": {
     parameters: {
       query?: never;
@@ -12149,6 +12169,12 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/).
+       * @default false
+       */
+      external_clients_enabled?: boolean;
+      /**
        * Inline File Text
        * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
        */
@@ -13656,6 +13682,25 @@ export interface components {
        */
       stream?: boolean;
     };
+    /**
+     * ConversationContextItem
+     * @description Text sent with a question, apart from the question itself.
+     *
+     *     Stored and shown as a quote that opens the question, with `label` as the
+     *     name of its source.
+     */
+    ConversationContextItem: {
+      /**
+       * Label
+       * @description What the text is, shown as the source of the quote.
+       */
+      label: string;
+      /**
+       * Text
+       * @description The text the question is about.
+       */
+      text: string;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -13691,6 +13736,12 @@ export interface components {
       group_chat_id?: string | null;
       /** Question */
       question: string;
+      /**
+       * Context
+       * @description Text the question is about, sent apart from the question. It is stored and sent to the model as a quote that opens the question; the conversation is named from, and knowledge is retrieved with, the question alone. Not supported for group chats.
+       * @default []
+       */
+      context?: components["schemas"]["ConversationContextItem"][];
       /**
        * Files
        * @default []
@@ -14524,6 +14575,12 @@ export interface components {
        * @default false
        */
       insight_enabled?: boolean;
+      /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/).
+       * @default false
+       */
+      external_clients_enabled?: boolean;
       /**
        * Inline File Text
        * @default true
@@ -15558,6 +15615,43 @@ export interface components {
        * Format: date-time
        */
       expires_at: string;
+    };
+    /**
+     * ExternalAssistant
+     * @description An assistant another client may offer the caller.
+     *
+     *     Deliberately small: enough to show a choice and to ask it. The prompt,
+     *     the knowledge and the model stay inside Eneo.
+     */
+    ExternalAssistant: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Description */
+      description: string | null;
+      space: components["schemas"]["ExternalAssistantSpace"];
+    };
+    /** ExternalAssistantList */
+    ExternalAssistantList: {
+      /** Items */
+      items: components["schemas"]["ExternalAssistant"][];
+    };
+    /**
+     * ExternalAssistantSpace
+     * @description The space an assistant offered to other clients belongs to.
+     */
+    ExternalAssistantSpace: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
     };
     /** ExternalPasswordChangeCapabilityPublic */
     ExternalPasswordChangeCapabilityPublic: {
@@ -20027,6 +20121,11 @@ export interface components {
        */
       insight_enabled?: boolean | null;
       /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/). Only a space admin can change it.
+       */
+      external_clients_enabled?: boolean | null;
+      /**
        * Inline File Text
        * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
        */
@@ -20608,6 +20707,11 @@ export interface components {
        * @default
        */
       question?: string;
+      /**
+       * Context
+       * @default []
+       */
+      context?: components["schemas"]["ConversationContextItem"][];
       /**
        * File Ids
        * @default []
@@ -31825,6 +31929,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_external_assistants_api_v1_assistants_external__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalAssistantList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

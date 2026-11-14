@@ -150,6 +150,7 @@ POST /api/v1/conversations/
 | `session_id` | UUID | Continue an existing conversation. |
 | `assistant_id` | UUID | Start a new conversation with an assistant. |
 | `group_chat_id` | UUID | Start a new conversation with a group chat. |
+| `context` | list of `{"label": string, "text": string}` | Text the question is about, sent apart from the question. At most 8 items; `label` 1 to 200 characters, `text` 1 to 12,000. See [Context sent with a question](#context-sent-with-a-question). Not supported for group chats. |
 | `stream` | boolean | Default `false`. `true` returns Server-Sent Events. |
 | `files` | list of `{"id": UUID}` | Previously uploaded files to attach. |
 | `tools` | object | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise). |
@@ -160,6 +161,26 @@ POST /api/v1/conversations/
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
 Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+
+### Context sent with a question
+
+A client that shows a person something beside the chat, such as a case or a document, can send that text in `context` instead of pasting it into `question`. Each item has a `label` (what the text is) and the `text` itself.
+
+Eneo stores the question with the context in front of it as a quote, so the conversation shows what was asked about and the model reads it:
+
+```text
+> Application for a building permit
+> for a garage
+> (Case BN 2026-104)
+
+What is missing in the application?
+```
+
+Several items share one quote, each text followed by its label in parentheses and separated by an empty quote line. The stored text is what `question` holds in the response and in the conversation's messages.
+
+The question alone, without the context, names a new conversation and is what the assistant's knowledge is searched with when knowledge is retrieved for every question. `POST /api/v1/conversations/preflight` accepts the same `context` and counts it with the question.
+
+A request with more than 8 items, an empty or blank `label` or `text`, or one over its length fails validation with `422`. Sending `context` to a group chat returns `400`.
 
 ### Non-streaming response
 
@@ -255,6 +276,35 @@ console.log(conversation.session_id, conversation.answer);
 - `POST /api/v1/conversations/{session_id}/feedback/` records feedback on the whole conversation.
 - `PUT /api/v1/conversations/{session_id}/messages/{message_id}/feedback/` rates one answer with `{"value": 1}` (good) or `{"value": -1}` (bad) and an optional `"text"` comment, replacing an earlier rating of that answer. `DELETE` on the same path clears it (`204`). Each message in a conversation carries its rating as `feedback`.
 - `POST /api/v1/conversations/preflight` estimates the token cost of the next message before sending it.
+
+## Assistants for other clients
+
+Another system that has its own chat can let a person ask an Eneo assistant. It calls Eneo as that person, with a session token, an API key or, where `OIDC_RESOURCE_SERVER_ENABLED` is set, the person's access token from the identity provider (see [OIDC federation](/guides/oidc-federation)).
+
+An administrator of a space decides per assistant: **Available to other clients** under **Publishing** in the assistant's settings, or `"external_clients_enabled": true` in `POST /api/v1/assistants/{id}/`. The field is `false` by default and is part of every assistant response. Only a space admin can change it; anyone else receives `403`. A space's default assistant, the personal assistant and a Help Assistant cannot be made available (`400`). The change is recorded in the audit log with the old and the new value.
+
+```http
+GET /api/v1/assistants/external/
+```
+
+lists the assistants to offer the caller:
+
+```json
+{
+  "items": [
+    {
+      "id": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "name": "Building permits",
+      "description": "Answers questions about building permits",
+      "space": { "id": "7c3a1f0e-5b2d-4c6a-9e8f-1a2b3c4d5e6f", "name": "Urban planning" }
+    }
+  ]
+}
+```
+
+An assistant is listed when it is available to other clients, is published, has a completion model, and the caller may read it: the same rule as in Eneo itself, so the caller is a member of the assistant's space, directly or through a user group, and holds the `assistants` permission. Assistants in the organization space are listed for administrators only. Nothing else about the assistant is returned. A space-scoped or assistant-scoped API key sees only what its scope covers.
+
+The flag does not grant access. It only says that the assistant may be offered outside Eneo; asking it goes through [`POST /api/v1/conversations/`](#chat) with the same checks as any other question, and the conversation appears in Eneo like one started there. Send what the person is looking at in [`context`](#context-sent-with-a-question).
 
 ---
 
