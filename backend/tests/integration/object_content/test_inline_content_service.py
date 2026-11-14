@@ -1,3 +1,4 @@
+import re
 from collections.abc import AsyncIterator
 from uuid import UUID, uuid4
 
@@ -178,11 +179,16 @@ async def test_inline_create_read_range_and_final_delete_need_no_object_store(
         statement.lstrip().upper().startswith("DELETE FROM INLINE_CONTENT_PAYLOADS")
         for statement in statements
     )
+    # The same run checks stored payloads by size and digest; these functions
+    # run in the database and return a number or a digest, never the file.
+    in_database = re.compile(
+        r"(pg_column_size|octet_length|sha256)\(inline_content_payloads\.payload\)"
+    )
     payload_reads = [
         statement
         for statement in statements
         if statement.lstrip().upper().startswith("SELECT")
-        and "inline_content_payloads.payload" in statement
+        and "inline_content_payloads.payload" in in_database.sub("", statement)
     ]
     assert payload_reads == []
 
