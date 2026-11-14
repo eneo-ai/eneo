@@ -1008,7 +1008,7 @@
               {/if}
 
               {#if databaseStorageLimit !== null}
-                <div class="text-secondary flex flex-col gap-2 text-sm">
+                <div class="text-secondary flex flex-col gap-2 text-sm wrap-anywhere">
                   <p>{m.storage_limits_database_ceiling()}</p>
                   {#if databaseStorageLimitApplies}
                     <p>
