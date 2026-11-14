@@ -1,10 +1,14 @@
+import logging
 import os
 from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
+from eneo.database.tables.object_content_table import InlineContentPayloads
+from eneo.object_content import configuration
 from eneo.object_content.configuration import (
+    INLINE_PAYLOAD_CAPACITY_BYTES,
     ObjectContentCoreSettings,
     ObjectContentSettings,
     load_object_content_core_settings,
@@ -30,7 +34,108 @@ def test_absent_object_store_environment_keeps_inline_defaults(
     _clear_object_content_environment(monkeypatch)
 
     assert load_object_content_settings() is None
-    assert load_object_content_core_settings().inline_maximum_bytes == 200 * 1024**2
+    assert (
+        load_object_content_core_settings().inline_maximum_bytes
+        == INLINE_PAYLOAD_CAPACITY_BYTES
+    )
+
+
+def test_inline_capacity_fits_one_postgres_copy_row() -> None:
+    """pg_dump writes each payload as hex text, two characters per byte."""
+
+    assert 400 * 1024**2 < INLINE_PAYLOAD_CAPACITY_BYTES
+    assert 2 * INLINE_PAYLOAD_CAPACITY_BYTES + 1024 < 1024**3
+
+
+def test_inline_row_allowance_covers_the_payload_table_columns() -> None:
+    """The capacity reserves room for these columns; a new one needs a review."""
+
+    assert {column.name for column in InlineContentPayloads.__table__.columns} == {
+        "content_id",
+        "storage_kind",
+        "payload",
+        "created_at",
+        "updated_at",
+    }
+
+
+_DEPRECATED_INLINE_LIMIT = "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES"
+
+
+@pytest.fixture(autouse=True)
+def _capturable_configuration_logger(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The application logger does not propagate to the root logger caplog reads.
+    monkeypatch.setattr(
+        configuration, "logger", logging.getLogger("test_object_content_configuration")
+    )
+
+
+def _deprecation_warnings(caplog: pytest.LogCaptureFixture) -> list[str]:
+    return [
+        record.getMessage()
+        for record in caplog.records
+        if record.levelno == logging.WARNING
+        and _DEPRECATED_INLINE_LIMIT in record.getMessage()
+    ]
+
+
+def test_unset_inline_limit_logs_no_deprecation_warning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+
+    with caplog.at_level(logging.WARNING):
+        load_object_content_core_settings()
+
+    assert _deprecation_warnings(caplog) == []
+
+
+def test_set_inline_limit_still_applies_and_warns_that_it_is_deprecated(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv(_DEPRECATED_INLINE_LIMIT, "10485760")
+
+    with caplog.at_level(logging.WARNING):
+        settings = load_object_content_core_settings()
+
+    assert settings.inline_maximum_bytes == 10 * 1024**2
+    [warning] = _deprecation_warnings(caplog)
+    assert "deprecated" in warning
+    assert "Admin > File storage" in warning
+    assert "10485760" in warning
+    assert "capped" not in warning
+
+
+@pytest.mark.parametrize(
+    "configured", [INLINE_PAYLOAD_CAPACITY_BYTES, INLINE_PAYLOAD_CAPACITY_BYTES + 1]
+)
+def test_inline_limit_at_or_above_capacity_starts_at_the_capacity(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    configured: int,
+) -> None:
+    _clear_object_content_environment(monkeypatch)
+    monkeypatch.setenv(_DEPRECATED_INLINE_LIMIT.lower(), str(configured))
+
+    with caplog.at_level(logging.WARNING):
+        settings = load_object_content_core_settings()
+
+    assert settings.inline_maximum_bytes == INLINE_PAYLOAD_CAPACITY_BYTES
+    [warning] = _deprecation_warnings(caplog)
+    assert "deprecated" in warning
+    assert str(INLINE_PAYLOAD_CAPACITY_BYTES) in warning
+    assert "capped" in warning
+
+
+def test_every_settings_path_caps_the_inline_limit_at_the_capacity() -> None:
+    """Direct construction (preflight, legacy object store) caps like the loader."""
+
+    settings = ObjectContentCoreSettings(
+        _env_file=None, inline_maximum_bytes=INLINE_PAYLOAD_CAPACITY_BYTES + 1
+    )
+
+    assert settings.inline_maximum_bytes == INLINE_PAYLOAD_CAPACITY_BYTES
 
 
 def test_inline_tuning_does_not_require_object_store_configuration(
