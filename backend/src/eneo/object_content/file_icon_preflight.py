@@ -439,7 +439,7 @@ async def _inspect(
         report.blockers.append(
             PreflightIssue(
                 "oversized_legacy_items",
-                "Remaining legacy items exceed the largest file the database may store. Remove a lower value of the deprecated OBJECT_CONTENT_INLINE_MAXIMUM_BYTES or adopt these items into object storage, and measure database memory/capacity before starting adoption; batch limits do not override it.",
+                "Remaining legacy items exceed the largest file the database may store. If the deprecated OBJECT_CONTENT_INLINE_MAXIMUM_BYTES sets that limit, remove it after measuring database memory/capacity; batch limits do not override it.",
             )
         )
     if (
