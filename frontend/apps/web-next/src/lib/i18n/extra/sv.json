@@ -2631,6 +2631,7 @@
   "flow_admin_audio_duration_description": "Gäller varje ljudfil och alla delar av en inspelning tillsammans.",
   "flow_admin_audio_duration_ceiling": "Högst {ceiling}: så mycket uppackat ljud tar servern emot före transkriberingen, och driftmiljön sätter den gränsen.",
   "flow_admin_audio_duration_ceiling_wav": "Högst {ceiling}: så lång kan en uppackad ljudfil bli, även om servern tar emot mer uppackat ljud.",
+  "flow_admin_audio_duration_step_time": "En lång inspelning måste också hinna transkriberas inom stegens tidsgräns i rutan Tidsgränser per steg längre ned.",
   "flow_admin_duration_equivalent": "Det motsvarar {duration}.",
   "flow_admin_runs_group": "Samtidiga körningar",
   "flow_admin_runs_group_description": "Hur många flödeskörningar servern tar emot samtidigt.",

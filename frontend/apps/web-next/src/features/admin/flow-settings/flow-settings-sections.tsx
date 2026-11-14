@@ -93,6 +93,7 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
                   : "flow_admin_audio_duration_ceiling",
                 { ceiling: formatSeconds(ceiling, t) }
               ),
+              t("flow_admin_audio_duration_step_time"),
               duration !== null && duration >= 3600
                 ? t("flow_admin_duration_equivalent", { duration: formatSeconds(duration, t) })
                 : null,

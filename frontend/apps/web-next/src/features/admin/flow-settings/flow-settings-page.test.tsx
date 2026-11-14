@@ -339,6 +339,16 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     expect(screen.queryByText(/Driftmiljön tillåter/)).toBeNull();
   });
 
+  it("says a long recording must also fit the step time limits further down", async () => {
+    await show();
+
+    expect(
+      screen.getByText(
+        /En lång inspelning måste också hinna transkriberas inom stegens tidsgräns i rutan Tidsgränser per steg längre ned\./
+      )
+    ).toBeTruthy();
+  });
+
   it("names the WAV file as the reason when it holds less than the server takes", async () => {
     const settings = flowSettingsFixture();
     serve({
