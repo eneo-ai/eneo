@@ -1,5 +1,6 @@
 # Copyright (c) 2025 Sundsvalls Kommun
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING, Collection, Optional
 
 from eneo.completion_models.infrastructure.context_builder import (
@@ -10,6 +11,10 @@ from eneo.completion_models.infrastructure.static_prompts import (
     SET_TITLE_OF_CONVERSATION_PROMPT,
 )
 from eneo.conversations.conversation_models import PreflightResponse
+from eneo.conversations.question_quote import (
+    QuestionContext,
+    compose_question_with_context,
+)
 from eneo.files.file_models import FileType
 from eneo.files.file_reference import (
     inline_file_text_for_model,
@@ -57,6 +62,9 @@ def _litellm_token_counter_name(model: "CompletionModel") -> str:
     return model.name
 
 
+_GROUP_CHAT_CONTEXT_MESSAGE = "Context is not supported for group chats."
+
+
 class ConversationService:
     """
     Service for handling conversations with assistants and group chats.
@@ -93,6 +101,7 @@ class ConversationService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        context: Sequence[QuestionContext] = (),
     ) -> "AssistantResponse":
         """
         Routes a conversation request to the appropriate service based on the parameters.
@@ -119,6 +128,9 @@ class ConversationService:
         if require_tool_approval and group_chat_id is not None:
             raise BadRequestException("Tool approval is not supported for group chats.")
 
+        if context and group_chat_id is not None:
+            raise BadRequestException(_GROUP_CHAT_CONTEXT_MESSAGE)
+
         # case 1: continuing a conversation (session_id is provided)
         if session_id:
             # get session information to determine where it belongs
@@ -126,6 +138,8 @@ class ConversationService:
             assert session is not None
 
             if session.group_chat_id:
+                if context:
+                    raise BadRequestException(_GROUP_CHAT_CONTEXT_MESSAGE)
                 if require_tool_approval:
                     raise BadRequestException(
                         "Tool approval is not supported for group chats."
@@ -154,6 +168,7 @@ class ConversationService:
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
+                    context=context,
                 )
 
         # case 2: starting a new conversation
@@ -182,6 +197,7 @@ class ConversationService:
                     require_tool_approval=require_tool_approval,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
+                    context=context,
                 )
             else:
                 # should never happen due to model validation, but just to be safe
@@ -199,6 +215,7 @@ class ConversationService:
         tool_assistant_id: Optional["UUID"] = None,
         assistant_prompt: str | None = None,
         attachments: "list[tuple[UUID, bool]] | None" = None,
+        context: Sequence[QuestionContext] = (),
     ) -> PreflightResponse:
         """Estimate the tokens this request would add to context, without sending.
 
@@ -232,7 +249,16 @@ class ConversationService:
         model_name = _litellm_token_counter_name(model)
 
         # count_tokens already returns 0 for empty input — no need to short-circuit.
-        input_tokens = count_tokens(question, model_name) + selector_tokens
+        # Context reaches the model as a quote that opens the question.
+        input_tokens = (
+            count_tokens(
+                compose_question_with_context(context, question)
+                if context
+                else question,
+                model_name,
+            )
+            + selector_tokens
+        )
 
         file_tokens = 0
         excluded_file_count = 0

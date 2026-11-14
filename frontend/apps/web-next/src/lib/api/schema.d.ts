@@ -1293,6 +1293,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/external/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get External Assistants
+     * @description List the assistants the caller may use that a space admin has made available to other clients. Only published assistants with a completion model are listed, each with its name, description and space.
+     */
+    get: operations["get_external_assistants_api_v1_assistants_external__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/": {
     parameters: {
       query?: never;
@@ -4124,6 +4144,50 @@ export interface paths {
     put?: never;
     post?: never;
     delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/connector-installations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Installations
+     * @description List the installations of other systems the tenant lets call Eneo over the connector protocol.
+     */
+    get: operations["list_installations_api_v1_admin_connector_installations__get"];
+    put?: never;
+    /**
+     * Add Installation
+     * @description Let an installation call Eneo. The answer carries the shared key to enter in that installation; it is shown this once.
+     */
+    post: operations["add_installation_api_v1_admin_connector_installations__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/admin/connector-installations/{id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    /**
+     * Remove Installation
+     * @description Stop an installation from calling Eneo. Its shared key is refused from the next call on.
+     */
+    delete: operations["remove_installation_api_v1_admin_connector_installations__id___delete"];
     options?: never;
     head?: never;
     patch?: never;
@@ -10473,7 +10537,10 @@ export interface components {
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
-      | "widget_template_published";
+      | "widget_template_published"
+      | "connector_installation_added"
+      | "connector_installation_removed"
+      | "connector_question_asked";
     /**
      * ActionUpdate
      * @description Represents an action-level configuration change request.
@@ -12149,6 +12216,17 @@ export interface components {
        */
       insight_enabled: boolean;
       /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/).
+       * @default false
+       */
+      external_clients_enabled?: boolean;
+      /**
+       * External Clients Description
+       * @description What other systems should know about the assistant, offered to other clients in place of `description`.
+       */
+      external_clients_description?: string | null;
+      /**
        * Inline File Text
        * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
        */
@@ -13607,6 +13685,62 @@ export interface components {
      * @enum {string}
      */
     ConnectionCheckStatus: "ok" | "failed";
+    /** ConnectorInstallationCreate */
+    ConnectorInstallationCreate: {
+      /**
+       * Name
+       * @description What administrators call the installation.
+       */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address, for example `https://start.example`. Must use https.
+       */
+      base_url: string;
+    };
+    /** ConnectorInstallationCreated */
+    ConnectorInstallationCreated: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address. Its public signing keys are read from `/api/connectors/jwks` under it.
+       */
+      base_url: string;
+      /**
+       * Key
+       * @description The shared key to enter in the installation, beside Eneo's connector address. Shown this once: Eneo keeps only a digest of it.
+       */
+      key: string;
+    };
+    /** ConnectorInstallationPublic */
+    ConnectorInstallationPublic: {
+      /** Created At */
+      created_at?: string | null;
+      /** Updated At */
+      updated_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Base Url
+       * @description The installation's own address. Its public signing keys are read from `/api/connectors/jwks` under it.
+       */
+      base_url: string;
+    };
     /**
      * ConstrainingSource
      * @enum {string}
@@ -13656,6 +13790,25 @@ export interface components {
        */
       stream?: boolean;
     };
+    /**
+     * ConversationContextItem
+     * @description Text sent with a question, apart from the question itself.
+     *
+     *     Stored and shown as a quote that opens the question, with `label` as the
+     *     name of its source.
+     */
+    ConversationContextItem: {
+      /**
+       * Label
+       * @description What the text is, shown as the source of the quote.
+       */
+      label: string;
+      /**
+       * Text
+       * @description The text the question is about.
+       */
+      text: string;
+    };
     /** ConversationInsightResponse */
     ConversationInsightResponse: {
       /** Total Conversations */
@@ -13691,6 +13844,12 @@ export interface components {
       group_chat_id?: string | null;
       /** Question */
       question: string;
+      /**
+       * Context
+       * @description Text the question is about, sent apart from the question. It is stored and sent to the model as a quote that opens the question; the conversation is named from, and knowledge is retrieved with, the question alone. Not supported for group chats.
+       * @default []
+       */
+      context?: components["schemas"]["ConversationContextItem"][];
       /**
        * Files
        * @default []
@@ -14524,6 +14683,17 @@ export interface components {
        * @default false
        */
       insight_enabled?: boolean;
+      /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/).
+       * @default false
+       */
+      external_clients_enabled?: boolean;
+      /**
+       * External Clients Description
+       * @description What other systems should know about the assistant, offered to other clients in place of `description`.
+       */
+      external_clients_description?: string | null;
       /**
        * Inline File Text
        * @default true
@@ -15558,6 +15728,46 @@ export interface components {
        * Format: date-time
        */
       expires_at: string;
+    };
+    /**
+     * ExternalAssistant
+     * @description An assistant another client may offer the caller.
+     *
+     *     Deliberately small: enough to show a choice and to ask it. The prompt,
+     *     the knowledge and the model stay inside Eneo.
+     */
+    ExternalAssistant: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Description
+       * @description What the assistant is for, as written for other systems; the assistant's own description when nothing was written for them.
+       */
+      description: string | null;
+      space: components["schemas"]["ExternalAssistantSpace"];
+    };
+    /** ExternalAssistantList */
+    ExternalAssistantList: {
+      /** Items */
+      items: components["schemas"]["ExternalAssistant"][];
+    };
+    /**
+     * ExternalAssistantSpace
+     * @description The space an assistant offered to other clients belongs to.
+     */
+    ExternalAssistantSpace: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
     };
     /** ExternalPasswordChangeCapabilityPublic */
     ExternalPasswordChangeCapabilityPublic: {
@@ -19429,6 +19639,19 @@ export interface components {
        */
       readonly count: number;
     };
+    /** PaginatedResponse[ConnectorInstallationPublic] */
+    PaginatedResponse_ConnectorInstallationPublic_: {
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["ConnectorInstallationPublic"][];
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+    };
     /** PaginatedResponse[EmbeddingModelLegacy] */
     PaginatedResponse_EmbeddingModelLegacy_: {
       /**
@@ -20027,6 +20250,16 @@ export interface components {
        */
       insight_enabled?: boolean | null;
       /**
+       * External Clients Enabled
+       * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/). Only a space admin can change it.
+       */
+      external_clients_enabled?: boolean | null;
+      /**
+       * External Clients Description
+       * @description What other systems should know about the assistant: what it is for and when to turn to it. Offered to other clients in place of `description`, which stays what the assistant's own users read. Send null or an empty string to clear it.
+       */
+      external_clients_description?: string | null;
+      /**
        * Inline File Text
        * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).
        */
@@ -20608,6 +20841,11 @@ export interface components {
        * @default
        */
       question?: string;
+      /**
+       * Context
+       * @default []
+       */
+      context?: components["schemas"]["ConversationContextItem"][];
       /**
        * File Ids
        * @default []
@@ -31825,6 +32063,35 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  get_external_assistants_api_v1_assistants_external__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ExternalAssistantList"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };
@@ -43399,6 +43666,133 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_installations_api_v1_admin_connector_installations__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["PaginatedResponse_ConnectorInstallationPublic_"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  add_installation_api_v1_admin_connector_installations__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ConnectorInstallationCreate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ConnectorInstallationCreated"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
+        };
+      };
+    };
+  };
+  remove_installation_api_v1_admin_connector_installations__id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HTTPValidationError"];
         };
       };
     };

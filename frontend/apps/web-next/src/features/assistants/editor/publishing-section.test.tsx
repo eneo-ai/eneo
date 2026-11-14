@@ -24,11 +24,18 @@ afterEach(cleanup);
 
 const REASON = "Endast ytans administratörer kan växla insikter.";
 
-function show(permissions: string[]) {
+function show(permissions: string[], assistant: Partial<Assistant> = {}) {
   state.space = makeSpace({ permissions: ["read", "edit"] });
   return renderInApp(
     <PublishingSection
-      assistant={{ id: "assistant", insight_enabled: false, permissions } as unknown as Assistant}
+      assistant={
+        {
+          id: "assistant",
+          insight_enabled: false,
+          permissions,
+          ...assistant
+        } as unknown as Assistant
+      }
     />
   );
 }
@@ -53,5 +60,38 @@ describe("the insights switch", () => {
     expect(screen.getByRole("switch", { name: "Aktivera insikter" }).hasAttribute("disabled")).toBe(
       false
     );
+  });
+});
+
+describe("the switch that makes an assistant available to other clients", () => {
+  const NAME = "Gör tillgänglig";
+  const ADMINS_ONLY =
+    "Endast ytans administratörer kan ändra om assistenten är tillgänglig för andra klienter.";
+
+  it("shows the stored choice to a space admin, who may change it", async () => {
+    const { container } = show(["publish", "insight_toggle"], { external_clients_enabled: true });
+
+    const toggle = screen.getByRole("switch", { name: NAME });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(toggle.hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByText(new RegExp(ADMINS_ONLY))).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("says in text why it is off for someone who may not change it", async () => {
+    const { container } = show(["publish"]);
+
+    const toggle = screen.getByRole("switch", { name: NAME });
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(toggle.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(new RegExp(ADMINS_ONLY))).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("is not offered for a Help Assistant, which is never asked from another client", () => {
+    show(["publish", "insight_toggle"], { is_help_assistant: true });
+
+    expect(screen.queryByRole("switch", { name: NAME })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Aktivera insikter" })).toBeTruthy();
   });
 });

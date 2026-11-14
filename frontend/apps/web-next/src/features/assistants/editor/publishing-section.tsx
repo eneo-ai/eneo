@@ -2,11 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave } from "@/components/composites/use-autosave";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -65,6 +66,37 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
   );
 }
 
+/**
+ * What other systems are told about the assistant, apart from the description
+ * its own users read. Empty, they get that description.
+ */
+function ExternalClientsDescriptionRow({ assistant }: { assistant: Assistant }) {
+  const t = useTranslations();
+  const update = useUpdateAssistant(assistant.id);
+  const text = useAutosaveField({
+    key: "assistant-external-clients-description",
+    value: assistant.external_clients_description ?? "",
+    save: (value) => update.mutateAsync({ external_clients_description: value })
+  });
+
+  return (
+    <SettingsRow
+      title={t("external_clients_hint_title")}
+      description={t("external_clients_hint_description")}
+      htmlFor="assistant-external-clients-description"
+    >
+      <Textarea
+        id="assistant-external-clients-description"
+        value={text.value}
+        rows={3}
+        maxLength={400}
+        onChange={(event) => text.setValue(event.target.value)}
+        onBlur={() => text.commit()}
+      />
+    </SettingsRow>
+  );
+}
+
 export function PublishingSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
@@ -101,6 +133,34 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
           />
         </Label>
       </SettingsRow>
+      {/* A Help Assistant is never asked from another client; the API refuses the change. */}
+      {!assistant.is_help_assistant && (
+        <SettingsRow
+          title={t("external_clients")}
+          description={
+            // The right to decide this is the space admin's, as for insights.
+            canToggleInsights
+              ? t("external_clients_description")
+              : `${t("external_clients_description")} ${t("only_space_admins_external_clients")}`
+          }
+        >
+          <Label className="flex items-center justify-between gap-2 py-1 font-normal">
+            {t("enable_external_clients")}
+            <Switch
+              checked={assistant.external_clients_enabled ?? false}
+              disabled={!canToggleInsights}
+              aria-busy={update.isPending || undefined}
+              onCheckedChange={(checked) => {
+                if (!update.isPending)
+                  void autosave(() => update.mutateAsync({ external_clients_enabled: checked }));
+              }}
+            />
+          </Label>
+        </SettingsRow>
+      )}
+      {!assistant.is_help_assistant && assistant.external_clients_enabled && (
+        <ExternalClientsDescriptionRow assistant={assistant} />
+      )}
     </SettingsGroup>
   );
 }

@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from eneo.main.models import ModelId
 from eneo.mcp_servers.domain.capabilities import (
@@ -50,6 +50,40 @@ class _ConversationTarget(BaseModel):
 _MAX_FILES_PER_PREFLIGHT = 50
 
 
+# Bounds on the context another client may send with one question: enough for
+# a few passages, small enough that a request cannot fill the context window
+# or the stored question with it.
+_MAX_CONTEXT_ITEMS = 8
+_MAX_CONTEXT_LABEL_LENGTH = 200
+_MAX_CONTEXT_TEXT_LENGTH = 12_000
+
+
+class ConversationContextItem(BaseModel):
+    """Text sent with a question, apart from the question itself.
+
+    Stored and shown as a quote that opens the question, with `label` as the
+    name of its source.
+    """
+
+    label: str = Field(
+        min_length=1,
+        max_length=_MAX_CONTEXT_LABEL_LENGTH,
+        description="What the text is, shown as the source of the quote.",
+    )
+    text: str = Field(
+        min_length=1,
+        max_length=_MAX_CONTEXT_TEXT_LENGTH,
+        description="The text the question is about.",
+    )
+
+    @field_validator("label", "text")
+    @classmethod
+    def _not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must contain more than whitespace")
+        return value
+
+
 class PreflightAttachment(ModelId):
     """A persistent attachment as the assistant editor is about to save it."""
 
@@ -68,6 +102,10 @@ class PreflightRequest(_ConversationTarget):
     """
 
     question: str = ""
+    # Counted with the question, as the chat request will send it.
+    context: list[ConversationContextItem] = Field(
+        default=[], max_length=_MAX_CONTEXT_ITEMS
+    )
     file_ids: list[UUID] = Field(default=[], max_length=_MAX_FILES_PER_PREFLIGHT)
     tools: Optional[UseTools] = None
     assistant_prompt: Optional[str] = None
@@ -156,6 +194,16 @@ class ConversationRequest(_ConversationTarget):
     """
 
     question: str
+    context: list[ConversationContextItem] = Field(
+        default=[],
+        max_length=_MAX_CONTEXT_ITEMS,
+        description=(
+            "Text the question is about, sent apart from the question. It is "
+            "stored and sent to the model as a quote that opens the question; "
+            "the conversation is named from, and knowledge is retrieved with, "
+            "the question alone. Not supported for group chats."
+        ),
+    )
     files: list[ModelId] = Field(default=[])
     stream: bool = False
     tools: Optional[UseTools] = None

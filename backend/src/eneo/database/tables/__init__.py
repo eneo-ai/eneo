@@ -16,6 +16,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.browser_sessions_table",
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
+    "eneo.database.tables.connector_installations_table",
     "eneo.database.tables.feature_flag_table",
     "eneo.database.tables.file_icon_backfill_table",
     "eneo.database.tables.files_table",

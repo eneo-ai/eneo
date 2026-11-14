@@ -5873,5 +5873,11 @@
   "federation_admin_jit_on": "Nya konton skapas vid första inloggningen: personer i domänerna som saknar konto får ett om e-postadressen är verifierad.",
   "federation_admin_jit_off": "Nya konton skapas inte vid första inloggningen: bara personer som redan har ett konto kan logga in.",
   "federation_admin_jit_no_domains": "Nya konton skapas inte så länge listan är tom: bara personer som redan har ett konto kan logga in. Lägg till domäner för att skapa konton vid första inloggningen.",
-  "federation_admin_jit_link": "Ändra under {setting}"
+  "federation_admin_jit_link": "Ändra under {setting}",
+  "audit_action_connector_installation_added": "Anslutet system tillagt",
+  "audit_action_connector_installation_added_description": "Loggar när en administratör låter ett annat system anropa Eneo",
+  "audit_action_connector_installation_removed": "Anslutet system borttaget",
+  "audit_action_connector_installation_removed_description": "Loggar när en administratör tar bort ett anslutet system",
+  "audit_action_connector_question_asked": "Fråga ställd från anslutet system",
+  "audit_action_connector_question_asked_description": "Loggar när en person frågar en assistent genom ett anslutet system, och vilket system frågan kom från"
 }

@@ -94,6 +94,7 @@ async def test_preflight_router_returns_service_result():
     mock_validate.assert_awaited_once()
     service.preflight_tokens.assert_awaited_once_with(
         question="hello",
+        context=[],
         file_ids=[],
         session_id=None,
         assistant_id=request_body.assistant_id,

@@ -17,6 +17,7 @@ import {
   sharepointAppQueryOptions,
   tenantIntegrationsQueryOptions
 } from "@/features/admin/integrations/integrations";
+import { ConnectedSystemsSection } from "./connected-systems";
 import { SharePointAppConfigDialog } from "./sharepoint-app-config-dialog";
 import { SharePointAppDeleteDialog } from "./sharepoint-app-delete-dialog";
 import { SharePointConnectionHealth, SharePointAuthBadge } from "./sharepoint-connection-health";
@@ -163,6 +164,7 @@ export function AdminIntegrationsPage() {
         ))}
       </div>
       <SharePointAdminSection />
+      <ConnectedSystemsSection />
     </div>
   );
 }

@@ -724,6 +724,18 @@ const ACTION_MESSAGES = {
   widget_template_deleted: {
     name: m.audit_action_widget_template_deleted,
     description: m.audit_action_widget_template_deleted_description
+  },
+  connector_installation_added: {
+    name: m.audit_action_connector_installation_added,
+    description: m.audit_action_connector_installation_added_description
+  },
+  connector_installation_removed: {
+    name: m.audit_action_connector_installation_removed,
+    description: m.audit_action_connector_installation_removed_description
+  },
+  connector_question_asked: {
+    name: m.audit_action_connector_question_asked,
+    description: m.audit_action_connector_question_asked_description
   }
 } satisfies Record<ActionType, { name: MessageFn; description: MessageFn }>;
 

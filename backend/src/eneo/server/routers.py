@@ -33,6 +33,10 @@ from eneo.completion_models.presentation.completion_models_router import (
 from eneo.completion_models.presentation.tenant_completion_models_router import (
     router as tenant_completion_models_router,
 )
+from eneo.connector_protocol.connector_router import router as connector_router
+from eneo.connector_protocol.installation_router import (
+    router as connector_installations_router,
+)
 from eneo.conversations.conversations_router import router as conversations_router
 from eneo.crawler.crawl_run_router import router as crawl_run_router
 from eneo.dashboard.api.dashboard_router import router as dashboard_router
@@ -452,6 +456,15 @@ router.include_router(
     tags=["allowed-origins"],
     dependencies=TENANT_ADMIN_API_KEY_GUARDS,
 )
+router.include_router(
+    connector_installations_router,
+    prefix="/admin/connector-installations",
+    tags=["admin", "connector-installations"],
+    dependencies=TENANT_ADMIN_API_KEY_GUARDS,
+)
+# The address an administrator registers in the calling system. Its paths are
+# the connector protocol's own, so they stay out of Eneo's API reference.
+router.include_router(connector_router, prefix="/connector", include_in_schema=False)
 router.include_router(
     completion_models_router,
     prefix="/completion-models",

@@ -46,6 +46,7 @@ from eneo.conversations.document_export import (
     export_document,
 )
 from eneo.conversations.document_versions import save_document_version
+from eneo.conversations.question_quote import QuestionContext
 from eneo.conversations.ui_message_stream import to_ui_message_stream_response
 from eneo.database.database import AsyncSession
 from eneo.document_templates.service import document_template_resolver
@@ -456,6 +457,10 @@ async def chat(
         conversation_service = container.conversation_service()
         response = await conversation_service.ask_conversation(
             question=request.question,
+            context=[
+                QuestionContext(label=item.label, text=item.text)
+                for item in request.context
+            ],
             session_id=request.session_id,
             assistant_id=request.assistant_id,
             group_chat_id=request.group_chat_id,
@@ -595,6 +600,10 @@ async def preflight_tokens(
 
         return await conversation_service.preflight_tokens(
             question=request.question,
+            context=[
+                QuestionContext(label=item.label, text=item.text)
+                for item in request.context
+            ],
             file_ids=request.file_ids,
             session_id=request.session_id,
             assistant_id=request.assistant_id,

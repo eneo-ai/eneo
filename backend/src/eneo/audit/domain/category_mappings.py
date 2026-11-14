@@ -41,6 +41,8 @@ CATEGORY_MAPPINGS = {
     ActionType.WIDGET_TEMPLATE_UPDATED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_DELETED.value: "admin_actions",
     ActionType.WIDGET_TEMPLATE_PUBLISHED.value: "admin_actions",
+    ActionType.CONNECTOR_INSTALLATION_ADDED.value: "admin_actions",
+    ActionType.CONNECTOR_INSTALLATION_REMOVED.value: "admin_actions",
     ActionType.CREDENTIALS_UPDATED.value: "admin_actions",
     ActionType.FEDERATION_UPDATED.value: "admin_actions",
     ActionType.MODULE_ADDED.value: "admin_actions",
@@ -170,6 +172,7 @@ CATEGORY_MAPPINGS = {
     ActionType.MCP_SERVER_TOOL_DISABLED.value: "integration_events",
     ActionType.MCP_APP_VIEW_LINK_CREATED.value: "integration_events",
     ActionType.MCP_APP_TOOL_CALLED.value: "integration_events",
+    ActionType.CONNECTOR_QUESTION_ASKED.value: "integration_events",
     # Model Provider Outbound Header Actions (3 actions)
     ActionType.MODEL_PROVIDER_HEADERS_UPDATED.value: "admin_actions",
     ActionType.MODEL_PROVIDER_DESTINATION_CHANGED.value: "admin_actions",

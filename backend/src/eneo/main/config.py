@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlsplit
 
+import email_validator
 from pydantic import (
     Field,
     ValidationError,
@@ -564,6 +565,13 @@ class Settings(BaseSettings):
     oidc_resource_server_enabled: bool = False
     oidc_accepted_issuer: Optional[str] = None
     oidc_accepted_audience: Optional[str] = None
+    # Where the accepted issuer's signing keys are read from, when that is not
+    # where its discovery document says: a provider whose public name cannot be
+    # reached from this network (an internal address, a container's own name).
+    # The issuer is then only compared with the token's `iss`; nothing is
+    # fetched from it. Held to the rules of every key address: https, or this
+    # machine in development.
+    oidc_accepted_jwks_uri: Optional[str] = None
     oidc_jwks_cache_ttl_seconds: int = 3600
 
     # Global OIDC sign-in (FEDERATION_ENABLED=false)
@@ -1556,7 +1564,18 @@ def get_settings() -> Settings:
                 UPGRADE_GUIDE_URL,
             )
             raise InvalidConfiguration() from None
+        _apply_email_rules(_settings)
     return _settings
+
+
+def _apply_email_rules(settings: Settings) -> None:
+    """Accept addresses under ``.test`` in development, and only there.
+
+    The domain is reserved for testing (RFC 2606), so no real mailbox is under
+    it and e-mail validation refuses it. A development setup's accounts, such
+    as the people of a local identity provider, use it for that reason.
+    """
+    email_validator.TEST_ENVIRONMENT = settings.is_development
 
 
 def set_settings(settings: Settings) -> None:
@@ -1567,6 +1586,7 @@ def set_settings(settings: Settings) -> None:
     """
     global _settings
     _settings = settings
+    _apply_email_rules(settings)
 
 
 def reset_settings() -> None:

@@ -5873,5 +5873,11 @@
   "federation_admin_jit_on": "New accounts are created at first sign-in: people in these domains without an account get one if their email address is verified.",
   "federation_admin_jit_off": "New accounts are not created at first sign-in: only people who already have an account can sign in.",
   "federation_admin_jit_no_domains": "New accounts are not created while the list is empty: only people who already have an account can sign in. Add domains to create accounts at first sign-in.",
-  "federation_admin_jit_link": "Change under {setting}"
+  "federation_admin_jit_link": "Change under {setting}",
+  "audit_action_connector_installation_added": "Connected System Added",
+  "audit_action_connector_installation_added_description": "Logs when an administrator lets another system call Eneo",
+  "audit_action_connector_installation_removed": "Connected System Removed",
+  "audit_action_connector_installation_removed_description": "Logs when an administrator removes a connected system",
+  "audit_action_connector_question_asked": "Question Asked From Connected System",
+  "audit_action_connector_question_asked_description": "Logs when a person asks an assistant through a connected system, and which system the question came from"
 }

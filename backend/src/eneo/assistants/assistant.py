@@ -88,6 +88,8 @@ class Assistant(Entity):
         tool_assistants: list["Assistant"] | None = None,
         description: Optional[str] = None,
         insight_enabled: bool = False,
+        external_clients_enabled: bool = False,
+        external_clients_description: Optional[str] = None,
         inline_file_text: bool = True,
         knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT,
         data_retention_days: Optional[int] = None,
@@ -127,6 +129,8 @@ class Assistant(Entity):
         self.tool_assistants = tool_assistants or []
         self.description = description
         self.insight_enabled = insight_enabled
+        self.external_clients_enabled = external_clients_enabled
+        self.external_clients_description = external_clients_description
         self.inline_file_text = inline_file_text
         self.knowledge_mode = knowledge_mode
         self.rerank_model_id = rerank_model_id
@@ -431,6 +435,8 @@ class Assistant(Entity):
         published: bool | None = None,
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
+        external_clients_enabled: bool | None = None,
+        external_clients_description: Union[str, None, NotProvided] = NOT_PROVIDED,
         inline_file_text: bool | None = None,
         knowledge_mode: KnowledgeMode | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
@@ -475,6 +481,12 @@ class Assistant(Entity):
 
         if insight_enabled is not None:
             self.insight_enabled = insight_enabled
+
+        if external_clients_enabled is not None:
+            self.external_clients_enabled = external_clients_enabled
+
+        if is_provided(external_clients_description):
+            self.external_clients_description = external_clients_description
 
         if inline_file_text is not None:
             self.inline_file_text = inline_file_text
@@ -553,6 +565,7 @@ class Assistant(Entity):
         skill_runtime: "SkillActivationRuntime | None" = None,
         document_template: "DocumentTemplateReference | None" = None,
         rerank: "RerankSpec | None" = None,
+        retrieval_question: str | None = None,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -589,8 +602,10 @@ class Assistant(Entity):
         # which never gets a server) keeps the legacy retrieve-and-inject path.
         use_knowledge_tool = knowledge_mcp_server is not None
         if self.has_knowledge() and not use_knowledge_tool:
+            # Inject-mode retrieval searches with the question as it was asked,
+            # not with the context a client sent along with it.
             datastore_result = await references_service.get_references(
-                question=question,
+                question=question if retrieval_question is None else retrieval_question,
                 session=session,
                 collections=self.collections,
                 websites=self.websites,

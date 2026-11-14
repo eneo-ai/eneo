@@ -2226,6 +2226,23 @@ class UserService:
 
         return user_in_db
 
+    async def authenticate_delegated_token(
+        self, token: str, request: HTTPConnection | None = None
+    ) -> "UserInDB":
+        """Admit the person behind an identity-provider access token that
+        another system forwards for them.
+
+        Only a token the identity provider issued for Eneo is taken, by the
+        rules of resource-server mode. Eneo's own tokens are never another
+        system's to carry, so one presented here is refused like any other
+        token the provider did not sign.
+        """
+        if not get_settings().oidc_resource_server_enabled:
+            raise AuthenticationException("Could not validate token credentials.")
+        return await self._admit_user(
+            await self._admit_idp_access_token(token, request), request
+        )
+
     async def authenticate_payload(
         self, payload: JWTPayload, request: HTTPConnection | None = None
     ) -> "UserInDB":

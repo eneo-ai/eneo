@@ -35,6 +35,10 @@ from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
 )
+from eneo.conversations.question_quote import (
+    QuestionContext,
+    compose_question_with_context,
+)
 from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
     attachment_token_ceiling,
@@ -62,6 +66,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
+    build_handback_mcp_server,
     build_knowledge_mcp_server,
     resolve_internal_mcp_availability,
 )
@@ -145,6 +150,9 @@ from eneo.skills.infrastructure.skill_repo_impl import (
     acquire_personal_default_fit_lock,
 )
 from eneo.spaces.api.space_models import WizardType
+from eneo.spaces.space_applications_projection import (
+    AssistantApplicationsProjection,
+)
 from eneo.spaces.space_repo import AssistantMCPServerProjection
 from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
@@ -302,6 +310,9 @@ class _PreparedAssistantTurn:
     space: "Space"
     files: list["File"]
     cleaned_question: str
+    # What knowledge is retrieved with: the question without the context sent
+    # with it. The same text as cleaned_question when there is no context.
+    retrieval_question: str
     effective_completion_model: "CompletionModel"
     completion_model_override: "CompletionModel | None"
     model_kwargs_override: ModelKwargs | None
@@ -1823,6 +1834,8 @@ class AssistantService:
         skill_binding_intents: list[SkillBindingIntent] | None = None,
         document_template: "DocumentTemplateChoice | None" = None,
         rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        external_clients_enabled: Optional[bool] = None,
+        external_clients_description: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1841,6 +1854,21 @@ class AssistantService:
         if insight_enabled is not None:
             if not actor.can_toggle_insight():
                 raise UnauthorizedException("Only admins can toggle insights")
+
+        if (
+            external_clients_enabled is not None
+            and not actor.can_toggle_external_clients()
+        ):
+            raise UnauthorizedException(
+                "Only space admins can change whether other clients may use "
+                "the assistant",
+                code="forbidden_action",
+                context={
+                    "resource_type": "assistant",
+                    "action": "update_external_clients",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
         if is_provided(data_retention_days) and not actor.can_edit_retention():
             raise UnauthorizedException(
@@ -1864,6 +1892,23 @@ class AssistantService:
             and space.default_assistant is not None
             and assistant.id == space.default_assistant.id
         )
+
+        # Only an ordinary assistant can be offered to other clients: a default
+        # assistant is a space's own chat, and a Help Assistant is never asked
+        # through the ordinary path (assert_not_helper_assistant).
+        if external_clients_enabled and (
+            assistant.is_default
+            or await self.org_space_assistant_role_repo.exists_active_for_assistant(
+                assistant_id
+            )
+            or await self.help_assistant_assignment_history_repo.exists_for_assistant(
+                assistant_id
+            )
+        ):
+            raise BadRequestException(
+                "Default assistants and Help Assistants cannot be made available "
+                "to other clients."
+            )
 
         can_edit_default = (
             actor.can_edit_default_assistant() if is_personal_default else False
@@ -1904,6 +1949,7 @@ class AssistantService:
                 mcp_tools,
                 attachments,
                 insight_enabled,
+                external_clients_enabled,
                 inline_file_text,
                 knowledge_mode,
                 None if is_personal_default else skill_binding_intents,
@@ -1912,6 +1958,7 @@ class AssistantService:
             is_provided(value)
             for value in (
                 description,
+                external_clients_description,
                 data_retention_days,
                 metadata_json,
                 icon_id,
@@ -2259,6 +2306,8 @@ class AssistantService:
             integration_knowledge_list=integration_knowledge_list,
             description=description,
             insight_enabled=insight_enabled,
+            external_clients_enabled=external_clients_enabled,
+            external_clients_description=external_clients_description,
             inline_file_text=inline_file_text,
             knowledge_mode=knowledge_mode,
             data_retention_days=data_retention_days,
@@ -2360,6 +2409,10 @@ class AssistantService:
                 insight_enabled=insight_enabled
                 if insight_enabled is not None
                 else NOT_PROVIDED,
+                external_clients_enabled=external_clients_enabled
+                if external_clients_enabled is not None
+                else NOT_PROVIDED,
+                external_clients_description=external_clients_description,
                 inline_file_text=inline_file_text
                 if inline_file_text is not None
                 else NOT_PROVIDED,
@@ -2668,6 +2721,66 @@ class AssistantService:
             space_id=space_id_filter,
             assistant_id=assistant_id_filter,
         )
+
+    async def get_external_client_assistants(
+        self,
+        space_id_filter: UUID | None = None,
+        assistant_id_filter: UUID | None = None,
+    ) -> list[tuple[AssistantApplicationsProjection, "Space"]]:
+        """The assistants another client may offer the caller, with their space.
+
+        An assistant is offered when a space admin has made it available to
+        other clients, it is published and has a completion model, and the
+        caller may read it under the same rule as everywhere else
+        (``SpaceActor.can_read_assistant``). The spaces are the ones the
+        caller's dashboard is built from, so membership, user groups, the
+        organization space and the caller's tenant are decided where they
+        already are. A space's own default assistant is never offered.
+
+        The dashboard's listing does not resolve completion models, so it only
+        says which spaces to look in; each of those is then decided from its
+        applications projection, the read the space's own application list
+        is drawn from.
+        """
+        offered: list[tuple[AssistantApplicationsProjection, "Space"]] = []
+        for space in await self.space_service.get_spaces(include_applications=True):
+            assert space.id is not None
+            if space_id_filter is not None and space.id != space_id_filter:
+                continue
+            if not any(
+                assistant.external_clients_enabled and assistant.published
+                for assistant in space.assistants
+            ):
+                continue
+            projection = await self.space_repo.get_applications_projection(space.id)
+            actor = self.actor_manager.get_space_actor(projection.access)
+            for assistant in projection.assistants:
+                if (
+                    assistant_id_filter is not None
+                    and assistant.id != assistant_id_filter
+                ):
+                    continue
+                if not (
+                    assistant.external_clients_enabled
+                    and assistant.published
+                    and assistant.completion_model_id is not None
+                    and actor.can_read_assistant(assistant=assistant)
+                ):
+                    continue
+                # A Help Assistant, current or former, is refused by the ask
+                # path; one that was made available before it became a helper
+                # must not be offered either.
+                if (
+                    await self.org_space_assistant_role_repo.exists_active_for_assistant(
+                        assistant.id
+                    )
+                    or await self.help_assistant_assignment_history_repo.exists_for_assistant(
+                        assistant.id
+                    )
+                ):
+                    continue
+                offered.append((assistant, space))
+        return offered
 
     @validate_permissions(Permission.ADMIN)
     async def get_tenant_assistants(
@@ -3504,6 +3617,7 @@ class AssistantService:
         tool_assistant_id: UUID | None = None,
         disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        retrieval_question: str | None = None,
     ) -> _PreparedAssistantTurn:
         """Resolve the ordinary ask policy without creating conversation rows."""
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
@@ -3768,6 +3882,11 @@ class AssistantService:
             space=space,
             files=files,
             cleaned_question=cleaned_question,
+            retrieval_question=(
+                cleaned_question
+                if retrieval_question is None
+                else clean_eneo_tag(retrieval_question)
+            ),
             effective_completion_model=effective_completion_model,
             completion_model_override=completion_model_override,
             model_kwargs_override=model_kwargs_override,
@@ -3794,6 +3913,7 @@ class AssistantService:
         require_tool_approval: bool,
         num_chunks_override: int | None = None,
         prompt_addendum: str | None = None,
+        offer_handback: bool = False,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Run the existing assistant engine; the caller owns response persistence."""
         mcp_servers_override = prepared.mcp_servers_override
@@ -3885,6 +4005,17 @@ class AssistantService:
                 len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
             )
+        # A turn from another system's conversation can be handed back to it;
+        # the surface serving the turn reads the call from the answer stream.
+        handback_mcp_server = None
+        if (
+            offer_handback
+            and prepared.effective_completion_model.supports_tool_calling
+            and self.user.active_widget is None
+        ):
+            handback_mcp_server = await build_handback_mcp_server(
+                token=mint_scoped_token(), tenant_id=self.user.tenant_id
+            )
         logger.info(
             "[RAG] assistant=%s knowledge_mode=%s "
             "collections=%d websites=%d integrations=%d "
@@ -3941,12 +4072,13 @@ class AssistantService:
         if self.rerank_service is not None and not prepared.is_personal_default:
             rerank = await self.rerank_service.spec_for_model(
                 prepared.assistant_to_ask.rerank_model_id,
-                query=prepared.cleaned_question,
+                query=prepared.retrieval_question,
                 security_classification=prepared.space.security_classification,
             )
 
         response, datastore_result = await prepared.assistant_to_ask.ask(
             question=prepared.cleaned_question,
+            retrieval_question=prepared.retrieval_question,
             completion_service=self.completion_service,
             references_service=self.references_service,
             rerank=rerank,
@@ -3966,9 +4098,11 @@ class AssistantService:
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
             skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
-            internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
-            ),
+            internal_mcp_servers=[
+                server
+                for server in (files_mcp_server, handback_mcp_server)
+                if server is not None
+            ],
         )
 
         return response, datastore_result
@@ -3989,7 +4123,17 @@ class AssistantService:
         require_tool_approval: bool = False,
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        context: Sequence[QuestionContext] = (),
+        # The turn arrives from another system's conversation, which the
+        # assistant may return (eneo.internal_mcp.handback).
+        offer_handback: bool = False,
     ):
+        # Context sent with a question is stored, shown and sent to the model
+        # as a quote that opens the question. The question as it was asked
+        # still names the conversation and is what knowledge is retrieved with.
+        asked_question = question
+        if context:
+            question = compose_question_with_context(context, question)
         prepared = await self._prepare_turn(
             question=question,
             assistant_id=assistant_id,
@@ -3997,6 +4141,7 @@ class AssistantService:
             tool_assistant_id=tool_assistant_id,
             disabled_mcp_server_ids=disabled_mcp_server_ids,
             disabled_capabilities=disabled_capabilities,
+            retrieval_question=asked_question if context else None,
         )
         active_assistant = prepared.active_assistant
         assistant_to_ask = prepared.assistant_to_ask
@@ -4023,7 +4168,7 @@ class AssistantService:
                 )
         else:
             # Set the name as the question or the filenames
-            name = question
+            name = asked_question
             if not name and files:
                 name = " ".join(file.name for file in files)
             if group_chat_id is not None:
@@ -4102,6 +4247,7 @@ class AssistantService:
                 require_tool_approval=require_tool_approval,
                 num_chunks_override=num_chunks_override,
                 prompt_addendum=prompt_addendum,
+                offer_handback=offer_handback,
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()

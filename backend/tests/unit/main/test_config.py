@@ -2,12 +2,13 @@ import re
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
+from pydantic import EmailStr, TypeAdapter, ValidationError
 
 from eneo.main.config import (
     JWT_EXPIRY_TIME_MAXIMUM_MINUTES,
     Settings,
     get_settings,
+    set_settings,
 )
 
 
@@ -301,3 +302,26 @@ def test_view_host_origins_list_the_public_origin_once() -> None:
     )
 
     assert settings.mcp_app_view_host_origins() == ["https://eneo.example.org"]
+
+
+@pytest.mark.parametrize(
+    "environment,accepted",
+    [("development", True), ("production", False), ("test", False)],
+)
+def test_addresses_under_the_reserved_test_domain_are_for_development_only(
+    environment, accepted
+) -> None:
+    current = get_settings()
+    email = TypeAdapter(EmailStr)
+    try:
+        set_settings(current.model_copy(update={"environment": environment}))
+
+        if accepted:
+            assert email.validate_python("anna@start.test") == "anna@start.test"
+        else:
+            with pytest.raises(ValidationError):
+                email.validate_python("anna@start.test")
+        # An ordinary address is unaffected either way.
+        assert email.validate_python("anna@example.com") == "anna@example.com"
+    finally:
+        set_settings(current)

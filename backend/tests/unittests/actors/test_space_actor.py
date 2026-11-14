@@ -288,6 +288,35 @@ def test_shared_assistant_insights_require_role_and_enabled_resource(
     assert actor.can_access_insight_assistant(assistant=assistant) is can_view_insights
 
 
+@pytest.mark.parametrize(
+    ("role", "can_toggle"),
+    [
+        (MockSpaceRole.VIEWER, False),
+        (MockSpaceRole.EDITOR, False),
+        (MockSpaceRole.ADMIN, True),
+    ],
+)
+def test_only_a_space_admin_offers_assistants_to_other_clients(
+    shared_space: MockSpace, role: str, can_toggle: bool
+):
+    user = MockUser(
+        id=uuid4(),
+        permissions={Permission.SHARED_SPACES, Permission.ASSISTANTS},
+    )
+    shared_space.members[user.id] = MockGroupMember(id=user.id, role=role)
+    actor = _actor(user, shared_space)
+
+    assert actor.can_toggle_external_clients() is can_toggle
+    # The same rule as insights, by design.
+    assert actor.can_toggle_insight() is can_toggle
+
+
+def test_the_owner_of_a_personal_space_cannot_offer_assistants_to_other_clients(
+    owner_user: MockUser, personal_space: MockSpace
+):
+    assert _actor(owner_user, personal_space).can_toggle_external_clients() is False
+
+
 def test_owner_can_read_personal_space(owner_user: MockUser, personal_space: MockSpace):
     actor = _actor(owner_user, personal_space)
     assert actor.can_perform_action(

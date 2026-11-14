@@ -13,6 +13,9 @@ from eneo.assistants.api.assistant_models import (
     AssistantPublic,
     AssistantUpdatePublic,
     AssistantWidgetStatus,
+    ExternalAssistant,
+    ExternalAssistantList,
+    ExternalAssistantSpace,
 )
 
 # Audit logging - module level imports for consistency
@@ -151,6 +154,7 @@ async def create_assistant(
             "insights_enabled": created_assistant.insight_enabled
             if hasattr(created_assistant, "insight_enabled")
             else None,
+            "external_clients_enabled": created_assistant.external_clients_enabled,
             "published": created_assistant.published,
         },
     }
@@ -259,6 +263,56 @@ async def _assistant_response(
         effective_config=effective_config,
         is_help_assistant=is_help_assistant,
     )
+
+
+# Declared before "/{id}/": the path would otherwise match "external" as an
+# assistant id and fail its UUID validation.
+@router.get(
+    "/external/",
+    response_model=ExternalAssistantList,
+    description=(
+        "List the assistants the caller may use that a space admin has made "
+        "available to other clients. Only published assistants with a "
+        "completion model are listed, each with its name, description and space."
+    ),
+    responses=responses.get_responses([403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Lets another client offer the caller the assistants they may already "
+        "use: AssistantService lists only published assistants made available "
+        "to other clients that the caller's space role may read."
+    ),
+)
+async def get_external_assistants(
+    request: Request,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> ExternalAssistantList:
+    # A scoped API key sees no further than its space or its assistant; a key
+    # scoped to anything else (an app) has no assistant to offer.
+    scope_filter = get_scope_filter(request)
+    if scope_filter.scope_type not in (None, "tenant", "space", "assistant"):
+        return ExternalAssistantList(items=[])
+    offered = await container.assistant_service().get_external_client_assistants(
+        space_id_filter=scope_filter.space_id,
+        assistant_id_filter=scope_filter.assistant_id,
+    )
+    items: list[ExternalAssistant] = []
+    for assistant, space in offered:
+        assert space.id is not None
+        items.append(
+            ExternalAssistant(
+                id=assistant.id,
+                name=assistant.name,
+                description=(
+                    assistant.external_clients_description or assistant.description
+                ),
+                space=ExternalAssistantSpace(id=space.id, name=space.name),
+            )
+        )
+    return ExternalAssistantList(items=items)
 
 
 @router.get(
@@ -423,6 +477,26 @@ def _build_assistant_update_changes(
         changes["insights_enabled"] = {
             "old": old_assistant.insight_enabled,
             "new": assistant.insight_enabled,
+        }
+
+    # Availability to other clients. Compared on the stored values: the request
+    # field is None when it was left out.
+    if (
+        updated_assistant.external_clients_enabled
+        != old_assistant.external_clients_enabled
+    ):
+        changes["external_clients_enabled"] = {
+            "old": old_assistant.external_clients_enabled,
+            "new": updated_assistant.external_clients_enabled,
+        }
+
+    if (
+        updated_assistant.external_clients_description
+        != old_assistant.external_clients_description
+    ):
+        changes["external_clients_description"] = {
+            "old": old_assistant.external_clients_description,
+            "new": updated_assistant.external_clients_description,
         }
 
     # Data retention change
@@ -635,6 +709,10 @@ def _build_assistant_update_changes(
         change_summary.append("description")
     if "insights_enabled" in changes:
         change_summary.append("insights")
+    if "external_clients_description" in changes:
+        change_summary.append("description for other clients")
+    if "external_clients_enabled" in changes:
+        change_summary.append("availability to other clients")
     if "data_retention_days" in changes:
         change_summary.append("retention")
     if "knowledge_sources" in changes:
@@ -778,6 +856,13 @@ async def update_assistant(
     if "rerank_model_id" in request_dict:
         rerank_model_id = assistant.rerank_model_id
 
+    # Blank text is no text: the listing then offers the ordinary description.
+    external_clients_description: str | None | NotProvided = NOT_PROVIDED
+    if "external_clients_description" in request_dict:
+        external_clients_description = (
+            assistant.external_clients_description or ""
+        ).strip() or None
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -794,6 +879,8 @@ async def update_assistant(
         mcp_tools=mcp_tool_settings,
         description=description,
         insight_enabled=assistant.insight_enabled,
+        external_clients_enabled=assistant.external_clients_enabled,
+        external_clients_description=external_clients_description,
         inline_file_text=assistant.inline_file_text,
         knowledge_mode=assistant.knowledge_mode,
         data_retention_days=data_retention_days,

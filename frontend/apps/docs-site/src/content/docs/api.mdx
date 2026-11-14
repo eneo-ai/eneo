@@ -150,6 +150,7 @@ POST /api/v1/conversations/
 | `session_id` | UUID | Continue an existing conversation. |
 | `assistant_id` | UUID | Start a new conversation with an assistant. |
 | `group_chat_id` | UUID | Start a new conversation with a group chat. |
+| `context` | list of `{"label": string, "text": string}` | Text the question is about, sent apart from the question. At most 8 items; `label` 1 to 200 characters, `text` 1 to 12,000. See [Context sent with a question](#context-sent-with-a-question). Not supported for group chats. |
 | `stream` | boolean | Default `false`. `true` returns Server-Sent Events. |
 | `files` | list of `{"id": UUID}` | Previously uploaded files to attach. |
 | `tools` | object | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise). |
@@ -160,6 +161,26 @@ POST /api/v1/conversations/
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
 Sending `require_tool_approval: true` without `stream: true` returns `400` with `code: "invalid_request"`; sending it for a group chat returns `400` with `code: "not_supported"`.
+
+### Context sent with a question
+
+A client that shows a person something beside the chat, such as a case or a document, can send that text in `context` instead of pasting it into `question`. Each item has a `label` (what the text is) and the `text` itself.
+
+Eneo stores the question with the context in front of it as a quote, so the conversation shows what was asked about and the model reads it:
+
+```text
+> Application for a building permit
+> for a garage
+> (Case BN 2026-104)
+
+What is missing in the application?
+```
+
+Several items share one quote, each text followed by its label in parentheses and separated by an empty quote line. The stored text is what `question` holds in the response and in the conversation's messages.
+
+The question alone, without the context, names a new conversation and is what the assistant's knowledge is searched with when knowledge is retrieved for every question. `POST /api/v1/conversations/preflight` accepts the same `context` and counts it with the question.
+
+A request with more than 8 items, an empty or blank `label` or `text`, or one over its length fails validation with `422`. Sending `context` to a group chat returns `400`.
 
 ### Non-streaming response
 
@@ -255,6 +276,75 @@ console.log(conversation.session_id, conversation.answer);
 - `POST /api/v1/conversations/{session_id}/feedback/` records feedback on the whole conversation.
 - `PUT /api/v1/conversations/{session_id}/messages/{message_id}/feedback/` rates one answer with `{"value": 1}` (good) or `{"value": -1}` (bad) and an optional `"text"` comment, replacing an earlier rating of that answer. `DELETE` on the same path clears it (`204`). Each message in a conversation carries its rating as `feedback`.
 - `POST /api/v1/conversations/preflight` estimates the token cost of the next message before sending it.
+
+## Assistants for other clients
+
+Another system that has its own chat can let a person ask an Eneo assistant. It calls Eneo as that person, with a session token, an API key or, where `OIDC_RESOURCE_SERVER_ENABLED` is set, the person's access token from the identity provider (see [OIDC federation](/guides/oidc-federation)).
+
+An administrator of a space decides per assistant: **Available to other clients** under **Publishing** in the assistant's settings in the React beta, or `"external_clients_enabled": true` in `POST /api/v1/assistants/{id}/`. The field is `false` by default and is part of every assistant response. Only a space admin can change it; anyone else receives `403`. A space's default assistant, the personal assistant and a Help Assistant cannot be made available (`400`). The change is recorded in the audit log with the old and the new value.
+
+```http
+GET /api/v1/assistants/external/
+```
+
+lists the assistants to offer the caller:
+
+```json
+{
+  "items": [
+    {
+      "id": "0f1e2d3c-4b5a-6978-8a9b-0c1d2e3f4a5b",
+      "name": "Building permits",
+      "description": "Answers questions about building permits",
+      "space": { "id": "7c3a1f0e-5b2d-4c6a-9e8f-1a2b3c4d5e6f", "name": "Urban planning" }
+    }
+  ]
+}
+```
+
+An assistant is listed when it is available to other clients, is published, has a completion model, and the caller may read it: the same rule as in Eneo itself, so the caller is a member of the assistant's space, directly or through a user group, and holds the `assistants` permission. Assistants in the organization space are listed for administrators only. Nothing else about the assistant is returned. A space-scoped or assistant-scoped API key sees only what its scope covers.
+
+What another system needs to know about an assistant is often not what its own users read. `external_clients_description` (at most 400 characters; **Description for other systems** under **Publishing** in the React beta, shown once the assistant is available to other clients) holds what the assistant is for and when to turn to it. When it is set, the listing's `description` carries it; otherwise the assistant's ordinary description. Whoever may edit the assistant can write it, and `null` or an empty string clears it. The assistant's own `description` is never changed by it.
+
+The flag does not grant access. It only says that the assistant may be offered outside Eneo; asking it goes through [`POST /api/v1/conversations/`](#chat) with the same checks as any other question, and the conversation appears in Eneo like one started there. Send what the person is looking at in [`context`](#context-sent-with-a-question).
+
+### Connected systems
+
+A system that speaks the connector protocol (version 3), such as a start page for staff, does not need an adapter in front of Eneo: Eneo serves the protocol itself. An administrator adds the system in the React beta, under **Administration › Integrations › Connected systems**, or with `POST /api/v1/admin/connector-installations/`, with a name and the system's own https address. Eneo answers with two values to enter in that system: Eneo's connector address, `https://<your-eneo>/api/v1/connector`, and a shared key. The key is shown once; Eneo keeps only a digest of it. Removing the system there refuses its key from the next call on. Until a system has been added, every route below answers `404`.
+
+| Route | What it does |
+| --- | --- |
+| `GET /api/v1/connector/clew/manifest` | The manifest: protocol version, the id `eneo`, and the reads Eneo offers. No credentials. |
+| `POST /api/v1/connector/clew/capabilities/eneo.assistants` | The assistants the person may ask, as `{ "output": { "assistants": [{ "ref", "name", "description" }] } }`. The same list as `GET /api/v1/assistants/external/`, at most 50, without the space; `description` is the assistant's description for other systems when it has one. |
+| `POST /api/v1/connector/clew/ask` | One question from the person to one assistant, answered as a stream of events. |
+
+Every `POST` carries two credentials:
+
+- **The calling system's.** The shared key in `X-Clew-Connector-Key`, and in `Authorization: Bearer` an assertion the system signed for exactly this request: an `RS256` JWT for the audience `eneo` that lives at most two minutes and holds the SHA-256 of the request body and, on a capability route, the capability's name. Eneo verifies it against the public keys at `/api/connectors/jwks` under the address the administrator registered, never against an address the token names. Anything wrong here answers `401`, and nothing is read for an unverified request.
+- **The person's.** Their own access token from the identity provider, issued for Eneo, in `X-Clew-Delegated-Token`. Eneo admits it as it admits a bearer token in resource-server mode, so `OIDC_RESOURCE_SERVER_ENABLED` must be set (see [OIDC federation](/guides/oidc-federation)); without it the routes answer `503`. A missing or refused token answers `403`. What the calling system says about the person is never used to decide access: the person lists and asks exactly what they could in Eneo, in the tenant that added the system.
+
+The body of `POST …/clew/ask` is `{ "actor": {…}, "ask": { "assistant", "session"?, "question", "context"? } }`: the assistant's id, the session to continue on a follow-up, the question as typed (1 to 4,000 characters) and up to 8 [`context`](#context-sent-with-a-question) items. The assistant must be one the listing offers the person, and a session must be the person's own with that assistant; otherwise the answer is `404`. The whole assistant answers, with its prompt, knowledge and tools, and the conversation appears in the person's history in Eneo. Tools that produce files (images, documents, analysis, charts, calculations) are left out of the turn, and no tool approval is requested.
+
+The answer is `text/event-stream`, one JSON object per `data:` line:
+
+```text
+data: {"type":"text","delta":"You have 25 days "}
+data: {"type":"source","source":{"label":"Holiday rules","link":"https://intra.example/holiday"}}
+data: {"type":"done","session":"<session id>","link":"https://<your-eneo>/dashboard/<assistant id>/<session id>"}
+```
+
+`text` is the answer as it is written, without Eneo's citation tags. `source` follows the text, once for each source the answer cites and at most ten, with a `link` only when it is an https address. The stream ends with one `done`, carrying the session to continue in and, when `PUBLIC_ORIGIN` is an https address, a link that opens the conversation in Eneo, with one `handback` (below), or with one `{"type":"error","code":…}` (`unavailable` or `unknown`). Comment lines are sent as keep-alives. An answer that takes longer than 170 seconds ends as `unavailable`.
+
+An assistant can return the conversation to the calling system. On these turns, and only these, a model that can call tools is offered one more tool, `hand_back`, and a line in its prompt saying when to use it. The stream then ends with `handback` instead of `done`:
+
+```text
+data: {"type":"handback","reason":"declined","session":"<session id>"}
+data: {"type":"handback","reason":"completed","session":"<session id>","link":"https://<your-eneo>/dashboard/<assistant id>/<session id>"}
+```
+
+`declined` means the question was not the assistant's to answer, such as one about the person's own calendar; nothing of the answer is sent after the assistant has declined, and the calling system answers the question itself. `completed` follows a full answer, with its text and sources, when the assistant expects nothing more from the person. A handback carries the reason, the session and the link, and never any text. An assistant that expects a follow-up ends with `done`. What the assistant does is up to its instructions: say there which questions it should decline.
+
+Errors before the stream starts are `{ "error": { "code", "message" } }` with the code `invalid` (400), `denied` (401 or 403), `not-found` (404) or `unavailable` (503); the message is in Swedish and may be shown to the person. Adding and removing a system, and each question asked through one (which system, which assistant and session, never the text), are recorded in the audit log.
 
 ---
 

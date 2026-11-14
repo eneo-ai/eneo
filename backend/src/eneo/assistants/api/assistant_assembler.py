@@ -261,6 +261,8 @@ class AssistantAssembler:
             permissions=permissions,
             description=assistant.description,
             insight_enabled=assistant.insight_enabled,
+            external_clients_enabled=assistant.external_clients_enabled,
+            external_clients_description=assistant.external_clients_description,
             # Governed value so the chat surfaces the mode the ask will use.
             inline_file_text=select_effective_inline_file_text(
                 assistant.inline_file_text, effective_config

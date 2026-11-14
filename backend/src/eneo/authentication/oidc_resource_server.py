@@ -207,6 +207,10 @@ async def validate_idp_access_token(
             issuer=issuer,
             kid=kid,
             ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
+            # OIDC_ACCEPTED_JWKS_URI: the keys are read from there and the
+            # issuer is only compared with the token's; unset, the issuer's
+            # own discovery document says where they are.
+            jwks_uri=settings.oidc_accepted_jwks_uri or None,
         )
     except AuthenticationException:
         raise

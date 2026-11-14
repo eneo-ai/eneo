@@ -35,6 +35,7 @@ class Authentication(str, Enum):
     SIGNED_URL = "signed_file_token"
     WEBSOCKET = "websocket_user_token"
     WIDGET_VISITOR = "widget_visitor_token"
+    CONNECTOR = "installation_assertion_and_delegated_user_token"
     PUBLIC = "public"
 
 
@@ -56,6 +57,10 @@ class Authorization(str, Enum):
     # A pseudonymous widget visitor: the token binds one widget, and the
     # widget service checks session ownership and the widget's live state.
     WIDGET_VISITOR = "token_widget_visitor"
+    # A person acting through an installation their tenant trusts: the
+    # installation's assertion says which one is calling, and the person's own
+    # identity-provider token decides everything they may see or ask.
+    CONNECTOR = "delegated_user_of_trusting_tenant"
     PUBLIC = "public"
 
 
@@ -74,6 +79,7 @@ _SPECIAL_AUTHORIZATION = {
     Authentication.MODULE: Authorization.MODULE,
     Authentication.SIGNED_URL: Authorization.SIGNED_URL,
     Authentication.WIDGET_VISITOR: Authorization.WIDGET_VISITOR,
+    Authentication.CONNECTOR: Authorization.CONNECTOR,
     Authentication.PUBLIC: Authorization.PUBLIC,
 }
 

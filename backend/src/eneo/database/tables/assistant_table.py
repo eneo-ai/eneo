@@ -37,6 +37,14 @@ class Assistants(BasePublic):
     published: Mapped[bool] = mapped_column()
     description: Mapped[Optional[str]] = mapped_column()
     insight_enabled: Mapped[bool] = mapped_column(default=False)
+    # When True, people who may use the assistant can find and ask it from
+    # other clients than Eneo's own UI (GET /assistants/external/).
+    external_clients_enabled: Mapped[bool] = mapped_column(
+        default=False, server_default="false"
+    )
+    # What other systems should know about the assistant, when that is not
+    # what its own users read in ``description``; offered in its place there.
+    external_clients_description: Mapped[Optional[str]] = mapped_column()
     # When False, an attached file whose original is available via signed URL is
     # surfaced to the model as that URL only (text not inlined) — e.g. to keep a
     # large CSV from blowing the context window. Default True preserves the

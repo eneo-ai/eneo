@@ -54,6 +54,9 @@ from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
 
+# As long as another client's listing takes a description.
+EXTERNAL_CLIENTS_DESCRIPTION_MAX_LENGTH = 400
+
 
 class AssistantType(str, Enum):
     ASSISTANT = "assistant"
@@ -293,6 +296,24 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    external_clients_enabled: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Whether people who may use this assistant can find and ask it from "
+            "other clients (it is then listed by GET /assistants/external/). "
+            "Only a space admin can change it."
+        ),
+    )
+    external_clients_description: Optional[str] = Field(
+        default=None,
+        max_length=EXTERNAL_CLIENTS_DESCRIPTION_MAX_LENGTH,
+        description=(
+            "What other systems should know about the assistant: what it is "
+            "for and when to turn to it. Offered to other clients in place of "
+            "`description`, which stays what the assistant's own users read. "
+            "Send null or an empty string to clear it."
+        ),
+    )
     inline_file_text: Optional[bool] = Field(
         default=None,
         description=(
@@ -484,6 +505,20 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "appropriate permissions can see all sessions for this assistant."
         ),
     )
+    external_clients_enabled: bool = Field(
+        default=False,
+        description=(
+            "Whether people who may use this assistant can find and ask it from "
+            "other clients (it is then listed by GET /assistants/external/)."
+        ),
+    )
+    external_clients_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "What other systems should know about the assistant, offered to "
+            "other clients in place of `description`."
+        ),
+    )
     inline_file_text: bool = Field(
         description=(
             "Whether attached file text is inlined into the prompt (True) or the file "
@@ -522,6 +557,35 @@ class AssistantPublic(InDB, ResourcePermissionsMixin):
             "GET endpoint computes it; other responses default to False."
         ),
     )
+
+
+class ExternalAssistantSpace(BaseModel):
+    """The space an assistant offered to other clients belongs to."""
+
+    id: UUID
+    name: str
+
+
+class ExternalAssistant(BaseModel):
+    """An assistant another client may offer the caller.
+
+    Deliberately small: enough to show a choice and to ask it. The prompt,
+    the knowledge and the model stay inside Eneo.
+    """
+
+    id: UUID
+    name: str
+    description: Optional[str] = Field(
+        description=(
+            "What the assistant is for, as written for other systems; the "
+            "assistant's own description when nothing was written for them."
+        )
+    )
+    space: ExternalAssistantSpace
+
+
+class ExternalAssistantList(BaseModel):
+    items: list[ExternalAssistant]
 
 
 class DefaultAssistant(AssistantPublic):

@@ -11,6 +11,7 @@ GET /api/v1/admin/api-keys/expiring-soon
 GET /api/v1/admin/api-keys/notification-policy
 GET /api/v1/admin/api-keys/{id}
 GET /api/v1/admin/api-keys/{id}/usage
+GET /api/v1/admin/connector-installations/
 GET /api/v1/admin/crawler/
 GET /api/v1/admin/crawler/runs/{id}/
 GET /api/v1/admin/crawler/runs/{id}/failures/
@@ -76,6 +77,7 @@ GET /api/v1/apps/{id}/
 GET /api/v1/apps/{id}/prompts/
 GET /api/v1/apps/{id}/runs/
 GET /api/v1/assistants/
+GET /api/v1/assistants/external/
 GET /api/v1/assistants/{id}/
 GET /api/v1/assistants/{id}/mcp-servers/
 GET /api/v1/assistants/{id}/prompts/
