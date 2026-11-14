@@ -1908,5 +1908,7 @@
   "connected_systems_remove_named": "Remove {name}",
   "connected_systems_remove_title": "Remove {name}?",
   "connected_systems_remove_description": "The system can no longer call Eneo. Its key stops working at once.",
-  "connected_systems_removed": "{name} has been removed"
+  "connected_systems_removed": "{name} has been removed",
+  "external_clients_hint_title": "Description for other systems",
+  "external_clients_hint_description": "What other systems should know about the assistant: what it is for and when to turn to it. At most 400 characters. Leave empty to use the assistant's ordinary description."
 }

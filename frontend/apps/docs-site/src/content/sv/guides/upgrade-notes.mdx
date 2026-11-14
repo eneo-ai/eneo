@@ -134,7 +134,7 @@ flowchart TB
 | [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
-| Assistenter kan göras [tillgängliga för andra klienter](/docs/api#assistants-for-other-clients): assistentfältet `external_clients_enabled` (av för alla befintliga assistenter), `GET /api/v1/assistants/external/` och `context` i `POST /api/v1/conversations/` | API-konsumenter, ytans administratörer | Inget |
+| Assistenter kan göras [tillgängliga för andra klienter](/docs/api#assistants-for-other-clients): assistentfälten `external_clients_enabled` (av för alla befintliga assistenter) och `external_clients_description`, `GET /api/v1/assistants/external/` och `context` i `POST /api/v1/conversations/` | API-konsumenter, ytans administratörer | Inget |
 | Eneo talar anslutningsprotokollet självt, så ett [anslutet system](/docs/api#connected-systems) kan lista och fråga de tillgängliga assistenterna utan en adapter: adresser under `/api/v1/connector/`, avstängt tills en administratör lägger till ett system under Administration › Integrationer i React-betan. Ny tabell `connector_installations` | Driftansvariga, organisationens administratörer | Inget. För att använda det: sätt `OIDC_RESOURCE_SERVER_ENABLED` och lägg till systemet |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]

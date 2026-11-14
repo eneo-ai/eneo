@@ -1908,5 +1908,7 @@
   "connected_systems_remove_named": "Ta bort {name}",
   "connected_systems_remove_title": "Ta bort {name}?",
   "connected_systems_remove_description": "Systemet kan inte längre anropa Eneo. Nyckeln slutar gälla direkt.",
-  "connected_systems_removed": "{name} är borttaget"
+  "connected_systems_removed": "{name} är borttaget",
+  "external_clients_hint_title": "Beskrivning för andra system",
+  "external_clients_hint_description": "Vad andra system ska veta om assistenten: vad den är till för och när man ska vända sig till den. Högst 400 tecken. Lämna tomt för att använda assistentens vanliga beskrivning."
 }

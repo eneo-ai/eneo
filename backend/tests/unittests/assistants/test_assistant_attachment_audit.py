@@ -22,6 +22,7 @@ def _assistant(attachments: list[SimpleNamespace], inline: dict[object, bool]) -
         description=None,
         insight_enabled=False,
         external_clients_enabled=False,
+        external_clients_description=None,
         data_retention_days=None,
         collections=[],
         websites=[],

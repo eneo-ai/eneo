@@ -151,20 +151,15 @@ async def _list_assistants(container: Container) -> dict[str, Any]:
     session = cast(AsyncSession, container.session())
     async with session.begin():
         offered = await container.assistant_service().get_external_client_assistants()
-    return {
-        "assistants": [
-            {
-                "ref": str(assistant.id),
-                "name": _clip(assistant.name, _MAX_NAME),
-                **(
-                    {"description": _clip(assistant.description, _MAX_DESCRIPTION)}
-                    if assistant.description
-                    else {}
-                ),
-            }
-            for assistant, _space in offered[:MAX_ASSISTANTS]
-        ]
-    }
+    assistants: list[dict[str, str]] = []
+    for assistant, _space in offered[:MAX_ASSISTANTS]:
+        # What the owner wrote for other systems, else what its users read.
+        description = assistant.external_clients_description or assistant.description
+        listed = {"ref": str(assistant.id), "name": _clip(assistant.name, _MAX_NAME)}
+        if description:
+            listed["description"] = _clip(description, _MAX_DESCRIPTION)
+        assistants.append(listed)
+    return {"assistants": assistants}
 
 
 @router.post(

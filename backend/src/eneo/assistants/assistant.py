@@ -89,6 +89,7 @@ class Assistant(Entity):
         description: Optional[str] = None,
         insight_enabled: bool = False,
         external_clients_enabled: bool = False,
+        external_clients_description: Optional[str] = None,
         inline_file_text: bool = True,
         knowledge_mode: KnowledgeMode = KnowledgeMode.INJECT,
         data_retention_days: Optional[int] = None,
@@ -129,6 +130,7 @@ class Assistant(Entity):
         self.description = description
         self.insight_enabled = insight_enabled
         self.external_clients_enabled = external_clients_enabled
+        self.external_clients_description = external_clients_description
         self.inline_file_text = inline_file_text
         self.knowledge_mode = knowledge_mode
         self.rerank_model_id = rerank_model_id
@@ -434,6 +436,7 @@ class Assistant(Entity):
         description: Union[str, None, NotProvided] = NOT_PROVIDED,
         insight_enabled: bool | None = None,
         external_clients_enabled: bool | None = None,
+        external_clients_description: Union[str, None, NotProvided] = NOT_PROVIDED,
         inline_file_text: bool | None = None,
         knowledge_mode: KnowledgeMode | None = None,
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
@@ -481,6 +484,9 @@ class Assistant(Entity):
 
         if external_clients_enabled is not None:
             self.external_clients_enabled = external_clients_enabled
+
+        if is_provided(external_clients_description):
+            self.external_clients_description = external_clients_description
 
         if inline_file_text is not None:
             self.inline_file_text = inline_file_text

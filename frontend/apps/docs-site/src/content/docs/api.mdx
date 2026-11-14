@@ -304,6 +304,8 @@ lists the assistants to offer the caller:
 
 An assistant is listed when it is available to other clients, is published, has a completion model, and the caller may read it: the same rule as in Eneo itself, so the caller is a member of the assistant's space, directly or through a user group, and holds the `assistants` permission. Assistants in the organization space are listed for administrators only. Nothing else about the assistant is returned. A space-scoped or assistant-scoped API key sees only what its scope covers.
 
+What another system needs to know about an assistant is often not what its own users read. `external_clients_description` (at most 400 characters; **Description for other systems** under **Publishing** in the React beta, shown once the assistant is available to other clients) holds what the assistant is for and when to turn to it. When it is set, the listing's `description` carries it; otherwise the assistant's ordinary description. Whoever may edit the assistant can write it, and `null` or an empty string clears it. The assistant's own `description` is never changed by it.
+
 The flag does not grant access. It only says that the assistant may be offered outside Eneo; asking it goes through [`POST /api/v1/conversations/`](#chat) with the same checks as any other question, and the conversation appears in Eneo like one started there. Send what the person is looking at in [`context`](#context-sent-with-a-question).
 
 ### Connected systems
@@ -313,7 +315,7 @@ A system that speaks the connector protocol (version 3), such as a start page fo
 | Route | What it does |
 | --- | --- |
 | `GET /api/v1/connector/clew/manifest` | The manifest: protocol version, the id `eneo`, and the reads Eneo offers. No credentials. |
-| `POST /api/v1/connector/clew/capabilities/eneo.assistants` | The assistants the person may ask, as `{ "output": { "assistants": [{ "ref", "name", "description" }] } }`. The same list as `GET /api/v1/assistants/external/`, at most 50, without the space. |
+| `POST /api/v1/connector/clew/capabilities/eneo.assistants` | The assistants the person may ask, as `{ "output": { "assistants": [{ "ref", "name", "description" }] } }`. The same list as `GET /api/v1/assistants/external/`, at most 50, without the space; `description` is the assistant's description for other systems when it has one. |
 | `POST /api/v1/connector/clew/ask` | One question from the person to one assistant, answered as a stream of events. |
 
 Every `POST` carries two credentials:

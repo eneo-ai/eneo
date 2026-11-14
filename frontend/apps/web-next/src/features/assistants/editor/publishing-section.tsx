@@ -2,11 +2,12 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave } from "@/components/composites/use-autosave";
+import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -60,6 +61,37 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
         pending={publish.isPending}
         publishHint={t("api_keys_notifications_publish_assistant_hint")}
         onConfirm={() => publish.mutate()}
+      />
+    </SettingsRow>
+  );
+}
+
+/**
+ * What other systems are told about the assistant, apart from the description
+ * its own users read. Empty, they get that description.
+ */
+function ExternalClientsDescriptionRow({ assistant }: { assistant: Assistant }) {
+  const t = useTranslations();
+  const update = useUpdateAssistant(assistant.id);
+  const text = useAutosaveField({
+    key: "assistant-external-clients-description",
+    value: assistant.external_clients_description ?? "",
+    save: (value) => update.mutateAsync({ external_clients_description: value })
+  });
+
+  return (
+    <SettingsRow
+      title={t("external_clients_hint_title")}
+      description={t("external_clients_hint_description")}
+      htmlFor="assistant-external-clients-description"
+    >
+      <Textarea
+        id="assistant-external-clients-description"
+        value={text.value}
+        rows={3}
+        maxLength={400}
+        onChange={(event) => text.setValue(event.target.value)}
+        onBlur={() => text.commit()}
       />
     </SettingsRow>
   );
@@ -125,6 +157,9 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
             />
           </Label>
         </SettingsRow>
+      )}
+      {!assistant.is_help_assistant && assistant.external_clients_enabled && (
+        <ExternalClientsDescriptionRow assistant={assistant} />
       )}
     </SettingsGroup>
   );

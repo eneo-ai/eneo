@@ -12222,6 +12222,11 @@ export interface components {
        */
       external_clients_enabled?: boolean;
       /**
+       * External Clients Description
+       * @description What other systems should know about the assistant, offered to other clients in place of `description`.
+       */
+      external_clients_description?: string | null;
+      /**
        * Inline File Text
        * @description Whether attached file text is inlined into the prompt (True) or the file is surfaced to the model as a signed URL only (False).
        */
@@ -14685,6 +14690,11 @@ export interface components {
        */
       external_clients_enabled?: boolean;
       /**
+       * External Clients Description
+       * @description What other systems should know about the assistant, offered to other clients in place of `description`.
+       */
+      external_clients_description?: string | null;
+      /**
        * Inline File Text
        * @default true
        */
@@ -15734,7 +15744,10 @@ export interface components {
       id: string;
       /** Name */
       name: string;
-      /** Description */
+      /**
+       * Description
+       * @description What the assistant is for, as written for other systems; the assistant's own description when nothing was written for them.
+       */
       description: string | null;
       space: components["schemas"]["ExternalAssistantSpace"];
     };
@@ -20241,6 +20254,11 @@ export interface components {
        * @description Whether people who may use this assistant can find and ask it from other clients (it is then listed by GET /assistants/external/). Only a space admin can change it.
        */
       external_clients_enabled?: boolean | null;
+      /**
+       * External Clients Description
+       * @description What other systems should know about the assistant: what it is for and when to turn to it. Offered to other clients in place of `description`, which stays what the assistant's own users read. Send null or an empty string to clear it.
+       */
+      external_clients_description?: string | null;
       /**
        * Inline File Text
        * @description Whether to inline attached file text into the prompt. When False, a file whose original is available via signed URL is surfaced as that URL only (e.g. to avoid large files blowing the context window).

@@ -306,7 +306,9 @@ async def get_external_assistants(
             ExternalAssistant(
                 id=assistant.id,
                 name=assistant.name,
-                description=assistant.description,
+                description=(
+                    assistant.external_clients_description or assistant.description
+                ),
                 space=ExternalAssistantSpace(id=space.id, name=space.name),
             )
         )
@@ -486,6 +488,15 @@ def _build_assistant_update_changes(
         changes["external_clients_enabled"] = {
             "old": old_assistant.external_clients_enabled,
             "new": updated_assistant.external_clients_enabled,
+        }
+
+    if (
+        updated_assistant.external_clients_description
+        != old_assistant.external_clients_description
+    ):
+        changes["external_clients_description"] = {
+            "old": old_assistant.external_clients_description,
+            "new": updated_assistant.external_clients_description,
         }
 
     # Data retention change
@@ -698,6 +709,8 @@ def _build_assistant_update_changes(
         change_summary.append("description")
     if "insights_enabled" in changes:
         change_summary.append("insights")
+    if "external_clients_description" in changes:
+        change_summary.append("description for other clients")
     if "external_clients_enabled" in changes:
         change_summary.append("availability to other clients")
     if "data_retention_days" in changes:
@@ -843,6 +856,13 @@ async def update_assistant(
     if "rerank_model_id" in request_dict:
         rerank_model_id = assistant.rerank_model_id
 
+    # Blank text is no text: the listing then offers the ordinary description.
+    external_clients_description: str | None | NotProvided = NOT_PROVIDED
+    if "external_clients_description" in request_dict:
+        external_clients_description = (
+            assistant.external_clients_description or ""
+        ).strip() or None
+
     updated_assistant, _ = await service.update_assistant(
         assistant_id=id,
         name=assistant.name,
@@ -860,6 +880,7 @@ async def update_assistant(
         description=description,
         insight_enabled=assistant.insight_enabled,
         external_clients_enabled=assistant.external_clients_enabled,
+        external_clients_description=external_clients_description,
         inline_file_text=assistant.inline_file_text,
         knowledge_mode=assistant.knowledge_mode,
         data_retention_days=data_retention_days,

@@ -192,6 +192,7 @@ class SpaceFactory:
                 ),
                 insight_enabled=assistant.insight_enabled,
                 external_clients_enabled=assistant.external_clients_enabled,
+                external_clients_description=assistant.external_clients_description,
             )
 
         all_assistants = _build_or_skip(

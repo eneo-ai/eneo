@@ -1116,3 +1116,88 @@ async def test_a_model_that_cannot_call_tools_is_not_offered_one(
 
     assert _events(response.text)[-1]["type"] == "done"
     assert all(name != "handback" for name, _tools in model["offered"][-1])
+
+
+# What other systems are told about an assistant.
+
+
+async def test_other_systems_get_what_was_written_for_them_and_users_keep_their_own(
+    raw_client,
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+    installation,
+    provider_token,  # noqa: F811
+    signing_key,
+):
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+    for_others = "Svarar på frågor om bygglov, anmälan och avgifter."
+
+    updated = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"external_clients_description": f"  {for_others}  "},
+        headers=admin_headers,
+    )
+
+    assert updated.status_code == 200, updated.text
+    # Its own users still read the ordinary description.
+    assert updated.json()["description"] == "Om Bygglovshjälpen"
+    assert updated.json()["external_clients_description"] == for_others
+
+    async def listed() -> tuple[str | None, str | None]:
+        through_connector = await _post(
+            raw_client,
+            ASSISTANTS,
+            {"input": {}},
+            key=installation["key"],
+            signing_key=signing_key,
+            token=provider_token,
+        )
+        general = await raw_client.get(
+            "/api/v1/assistants/external/",
+            headers={"Authorization": f"Bearer {provider_token}"},
+        )
+        return (
+            through_connector.json()["output"]["assistants"][0].get("description"),
+            general.json()["items"][0]["description"],
+        )
+
+    assert await listed() == (for_others, for_others)
+
+    # Cleared, other systems are offered the ordinary description again.
+    cleared = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"external_clients_description": "   "},
+        headers=admin_headers,
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["external_clients_description"] is None
+    assert await listed() == ("Om Bygglovshjälpen", "Om Bygglovshjälpen")
+
+
+async def test_the_text_for_other_systems_is_bounded_and_left_alone_when_not_sent(
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+):
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+
+    too_long = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"external_clients_description": "x" * 401},
+        headers=admin_headers,
+    )
+    written = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"external_clients_description": "För andra system"},
+        headers=admin_headers,
+    )
+    renamed = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"name": "Bygglov"},
+        headers=admin_headers,
+    )
+
+    assert too_long.status_code == 422, too_long.text
+    assert written.status_code == 200, written.text
+    assert renamed.json()["external_clients_description"] == "För andra system"

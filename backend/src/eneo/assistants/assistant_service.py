@@ -1835,6 +1835,7 @@ class AssistantService:
         document_template: "DocumentTemplateChoice | None" = None,
         rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
         external_clients_enabled: Optional[bool] = None,
+        external_clients_description: Union[str, None, NotProvided] = NOT_PROVIDED,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
@@ -1957,6 +1958,7 @@ class AssistantService:
             is_provided(value)
             for value in (
                 description,
+                external_clients_description,
                 data_retention_days,
                 metadata_json,
                 icon_id,
@@ -2305,6 +2307,7 @@ class AssistantService:
             description=description,
             insight_enabled=insight_enabled,
             external_clients_enabled=external_clients_enabled,
+            external_clients_description=external_clients_description,
             inline_file_text=inline_file_text,
             knowledge_mode=knowledge_mode,
             data_retention_days=data_retention_days,
@@ -2409,6 +2412,7 @@ class AssistantService:
                 external_clients_enabled=external_clients_enabled
                 if external_clients_enabled is not None
                 else NOT_PROVIDED,
+                external_clients_description=external_clients_description,
                 inline_file_text=inline_file_text
                 if inline_file_text is not None
                 else NOT_PROVIDED,
