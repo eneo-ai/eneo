@@ -246,12 +246,11 @@ ENEO_SUPER_API_KEY=
 # step exits with a Settings validation error and the stack never comes up.
 # Images that include migration 202607251700 read them exactly once, to seed
 # the initial upload policy, and ignore them afterwards; administrators then
-# manage the limits in Admin > File storage. Migration 202609202000 raises
-# unchanged historical seeds. Values below match the resulting upload defaults.
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=268435456
+# manage the limits in Admin > File storage. Values below match the seed defaults.
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
 UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
-UPLOAD_MAX_FILE_SIZE=268435456
-TRANSCRIPTION_MAX_FILE_SIZE=402653184
+UPLOAD_MAX_FILE_SIZE=10485760
+TRANSCRIPTION_MAX_FILE_SIZE=209715200
 
 # ----------------------------------------------------------------------------
 # Durable Object Content (PostgreSQL-inline defaults)
@@ -522,7 +521,7 @@ FLOW_MAX_INLINE_TEXT_BYTES=8388608
 # Calls per mapped step; includes the native-JSON fallback reserve.
 FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT=1000
 # Persistent assistant attachments must also fit the selected model's context.
-ATTACHMENT_MAX_SIZE_BYTES=268435456
+ATTACHMENT_MAX_SIZE_BYTES=26214400
 ATTACHMENT_MAX_FILES=100
 
 # Per-tenant crawl ceiling (default: 4). Single-tenant deployments can set this

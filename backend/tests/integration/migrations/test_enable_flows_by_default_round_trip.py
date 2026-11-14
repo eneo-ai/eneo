@@ -1,8 +1,8 @@
-"""Round-trip flows on by default (202610220930).
+"""Round-trip 202610220930, which leaves Flows as the organisation chose them.
 
-The upgrade turns the ``flows_core`` flag on and gives predefined Owner and AI
-Configurator roles the flow permissions new tenants receive. The downgrade
-turns the flag off and leaves the permissions.
+Neither direction touches the ``flows_core`` flag or any role: an upgrade does
+not switch Flows on or grant flow permissions, and a downgrade does not undo a
+choice an administrator made.
 """
 
 from __future__ import annotations
@@ -20,7 +20,6 @@ pytestmark = pytest.mark.migration_isolation
 
 PRE_REVISION = "202610212300"
 REVISION = "202610220930"
-OWNER_FLOW_PERMISSIONS = {"flows_view", "flows_run", "flows_manage", "flows_trace"}
 
 
 def _alembic_cfg(database_url: str) -> Config:
@@ -53,6 +52,12 @@ def round_trip_db(test_settings):
     conn.autocommit = True
     command.upgrade(cfg, "head")
     command.downgrade(cfg, PRE_REVISION)
+    # The flag as 202610211900 seeds it: neither direction of the revision
+    # resets a value an earlier test turned on.
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE global_feature_flags SET enabled = false WHERE name = 'flows_core'"
+        )
     try:
         yield {"conn": conn, "cfg": cfg}
     finally:
@@ -96,7 +101,7 @@ def _flag_enabled(conn) -> bool:
         return cursor.fetchone()[0]
 
 
-def test_upgrade_turns_flows_on_and_grants_predefined_roles(round_trip_db):
+def test_upgrade_leaves_the_flag_and_the_roles_alone(round_trip_db):
     conn, cfg = round_trip_db["conn"], round_trip_db["cfg"]
     owner = _insert_role(
         conn, predefined_source="Owner", permissions=["assistants", "flows_view"]
@@ -110,22 +115,25 @@ def test_upgrade_turns_flows_on_and_grants_predefined_roles(round_trip_db):
 
     command.upgrade(cfg, REVISION)
 
-    assert _flag_enabled(conn)
-    owner_permissions = _permissions(conn, owner)
-    assert set(owner_permissions) == {"assistants", *OWNER_FLOW_PERMISSIONS}
-    # A permission the role already held is not added twice.
-    assert owner_permissions.count("flows_view") == 1
-    assert _permissions(conn, configurator) == ["assistants", "flows_trace"]
+    assert not _flag_enabled(conn)
+    assert _permissions(conn, owner) == ["assistants", "flows_view"]
+    assert _permissions(conn, configurator) == ["assistants"]
     assert _permissions(conn, user) == ["assistants"]
     assert _permissions(conn, custom) == ["assistants"]
 
 
-def test_downgrade_turns_flows_off_and_keeps_the_permissions(round_trip_db):
+def test_downgrade_keeps_a_flag_an_administrator_turned_on(round_trip_db):
     conn, cfg = round_trip_db["conn"], round_trip_db["cfg"]
-    owner = _insert_role(conn, predefined_source="Owner", permissions=["assistants"])
+    owner = _insert_role(
+        conn, predefined_source="Owner", permissions=["assistants", "flows_run"]
+    )
     command.upgrade(cfg, REVISION)
+    with conn.cursor() as cursor:
+        cursor.execute(
+            "UPDATE global_feature_flags SET enabled = true WHERE name = 'flows_core'"
+        )
 
     command.downgrade(cfg, PRE_REVISION)
 
-    assert not _flag_enabled(conn)
-    assert set(_permissions(conn, owner)) == {"assistants", *OWNER_FLOW_PERMISSIONS}
+    assert _flag_enabled(conn)
+    assert _permissions(conn, owner) == ["assistants", "flows_run"]

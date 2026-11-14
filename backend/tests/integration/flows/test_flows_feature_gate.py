@@ -6,11 +6,15 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
 from httpx import AsyncClient
 
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.spaces_table import SpacesUsers
+from eneo.database.tables.users_table import users_roles_table
 from tests.fixtures import mint_v2_api_key
 from tests.integration.module_session_support import (
     enable_module,
@@ -65,6 +69,130 @@ async def test_a_tenant_with_the_flag_reaches_the_flow_surface(
     response = await _call(client, method, path, admin_user_api_key.key)
 
     assert response.status_code != 404
+
+
+@pytest.mark.parametrize(("method", "path"), SURFACES)
+async def test_with_the_global_flag_off_only_a_tenant_that_turned_flows_on_reaches_them(
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    admin_user_api_key,
+    tenant_factory,
+    user_factory,
+    method,
+    path,
+):
+    """An installation as it runs: the global row off, and one organisation
+    switched on through its own row. The other organisation's Owner holds the
+    flow permissions too, so only the flag can refuse it."""
+    async with db_container() as container:
+        session = container.session()
+        other_tenant = await tenant_factory(session)
+        other_user = await user_factory(session, tenant_id=other_tenant.id)
+        owner = Roles(
+            name="Owner",
+            permissions=[
+                "admin",
+                "flows_view",
+                "flows_run",
+                "flows_manage",
+                "flows_trace",
+            ],
+            tenant_id=other_tenant.id,
+            predefined_source="Owner",
+        )
+        session.add(owner)
+        await session.flush()
+        await session.execute(
+            sa.insert(users_roles_table).values(user_id=other_user.id, role_id=owner.id)
+        )
+        other_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=other_tenant.id,
+            user_id=other_user.id,
+        )
+        await session.execute(
+            sa.text(
+                "UPDATE global_feature_flags SET enabled = false "
+                "WHERE name = 'flows_core'"
+            )
+        )
+    await _set_flag(db_container, admin_user.tenant_id, enabled=True)
+
+    switched_on = await _call(client, method, path, admin_user_api_key.key)
+    without_row = await _call(client, method, path, other_key.key)
+
+    # The reads succeed; the package check gets past the flag to the empty body.
+    assert switched_on.status_code == (422 if method == "POST" else 200), (
+        switched_on.text
+    )
+    assert without_row.status_code == 404, without_row.text
+
+
+async def test_a_member_without_flows_view_neither_reaches_nor_sees_a_flow(
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    user_factory,
+    flow_process_auth_headers,
+):
+    """Flows on for the organisation and the user a member of the flow's space:
+    without a flow permission the flow routes still refuse them, and with
+    flows_view the same member reaches the same routes."""
+    await _set_flag(db_container, admin_user.tenant_id, enabled=True)
+    author = dict(flow_process_auth_headers)
+    space = await client.post(
+        "/api/v1/spaces/", json={"name": f"gate-{uuid4().hex[:8]}"}, headers=author
+    )
+    assert space.status_code == 201, space.text
+    space_id = space.json()["id"]
+    flow = await client.post(
+        "/api/v1/flows/",
+        json={"space_id": space_id, "name": f"gate-{uuid4().hex[:8]}"},
+        headers=author,
+    )
+    assert flow.status_code == 201, flow.text
+    flow_id = flow.json()["id"]
+    async with db_container() as container:
+        session = container.session()
+        member = await user_factory(session)
+        role = Roles(
+            name=f"no-flows-{uuid4().hex[:8]}",
+            permissions=["assistants"],
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(role)
+        await session.flush()
+        role_id = role.id
+        await session.execute(
+            sa.insert(users_roles_table).values(user_id=member.id, role_id=role_id)
+        )
+        session.add(SpacesUsers(space_id=space_id, user_id=member.id, role="editor"))
+        await session.flush()
+        member_in_db = await container.user_repo().get_user_by_id(member.id)
+        token = container.auth_service().create_access_token_for_user(member_in_db)
+    member_headers = {"Authorization": f"Bearer {token}"}
+    routes = (
+        ("/api/v1/flows/", {"space_id": space_id}),
+        (f"/api/v1/flows/{flow_id}/", None),
+    )
+
+    for path, params in routes:
+        refused = await client.get(path, params=params, headers=member_headers)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["code"] == "insufficient_tenant_permission", refused.text
+
+    # The refusal came from the missing permission: with flows_view the same
+    # member reaches the same routes.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Roles)
+            .where(Roles.id == role_id)
+            .values(permissions=["assistants", "flows_view"])
+        )
+    for path, params in routes:
+        allowed = await client.get(path, params=params, headers=member_headers)
+        assert allowed.status_code == 200, allowed.text
 
 
 @pytest.mark.parametrize("enabled", [True, False])

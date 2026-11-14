@@ -91,6 +91,30 @@ describe("groupPermissions", () => {
     ]);
   });
 
+  test("offers the retention permissions in the admin group, where a role is granted them", () => {
+    // No template carries them; an administrator ticks them in the role editor.
+    const groups = groupPermissions([
+      ...catalogue,
+      ...(["retention_manage", "retention_holds"] as Permission[]).map((name) => ({
+        name,
+        description: `${name} description`
+      }))
+    ]);
+    const admin = groups.find((group) => group.id === "admin");
+    expect(admin?.permissions.map((p) => p.name)).toEqual([
+      "admin",
+      "retention_manage",
+      "retention_holds",
+      "api_keys",
+      "storage",
+      "modules"
+    ]);
+    expect(admin?.permissions[1]).toMatchObject({
+      label: "permission_retention_manage",
+      description: "permission_retention_manage_description"
+    });
+  });
+
   test("drops groups that have no permissions in the catalogue", () => {
     const groups = groupPermissions(catalogue.filter((p) => p.name === "admin"));
     expect(groups.map((group) => group.id)).toEqual(["admin"]);

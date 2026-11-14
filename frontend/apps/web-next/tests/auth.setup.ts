@@ -1,6 +1,6 @@
 import { expect, test as setup } from "@playwright/test";
 import { STORAGE_STATE } from "../playwright.config";
-import { E2E_CREDENTIALS } from "./helpers";
+import { E2E_CREDENTIALS, flowsShown } from "./helpers";
 
 // Choose password login explicitly, including on SSO installations, then persist
 // the session so the smoke specs start authenticated. If this breaks, auth is broken.
@@ -30,4 +30,11 @@ setup("authenticate", async ({ page }) => {
   ).toBe(true);
   await expect(page.locator("main#main-content")).toBeVisible();
   expect(legacyRequests, "Vite must call FastAPI directly").toEqual([]);
+
+  // Specs that adapt to Flows being off would pass without running a single flow step. The
+  // stack switches Flows on for its organisation and grants the seeded user (e2e/seed.py).
+  expect(
+    await flowsShown(page),
+    "Flows are off for the E2E user: run e2e/seed.py on the stack before the suite"
+  ).toBe(true);
 });

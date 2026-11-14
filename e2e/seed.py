@@ -9,6 +9,11 @@ app needs to be created, as with a real organisation's defaults. Idempotent:
 each row is created only when missing, so a rerun also completes a database
 seeded by an older version of this script.
 
+It also switches Flows on for the E2E organisation, through that
+organisation's own flag row, and grants its Owner the flow permissions: an
+installation has Flows off and gives no role those permissions on its own.
+Only the E2E compose files run this script; the backend image does not contain it.
+
 The provider's API key is stored encrypted with the stack's fixed test
 ENCRYPTION_KEY, as the backend stores keys in production: with a key set it
 refuses plaintext credentials. A key left in plaintext by an older version of
@@ -30,6 +35,10 @@ from eneo.database.tables.ai_models_table import (
     EmbeddingModels,
     TranscriptionModels,
 )
+from eneo.database.tables.feature_flag_table import (
+    GlobalFeatureFlag,
+    TenantFeatureFlag,
+)
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.tenant_table import Tenants
@@ -50,6 +59,13 @@ MODEL_NAME = "e2e-mock"
 EMBEDDING_MODEL_NAME = "e2e-mock-embedding"
 OWNER_ROLE_SOURCE = "Owner"
 PERMISSIONS_ADAPTER = TypeAdapter(list[str])
+# Flows are off for an organisation until it is switched on, and no role gets
+# the flow or retention permissions from the template. The E2E organisation
+# runs the flow legs and the retention rules, so the stack switches Flows on
+# for it alone and grants its Owner, as an administrator would.
+FLOWS_FLAG = "flows_core"
+FLOW_PERMISSIONS = ("flows_view", "flows_run", "flows_manage", "flows_trace")
+RETENTION_PERMISSIONS = ("retention_manage",)
 
 
 def _predefined_owner_permissions() -> list[str]:
@@ -89,23 +105,55 @@ async def _ensure_owner_permissions(session: AsyncSession, tenant_id: UUID) -> N
     if role is None:
         raise RuntimeError("E2E Owner role not found.")
 
-    template_permissions = _predefined_owner_permissions()
+    wanted_permissions = [
+        *_predefined_owner_permissions(),
+        *FLOW_PERMISSIONS,
+        *RETENTION_PERMISSIONS,
+    ]
     existing_permissions = list(role.permissions)
     missing_permissions = [
         permission
-        for permission in template_permissions
+        for permission in dict.fromkeys(wanted_permissions)
         if permission not in existing_permissions
     ]
     if not missing_permissions:
         return
 
-    # init_db creates Owner before granular Flow permissions; boot seeding skips
-    # sourced roles, so E2E merges from the predefined-role source of truth.
+    # Boot seeding skips sourced roles, so E2E merges the predefined-role
+    # template and the flow permissions the template leaves out.
     role.permissions = [*existing_permissions, *missing_permissions]
     print(
         "[seed] merged E2E Owner permissions from predefined role template",
         flush=True,
     )
+
+
+async def _enable_flows(session: AsyncSession, tenant_id: UUID) -> bool:
+    """Switch Flows on with the organisation's own flag row, not the global one."""
+    flag_id = (
+        await session.execute(
+            select(GlobalFeatureFlag.id).where(GlobalFeatureFlag.name == FLOWS_FLAG)
+        )
+    ).scalar_one()
+    row = (
+        await session.execute(
+            select(TenantFeatureFlag).where(
+                TenantFeatureFlag.feature_id == flag_id,
+                TenantFeatureFlag.tenant_id == tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        session.add(
+            TenantFeatureFlag(
+                name=FLOWS_FLAG, feature_id=flag_id, tenant_id=tenant_id, enabled=True
+            )
+        )
+        return True
+    if not row.enabled:
+        row.enabled = True
+        return True
+    return False
 
 
 async def main() -> None:
@@ -123,6 +171,8 @@ async def main() -> None:
         ).scalar_one()
 
         await _ensure_owner_permissions(session, tenant_id)
+        if await _enable_flows(session, tenant_id):
+            done.append("switched Flows on for the E2E organisation")
 
         provider = (
             await session.execute(

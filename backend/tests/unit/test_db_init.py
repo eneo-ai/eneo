@@ -25,7 +25,9 @@ import sys
 from init_db import _predefined_role_permissions
 permissions = _predefined_role_permissions("Owner")
 assert "admin" in permissions
-assert "flows_manage" in permissions
+assert "flows_manage" not in permissions
+assert "retention_manage" not in permissions
+assert "retention_holds" not in permissions
 assert "eneo.audit.application.audit_service" not in sys.modules
 assert "eneo.worker.redis" not in sys.modules
 """,

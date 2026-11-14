@@ -119,6 +119,23 @@ describe("role administration", () => {
     }
   });
 
+  it("grants the retention permissions to a role", async () => {
+    show();
+    const row = (await screen.findByText("Manager")).closest("article")!;
+    fireEvent.click(within(row).getByRole("button", { name: "edit" }));
+    const dialog = screen.getByRole("dialog");
+    for (const name of ["permission_retention_manage", "permission_retention_holds"]) {
+      fireEvent.click(within(dialog).getByRole("checkbox", { name: new RegExp(`^${name} `) }));
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "save_changes" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/api/v1/roles/{role_id}/", {
+        params: { path: { role_id: "custom" } },
+        body: { permissions: ["admin", "retention_manage", "retention_holds"] }
+      })
+    );
+  });
+
   it("creates a role from selected template permissions", async () => {
     show();
     await screen.findByText("Everyone");

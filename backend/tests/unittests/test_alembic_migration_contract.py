@@ -19,9 +19,6 @@ from eneo.database.tables.flow_tables import (
     FLOW_RUN_LIFECYCLE_SOURCE_VALUES,
     FlowProviderCalls,
 )
-from eneo.object_content.configuration import (
-    DEFAULT_FILE_UPLOAD_LIMIT_BYTES,
-)
 
 _ALEMBIC_VERSION_NUM_LIMIT = 32
 
@@ -445,27 +442,22 @@ def _string_constant(node: ast.expr) -> str | None:
     return None
 
 
-def test_upload_default_migration_literals_match_runtime_defaults() -> None:
+def _does_nothing(function: ast.FunctionDef) -> bool:
+    body = function.body
+    if body and isinstance(body[0], ast.Expr) and _string_constant(body[0].value):
+        body = body[1:]
+    return all(isinstance(node, ast.Pass) for node in body)
+
+
+def test_upload_default_migration_changes_no_limit() -> None:
     versions = Path(__file__).parents[2] / "alembic/versions"
     path = versions / "202609201300_raise_upload_policy_defaults.py"
     module = ast.parse(path.read_text())
-    limits = next(
-        node.value
-        for node in module.body
-        if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "_LIMITS"
-            for target in node.targets
-        )
-    )
-    assert ast.literal_eval(limits) == {
-        "session_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
-        "knowledge_file_limit_bytes": (10485760, DEFAULT_FILE_UPLOAD_LIMIT_BYTES),
-        "transcription_audio_limit_bytes": (
-            209715200,
-            402653184,
-        ),
+    functions = {
+        node.name: node for node in module.body if isinstance(node, ast.FunctionDef)
     }
+    assert _does_nothing(functions["upgrade"])
+    assert _does_nothing(functions["downgrade"])
     for filename in ("202607251700_add_object_content_deployment_policy.py", path.name):
         tree = ast.parse((versions / filename).read_text())
         assert not any(
@@ -482,18 +474,16 @@ def test_upload_default_migration_literals_match_runtime_defaults() -> None:
 
 
 @pytest.mark.parametrize(
-    ("stored", "raised"),
+    "stored",
     [
-        (None, (268435456, 268435456, 402653184)),
-        ((268435456, 268435456, 402653184), (268435456, 268435456, 402653184)),
-        ((1024, 2048, 4096), (1024, 2048, 4096)),
-        ((536870912, 536870912, 2147483648), (536870912, 536870912, 2147483648)),
-        ((10485760, 2048, 209715200), (268435456, 2048, 402653184)),
+        None,
+        (268435456, 268435456, 402653184),
+        (1024, 2048, 4096),
+        (536870912, 536870912, 2147483648),
+        (10485760, 2048, 209715200),
     ],
 )
-def test_upload_default_migration_preserves_policy_on_downgrade(
-    monkeypatch, stored, raised
-):
+def test_upload_default_migration_leaves_the_policy_as_it_was(monkeypatch, stored):
     path = (
         Path(__file__).parents[2]
         / "alembic/versions/202609201300_raise_upload_policy_defaults.py"
@@ -550,24 +540,22 @@ def test_upload_default_migration_preserves_policy_on_downgrade(
                     **dict(zip(columns, stored)),
                 )
             )
-            monkeypatch.setattr(migration.op, "execute", connection.execute)
+            # Whatever the body would run goes to this database.
+            monkeypatch.setattr(
+                migration,
+                "op",
+                MagicMock(execute=connection.execute, get_bind=lambda: connection),
+                raising=False,
+            )
             original = dict(connection.execute(sa.select(table)).mappings().one())
             migration.upgrade()
-            row = connection.execute(sa.select(table)).mappings().one()
-            if stored == raised:
-                assert dict(row) == original
-            assert tuple(row[name] for name in columns) == raised
-            assert row["session_image_limit_bytes"] == 1234
-            assert row["revision"] == 7 + (stored != raised)
-            migration.upgrade()
-            assert (
-                connection.execute(sa.select(table.c.revision)).scalar_one()
-                == row["revision"]
+            assert dict(connection.execute(sa.select(table)).mappings().one()) == (
+                original
             )
-            upgraded = dict(row)
             migration.downgrade()
-            row = connection.execute(sa.select(table)).mappings().one()
-            assert dict(row) == upgraded
+            assert dict(connection.execute(sa.select(table)).mappings().one()) == (
+                original
+            )
     finally:
         engine.dispose()
 
