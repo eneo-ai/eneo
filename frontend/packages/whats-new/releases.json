@@ -216,8 +216,8 @@
             "sv": "Se vad som begränsar filer i databasen"
           },
           "body": {
-            "en": "In Admin > File storage, the upload limits now explain the storage limit for files kept in the database and what large files cost there. Limits above 200 MB now apply unless operations still sets a lower limit on the server.",
-            "sv": "Under Admin > Fillagring förklarar uppladdningsgränserna nu lagringsgränsen för filer som sparas i databasen och vad stora filer kostar där. Gränser över 200 MB gäller nu, om inte driften fortfarande sätter en lägre gräns på servern."
+            "en": "In Admin > File storage, the upload limits now explain the storage limit for files kept in the database and what large files cost there. Limits above 200 MB now apply, up to that storage limit, unless operations still sets a lower limit on the server.",
+            "sv": "Under Admin > Fillagring förklarar uppladdningsgränserna nu lagringsgränsen för filer som sparas i databasen och vad stora filer kostar där. Gränser över 200 MB gäller nu, upp till lagringsgränsen, om inte driften fortfarande sätter en lägre gräns på servern."
           }
         }
       ]
