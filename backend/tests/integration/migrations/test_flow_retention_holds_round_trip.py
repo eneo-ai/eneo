@@ -209,7 +209,9 @@ def test_no_role_gets_the_retention_permissions_and_downgrade_removes_them(
     assert _permissions(conn, member_role) == ["assistants"]
 
     # An administrator grants them after the upgrade.
-    granted_role = _insert_role(conn, tenant_id, ["admin", "retention_holds"])
+    granted_role = _insert_role(
+        conn, tenant_id, ["admin", "retention_manage", "retention_holds"]
+    )
 
     # The downgrade removes both values from every role, because the previous
     # release cannot read a role that holds them, and upgrading again does not

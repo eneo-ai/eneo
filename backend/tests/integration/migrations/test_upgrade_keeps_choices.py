@@ -163,6 +163,13 @@ def test_no_role_gains_a_retention_permission(upgraded):
     assert held == {name: [] for name in after["roles"]}
 
 
+def test_every_role_keeps_the_permissions_it_had(upgraded):
+    before, after = upgraded
+    assert before["roles"]
+    for name, (_, permissions) in before["roles"].items():
+        assert permissions <= after["roles"][name][1], name
+
+
 def test_upload_policy_and_its_revision_are_unchanged(upgraded):
     before, after = upgraded
     assert before["policy"] == POLICY
