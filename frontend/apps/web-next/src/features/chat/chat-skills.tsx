@@ -1,19 +1,10 @@
-import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Popover } from "@astryxdesign/core/Popover";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { BookOpenCheck, Lock, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { BookOpenCheck, Lock, Plug, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject
-} from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -30,7 +21,13 @@ import { useSpace } from "@/features/spaces/use-space";
 import { SkillDependencies } from "@/features/skills/skill-dependencies";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
-import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
+import {
+  COMPOSER_COUNT_CLASS,
+  ComposerPanel,
+  useFitAbove,
+  type ComposerPanelSurface
+} from "./composer-panel";
+import { ChatTools, ToolsPanel, toolCounts, type ChatToolsProps } from "./mcp-controls";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
@@ -38,13 +35,6 @@ type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
 type SearchField = { value: string; onChange: (value: string) => void; query: string };
 
 const SEARCH_DEBOUNCE_MS = 250;
-
-/**
- * What Astryx's Popover adds around its content, above the trigger: the 4 px
- * gap, 12 px of padding above and below and the 16 px gutter at the top of
- * the window.
- */
-const POPOVER_CHROME = 44;
 
 /**
  * A chosen "Vid behov" or "Alltid" takes the accent; a chosen "Av" keeps the
@@ -269,49 +259,24 @@ function OwnSkills({
   );
 }
 
-/**
- * A ref for the panel that keeps it within the room above its trigger.
- * Astryx caps a popover to the window, not to that room, so where the
- * composer sits mid-page (the start state) a long list grew over the pill
- * and the composer; the list scrolls inside instead, and the header and
- * links stay in view.
- */
-function useFitAbove(anchor?: RefObject<HTMLElement | null>) {
-  const panel = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
-    const element = panel.current;
-    const trigger = anchor?.current;
-    if (!element || !trigger) return;
-    const fit = () => {
-      const room = trigger.getBoundingClientRect().top - POPOVER_CHROME;
-      element.style.maxHeight = `${Math.max(0, room)}px`;
-    };
-    fit();
-    window.addEventListener("resize", fit);
-    window.addEventListener("scroll", fit, true);
-    return () => {
-      window.removeEventListener("resize", fit);
-      window.removeEventListener("scroll", fit, true);
-    };
-  }, [anchor]);
-  return panel;
-}
-
 /** What the popover and the bottom sheet show: header, both layers, links. */
 function SkillsPanel({
   skills,
   stacked,
   search,
   anchor,
-  onClose
+  onClose,
+  tabbed = false
 }: {
   skills: PersonalChatSkills;
   stacked: boolean;
   search: SearchField;
   /** The popover's trigger: the panel fits in the room above it. */
-  anchor?: RefObject<HTMLElement | null>;
+  anchor?: HTMLElement | null;
   /** The sheet's visible close button; the popover has its own. */
   onClose?: () => void;
+  /** Under a tab that already names the panel: no title, padding or close button here. */
+  tabbed?: boolean;
 }) {
   const t = useTranslations();
   const { routeId } = useSpace();
@@ -320,10 +285,13 @@ function SkillsPanel({
   const panel = useFitAbove(anchor);
 
   return (
-    <div ref={panel} className={cn("flex min-h-0 flex-col gap-3", stacked ? "p-4" : "p-1")}>
+    <div
+      ref={panel}
+      className={cn("flex min-h-0 flex-col gap-3", tabbed ? "flex-auto" : stacked ? "p-4" : "p-1")}
+    >
       <div className="flex shrink-0 items-start gap-3">
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <p className="text-sm font-semibold">{t("personal_chat_skills_button")}</p>
+          {!tabbed && <p className="text-sm font-semibold">{t("personal_chat_skills_button")}</p>}
           <p className="text-ax-text-secondary text-xs">{t("personal_chat_skills_scope")}</p>
           {running && (
             <p className="text-ax-text-secondary text-xs tabular-nums">
@@ -404,19 +372,106 @@ function SkillsPanel({
   );
 }
 
+type PanelTab = "tools" | "skills";
+
 /**
- * The personal chat composer's Skills pill, beside Verktyg: the count of
- * Skills that run, and a popover (a bottom sheet on phones) with the
- * organisation's Skills, read-only, and the person's own with
- * "Av / Vid behov / Alltid". Shown to people who may choose their own
- * Skills, and to anyone whose chat has Skills in it.
+ * Verktyg and Skills as two tabs of one panel: the tabs name the panels, so
+ * neither panel repeats its title, and the sheet's close button sits beside
+ * them. Only the tab in view is mounted.
  */
-export function ChatSkills() {
+function ToolsAndSkills({
+  tools,
+  skills,
+  search,
+  tab,
+  onTabChange,
+  surface
+}: {
+  tools: ChatToolsProps;
+  skills: PersonalChatSkills;
+  search: SearchField;
+  tab: PanelTab;
+  onTabChange: (tab: PanelTab) => void;
+  surface: ComposerPanelSurface;
+}) {
+  const t = useTranslations();
+  const { stacked, anchor, onClose } = surface;
+  const panel = useFitAbove(anchor);
+  const toolsPanelId = useId();
+  const skillsPanelId = useId();
+  const panelClass = "flex min-h-0 flex-auto flex-col";
+
+  return (
+    <div ref={panel} className={cn("flex min-h-0 flex-col gap-3", stacked ? "p-4" : "p-1")}>
+      <div className="flex shrink-0 items-center justify-between gap-3">
+        <TabList
+          value={tab}
+          onChange={(value) => onTabChange(value === "skills" ? "skills" : "tools")}
+          role="tablist"
+          size="sm"
+          aria-label={t("chat_tools")}
+        >
+          <Tab
+            value="tools"
+            label={t("chat_tools")}
+            panelId={toolsPanelId}
+            endContent={<span className={COMPOSER_COUNT_CLASS}>{toolCounts(tools).active}</span>}
+          />
+          <Tab
+            value="skills"
+            label={t("personal_chat_skills_button")}
+            panelId={skillsPanelId}
+            endContent={
+              skills.running && <span className={COMPOSER_COUNT_CLASS}>{skills.running.total}</span>
+            }
+          />
+        </TabList>
+        {onClose && (
+          <IconButton
+            label={t("close")}
+            icon={<X aria-hidden="true" />}
+            variant="ghost"
+            onClick={onClose}
+          />
+        )}
+      </div>
+      <div
+        id={toolsPanelId}
+        role="tabpanel"
+        aria-label={t("chat_tools")}
+        hidden={tab !== "tools"}
+        className={panelClass}
+      >
+        {tab === "tools" && <ToolsPanel {...tools} stacked={stacked} tabbed />}
+      </div>
+      <div
+        id={skillsPanelId}
+        role="tabpanel"
+        aria-label={t("personal_chat_skills_button")}
+        hidden={tab !== "skills"}
+        className={panelClass}
+      >
+        {tab === "skills" && (
+          <SkillsPanel skills={skills} stacked={stacked} search={search} tabbed />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The personal chat composer's pill for Verktyg and Skills: one control, so
+ * the footer holds on a phone. It carries the count of tools that are on and
+ * Skills that run, and opens a popover (a bottom sheet on phones) with a tab
+ * for each: the tools' switches, and the organisation's Skills, read-only,
+ * with the person's own on "Av / Vid behov / Alltid". A chat with only one of
+ * the two shows that one under its own name; Skills are shown to people who
+ * may choose their own, and to anyone whose chat has Skills in it.
+ */
+export function ChatSkills({ tools }: { tools?: ChatToolsProps } = {}) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
-  const pillRef = useRef<HTMLButtonElement>(null);
-  // The composer's toolbar goes icon-only below 40rem (max-sm); so does this.
-  const wide = useMediaQuery("(min-width: 40rem)");
+  const [tab, setTab] = useState<PanelTab>("tools");
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   useEffect(() => {
@@ -424,7 +479,9 @@ export function ChatSkills() {
     return () => window.clearTimeout(timer);
   }, [searchInput]);
   const skills = usePersonalChatSkills({ withLibrary: open, search });
-  if (!skills.visible) return null;
+  const toolCount = tools ? toolCounts(tools) : null;
+  const withTools = tools && toolCount && toolCount.total > 0 ? { tools, count: toolCount } : null;
+  if (!skills.visible) return withTools ? <ChatTools {...withTools.tools} /> : null;
 
   // Refusals and the search belong to the visit that made them: closing forgets them.
   const changeOpen = (next: boolean) => {
@@ -436,69 +493,67 @@ export function ChatSkills() {
     setOpen(next);
   };
   const searchField = { value: searchInput, onChange: setSearchInput, query: search };
-
-  const label = skills.running
+  const skillsName = skills.running
     ? t("chat_skills_named", { count: skills.running.total })
     : t("personal_chat_skills_button");
-  const pill = (props: { onClick?: () => void }) => (
-    <button
-      ref={pillRef}
-      type="button"
-      aria-haspopup="dialog"
-      aria-expanded={open}
-      aria-label={label}
-      className={COMPOSER_PILL_CLASS}
-      {...props}
-    >
-      <BookOpenCheck aria-hidden="true" className="size-[15px]" />
-      <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>{" "}
-      {skills.running && (
-        <span aria-hidden="true" className={COMPOSER_PILL_COUNT_CLASS}>
-          {skills.running.total}
-        </span>
-      )}
-    </button>
-  );
+  // A search field brings up the keyboard: only a tall sheet makes room for it.
+  const sheetHeight = skills.searchable ? "tall" : "80dvh";
 
-  if (wide) {
+  if (!withTools) {
     return (
-      <Popover
-        isOpen={open}
-        onOpenChange={changeOpen}
-        placement="above"
-        alignment="start"
-        width={480}
+      <ComposerPanel
+        icon={BookOpenCheck}
+        text={t("personal_chat_skills_button")}
+        name={skillsName}
+        count={skills.running?.total}
         label={t("personal_chat_skills_button")}
-        closeButtonLabel={t("close")}
-        // Mounted only while open, so a closed popover holds no radios.
-        content={
-          open ? (
-            <SkillsPanel skills={skills} stacked={false} search={searchField} anchor={pillRef} />
-          ) : null
-        }
+        open={open}
+        onOpenChange={changeOpen}
+        width={480}
+        sheetHeight={sheetHeight}
       >
-        {pill({})}
-      </Popover>
+        {({ stacked, anchor, onClose }) => (
+          <SkillsPanel
+            skills={skills}
+            stacked={stacked}
+            search={searchField}
+            anchor={anchor}
+            onClose={onClose}
+          />
+        )}
+      </ComposerPanel>
     );
   }
+
+  const running = skills.running?.total ?? 0;
+  const active = withTools.count.active + running;
   return (
-    <>
-      {pill({ onClick: () => setOpen(true) })}
-      <BottomSheet
-        isOpen={open}
-        onOpenChange={changeOpen}
-        label={t("personal_chat_skills_button")}
-        // A search field brings up the keyboard: only a tall sheet makes room for it.
-        height={skills.searchable ? "tall" : "80dvh"}
-        padding={0}
-      >
-        <SkillsPanel
+    <ComposerPanel
+      icon={Plug}
+      text={t("chat_tools")}
+      // The pill shows the two counts as one; its name says which is which.
+      name={t("chat_tools_and_skills_named", {
+        count: active,
+        tools: withTools.count.active,
+        skills: running
+      })}
+      count={active}
+      label={t("chat_tools")}
+      open={open}
+      onOpenChange={changeOpen}
+      width={480}
+      sheetHeight={sheetHeight}
+    >
+      {(surface) => (
+        <ToolsAndSkills
+          tools={withTools.tools}
           skills={skills}
-          stacked
           search={searchField}
-          onClose={() => changeOpen(false)}
+          tab={tab}
+          onTabChange={setTab}
+          surface={surface}
         />
-      </BottomSheet>
-    </>
+      )}
+    </ComposerPanel>
   );
 }
