@@ -19,8 +19,8 @@ afterEach(() => vi.clearAllMocks());
 
 describe("ApiKeyPolicyPanel", () => {
   it.each([
-    ["sv", ["kl. 01:00 UTC", "tjänstenycklar", "längsta uppehåll"]],
-    ["en", ["01:00 UTC", "service keys", "longest pause"]]
+    ["sv", ["går ut vid nattens underhåll kl\\. 01:00 UTC", "tjänstenycklar", "längsta uppehåll"]],
+    ["en", ["expire in the nightly maintenance at 01:00 UTC", "service keys", "longest pause"]]
   ] as const)(
     "tells the admin in %s when unused keys expire and that service keys count",
     async (locale, phrases) => {

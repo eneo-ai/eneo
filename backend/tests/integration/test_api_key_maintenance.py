@@ -1,7 +1,9 @@
 """The nightly API key maintenance, run against a real database.
 
-Every check reads committed rows in a new session and signs in with the key,
-because sign-in judges a key by its dates, never by the stored ``state``.
+Every check reads committed rows in a new session. The expiry and race
+tests also sign in with the key, because sign-in judges a key by its dates,
+never by the stored ``state``; the isolation and limit tests use keys that
+cannot sign in and read the stored state.
 """
 
 from __future__ import annotations
@@ -117,18 +119,21 @@ async def insert_key(
 
 
 async def insert_due_keys(db_container, tenant_id: UUID, count: int) -> list[UUID]:
-    """``count`` keys past their end date, oldest first."""
+    """``count`` keys past their end date, returned oldest first. Each is
+    inserted older than the one before, so the job's order cannot come from
+    the order of insertion."""
     start = datetime.now(timezone.utc) - timedelta(days=30)
-    return [
+    newest_first = [
         await insert_key(
             db_container,
             tenant_id,
             name=f"due-{index}",
-            created_at=start + timedelta(minutes=index),
+            created_at=start - timedelta(minutes=index),
             expires_at=start + timedelta(days=1),
         )
         for index in range(count)
     ]
+    return newest_first[::-1]
 
 
 async def add_tenant(db_container) -> UUID:
@@ -243,12 +248,21 @@ async def test_an_unused_key_with_a_future_end_date_stops_working(
     past = datetime.now(timezone.utc) - timedelta(days=1)
     past_id, _ = await create_key(client, token, name="past", expires_at=past)
     await set_unused_days(db_container, admin_user.tenant_id, 7)
+    no_policy_tenant = await add_tenant(db_container)
+    unused_without_policy = await insert_key(
+        db_container,
+        no_policy_tenant,
+        name="unused-without-policy",
+        created_at=datetime.now(timezone.utc) - timedelta(days=30),
+    )
     assert await sign_in_status(client, unused_secret) == 200
     await make_unused(db_container, unused_id, days=10)
 
     result = await run_maintenance(db_container)
 
     assert result["auto_expired"] == 1
+    # Without a policy, an unused key stays active.
+    assert (await read_key(db_container, unused_without_policy)).state == "active"
     assert result["expired"] == 1
     unused = await read_key(db_container, unused_id)
     assert unused.state == "expired"
@@ -341,6 +355,29 @@ async def test_a_key_revoked_after_selection_keeps_its_revocation(
         db_container, key_id
     )
     assert await sign_in_status(client, secret) == 401
+
+
+async def test_a_key_extended_after_selection_keeps_its_new_end_date(
+    client, db_container, token, admin_user, monkeypatch
+):
+    """Still unused after the extension, so only the check that the end date
+    is the one the job selected keeps the job from ending it."""
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    key_id, secret = await create_key(client, token, name="extended", expires_at=future)
+    await make_unused(db_container, key_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    later = datetime.now(timezone.utc) + timedelta(days=60)
+
+    after_selection(monkeypatch, key_id, _extend(db_container, key_id, later))
+    result = await run_maintenance(db_container)
+
+    assert result["auto_expired"] == 0
+    key = await read_key(db_container, key_id)
+    assert key.expires_at == later
+    assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
+        db_container, key_id
+    )
+    assert await sign_in_status(client, secret) == 200
 
 
 async def test_a_new_grace_period_after_selection_keeps_the_old_key_working(
@@ -551,15 +588,21 @@ async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
 ):
     first, second = await insert_due_keys(db_container, admin_user.tenant_id, 2)
     original = ApiKeysV2Repository.expire_matching
+    update_failed = False
 
     async def drop_connection_at_second(self, condition, *, key, **kwargs):
+        nonlocal update_failed
         if key.id == second:
             pid = await self.session.scalar(sa.text("SELECT pg_backend_pid()"))
             async with db_container() as other:
                 await other.session().execute(
                     sa.text("SELECT pg_terminate_backend(:pid)"), {"pid": pid}
                 )
-        return await original(self, condition, key=key, **kwargs)
+        try:
+            return await original(self, condition, key=key, **kwargs)
+        except DBAPIError:
+            update_failed = True
+            raise
 
     monkeypatch.setattr(
         ApiKeysV2Repository, "expire_matching", drop_connection_at_second
@@ -570,6 +613,7 @@ async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
 
     # The run stops at the first statement on the dead connection instead of
     # reporting it as one key's error and going on.
+    assert update_failed, "the error must come from the job's update, not its commit"
     assert isinstance(failure.value, DBAPIError)
     assert failure.value.connection_invalidated
     assert await expired_ids(db_container, [first, second]) == set()

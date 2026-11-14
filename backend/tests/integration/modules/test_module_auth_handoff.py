@@ -593,9 +593,15 @@ async def exchange_ticket(client, *, token: str, module_key: str, secret: str) -
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "last_used_seconds_ago",
-    # Older than the one-day policy below, so the key would be selected.
-    # 870 s stays inside the 900 s write interval with room for the requests.
-    [2 * 24 * 3600, pytest.param(870, id="inside-the-write-interval")],
+    [
+        # Older than the one-day policy below, so without the exchange the
+        # key would be selected.
+        pytest.param(2 * 24 * 3600, id="older-than-the-policy"),
+        # Inside the policy, so never a candidate: this case only shows that
+        # the last use is not written again inside the 900 s interval. 870 s
+        # leaves room for the requests.
+        pytest.param(870, id="inside-the-write-interval"),
+    ],
 )
 async def test_a_module_signing_in_within_the_policy_keeps_its_service_key(
     client,
