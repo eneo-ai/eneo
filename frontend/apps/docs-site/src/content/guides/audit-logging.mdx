@@ -53,7 +53,7 @@ Configurable audit logging can be turned on or off globally in the admin UI.
 - Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
 - The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
-When disabled, no new audit logs are created, except the actions that are always logged: the [sign-in identity actions](#sign-in-identity-actions) and the required Flow safety events described above, which still record the protected action or deny it if the record cannot be persisted.
+When disabled, no new audit logs are created, except the actions that are always logged, such as the [sign-in identity actions](#sign-in-identity-actions), the records each [data retention](/guides/data-retention) run writes, and the required Flow safety events described above, which still record the protected action or deny it if the record cannot be persisted.
 
 ## Configure what gets logged
 
