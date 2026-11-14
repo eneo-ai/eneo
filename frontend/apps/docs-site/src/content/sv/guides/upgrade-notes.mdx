@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@2acbcc03da1a
+translationSource: guides/upgrade-notes.mdx@30d0ad0195df
 ---
 
 import { Callout } from "nextra/components";
@@ -383,15 +383,15 @@ Backend och worker vägrar starta om de inte kan läsa `s3:GetBucketVersioning`,
 
 ### `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` är föråldrad [#inline-maximum-deprecated]
 
-Uppladdningsgränserna ställs in i **Admin > File storage**. En fil som lagras i PostgreSQL får nu vara så stor som PostgreSQL rymmer och kan säkerhetskopiera per fil, strax under 512 MiB: [lagringsgränsen](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) (på engelska). Ett värde som fortfarande är satt fungerar som förut upp till den kapaciteten, och starten loggar en varning. Bara ett värde över kapaciteten är en bakåtinkompatibel ändring.
+Uppladdningsgränserna ställs in i **Admin > Fillagring**. En fil som lagras i PostgreSQL får nu vara så stor som PostgreSQL rymmer och kan säkerhetskopiera per fil, strax under 512 MiB: [lagringsgränsen](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) (på engelska). Ett värde som fortfarande är satt fungerar som förut upp till den kapaciteten, och starten loggar en varning. Bara ett värde över kapaciteten är en bakåtinkompatibel ändring.
 
 - **Satt till `10485760` (10 MiB), som i den gamla referensmallen:** uppladdningar över 10 MiB stoppas med `413` som förut.
-- **Inte satt:** gränsen går från 200 MiB till kapaciteten. Det ändrar uppladdningar bara där en administratör har satt policyn över 200 MiB, och flyttar från objektlagring till PostgreSQL tar emot större filer.
-- **Satt över kapaciteten (bakåtinkompatibelt):** starten går, gränsen kapas till kapaciteten och varningen säger det. Uppladdningar mellan kapaciteten och ert värde stoppas nu med `413`, och flyttar av sådana filer från objektlagring till PostgreSQL misslyckas. Sådana filer gick att lagra förut, men `pg_dump` kunde inte säkerhetskopiera dem. **Gör:** behåll så stora filer i objektlagring (välj det i **Admin > File storage**), eller godta den lägre gränsen.
+- **Inte satt:** uppladdningar kan gå upp till kapaciteten i stället för 200 MiB. Det ändrar uppladdningar bara där en administratör har satt policyn över 200 MiB. Flyttar från objektlagring till PostgreSQL, det löpande övertagandet av befintliga filer och ikoner (adoption) och dess [förkontroll](/guides/file-icon-storage-upgrade#run-preflight-while-eneo-21-is-running) (på engelska, `preflight`) tar också poster upp till kapaciteten. Räknar förkontrollen poster i `extra_large` (över 200 MiB): mät först PostgreSQL-minnet med en sådan post.
+- **Satt över kapaciteten (bakåtinkompatibelt):** starten går, gränsen kapas till kapaciteten och varningen säger det. Uppladdningar mellan kapaciteten och ert värde stoppas nu med `413`, och flyttar av sådana filer från objektlagring till PostgreSQL misslyckas. Sådana filer gick att lagra förut, men `pg_dump` kunde inte säkerhetskopiera dem. **Gör:** behåll så stora filer i objektlagring (välj det i **Admin > Fillagring**), eller godta den lägre gränsen.
 
 **Gör:** ta bort raden ur `env_backend.env` och skapa om backend och worker; sedan gäller policyn.
 
-**Kontroll:** starten loggar ingen varning om variabeln, och **Admin > File storage** visar ingen lagringsgräns under policyn.
+**Kontroll:** starten loggar ingen varning om variabeln, och **Admin > Fillagring** visar en lagringsgräns under policyn bara där policyn är över kapaciteten.
 
 **Återställning:** den tidigare versionen läser variabeln igen och använder 200 MiB utan den; filer som lagrats under tiden går fortfarande att läsa.
 

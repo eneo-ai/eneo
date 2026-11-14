@@ -343,7 +343,7 @@ to protect that earlier parsing boundary.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants may be larger and are bounded by the selected
-backend's operator ceiling instead of a second business limit.
+backend's storage limit instead of a second business limit.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -978,7 +978,11 @@ prevents minute jobs from overlapping and multiplying the configured byte and
 memory bounds. Memory is bounded by one item rather than the campaign or batch
 byte total. A separate five-item benchmark with 200 MiB items kept worker RSS
 near 140 MiB but briefly raised PostgreSQL to about 620 MiB while it hashed and
-copied one large `bytea`. Treat large PostgreSQL-inline items as a database
+copied one large `bytea`. One upload of a 511 MiB file at a time in local
+Docker, with `docker stats` sampled every 1–2 seconds so shorter peaks may be
+missing, raised the backend about 1 GiB and PostgreSQL about 1.8 GiB above
+idle, and PostgreSQL used about 3.7 GiB while `pg_restore` restored that file;
+concurrent uploads add up. Treat large PostgreSQL-inline items as a database
 memory concern and measure the exact peak on the deployment's PostgreSQL
 version before allowing larger files.
 After correcting a halted campaign's stated cause, increase

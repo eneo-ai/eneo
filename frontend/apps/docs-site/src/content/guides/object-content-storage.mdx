@@ -315,13 +315,13 @@ the previous active version remains available and no original is retained.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants can be larger; Eneo bounds those internal variants by
-the selected backend's operator ceiling instead of rejecting an otherwise valid
+the selected backend's storage limit instead of rejecting an otherwise valid
 upload against a second business limit.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the storage limit can still make the
 effective limit lower.
 
 ## Set up your choice
