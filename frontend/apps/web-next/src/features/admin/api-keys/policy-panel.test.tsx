@@ -92,3 +92,17 @@ it("switches 'require tenant-approved origins' and sends only that", async () =>
   );
   await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 });
+
+it("tells the admin when unused keys expire and that service keys count", async () => {
+  const { dialog } = show();
+  const days = await within(dialog).findByRole("spinbutton", {
+    name: "Automatiskt förfalla oanvända nycklar"
+  });
+  const [descriptionId] = (days.getAttribute("aria-describedby") ?? "").split(" ");
+  const description = document.getElementById(descriptionId ?? "")?.textContent ?? "";
+
+  expect(description).toContain("går ut vid nattens underhåll kl. 01:00 UTC");
+  expect(description).toContain("tjänstenycklar, till exempel modulernas");
+  expect(description).toContain("fler dagar än sitt längsta uppehåll");
+  await expectNoAxeViolations(dialog);
+});

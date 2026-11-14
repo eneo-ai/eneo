@@ -3076,7 +3076,7 @@
   "api_keys_admin_policy_max_expiration": "Maximum expiration days",
   "api_keys_admin_policy_max_expiration_desc": "Maximum allowed expiration period for new keys. Leave empty for no limit.",
   "api_keys_admin_policy_auto_expire": "Auto-expire unused keys",
-  "api_keys_admin_policy_auto_expire_desc": "Automatically revoke keys that haven't been used for this many days",
+  "api_keys_admin_policy_auto_expire_desc": "Keys not used for this many days expire in the nightly maintenance at 01:00 UTC. This includes service keys, such as the ones modules use, so a service used only on some days needs more days than its longest pause.",
   "api_keys_admin_policy_max_rate_limit": "Maximum rate limit override",
   "api_keys_admin_policy_max_rate_limit_desc": "Upper bound for per-key rate limits. Users cannot set higher limits.",
   "api_keys_admin_policy_rotation_grace": "Rotation grace period",

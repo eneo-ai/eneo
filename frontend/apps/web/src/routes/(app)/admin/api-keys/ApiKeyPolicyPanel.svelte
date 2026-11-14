@@ -274,7 +274,9 @@
               </div>
               <div>
                 <h4 class="text-default text-sm font-semibold">{item.title}</h4>
-                <p class="text-muted mt-0.5 max-w-md text-xs">{item.description}</p>
+                <p id={`policy-${item.id}-description`} class="text-muted mt-0.5 max-w-md text-xs">
+                  {item.description}
+                </p>
               </div>
             </div>
 
@@ -285,18 +287,21 @@
                     checked={requireExpiration}
                     onCheckedChange={(next) => (requireExpiration = next)}
                     aria-label={item.title}
+                    aria-describedby={`policy-${item.id}-description`}
                   />
                 {:else if item.id === "revocationCascadeEnabled"}
                   <Switch
                     checked={revocationCascadeEnabled}
                     onCheckedChange={(next) => (revocationCascadeEnabled = next)}
                     aria-label={item.title}
+                    aria-describedby={`policy-${item.id}-description`}
                   />
                 {:else if item.id === "requireTenantAllowedOrigin"}
                   <Switch
                     checked={requireTenantAllowedOrigin}
                     onCheckedChange={(next) => (requireTenantAllowedOrigin = next)}
                     aria-label={item.title}
+                    aria-describedby={`policy-${item.id}-description`}
                   />
                 {/if}
               {:else if item.type === "number"}
@@ -308,6 +313,7 @@
                       </Field.Label>
                       <Input
                         id={`policy-${item.id}`}
+                        aria-describedby={`policy-${item.id}-description`}
                         type="number"
                         min="1"
                         bind:value={maxExpirationDays}
@@ -322,6 +328,7 @@
                       </Field.Label>
                       <Input
                         id={`policy-${item.id}`}
+                        aria-describedby={`policy-${item.id}-description`}
                         type="number"
                         min="1"
                         bind:value={autoExpireUnusedDays}
@@ -336,6 +343,7 @@
                       </Field.Label>
                       <Input
                         id={`policy-${item.id}`}
+                        aria-describedby={`policy-${item.id}-description`}
                         type="number"
                         min="1"
                         bind:value={maxRateLimitOverride}
@@ -350,6 +358,7 @@
                       </Field.Label>
                       <Input
                         id={`policy-${item.id}`}
+                        aria-describedby={`policy-${item.id}-description`}
                         type="number"
                         min="0"
                         bind:value={rotationGraceHours}
@@ -364,6 +373,7 @@
                       </Field.Label>
                       <Input
                         id={`policy-${item.id}`}
+                        aria-describedby={`policy-${item.id}-description`}
                         type="number"
                         min="1"
                         bind:value={maxDelegationDepth}

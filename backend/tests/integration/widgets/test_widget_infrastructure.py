@@ -37,6 +37,7 @@ from eneo.widgets.domain.widget_template import WidgetTemplate
 from eneo.widgets.infrastructure.widget_overview_repo_impl import WidgetOverviewRepoImpl
 from eneo.widgets.infrastructure.widget_repo_impl import WidgetRepoImpl
 from eneo.widgets.infrastructure.widget_usage_repo_impl import WidgetUsageRepoImpl
+from tests.integration.fixtures.locks import wait_until_blocked
 from tests.integration.flows.statement_capture_support import (
     capture_queries,
     without_copy_source_probe,
@@ -275,33 +276,6 @@ async def test_stale_writer_cannot_undo_pause_or_revive_tokens(active_widget):
     assert saved.name != "Stale edit"
 
 
-async def _wait_until_blocked(session, racer: "asyncio.Task") -> None:
-    """Return once the racer waits for a row lock held by ``session``'s
-    transaction, so that transaction is released only after the racer has
-    lined up behind it. (The racer's query text is not visible here: asyncpg
-    reports the statement it is blocked in as the transaction's BEGIN.)"""
-    for _ in range(200):
-        if racer.done():
-            raise AssertionError(
-                f"racer finished before the lock was released: {racer.exception()!r}"
-            )
-        # pg_stat_activity is a per-transaction snapshot: without clearing
-        # it a racer that connected after the first poll is never seen.
-        await session.execute(sa.text("SELECT pg_stat_clear_snapshot()"))
-        blocked = await session.scalar(
-            sa.text(
-                "SELECT count(*) FROM pg_stat_activity"
-                " WHERE datname = current_database()"
-                " AND pid <> pg_backend_pid()"
-                " AND wait_event_type = 'Lock'"
-            )
-        )
-        if blocked:
-            return
-        await asyncio.sleep(0.05)
-    raise AssertionError(f"the racer never waited for the lock: {racer!r}")
-
-
 async def _pause_via_service(db_container, widget_id: UUID) -> Widget:
     async with db_container() as container:
         return (await container.widget_service().pause_widget(widget_id)).widget
@@ -329,7 +303,7 @@ async def test_pause_revokes_tokens_minted_after_a_concurrent_rules_change(
         assert edited.token_generation == active_widget["token_generation"] + 1
         visitor_token, _ = tokens.mint(edited, uuid4())
         pause = asyncio.create_task(_pause_via_service(db_container, widget_id))
-        await _wait_until_blocked(editor.session(), pause)
+        await wait_until_blocked(editor.session(), pause)
         assert not pause.done()
     paused = await pause
     assert paused.status == WidgetStatus.PAUSED
@@ -347,7 +321,7 @@ async def test_pause_cannot_overwrite_a_committed_archive(db_container, active_w
     async with db_container() as admin:
         archived = (await admin.widget_service().archive_widget(widget_id)).widget
         pause = asyncio.create_task(_pause_via_service(db_container, widget_id))
-        await _wait_until_blocked(admin.session(), pause)
+        await wait_until_blocked(admin.session(), pause)
         assert not pause.done()
     # The pause sees the archive once it gets the row and refuses it.
     with pytest.raises(BadRequestException):
@@ -404,7 +378,7 @@ async def test_draft_save_cannot_roll_back_a_concurrent_publication(db_container
             await publisher.widget_template_service().publish_template(template.id)
         ).template
         save = asyncio.create_task(save_draft())
-        await _wait_until_blocked(publisher.session(), save)
+        await wait_until_blocked(publisher.session(), save)
         assert not save.done()
     saved = await save
     assert saved.description == "Färger för kommunens sajter"
@@ -440,7 +414,7 @@ async def test_concurrent_default_templates_leave_exactly_one_default(
             first.id, {"is_default": True}
         )
         racer = asyncio.create_task(make_default())
-        await _wait_until_blocked(holder.session(), racer)
+        await wait_until_blocked(holder.session(), racer)
         assert not racer.done()
     # The later one wins instead of colliding with the default committed
     # meanwhile on the one-default-per-tenant index.
@@ -488,7 +462,7 @@ async def test_following_a_template_during_its_publication_takes_that_release(
         )
         release = (await service.publish_template(template_id)).template.published
         follower = asyncio.create_task(follow())
-        await _wait_until_blocked(publisher.session(), follower)
+        await wait_until_blocked(publisher.session(), follower)
         assert not follower.done()
     widget = await follower
     assert release is not None
@@ -680,7 +654,7 @@ async def test_creating_a_widget_during_an_assistant_transfer_does_not_deadlock(
     async with db_container() as mover:
         await mover.space_repo().lock(space_id)
         racer = asyncio.create_task(create())
-        await _wait_until_blocked(mover.session(), racer)
+        await wait_until_blocked(mover.session(), racer)
         # The transfer takes the assistant next; the creation must not hold it yet.
         await mover.session().execute(
             sa.select(Assistants.id).where(Assistants.id == target_id).with_for_update()
@@ -725,7 +699,7 @@ async def test_reapplying_a_release_during_its_publication_does_not_deadlock(
         repo = publisher.widget_template_repo()
         assert await repo.get(template_id, for_update=True) is not None
         racer = asyncio.create_task(reapply())
-        await _wait_until_blocked(publisher.session(), racer)
+        await wait_until_blocked(publisher.session(), racer)
         service = publisher.widget_template_service()
         await service.update_template(
             template_id,
