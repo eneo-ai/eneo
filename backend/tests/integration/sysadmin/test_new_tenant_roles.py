@@ -1,5 +1,5 @@
-"""A new organisation gets its predefined roles from the template: the Owner
-manages retention, and no role uses Flows until an administrator grants it.
+"""A new organisation gets its predefined roles from the template: no role uses
+Flows or manages retention until an administrator grants it.
 
 - POST /sysadmin/tenants/
 """
@@ -15,11 +15,12 @@ from eneo.database.tables.roles_table import Roles
 
 # The older "flows" value grants all four flow permissions.
 FLOW_PERMISSIONS = {"flows", "flows_view", "flows_run", "flows_manage", "flows_trace"}
+RETENTION_PERMISSIONS = {"retention_manage", "retention_holds"}
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_a_new_organisation_has_no_flow_permission_and_an_owner_for_retention(
+async def test_a_new_organisation_has_no_flow_or_retention_permission(
     client: AsyncClient, super_admin_token: str
 ):
     tenant = await client.post(
@@ -42,4 +43,4 @@ async def test_a_new_organisation_has_no_flow_permission_and_an_owner_for_retent
     assert set(roles) == {"User", "AI Configurator", "Owner"}
     for source, permissions in roles.items():
         assert not permissions & FLOW_PERMISSIONS, source
-    assert {"retention_manage", "retention_holds"} <= roles["Owner"]
+        assert not permissions & RETENTION_PERMISSIONS, source

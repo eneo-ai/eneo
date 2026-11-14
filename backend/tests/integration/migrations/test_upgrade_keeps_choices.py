@@ -2,9 +2,9 @@
 
 The database starts at develop's newest revision with the predefined roles, two
 custom roles and the upload policy an installation has before the Flows
-revisions run. After ``upgrade head``: Flows stay off, no role holds a flow
-permission, only the predefined Owner role holds the retention permissions, and
-the upload limits and their revision are as they were. The claims are what the
+revisions run. After ``upgrade head``: Flows stay off, no role holds a flow or
+retention permission (the Owner included), and the upload limits and their
+revision are as they were. The claims are what the
 chain promises, not equality with one revision, so a later develop revision may
 add its own permissions without turning this red.
 
@@ -153,17 +153,14 @@ def test_no_role_gains_a_flow_permission(upgraded):
     assert held == {name: [] for name in after["roles"]}
 
 
-def test_only_the_owner_role_gains_the_retention_permissions(upgraded):
+def test_no_role_gains_a_retention_permission(upgraded):
     _, after = upgraded
     held = {
         name: sorted(permissions & RETENTION_PERMISSIONS)
         for name, (_, permissions) in after["roles"].items()
     }
-    owners = {name for name, (source, _) in after["roles"].items() if source == "Owner"}
-    assert held == {
-        name: sorted(RETENTION_PERMISSIONS) if name in owners else []
-        for name in after["roles"]
-    }
+    assert "Owner" in held
+    assert held == {name: [] for name in after["roles"]}
 
 
 def test_upload_policy_and_its_revision_are_unchanged(upgraded):

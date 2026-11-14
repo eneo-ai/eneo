@@ -49,8 +49,6 @@ roles:
       - integrations
       - shared_spaces
       - api_keys
-      - retention_manage
-      - retention_holds
       - assistant_debug
       - web_search
       - image_generation

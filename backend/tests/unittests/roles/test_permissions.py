@@ -313,6 +313,7 @@ _FLOW_PERMISSIONS = {
     Permission.FLOWS_MANAGE,
     Permission.FLOWS_TRACE,
 }
+_RETENTION_PERMISSIONS = {Permission.RETENTION_MANAGE, Permission.RETENTION_HOLDS}
 
 
 class TestRoleTemplates:
@@ -327,10 +328,14 @@ class TestRoleTemplates:
             for t in load_predefined_roles_from_config()
         }
 
-    def test_owner_has_all_permissions_but_flows(self, templates):
+    def test_owner_has_all_permissions_but_flows_and_retention(self, templates):
         owner = templates["Owner"]
         for permission in Permission:
-            if permission in {Permission.EDITOR, *_FLOW_PERMISSIONS}:
+            if permission in {
+                Permission.EDITOR,
+                *_FLOW_PERMISSIONS,
+                *_RETENTION_PERMISSIONS,
+            }:
                 continue
             assert permission.value in owner, (
                 f"Owner template missing permission: {permission.value}"
@@ -341,6 +346,12 @@ class TestRoleTemplates:
         # grants the roles that should use them.
         for name, permissions in templates.items():
             assert not permissions & {p.value for p in _FLOW_PERMISSIONS}, name
+
+    def test_no_template_grants_a_retention_permission(self, templates):
+        # Who may change retention rules and lift legal holds is the
+        # organisation's choice; an administrator grants it in role editing.
+        for name, permissions in templates.items():
+            assert not permissions & {p.value for p in _RETENTION_PERMISSIONS}, name
 
     def test_user_has_basic_permissions(self, templates):
         user = templates["User"]
