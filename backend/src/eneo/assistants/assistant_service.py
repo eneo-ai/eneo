@@ -66,6 +66,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
+    build_handback_mcp_server,
     build_knowledge_mcp_server,
     resolve_internal_mcp_availability,
 )
@@ -3908,6 +3909,7 @@ class AssistantService:
         require_tool_approval: bool,
         num_chunks_override: int | None = None,
         prompt_addendum: str | None = None,
+        offer_handback: bool = False,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Run the existing assistant engine; the caller owns response persistence."""
         mcp_servers_override = prepared.mcp_servers_override
@@ -3999,6 +4001,17 @@ class AssistantService:
                 len(internal_mcp.referenced_file_ids),
                 len(internal_mcp.url_only_file_ids),
             )
+        # A turn from another system's conversation can be handed back to it;
+        # the surface serving the turn reads the call from the answer stream.
+        handback_mcp_server = None
+        if (
+            offer_handback
+            and prepared.effective_completion_model.supports_tool_calling
+            and self.user.active_widget is None
+        ):
+            handback_mcp_server = await build_handback_mcp_server(
+                token=mint_scoped_token(), tenant_id=self.user.tenant_id
+            )
         logger.info(
             "[RAG] assistant=%s knowledge_mode=%s "
             "collections=%d websites=%d integrations=%d "
@@ -4081,9 +4094,11 @@ class AssistantService:
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
             skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
-            internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
-            ),
+            internal_mcp_servers=[
+                server
+                for server in (files_mcp_server, handback_mcp_server)
+                if server is not None
+            ],
         )
 
         return response, datastore_result
@@ -4105,6 +4120,9 @@ class AssistantService:
         disabled_mcp_server_ids: list["UUID"] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
         context: Sequence[QuestionContext] = (),
+        # The turn arrives from another system's conversation, which the
+        # assistant may return (eneo.internal_mcp.handback).
+        offer_handback: bool = False,
     ):
         # Context sent with a question is stored, shown and sent to the model
         # as a quote that opens the question. The question as it was asked
@@ -4225,6 +4243,7 @@ class AssistantService:
                 require_tool_approval=require_tool_approval,
                 num_chunks_override=num_chunks_override,
                 prompt_addendum=prompt_addendum,
+                offer_handback=offer_handback,
             )
         except Exception:
             failed_snapshot = skill_runtime.snapshot()

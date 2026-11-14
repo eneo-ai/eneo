@@ -6,6 +6,8 @@ the sources the answer cites, then one closing event.
     {"type": "text", "delta": "..."}
     {"type": "source", "source": {"label": "...", "link": "https://..."}}
     {"type": "done", "session": "<uuid>", "link": "https://..."}
+    {"type": "handback", "reason": "declined", "session": "<uuid>"}
+    {"type": "handback", "reason": "completed", "session": "<uuid>", "link": "..."}
     {"type": "error", "code": "unavailable"}
 
 Eneo's answers carry citation tags (``<inref id="1a2b3c4d"/>``) where a source
@@ -13,6 +15,13 @@ is used. The calling system shows plain text, so the tags are taken out, and
 the sources they point at are listed once each, in the order cited. A source
 that was retrieved but never cited is not listed. Reasoning, tool activity and
 token counts stay in Eneo.
+
+An assistant can return the conversation to the calling system by calling the
+handback tool (``eneo.internal_mcp.handback``). The stream then ends with
+``handback`` instead of ``done``: ``declined`` when the question was not the
+assistant's to answer, after which nothing more of the answer is sent, or
+``completed`` after an answer the assistant considers the end of the matter.
+A handback carries the reason, the session and the link, and no text.
 """
 
 from __future__ import annotations
@@ -22,8 +31,13 @@ import re
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any, cast
 
-from eneo.ai_models.completion_models.completion_model import ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+)
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic, InfoBlobMetadata
+from eneo.internal_mcp.constants import HANDBACK_SERVER_NAME
+from eneo.internal_mcp.handback import HAND_BACK_TOOL_NAME, HANDBACK_REASONS
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -127,6 +141,26 @@ class _Sources:
         return [self._by_id[key] for key in found[:MAX_SOURCES]]
 
 
+def _handback_reason(completion: Completion) -> str | None:
+    """The reason the assistant gave if this chunk shows it handing back.
+
+    Only a call routed to Eneo's own handback server counts: an external
+    server an administrator named alike, or a call whose arguments are not
+    written yet, does not.
+    """
+    for tool in completion.tool_calls_metadata or []:
+        if (
+            tool.is_internal is True
+            and tool.server_name == HANDBACK_SERVER_NAME
+            and tool.tool_name == HAND_BACK_TOOL_NAME
+            and tool.approved is not False
+        ):
+            reason = (tool.arguments or {}).get("reason")
+            if isinstance(reason, str) and reason in HANDBACK_REASONS:
+                return reason
+    return None
+
+
 def _text_events(text: str) -> list[dict[str, Any]]:
     return [
         {"type": "text", "delta": text[start : start + MAX_TEXT_DELTA]}
@@ -140,7 +174,8 @@ async def answer_events(
     link: str | None,
     deadline_seconds: float = ANSWER_DEADLINE_SECONDS,
 ) -> AsyncIterator[dict[str, Any]]:
-    """The events of one streamed answer, ending in ``done`` or ``error``.
+    """The events of one streamed answer, ending in ``done``, ``handback`` or
+    ``error``.
 
     ``link`` opens the same conversation in Eneo's own interface; None when the
     installation has no public https address.
@@ -153,6 +188,7 @@ async def answer_events(
     text = CitedText()
     written = ""  # the tail of what was sent, to join later rounds to it
     between_rounds = False
+    handback: str | None = None
     try:
         async with asyncio.timeout(deadline_seconds):
             async for completion in response.answer:
@@ -163,6 +199,11 @@ async def answer_events(
                 if kind == ResponseType.TEXT:
                     for blob in completion.reference_chunks or []:
                         sources.add_blob(blob)
+                    if handback == "declined":
+                        # The other system answers instead: whatever the
+                        # model still writes stays in Eneo. The answer is
+                        # read to its end so the turn is stored whole.
+                        continue
                     visible = text.feed(completion.text or "")
                     # A later round of the model continues the same answer:
                     # keep it apart from what came before the tools ran.
@@ -183,6 +224,9 @@ async def answer_events(
                 if kind == ResponseType.TOOL_CALL:
                     for reference in completion.mcp_tool_references or []:
                         sources.add_reference(reference)
+                    # A decline is final; a later "completed" cannot undo it.
+                    if handback != "declined":
+                        handback = _handback_reason(completion) or handback
                 if kind in (ResponseType.TOOL_CALL, ResponseType.REASONING):
                     between_rounds = True
     except TimeoutError:
@@ -197,11 +241,17 @@ async def answer_events(
         yield {"type": "error", "code": "unknown"}
         return
 
-    for event in _text_events(text.flush()):
-        yield event
-    for source in sources.cited(text.cited):
-        yield {"type": "source", "source": source}
-    done: dict[str, Any] = {"type": "done", "session": str(response.session.id)}
+    if handback != "declined":
+        for event in _text_events(text.flush()):
+            yield event
+        for source in sources.cited(text.cited):
+            yield {"type": "source", "source": source}
+    closing: dict[str, Any] = (
+        {"type": "done"}
+        if handback is None
+        else {"type": "handback", "reason": handback}
+    )
+    closing["session"] = str(response.session.id)
     if link is not None:
-        done["link"] = link
-    yield done
+        closing["link"] = link
+    yield closing

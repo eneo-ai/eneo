@@ -9,7 +9,11 @@ from uuid import UUID
 
 import pytest
 
-from eneo.ai_models.completion_models.completion_model import Completion, ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+    ToolCallMetadata,
+)
 from eneo.connector_protocol.answer_events import CitedText, answer_events
 
 SESSION = UUID("11111111-1111-4111-8111-111111111111")
@@ -279,3 +283,131 @@ def test_cited_text_gives_back_a_tail_that_never_became_a_tag():
     assert text.feed('slut <inref id="1a') == "slut "
     assert text.flush() == '<inref id="1a'
     assert text.cited == []
+
+
+def _tool_call(
+    reason: object = "declined",
+    *,
+    server: str = "handback",
+    tool: str = "hand_back",
+    is_internal: bool | None = True,
+    arguments: dict[str, object] | None = None,
+) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[
+            ToolCallMetadata(
+                server_name=server,
+                tool_name=tool,
+                is_internal=is_internal,
+                arguments={"reason": reason} if arguments is None else arguments,
+            )
+        ],
+    )
+
+
+async def test_a_declined_question_ends_in_a_handback_without_an_answer():
+    events = await _events(
+        _response(_tool_call("declined"), _text("Det får du fråga någon annan om."))
+    )
+
+    # Nothing but the reason, the session and the link: no text for the caller.
+    assert events == [
+        {
+            "type": "handback",
+            "reason": "declined",
+            "session": str(SESSION),
+            "link": LINK,
+        }
+    ]
+
+
+async def test_what_was_written_before_a_decline_stays_and_nothing_follows_it():
+    rules = _Blob(RULES, "Semesterregler")
+
+    events = await _events(
+        _response(
+            _text('Det vet jag inte <inref id="1a2b3c4d"/>'),
+            _tool_call("declined"),
+            _text(" men så här gör du."),
+            blobs=(rules,),
+        ),
+        link=None,
+    )
+
+    assert _written(events) == "Det vet jag inte "
+    assert events[-1] == {
+        "type": "handback",
+        "reason": "declined",
+        "session": str(SESSION),
+    }
+    # No sources, and no tail of the text, after a decline.
+    assert [event["type"] for event in events] == ["text", "handback"]
+
+
+async def test_a_completed_answer_keeps_its_text_and_sources_before_the_handback():
+    rules = _Blob(RULES, "Semesterregler", "https://intra.example/semester")
+
+    events = await _events(
+        _response(
+            _text('Du har 25 dagar <inref id="1a2b3c4d"/>.'),
+            _tool_call("completed"),
+            _text(" Trevlig semester!"),
+            blobs=(rules,),
+        )
+    )
+
+    assert _written(events) == "Du har 25 dagar .\n\n Trevlig semester!"
+    assert events[-2:] == [
+        {
+            "type": "source",
+            "source": {
+                "label": "Semesterregler",
+                "link": "https://intra.example/semester",
+            },
+        },
+        {
+            "type": "handback",
+            "reason": "completed",
+            "session": str(SESSION),
+            "link": LINK,
+        },
+    ]
+
+
+async def test_a_decline_is_not_undone_by_a_later_call():
+    events = await _events(
+        _response(_tool_call("declined"), _tool_call("completed"), _text("Svar"))
+    )
+
+    assert [event["type"] for event in events] == ["handback"]
+    assert events[0]["reason"] == "declined"
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        pytest.param(
+            _tool_call(is_internal=False), id="an external server named alike"
+        ),
+        pytest.param(_tool_call(is_internal=None), id="a server not known as Eneo's"),
+        pytest.param(_tool_call(server="files"), id="another of Eneo's servers"),
+        pytest.param(_tool_call(tool="read_file"), id="another tool"),
+        pytest.param(_tool_call("because I said so"), id="a reason it has not got"),
+        pytest.param(_tool_call(arguments={}), id="arguments not written yet"),
+    ],
+)
+async def test_only_eneos_own_handback_tool_hands_back(call):
+    events = await _events(_response(call, _text("Svar")))
+
+    assert [event["type"] for event in events] == ["text", "done"]
+
+
+async def test_a_denied_call_does_not_hand_back():
+    call = _tool_call("declined")
+    assert call.tool_calls_metadata is not None
+    call.tool_calls_metadata[0].approved = False
+
+    events = await _events(_response(call, _text("Svar")))
+
+    assert events[-1]["type"] == "done"

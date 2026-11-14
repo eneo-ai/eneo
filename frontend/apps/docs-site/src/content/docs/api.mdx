@@ -281,7 +281,7 @@ console.log(conversation.session_id, conversation.answer);
 
 Another system that has its own chat can let a person ask an Eneo assistant. It calls Eneo as that person, with a session token, an API key or, where `OIDC_RESOURCE_SERVER_ENABLED` is set, the person's access token from the identity provider (see [OIDC federation](/guides/oidc-federation)).
 
-An administrator of a space decides per assistant: **Available to other clients** under **Publishing** in the assistant's settings, or `"external_clients_enabled": true` in `POST /api/v1/assistants/{id}/`. The field is `false` by default and is part of every assistant response. Only a space admin can change it; anyone else receives `403`. A space's default assistant, the personal assistant and a Help Assistant cannot be made available (`400`). The change is recorded in the audit log with the old and the new value.
+An administrator of a space decides per assistant: **Available to other clients** under **Publishing** in the assistant's settings in the React beta, or `"external_clients_enabled": true` in `POST /api/v1/assistants/{id}/`. The field is `false` by default and is part of every assistant response. Only a space admin can change it; anyone else receives `403`. A space's default assistant, the personal assistant and a Help Assistant cannot be made available (`400`). The change is recorded in the audit log with the old and the new value.
 
 ```http
 GET /api/v1/assistants/external/
@@ -308,7 +308,7 @@ The flag does not grant access. It only says that the assistant may be offered o
 
 ### Connected systems
 
-A system that speaks the connector protocol (version 3), such as a start page for staff, does not need an adapter in front of Eneo: Eneo serves the protocol itself. An administrator adds the system under **Administration › Integrations › Connected systems** with a name and the system's own https address. Eneo answers with two values to enter in that system: Eneo's connector address, `https://<your-eneo>/api/v1/connector`, and a shared key. The key is shown once; Eneo keeps only a digest of it. Removing the system there refuses its key from the next call on. Until a system has been added, every route below answers `404`.
+A system that speaks the connector protocol (version 3), such as a start page for staff, does not need an adapter in front of Eneo: Eneo serves the protocol itself. An administrator adds the system in the React beta, under **Administration › Integrations › Connected systems**, or with `POST /api/v1/admin/connector-installations/`, with a name and the system's own https address. Eneo answers with two values to enter in that system: Eneo's connector address, `https://<your-eneo>/api/v1/connector`, and a shared key. The key is shown once; Eneo keeps only a digest of it. Removing the system there refuses its key from the next call on. Until a system has been added, every route below answers `404`.
 
 | Route | What it does |
 | --- | --- |
@@ -331,7 +331,16 @@ data: {"type":"source","source":{"label":"Holiday rules","link":"https://intra.e
 data: {"type":"done","session":"<session id>","link":"https://<your-eneo>/dashboard/<assistant id>/<session id>"}
 ```
 
-`text` is the answer as it is written, without Eneo's citation tags. `source` follows the text, once for each source the answer cites and at most ten, with a `link` only when it is an https address. The stream ends with one `done`, carrying the session to continue in and, when `PUBLIC_ORIGIN` is an https address, a link that opens the conversation in Eneo, or with one `{"type":"error","code":…}` (`unavailable` or `unknown`). Comment lines are sent as keep-alives. An answer that takes longer than 170 seconds ends as `unavailable`.
+`text` is the answer as it is written, without Eneo's citation tags. `source` follows the text, once for each source the answer cites and at most ten, with a `link` only when it is an https address. The stream ends with one `done`, carrying the session to continue in and, when `PUBLIC_ORIGIN` is an https address, a link that opens the conversation in Eneo, with one `handback` (below), or with one `{"type":"error","code":…}` (`unavailable` or `unknown`). Comment lines are sent as keep-alives. An answer that takes longer than 170 seconds ends as `unavailable`.
+
+An assistant can return the conversation to the calling system. On these turns, and only these, a model that can call tools is offered one more tool, `hand_back`, and a line in its prompt saying when to use it. The stream then ends with `handback` instead of `done`:
+
+```text
+data: {"type":"handback","reason":"declined","session":"<session id>"}
+data: {"type":"handback","reason":"completed","session":"<session id>","link":"https://<your-eneo>/dashboard/<assistant id>/<session id>"}
+```
+
+`declined` means the question was not the assistant's to answer, such as one about the person's own calendar; nothing of the answer is sent after the assistant has declined, and the calling system answers the question itself. `completed` follows a full answer, with its text and sources, when the assistant expects nothing more from the person. A handback carries the reason, the session and the link, and never any text. An assistant that expects a follow-up ends with `done`. What the assistant does is up to its instructions: say there which questions it should decline.
 
 Errors before the stream starts are `{ "error": { "code", "message" } }` with the code `invalid` (400), `denied` (401 or 403), `not-found` (404) or `unavailable` (503); the message is in Swedish and may be shown to the person. Adding and removing a system, and each question asked through one (which system, which assistant and session, never the text), are recorded in the audit log.
 

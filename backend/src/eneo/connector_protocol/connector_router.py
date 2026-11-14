@@ -67,6 +67,19 @@ _NO_FILES: list[CapabilityPurpose] = [
     "compute",
     "charts",
 ]
+# Added to the assistant's prompt for these turns only, never stored: who the
+# person is writing from, and when the conversation goes back there.
+HANDBACK_PROMPT = (
+    "The person is writing to you from another system that has an assistant "
+    "of its own. You hold the conversation until you return it with the "
+    "hand_back tool. If the question is not yours to answer here, because it "
+    "is about something you have no knowledge of or access to (the person's "
+    "own calendar, mail or tasks, a colleague's data, another system), call "
+    'hand_back with the reason "declined" instead of answering or guessing. '
+    "If you have fully answered and nothing more is expected from you, call "
+    'hand_back with the reason "completed". Otherwise answer as usual and do '
+    "not call the tool: writing a reply is not a reason to hand back."
+)
 _MAX_NAME = 120
 _MAX_DESCRIPTION = 400
 
@@ -266,18 +279,20 @@ async def ask_assistant(call: VerifiedCall):
                 await container.session_service().get_session_by_uuid(
                     ask.session, assistant_id=ask.assistant
                 )
-            response = await container.conversation_service().ask_conversation(
+            response = await container.assistant_service().ask(
                 question=ask.question,
                 context=[
                     QuestionContext(label=item.label, text=item.text)
                     for item in ask.context
                 ],
+                assistant_id=ask.assistant,
                 session_id=ask.session,
-                assistant_id=None if ask.session is not None else ask.assistant,
                 stream=True,
                 version=2,
                 require_tool_approval=False,
                 disabled_capabilities=_NO_FILES,
+                prompt_addendum=HANDBACK_PROMPT,
+                offer_handback=True,
             )
     except ConnectorProtocolError:
         raise

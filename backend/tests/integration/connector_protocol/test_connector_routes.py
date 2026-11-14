@@ -17,12 +17,20 @@ import pytest
 import sqlalchemy as sa
 from cryptography.hazmat.primitives.asymmetric import rsa
 
-from eneo.ai_models.completion_models.completion_model import Completion, ResponseType
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    CompletionModelResponse,
+    ResponseType,
+    ToolCallMetadata,
+)
 from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.assistant_service import AssistantService
+from eneo.assistants.references import ReferencesService
 from eneo.audit.application import audit_service as audit_service_module
+from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.connector_protocol.verification import body_digest, key_digest
 from eneo.database.database import sessionmanager
+from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.connector_installations_table import ConnectorInstallations
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -30,6 +38,7 @@ from eneo.main.config import get_settings, set_settings
 from eneo.questions.question import UseTools
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies import connector_auth
+from eneo.services.service import DatastoreResult
 from tests.integration.assistants.test_external_client_assistants import (  # noqa: F401
     _assistant,
     _join,
@@ -722,6 +731,7 @@ async def test_a_question_is_answered_as_the_person_and_can_be_followed_up(
     assert call["user_id"] == member.id
     assert call["stream"] is True
     assert call["require_tool_approval"] is False
+    assert call["offer_handback"] is True
     assert set(call["disabled_capabilities"]) == {
         "image_generation",
         "file_creation",
@@ -920,3 +930,189 @@ async def test_asking_without_the_persons_token_is_refused(
 
     _denied(response, 403)
     assert asked == []
+
+
+# Handing the conversation back.
+
+
+@pytest.fixture
+def model(monkeypatch) -> dict[str, Any]:
+    """Replace the model with one whose answer the test writes.
+
+    ``model["answer"]`` is the list of chunks it streams. What it was offered
+    (its tools, its prompt) is recorded for each call.
+    """
+    state: dict[str, Any] = {"answer": [], "offered": [], "prompts": []}
+
+    async def fake_get_response(self: CompletionService, **kwargs: Any):
+        state["offered"].append(
+            [
+                (server.name, [tool.name for tool in server.tools or []])
+                for server in kwargs.get("mcp_servers") or []
+            ]
+        )
+        state["prompts"].append(kwargs.get("prompt") or "")
+        if not kwargs.get("stream"):
+            completion: Any = Completion(text="svar", response_type=ResponseType.TEXT)
+        else:
+
+            async def answer():
+                for chunk in state["answer"]:
+                    yield chunk
+
+            completion = answer()
+        return CompletionModelResponse(
+            completion=completion,
+            model=kwargs["model"],
+            extended_logging=None,
+            total_token_count=1,
+            usage=None,
+        )
+
+    async def fake_get_references(self: ReferencesService, **kwargs: Any):  # noqa: ARG001
+        return DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
+
+    monkeypatch.setattr(CompletionService, "get_response", fake_get_response)
+    monkeypatch.setattr(ReferencesService, "get_references", fake_get_references)
+    return state
+
+
+async def _calls_tools(space: dict[str, str]) -> None:  # noqa: F811
+    async with sessionmanager.session() as db, db.begin():
+        await db.execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == UUID(space["model"]))
+            .values(supports_tool_calling=True)
+        )
+
+
+def _hands_back(reason: str) -> Completion:
+    return Completion(
+        response_type=ResponseType.TOOL_CALL,
+        tool_calls_metadata=[
+            ToolCallMetadata(
+                server_name="handback",
+                tool_name="hand_back",
+                is_internal=True,
+                arguments={"reason": reason},
+                result_status="completed",
+            )
+        ],
+    )
+
+
+async def test_an_assistant_hands_a_question_that_is_not_its_own_back(
+    raw_client,
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+    installation,
+    provider_token,  # noqa: F811
+    signing_key,
+    model,
+):
+    await _calls_tools(space)
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+    model["answer"] = [
+        Completion(text="Det vet jag inte.", response_type=ResponseType.TEXT),
+        _hands_back("declined"),
+        Completion(text=" Fråga någon annan.", response_type=ResponseType.TEXT),
+    ]
+
+    response = await _post(
+        raw_client,
+        ASK,
+        {"ask": {"assistant": assistant_id, "question": "Vad har jag i kalendern?"}},
+        key=installation["key"],
+        signing_key=signing_key,
+        token=provider_token,
+    )
+
+    assert response.status_code == 200, response.text
+    events = _events(response.text)
+    assert events[:-1] == [{"type": "text", "delta": "Det vet jag inte."}]
+    # The reason and the session, and no text of the assistant's.
+    assert set(events[-1]) <= {"type", "reason", "session", "link"}
+    assert (events[-1]["type"], events[-1]["reason"]) == ("handback", "declined")
+    UUID(events[-1]["session"])
+    # The turn was offered the tool, and told when to use it.
+    assert ("handback", ["hand_back"]) in model["offered"][-1]
+    assert "hand_back" in model["prompts"][-1]
+
+
+async def test_an_assistant_that_is_done_hands_back_after_its_answer(
+    raw_client,
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+    installation,
+    provider_token,  # noqa: F811
+    signing_key,
+    model,
+):
+    await _calls_tools(space)
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+    model["answer"] = [
+        Completion(text="Du har 25 dagar.", response_type=ResponseType.TEXT),
+        _hands_back("completed"),
+    ]
+
+    response = await _post(
+        raw_client,
+        ASK,
+        {"ask": {"assistant": assistant_id, "question": "Hur många dagar?"}},
+        key=installation["key"],
+        signing_key=signing_key,
+        token=provider_token,
+    )
+
+    events = _events(response.text)
+    assert events[0] == {"type": "text", "delta": "Du har 25 dagar."}
+    assert (events[-1]["type"], events[-1]["reason"]) == ("handback", "completed")
+    assert [event["type"] for event in events] == ["text", "handback"]
+
+
+async def test_a_turn_in_eneo_itself_is_never_offered_the_handback_tool(
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+    model,
+):
+    await _calls_tools(space)
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+
+    response = await client.post(
+        "/api/v1/conversations/",
+        json={"question": "Hej", "assistant_id": assistant_id, "stream": False},
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert all(name != "handback" for name, _tools in model["offered"][-1])
+    assert "hand_back" not in model["prompts"][-1]
+
+
+async def test_a_model_that_cannot_call_tools_is_not_offered_one(
+    raw_client,
+    client,
+    space,  # noqa: F811
+    admin_headers,  # noqa: F811
+    installation,
+    provider_token,  # noqa: F811
+    signing_key,
+    model,
+):
+    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
+    model["answer"] = [Completion(text="Hej!", response_type=ResponseType.TEXT)]
+
+    response = await _post(
+        raw_client,
+        ASK,
+        {"ask": {"assistant": assistant_id, "question": "Hej"}},
+        key=installation["key"],
+        signing_key=signing_key,
+        token=provider_token,
+    )
+
+    assert _events(response.text)[-1]["type"] == "done"
+    assert all(name != "handback" for name, _tools in model["offered"][-1])
