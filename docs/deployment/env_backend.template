@@ -456,8 +456,13 @@ WORKER_MAX_JOBS=15
 FLOW_PDF_MAX_PAGES=2000
 FLOW_PDF_MAX_EXTRACTED_BYTES=134217728
 FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS=900
-# Audio decode bounds. For longer recordings, raise duration and the invocation
-# budget together; provisional defaults pending measurement (eneo-hy7c).
+# Audio decode bounds. FLOW_AUDIO_MAX_DURATION_SECONDS is the default longest
+# recording for Flows (admins change it in Flow settings) and the longest audio
+# other transcription takes. FLOW_AUDIO_MAX_DECODED_BYTES bounds the WAV file
+# (16 kHz mono 16-bit, 32 000 bytes a second) that audio is decoded to on disk
+# before transcription; what it holds, at most one WAV file (37 h 16 min), is the
+# longest recording admins can set: 18 h 38 min at 2 GiB. For longer recordings,
+# raise the invocation budget (TASK_EXECUTION_TIMEOUT_SECONDS) too.
 FLOW_AUDIO_MAX_DURATION_SECONDS=18000
 FLOW_AUDIO_MAX_DECODED_BYTES=2147483648
 # An audio upload is decoded to measure it before it is kept, a few at a time; past
@@ -467,8 +472,8 @@ FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS=600
 # Live transcription preview. A recording keeps streaming audio (silence too),
 # so the idle timeout only ends a paused or stalled client. The final-text wait
 # covers what the model server has not decoded yet when recording stops; raise it
-# for a server that falls behind (CPU, busy GPU). A session accepts at most
-# FLOW_AUDIO_MAX_DURATION_SECONDS of audio.
+# for a server that falls behind (CPU, busy GPU). A session accepts at most the
+# longest recording set in Flow settings.
 FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS=300
 FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS=60
 # Flow HTTP input, HTTP output (webhook) and the editor's connection test reach
