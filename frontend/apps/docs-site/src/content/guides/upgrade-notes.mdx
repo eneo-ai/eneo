@@ -342,7 +342,7 @@ When the unused-key policy (`auto_expire_unused_days`) expired a key, the nightl
 - keys listed as Expired that still sign in, whatever the policy says now;
 - keys the policy expires, including service keys such as the ones modules use, and keys without an end date.
 
-One run takes at most 500 keys from each selection (per step, and per tenant for unused keys), so with more keys some stop a few nights later. The job's audit rows (`api_key_expired`, and `api_key_revoked` after a rotation) are now written also when the tenant has turned auditing of the action off.
+One run takes at most 500 keys from each selection (per step, and per tenant for unused keys), so with more keys some stop a few nights later. The job's audit rows (`api_key_expired`, and `api_key_revoked` after a rotation) are now written also when the tenant has turned off audit logging or the action.
 
 **Do:** before the upgrade, find in **Admin > API keys** the keys listed as Expired that an integration or module still uses, and the keys the policy will expire. Create a new key and put it in the integration, or in the module's configuration for a module's service key. Set the policy's days longer than the longest pause of any service that uses a key. A key that has expired does not come back when the policy is turned off. See [Nightly maintenance](/docs/api-key-management#nightly-maintenance).
 

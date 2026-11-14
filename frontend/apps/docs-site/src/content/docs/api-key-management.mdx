@@ -315,9 +315,9 @@ A worker job runs every night at 01:00 UTC and records what the keys' dates alre
 2. **Unused keys.** Where the tenant sets `auto_expire_unused_days`, a key not used for that many days (or never used and created that long ago) expires: its end date becomes the time of the run. This includes service keys, such as the ones modules sign in with. A use is stored at most once every 15 minutes by default (`API_KEY_LAST_USED_MIN_INTERVAL_SECONDS`), so set more days than the longest pause of any service that uses a key, for example a weekend for a service used on weekdays.
 3. **Rotation.** An old key whose rotation grace period has ended is revoked.
 
-Each change is written to the audit log in the same transaction, with the system as actor, also when the tenant has turned auditing of the action off. A key that changed while the job ran (it was used, revoked, extended or given a new grace period) is left as it is.
+Each change is written to the audit log in the same transaction, with the system as actor, also when the tenant has turned off audit logging or the action. A key that is used, revoked, extended or given a new grace period before the job reaches it is left as it is. A request or change that arrives after that waits until the run has finished: an extension or edit is then refused, and a request already let in is answered.
 
-One run takes at most 500 keys from each selection, oldest first: per step for expiry and rotation, and per tenant for unused keys. More keys than that are taken on the following nights. A key that fails is reported in the job's `errors` and does not stop the others.
+One run takes at most 500 keys from each selection, oldest first. The selections are keys past their end date, keys recorded as expired but still open, keys whose rotation grace period has ended, and, per tenant, unused keys. More keys than that are taken on the following nights. A key that fails is reported in the job's `errors` and does not stop the others.
 
 An expired key does not come back when the policy is turned off or changed. Create a new key and replace the old one in the integration, or in the module's configuration for a module's service key.
 

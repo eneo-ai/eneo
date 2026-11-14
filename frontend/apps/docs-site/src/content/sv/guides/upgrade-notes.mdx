@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@259b0dd33e04
+translationSource: guides/upgrade-notes.mdx@5cdd049b4ca7
 ---
 
 import { Callout } from "nextra/components";
@@ -347,7 +347,7 @@ När policyn för oanvända nycklar (`auto_expire_unused_days`) lät en nyckel g
 - nycklar med statusen Utgången som fortfarande loggar in, oavsett vad policyn säger nu;
 - nycklar som policyn låter gå ut, också tjänstenycklar som modulernas, och nycklar utan slutdatum.
 
-En körning tar högst 500 nycklar ur varje urval (per steg, och per organisation för oanvända nycklar), så med fler nycklar slutar några att fungera några nätter senare. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningen av åtgärden.
+En körning tar högst 500 nycklar ur varje urval (per steg, och per organisation för oanvända nycklar), så med fler nycklar slutar några att fungera några nätter senare. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningsloggen eller åtgärden.
 
 **Gör:** före uppgraderingen, leta i **Admin > API-nycklar** upp nycklarna med statusen Utgången som en integration eller modul fortfarande använder, och nycklarna som policyn kommer att låta gå ut. Skapa en ny nyckel och lägg in den i integrationen, eller i modulens konfiguration för en moduls tjänstenyckel. Sätt policyns antal dagar längre än det längsta uppehållet för en tjänst som använder en nyckel. En nyckel som har gått ut kommer inte tillbaka när policyn stängs av. Se [Nattligt underhåll](/docs/api-key-management#nightly-maintenance).
 
