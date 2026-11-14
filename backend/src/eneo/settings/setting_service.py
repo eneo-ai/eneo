@@ -517,9 +517,13 @@ class SettingService:
             )
         )
 
-        flows_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name=FLOW_FEATURE,
-            tenant_id=self.user.tenant_id,
+        flows_enabled = (
+            overrides["flows_enabled"]
+            if "flows_enabled" in overrides
+            else await self.feature_flag_service.check_is_feature_enabled(
+                feature_name=FLOW_FEATURE,
+                tenant_id=self.user.tenant_id,
+            )
         )
 
         tenant = await self.tenant_repo.get(self.user.tenant_id)
@@ -1316,3 +1320,33 @@ class SettingService:
             settings_in_db=settings,
             overrides={"whats_new_enabled": enabled},
         )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flows_setting(self, enabled: bool) -> SettingsPublic:
+        """Switch Flows on or off for the tenant with the tenant's own flag row.
+
+        The global row stays as it is, so no other tenant is affected. The
+        audit row is written in the same transaction as the flag when the
+        audit configuration keeps the action, so a kept row and the change
+        commit or fail together. Role permissions are not touched.
+        """
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name=FLOW_FEATURE,
+            tenant_id=self.user.tenant_id,
+        )
+        await self._set_feature_flag_for_tenant(name=FLOW_FEATURE, enabled=enabled)
+
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled flows_enabled to {enabled}",
+            metadata={
+                "setting": "flows_enabled",
+                "changes": {"flows_enabled": {"old": old_enabled, "new": enabled}},
+            },
+        )
+
+        return await self._build_settings_public(overrides={"flows_enabled": enabled})

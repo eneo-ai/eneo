@@ -82,8 +82,10 @@ from eneo.settings.settings import (
     SkillRuntimeModelProjections,
     SkillRuntimePolicyPublic,
     SkillRuntimePolicyUpdate,
+    TaskWorkersStatusPublic,
     ToggleSettingUpdate,
 )
+from eneo.tasks.health import load_task_worker_readiness
 
 logger = get_logger(__name__)
 
@@ -101,6 +103,12 @@ _TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
 )
 
 FlowRetentionMutationContainer = Annotated[
+    Container,
+    Depends(get_container(with_user=True, transaction_scope="function")),
+]
+# Commits before the response is sent: the caller never sees a success the
+# database did not keep.
+CommittedMutationContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
@@ -1942,3 +1950,68 @@ async def update_whats_new_setting(
 ):
     service = container.settings_service()
     return await service.update_whats_new_setting(enabled=data.enabled)
+
+
+@settings_admin_router.patch(
+    "/flows",
+    response_model=SettingsPublic,
+    responses=responses.get_responses([403]),
+    summary="Switch Flows on or off",
+    description="""
+Switch Flows on or off for your tenant.
+
+**Admin Only:** Requires admin permissions.
+
+**Behavior:**
+- Writes the tenant's own `flows_core` row; the global row and other tenants
+  are unchanged
+- When enabled: the flow endpoints answer, and members whose roles hold the
+  flow permissions can use them at once. No role permission is changed
+- When disabled: every flow endpoint answers `404`. Queued runs can still
+  start and running runs are not stopped
+- Flows need the `task-execution-worker` and `task-maintenance-worker`
+  services; `GET /settings/task-workers` reports whether they run
+- The response is sent after the change is committed
+    """,
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def update_flows_setting(
+    data: ToggleSettingUpdate,
+    container: CommittedMutationContainer,
+) -> SettingsPublic:
+    return await container.settings_service().update_flows_setting(enabled=data.enabled)
+
+
+@settings_admin_router.get(
+    "/task-workers",
+    response_model=TaskWorkersStatusPublic,
+    responses=responses.get_responses([403]),
+    summary="Report whether the task workers run",
+    description=(
+        "Whether `task-execution-worker` and `task-maintenance-worker`, the "
+        "two services Flows run on, are up, from each worker's latest health "
+        "signal. Answers whether or not Flows are switched on. `probe_ok` is "
+        "false when the signals could not be read. Deployment state only: the "
+        "answer carries no tenant data."
+    ),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def get_task_workers_status(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> TaskWorkersStatusPublic:
+    # The container authenticates the caller and checks the admin permission.
+    _ = container
+    readiness = await load_task_worker_readiness(timeout_seconds=1.0)
+    return TaskWorkersStatusPublic(
+        probe_ok=readiness.probe_ok,
+        execution_worker_ready=readiness.execution_ready,
+        maintenance_worker_ready=readiness.maintenance_ready,
+    )

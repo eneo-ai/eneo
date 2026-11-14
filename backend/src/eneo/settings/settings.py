@@ -98,10 +98,11 @@ class SettingsPublic(SettingsBase):
     flows_enabled: bool = Field(
         default=False,
         description=(
-            "Read-only: whether flows are switched on for the tenant (the "
-            "`flows_core` feature). When false every flow endpoint answers "
-            "`404`. It says nothing about the caller's own access: showing "
-            "or running flows still needs the `flows_view` and `flows_run` "
+            "Whether flows are switched on for the tenant (the `flows_core` "
+            "feature); an administrator switches it with `PATCH "
+            "/settings/flows`. When false every flow endpoint answers `404`. "
+            "It says nothing about the caller's own access: showing or "
+            "running flows still needs the `flows_view` and `flows_run` "
             "permissions."
         ),
         examples=[True],
@@ -115,6 +116,28 @@ class GetModelsResponse(BaseModel):
 
 class ToggleSettingUpdate(BaseModel):
     enabled: bool
+
+
+class TaskWorkersStatusPublic(BaseModel):
+    """Whether the two platform task workers that run flows are up, from each
+    worker's latest health signal. Deployment state only: nothing about any
+    tenant."""
+
+    probe_ok: bool = Field(
+        description=(
+            "False when the health signals could not be read; both workers "
+            "then read as not ready, which says nothing about whether they run."
+        )
+    )
+    execution_worker_ready: bool = Field(
+        description="Whether `task-execution-worker`, which runs flow runs, is up."
+    )
+    maintenance_worker_ready: bool = Field(
+        description=(
+            "Whether `task-maintenance-worker`, which dispatches queued runs "
+            "and recovers stalled ones, is up."
+        )
+    )
 
 
 FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE: JsonDict = {
