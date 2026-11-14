@@ -120,7 +120,8 @@ async def _ensure_owner_permissions(session: AsyncSession, tenant_id: UUID) -> N
         return
 
     # Boot seeding skips sourced roles, so E2E merges the predefined-role
-    # template and the flow permissions the template leaves out.
+    # template and the flow permissions and retention_manage the template
+    # leaves out.
     role.permissions = [*existing_permissions, *missing_permissions]
     print(
         "[seed] merged E2E Owner permissions from predefined role template",
