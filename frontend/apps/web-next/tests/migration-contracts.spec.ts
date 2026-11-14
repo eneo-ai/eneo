@@ -190,6 +190,7 @@ test(
       // The policy alone governs: the storage limit sits above 32 MiB.
       expect(projection).toMatchObject({
         effective_bytes: 32 * MIB,
+        operator_ceiling_bytes: 536_870_399,
         constraining_source: "admin_policy",
         storage_target: "postgres_inline"
       } satisfies Partial<Schema<"UploadLimitProjection">>);
