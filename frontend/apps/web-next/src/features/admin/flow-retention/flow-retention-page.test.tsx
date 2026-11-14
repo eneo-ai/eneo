@@ -91,13 +91,43 @@ describe("FlowRetentionPage", () => {
     });
   });
 
-  it("lets someone who may not manage retention read it, with nothing to save there", async () => {
-    page(["admin"]);
+  // What an administrator sees by what they hold beside admin. The windows are
+  // admin settings and stay in every row.
+  it("lets someone who may place holds read the rules, with only the windows to save", async () => {
+    page(["admin", "retention_holds"]);
     expect(await screen.findByText(/Du kan läsa gallringen/)).toBeTruthy();
     const radio = await screen.findByRole("radio", { name: /^Gallringstid för organisationen/ });
     expect((radio as HTMLInputElement).disabled).toBe(true);
-    // Only the windows, which an administrator may set, can be saved.
     await screen.findByRole("spinbutton", { name: /Felsökningsunderlag, dagar/ });
     expect(screen.getAllByRole("button", { name: "Spara inställningar" })).toHaveLength(1);
+  });
+
+  it("tells an administrator without a retention permission what is missing, and asks nothing the backend refuses", async () => {
+    const { container } = page(["admin"]);
+    expect(
+      await screen.findByText("Du har inte behörighet att se gallringsreglerna.")
+    ).toBeTruthy();
+    expect(screen.getByText(/Gallring – hantera regler/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Gå till Roller" }).getAttribute("href")).toBe(
+      "/admin/roles"
+    );
+    expect(screen.queryByRole("radio")).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /Yta/ })).toBeNull();
+    // The windows still load and save.
+    await screen.findByRole("spinbutton", { name: /Felsökningsunderlag, dagar/ });
+    expect(screen.getAllByRole("button", { name: "Spara inställningar" })).toHaveLength(1);
+    expect(backend.GET.mock.calls.map(([path]) => path)).toEqual([
+      "/api/v1/settings/flow-retention-policy"
+    ]);
+    await expectNoAxeViolations(container);
+  });
+
+  it("lets someone who manages retention change the rules", async () => {
+    page(["admin", "retention_manage"]);
+    const radio = await screen.findByRole("radio", { name: /^Gallringstid för organisationen/ });
+    expect((radio as HTMLInputElement).disabled).toBe(false);
+    expect(screen.queryByText(/Du kan läsa gallringen/)).toBeNull();
+    await screen.findByRole("spinbutton", { name: /Felsökningsunderlag, dagar/ });
+    expect(screen.getAllByRole("button", { name: "Spara inställningar" })).toHaveLength(2);
   });
 });

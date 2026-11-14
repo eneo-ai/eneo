@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Link } from "@astryxdesign/core/Link";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -55,22 +56,49 @@ function policyOf(draft: RetentionDraft) {
  * The tenant's retention, which is not one of the flow settings: run history has its
  * own levels and permission, and every level saves on its own. A flow's own period is
  * set on the flow. Saving makes data eligible at most; a purge is a separate act.
+ *
+ * The rules follow the backend's retention permissions (flow_retention_authz): either
+ * one reads them, retention_manage changes them, and without both the page does not
+ * ask for them. The windows are admin settings and stay in every case. Hiding is
+ * presentation only; the backend decides every request.
  */
 export function FlowRetentionPage() {
   const t = useTranslations();
   const { can } = useAppContext();
   const manages = can("retention_manage");
+  const reads = manages || can("retention_holds");
   return (
     <div className="flex w-full max-w-4xl flex-col gap-6">
       <PageHeader
         title={t("flow_retention_admin_title")}
         description={t("flow_retention_admin_description")}
       />
-      {manages ? null : (
+      {!reads ? (
+        <Banner
+          status="info"
+          title={t("flow_retention_admin_no_access")}
+          description={
+            <>
+              {t("flow_retention_admin_no_access_description", {
+                manage: t("permission_retention_manage"),
+                holds: t("permission_retention_holds")
+              })}{" "}
+              <Link href="/admin/roles" hasUnderline>
+                {t("flow_retention_admin_roles_link")}
+              </Link>
+            </>
+          }
+          collapsible={false}
+        />
+      ) : manages ? null : (
         <Banner status="info" title={t("flow_retention_admin_read_only")} collapsible={false} />
       )}
-      <OrganizationSection manages={manages} />
-      <SpaceSection manages={manages} />
+      {reads ? (
+        <>
+          <OrganizationSection manages={manages} />
+          <SpaceSection manages={manages} />
+        </>
+      ) : null}
       <WindowsSection />
     </div>
   );
