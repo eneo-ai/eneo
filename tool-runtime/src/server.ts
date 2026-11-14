@@ -50,6 +50,16 @@ const MAX_TEMPLATE_BYTES = 5 * 1024 * 1024;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** An exact HTTP(S) origin, or undefined for anything else (paths, credentials, junk). */
+/**
+ * The most elements (array items and object keys) a call's arguments can hold. Each takes at
+ * least two bytes of JSON ("0,"), so a body within the size limit never holds more: the SDK
+ * counts them before it validates (GHSA-46jr-4wx8-v453), and the bound follows the size limit,
+ * so it never refuses a call the limit accepts, however an operator sizes the body.
+ */
+export function toolInputElementLimit(maxBodyBytes: number): number {
+  return Math.ceil(maxBodyBytes / 2);
+}
+
 export function parseOrigin(value: string | null): string | undefined {
   if (!value) return undefined;
   try {
@@ -219,7 +229,10 @@ export function createHandler(options: ServerOptions) {
         controlActive++;
         control = true;
       }
-      const mcp = new McpServer({ name: `eneo-tool-runtime-${endpoint.slug}`, version });
+      const mcp = new McpServer(
+        { name: `eneo-tool-runtime-${endpoint.slug}`, version },
+        { maxToolInputElements: toolInputElementLimit(options.maxBodyBytes ?? MAX_BODY_BYTES) },
+      );
       for (const tool of endpoint.tools) {
         mcp.registerTool(
           tool.name,
