@@ -631,7 +631,7 @@ async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
 
     # The run stops at the first statement on the dead connection instead of
     # reporting it as one key's error and going on.
-    assert update_failed, "the error must come from the job's update, not its commit"
+    assert update_failed, "the job's update raised"
     assert isinstance(failure.value, DBAPIError)
     assert failure.value.connection_invalidated
     assert await expired_ids(db_container, [first, second]) == set()
