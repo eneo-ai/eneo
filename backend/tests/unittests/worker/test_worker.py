@@ -249,13 +249,20 @@ class _AsyncContext:
     def __init__(self, value: Any = None, exit_error: Exception | None = None):
         self.value = value
         self.exit_error = exit_error
+        self.committed = False
+        self.rolled_back = False
 
     async def __aenter__(self) -> Any:
         return self.value
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if exc_type is None and self.exit_error is not None:
+        if exc_type is not None:
+            self.rolled_back = True
+            return
+        if self.exit_error is not None:
+            self.rolled_back = True
             raise self.exit_error
+        self.committed = True
 
 
 async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
@@ -314,6 +321,86 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
         job_id, failure_code=JobFailureCode.PROCESSING_FAILED
     )
+
+
+async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
+    monkeypatch,
+) -> None:
+    """Cancelling a @worker.task rolls back its transaction (including the inner
+    fail_job write), so the CANCELLED status must be committed in a fresh
+    session before CancelledError is re-raised to ARQ."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from eneo.main.models import ChannelType
+    from eneo.worker import task_manager as task_manager_module
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    run_id = uuid4()
+    user_id = uuid4()
+    tx_contexts = [_AsyncContext(), _AsyncContext()]
+    pending = list(tx_contexts)
+
+    def session() -> _AsyncContext:
+        db = MagicMock()
+        db.begin.return_value = pending.pop(0)
+        return _AsyncContext(db)
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+    published_when_recovery_committed: list[bool] = []
+
+    async def fake_publish(_channel: str, _payload: str) -> None:
+        published_when_recovery_committed.append(tx_contexts[1].committed)
+
+    monkeypatch.setattr(task_manager_module, "r", SimpleNamespace(publish=fake_publish))
+
+    task_job_service = AsyncMock()
+    task_manager = TaskManager(
+        user=MagicMock(id=user_id),
+        job_id=job_id,
+        job_service=task_job_service,
+        channel_type=ChannelType.APP_RUN_UPDATES,
+        resource_id=run_id,
+    )
+    task_container = MagicMock()
+    task_container.task_manager.return_value = task_manager
+    recovery_container = MagicMock()
+    recovery_container.job_service.return_value = AsyncMock()
+    containers = [task_container, recovery_container]
+
+    async def create_container(session, user_id=None):
+        return containers.pop(0)
+
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", create_container)
+
+    started = asyncio.Event()
+
+    async def body(params, container):
+        started.set()
+        await asyncio.Event().wait()
+
+    wrapper = worker.task(channel_type=ChannelType.APP_RUN_UPDATES)(body)
+    params = SimpleNamespace(user_id=user_id, id=run_id)
+
+    running = asyncio.create_task(wrapper({"job_id": str(job_id)}, params))
+    await started.wait()
+    running.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert tx_contexts[0].rolled_back is True
+    assert tx_contexts[0].committed is False
+    assert tx_contexts[1].committed is True
+    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+        job_id, failure_code=JobFailureCode.CANCELLED
+    )
+    assert published_when_recovery_committed[-1] is True
 
 
 def _recovery_worker(monkeypatch, job_service: AsyncMock):
