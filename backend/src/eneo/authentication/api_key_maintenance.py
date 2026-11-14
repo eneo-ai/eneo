@@ -78,7 +78,11 @@ class ApiKeyMaintenanceService:
 
     async def run_daily_maintenance(self) -> dict[str, object]:
         """Run every step; a failing key, selection or tenant is reported in
-        ``errors`` and the rest goes on. A lost connection fails the run."""
+        ``errors`` and the rest goes on. An unreachable database or a lost
+        connection fails the run."""
+        # Connect before the per-step error boundaries, so a database that
+        # cannot be reached fails the job instead of becoming one error per step.
+        await self.api_key_repo.session.connection()
         now = datetime.now(timezone.utc)
         run = _Run()
         repo = self.api_key_repo

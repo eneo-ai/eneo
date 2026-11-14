@@ -16,7 +16,9 @@ from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
@@ -39,6 +41,7 @@ from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
 from eneo.database.tables.tenant_table import Tenants
+from eneo.main.container.container import Container
 from eneo.tenants.tenant import TenantBase
 from tests.integration.fixtures.locks import wait_until_blocked
 
@@ -635,6 +638,23 @@ async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
     assert isinstance(failure.value, DBAPIError)
     assert failure.value.connection_invalidated
     assert await expired_ids(db_container, [first, second]) == set()
+
+
+async def test_an_unreachable_database_fails_the_job():
+    async def refuse():
+        raise ConnectionRefusedError("connection refused")
+
+    engine = create_async_engine("postgresql+asyncpg://", async_creator=refuse)
+    # As the worker opens it: no autobegin, a transaction begun before the run
+    # and no statement yet, so the run makes the first connection attempt.
+    maker = async_sessionmaker(bind=engine, autobegin=False)
+    try:
+        with pytest.raises(ConnectionRefusedError):
+            async with maker() as session, session.begin():
+                container = Container(session=providers.Object(session))
+                await container.api_key_maintenance_service().run_daily_maintenance()
+    finally:
+        await engine.dispose()
 
 
 async def test_every_transition_is_audited_even_with_the_action_turned_off(
