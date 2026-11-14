@@ -9,18 +9,28 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.exc import DBAPIError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import api_key_maintenance
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
-from eneo.authentication.auth_models import ApiKeyV2InDB
+from eneo.authentication.auth_models import (
+    ApiKeyHashVersion,
+    ApiKeyOwnership,
+    ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
+    ApiKeyType,
+    ApiKeyV2InDB,
+)
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.tenant_table import Tenants
+from eneo.tenants.tenant import TenantBase
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -76,9 +86,70 @@ async def set_unused_days(db_container, tenant_id: UUID, days: int | None) -> No
         )
 
 
-async def run_maintenance(db_container) -> dict[str, Any]:
+async def insert_key(
+    db_container, tenant_id: UUID, *, name: str, created_at: datetime, **values: Any
+) -> UUID:
+    """A service key straight in the table, for runs that never sign in."""
     async with db_container() as container:
+        key = await container.api_key_v2_repo().create(
+            tenant_id=tenant_id,
+            ownership=ApiKeyOwnership.SERVICE.value,
+            scope_type=ApiKeyScopeType.TENANT.value,
+            permission=ApiKeyPermission.READ.value,
+            key_type=ApiKeyType.SK.value,
+            key_hash=uuid4().hex,
+            hash_version=ApiKeyHashVersion.HMAC_SHA256.value,
+            key_prefix=ApiKeyType.SK.value,
+            key_suffix=uuid4().hex[-8:],
+            name=name,
+            state=ApiKeyState.ACTIVE.value,
+            created_at=created_at,
+            **values,
+        )
+        return key.id
+
+
+async def insert_due_keys(db_container, tenant_id: UUID, count: int) -> list[UUID]:
+    """``count`` keys past their end date, oldest first."""
+    start = datetime.now(timezone.utc) - timedelta(days=30)
+    return [
+        await insert_key(
+            db_container,
+            tenant_id,
+            name=f"due-{index}",
+            created_at=start + timedelta(minutes=index),
+            expires_at=start + timedelta(days=1),
+        )
+        for index in range(count)
+    ]
+
+
+async def add_tenant(db_container) -> UUID:
+    async with db_container() as container:
+        tenant = await container.tenant_repo().add(
+            TenantBase(name=f"maintenance-{uuid4().hex[:8]}")
+        )
+        assert tenant is not None
+        return tenant.id
+
+
+async def run_maintenance(db_container, **context: Any) -> dict[str, Any]:
+    async with db_container(**context) as container:
         return await container.api_key_maintenance_service().run_daily_maintenance()
+
+
+def fail_with_sql_error(monkeypatch, method: str, should_fail) -> None:
+    """Make the repository ``method`` raise a real SQL error, which aborts the
+    transaction unless a savepoint contains it, whenever ``should_fail`` is
+    true for its arguments."""
+    original = getattr(ApiKeysV2Repository, method)
+
+    async def failing(self, *args, **kwargs):
+        if should_fail(*args, **kwargs):
+            await self.session.execute(sa.text("SELECT 1/0"))
+        return await original(self, *args, **kwargs)
+
+    monkeypatch.setattr(ApiKeysV2Repository, method, failing)
 
 
 async def read_key(db_container, key_id: UUID) -> ApiKeyV2InDB:
@@ -272,3 +343,173 @@ async def test_a_new_grace_period_after_selection_keeps_the_old_key_working(
         db_container, old_id
     )
     assert await sign_in_status(client, old_secret) == 200
+
+
+async def expired_ids(db_container, key_ids: list[UUID]) -> set[UUID]:
+    return {
+        key_id
+        for key_id in key_ids
+        if (await read_key(db_container, key_id)).state == "expired"
+    }
+
+
+async def test_a_failing_key_does_not_stop_the_others(
+    db_container, admin_user, monkeypatch
+):
+    first, middle, last = await insert_due_keys(db_container, admin_user.tenant_id, 3)
+    fail_with_sql_error(
+        monkeypatch, "expire_matching", lambda *_, key, **__: key.id == middle
+    )
+
+    result = await run_maintenance(db_container)
+
+    assert result["expired"] == 2
+    assert result["errors"] == [
+        {
+            "step": "expires_at",
+            "key_id": str(middle),
+            "tenant_id": str(admin_user.tenant_id),
+            "error": "DBAPIError",
+        }
+    ]
+    assert await expired_ids(db_container, [first, middle, last]) == {first, last}
+
+
+async def test_a_failing_selection_stops_only_its_step(
+    client, db_container, token, admin_user, monkeypatch
+):
+    due = await insert_due_keys(db_container, admin_user.tenant_id, 1)
+    # Recently used, so only the failing expiry step would take it.
+    await set_key_columns(db_container, due[0], last_used_at=datetime.now(timezone.utc))
+    unused_id, _ = await create_key(client, token, name="unused")
+    await make_unused(db_container, unused_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    calls = 0
+
+    def first_call(*_args, **_kwargs) -> bool:
+        nonlocal calls
+        calls += 1
+        return calls == 1
+
+    fail_with_sql_error(monkeypatch, "list_matching", first_call)
+
+    result = await run_maintenance(db_container)
+
+    assert result["expired"] == 0
+    assert result["auto_expired"] == 1
+    assert result["errors"] == [{"step": "expires_at", "error": "DBAPIError"}]
+    assert await expired_ids(db_container, [*due, unused_id]) == {unused_id}
+
+
+async def test_a_tenant_that_cannot_be_loaded_does_not_stop_the_others(
+    client, db_container, token, admin_user
+):
+    unused_id, _ = await create_key(client, token, name="unused")
+    await make_unused(db_container, unused_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    broken_id = await add_tenant(db_container)
+    async with db_container() as container:
+        tenant = await container.tenant_repo().get(admin_user.tenant_id)
+        # A state the tenant model refuses, as if written outside the app.
+        await container.session().execute(
+            sa.update(Tenants).where(Tenants.id == broken_id).values(state="bogus")
+        )
+
+    result = await run_maintenance(db_container, user=admin_user, tenant=tenant)
+
+    async with db_container(user=admin_user, tenant=tenant) as container:
+        await container.session().execute(
+            sa.update(Tenants).where(Tenants.id == broken_id).values(state="active")
+        )
+    assert result["auto_expired"] == 1
+    assert result["errors"] == [
+        {"step": "unused", "tenant_id": str(broken_id), "error": "ValidationError"}
+    ]
+    assert await expired_ids(db_container, [unused_id]) == {unused_id}
+
+
+async def test_more_keys_than_the_limit_are_taken_over_several_runs(
+    db_container, admin_user, monkeypatch
+):
+    monkeypatch.setattr(api_key_maintenance, "API_KEY_MAINTENANCE_BATCH_LIMIT", 3)
+    always_failing, *rest = await insert_due_keys(db_container, admin_user.tenant_id, 5)
+    fail_with_sql_error(
+        monkeypatch, "expire_matching", lambda *_, key, **__: key.id == always_failing
+    )
+
+    first = await run_maintenance(db_container)
+
+    assert first["expired"] == 2
+    assert first["limit_reached"] == [{"step": "expires_at"}]
+    assert [error["key_id"] for error in first["errors"]] == [str(always_failing)]
+    assert await expired_ids(db_container, rest) == set(rest[:2])
+
+    second = await run_maintenance(db_container)
+
+    assert second["expired"] == 2
+    assert second["limit_reached"] == [{"step": "expires_at"}]
+    assert await expired_ids(db_container, rest) == set(rest)
+
+
+async def test_the_limit_for_unused_keys_applies_per_tenant(
+    db_container, admin_user, monkeypatch
+):
+    monkeypatch.setattr(api_key_maintenance, "API_KEY_MAINTENANCE_BATCH_LIMIT", 2)
+    other_tenant = await add_tenant(db_container)
+    old = datetime.now(timezone.utc) - timedelta(days=30)
+    keys: dict[UUID, list[UUID]] = {}
+    for tenant_id, count in ((admin_user.tenant_id, 3), (other_tenant, 1)):
+        await set_unused_days(db_container, tenant_id, 7)
+        keys[tenant_id] = [
+            await insert_key(
+                db_container,
+                tenant_id,
+                name=f"unused-{index}",
+                created_at=old + timedelta(minutes=index),
+            )
+            for index in range(count)
+        ]
+
+    result = await run_maintenance(db_container)
+
+    # A limit per step would have stopped at two keys in all.
+    assert result["auto_expired"] == 3
+    assert result["limit_reached"] == [
+        {"step": "unused", "tenant_id": str(admin_user.tenant_id)}
+    ]
+    assert result["errors"] == []
+    assert await expired_ids(db_container, keys[admin_user.tenant_id]) == set(
+        keys[admin_user.tenant_id][:2]
+    )
+    assert await expired_ids(db_container, keys[other_tenant]) == set(
+        keys[other_tenant]
+    )
+
+
+async def test_a_lost_connection_fails_the_job_and_keeps_nothing(
+    db_container, admin_user, monkeypatch
+):
+    first, second = await insert_due_keys(db_container, admin_user.tenant_id, 2)
+    original = ApiKeysV2Repository.expire_matching
+
+    async def drop_connection_at_second(self, condition, *, key, **kwargs):
+        if key.id == second:
+            pid = await self.session.scalar(sa.text("SELECT pg_backend_pid()"))
+            async with db_container() as other:
+                await other.session().execute(
+                    sa.text("SELECT pg_terminate_backend(:pid)"), {"pid": pid}
+                )
+        return await original(self, condition, key=key, **kwargs)
+
+    monkeypatch.setattr(
+        ApiKeysV2Repository, "expire_matching", drop_connection_at_second
+    )
+
+    with pytest.raises(DBAPIError) as failure:
+        await run_maintenance(db_container)
+
+    # The run stops at the first statement on the dead connection instead of
+    # reporting it as one key's error and going on.
+    assert isinstance(failure.value, DBAPIError)
+    assert failure.value.connection_invalidated
+    assert await expired_ids(db_container, [first, second]) == set()

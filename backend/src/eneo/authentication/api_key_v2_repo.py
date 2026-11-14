@@ -635,9 +635,16 @@ class ApiKeysV2Repository:
         )
 
     async def list_matching(
-        self, condition: sa.ColumnElement[bool]
+        self, condition: sa.ColumnElement[bool], *, limit: int
     ) -> list[ApiKeyV2InDB]:
-        records = await self.session.scalars(sa.select(self.table).where(condition))
+        """The oldest ``limit`` keys matching ``condition``, in a stable order
+        so a run that stops at the limit is continued by the next one."""
+        records = await self.session.scalars(
+            sa.select(self.table)
+            .where(condition)
+            .order_by(self.table.created_at, self.table.id)
+            .limit(limit)
+        )
         return [ApiKeyV2InDB.model_validate(record) for record in records]
 
     async def expire_matching(

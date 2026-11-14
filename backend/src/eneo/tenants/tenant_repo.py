@@ -89,6 +89,19 @@ class TenantRepository:
 
         return await self.delegate.get_all()
 
+    async def get_all_tenant_ids(self) -> list[UUID]:
+        """Every tenant's id, oldest first, without validating the rows.
+
+        Platform sweeps that only scope work per tenant use this so one row
+        the tenant model refuses (a state value written outside the code)
+        cannot stop the sweep for every other tenant; the row still fails
+        wherever the tenant itself is loaded.
+        """
+        result = await self.session.execute(
+            sa.select(Tenants.id).order_by(Tenants.created_at)
+        )
+        return list(result.scalars().all())
+
     async def enable_module(
         self, tenant_id: UUID, module_id: UUID
     ) -> ModuleTenantAssignment:
