@@ -324,6 +324,33 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     expect(screen.getByText("Följer driftmiljöns standard.")).toBeTruthy();
   });
 
+  it("states the longest recording the server takes and why, in hours and minutes", async () => {
+    // The default 2 GiB of unpacked audio: 18 h 38 min 28 s.
+    const settings = flowSettingsFixture();
+    serve({
+      ...settings,
+      inputLimits: { ...settings.inputLimits, audio_max_duration_ceiling_seconds: 67_108 }
+    });
+    await show();
+
+    expect(
+      screen.getByText(/Högst 18 h 38 min: så mycket uppackat ljud tar servern emot/)
+    ).toBeTruthy();
+    expect(screen.queryByText(/Driftmiljön tillåter/)).toBeNull();
+  });
+
+  it("names the WAV file as the reason when it holds less than the server takes", async () => {
+    const settings = flowSettingsFixture();
+    serve({
+      ...settings,
+      inputLimits: { ...settings.inputLimits, audio_max_duration_ceiling_seconds: 134_217 }
+    });
+    await show();
+
+    expect(screen.getByText(/Högst 37 h 16 min: så lång kan en uppackad ljudfil bli/)).toBeTruthy();
+    expect(screen.queryByText(/så mycket uppackat ljud tar servern emot/)).toBeNull();
+  });
+
   it("disables the run limit with the reason when the server has no capacity", async () => {
     serve(
       flowSettingsFixture({

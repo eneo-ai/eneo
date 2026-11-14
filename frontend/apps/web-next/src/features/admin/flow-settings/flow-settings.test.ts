@@ -91,6 +91,19 @@ describe("fieldBounds", () => {
     expect(bounds.max_provider_calls_per_mapped_step).toMatchObject({ min: 2, max: null });
     expect(bounds.max_table_columns.max).toBe(100);
   });
+
+  it("holds the longest recording to the whole minutes under the server's ceiling", () => {
+    // 18 h 38 min 28 s: the field counts minutes, so it stops at 1118.
+    const bounds = fieldBounds(
+      flowSettingsFixture({
+        inputLimits: {
+          ...settings.inputLimits,
+          audio_max_duration_ceiling_seconds: 67_108
+        }
+      })
+    );
+    expect(bounds.audio_max_duration_seconds).toMatchObject({ min: 60, max: 67_080, scale: 60 });
+  });
 });
 
 describe("validateDraft", () => {
