@@ -3109,7 +3109,7 @@
   "api_keys_admin_policy_max_expiration": "Maximalt antal utgångsdagar",
   "api_keys_admin_policy_max_expiration_desc": "Maximal tillåten utgångsperiod för nya nycklar. Lämna tomt för ingen gräns.",
   "api_keys_admin_policy_auto_expire": "Automatiskt förfalla oanvända nycklar",
-  "api_keys_admin_policy_auto_expire_desc": "Återkalla automatiskt nycklar som inte har använts på detta antal dagar",
+  "api_keys_admin_policy_auto_expire_desc": "Nycklar som inte har använts på så här många dagar går ut vid nattens underhåll kl. 01:00 UTC. Det gäller också tjänstenycklar, till exempel modulernas, så en tjänst som bara används vissa dagar behöver fler dagar än sitt längsta uppehåll.",
   "api_keys_admin_policy_max_rate_limit": "Max anropsgräns",
   "api_keys_admin_policy_max_rate_limit_desc": "Övre gräns för anropsgränser per nyckel. Användare kan inte ställa in högre gränser.",
   "api_keys_admin_policy_rotation_grace": "Grace-period vid rotation",
