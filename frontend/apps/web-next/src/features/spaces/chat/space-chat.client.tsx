@@ -60,7 +60,9 @@ function usePersonalChatModel() {
     onError: (error) => toastApiError(error, t)
   });
   // Queued as the save is made, not when the mutation starts a tick later:
-  // a question sent right after waits for it.
+  // a question sent right after waits for it. The queue holds until the space
+  // has been fetched again (mutateAsync waits for onSuccess), so the pill shows
+  // the saved choice as its waiting ends and never flashes back to the old one.
   const save = (body: Parameters<typeof update.mutateAsync>[0]) =>
     queuePartnerUpdate(() => update.mutateAsync(body));
 

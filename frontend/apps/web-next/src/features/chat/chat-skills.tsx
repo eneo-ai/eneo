@@ -379,7 +379,9 @@ type PanelTab = "tools" | "skills";
 /**
  * Verktyg and Skills as two tabs of one panel: the tabs name the panels, so
  * neither panel repeats its title, and the sheet's close button sits beside
- * them. Only the tab in view is mounted.
+ * them. Beside the pill both tabs are mounted in one grid cell, the other one
+ * hidden (not reachable), so switching tabs never changes the panel's size; in
+ * the sheet only the tab in view is mounted.
  */
 function ToolsAndSkills({
   tools,
