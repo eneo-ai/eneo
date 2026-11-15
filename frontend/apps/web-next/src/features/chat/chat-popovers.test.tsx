@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ComposerAttachments } from "./attachments";
 import type { Capability } from "@/features/capabilities/capabilities";
 import type { ChatCapability } from "./chat-capabilities";
@@ -89,6 +90,68 @@ describe("ChatTools", () => {
     expect(auto.getAttribute("aria-describedby")).toBeTruthy();
     fireEvent.click(auto);
     expect(within(popover).getByText("Verktyg körs automatiskt utan godkännande")).toBeTruthy();
+    await expectNoAxeViolations(popover);
+  });
+
+  it("opens the tools in a bottom sheet on a phone, with its own close button", async () => {
+    setViewport("phone");
+    renderInChat(<McpHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" }));
+    const sheet = await screen.findByRole("dialog", { name: "Verktyg" });
+    expect(sheet.tagName).toBe("DIALOG");
+    expect(within(sheet).getByRole("switch", { name: "LOU-register" })).toBeTruthy();
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Verktyg" })).toBeNull());
+    setViewport("desktop");
+  });
+
+  it.each([
+    ["a phone held sideways", "phone-landscape" as const],
+    [
+      "a desktop window narrower than a phone's layout",
+      { width: 700, height: 900, pointer: "fine" as const }
+    ]
+  ])("opens in the sheet on %s, as the app lays out a phone", async (_name, viewport) => {
+    setViewport(viewport);
+    renderInChat(<McpHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" }));
+    expect((await screen.findByRole("dialog", { name: "Verktyg" })).tagName).toBe("DIALOG");
+    setViewport("desktop");
+  });
+
+  it("keeps the surface it opened on until it closes, and gives focus back to its pill", async () => {
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
+    renderInChat(<McpHarness />);
+    const pill = () => screen.getByRole("button", { name: "Verktyg: 1 av 2 aktiva" });
+    fireEvent.click(pill());
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    expect(popover.tagName).not.toBe("DIALOG");
+    // Narrowed to a phone's layout while open: the popover stays, with its switches.
+    act(() => setViewport("phone"));
+    expect(screen.getByRole("dialog", { name: "Verktyg" })).toBe(popover);
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(pill().getAttribute("aria-expanded")).toBe("false"));
+
+    // The next opening follows the screen it is on now. The pill is clicked, not
+    // focused first: Safari leaves focus elsewhere, and the sheet must give it back.
+    fireEvent.click(pill());
+    const sheet = await screen.findByRole("dialog", { name: "Verktyg" });
+    expect(sheet.tagName).toBe("DIALOG");
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Verktyg" })).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(pill()));
+    setViewport("desktop");
+  });
+
+  it("sets each tool's icon on its label's line, with a description under it or without", async () => {
+    renderInChat(<McpHarness withCapabilities />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 2 av 4 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    // LOU-register and Bildgenerering have a line under the label; the others not.
+    for (const name of ["LOU-register", "Diarium", "Webbsökning", "Bildgenerering"]) {
+      const label = (within(popover).getByRole("switch", { name }) as HTMLInputElement).labels?.[0];
+      expect(label?.querySelector('[aria-hidden="true"]'), name).toBeTruthy();
+    }
     await expectNoAxeViolations(popover);
   });
 

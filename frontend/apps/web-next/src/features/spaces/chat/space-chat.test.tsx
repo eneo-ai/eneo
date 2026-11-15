@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
@@ -77,8 +78,10 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A save and the choice it carries are module state: let them settle before the next case.
+  await awaitPartnerUpdates();
   api.GET.mockClear();
   api.POST.mockReset();
   api.POST.mockImplementation(async (_path, init) => ({
@@ -263,15 +266,15 @@ describe("SpaceChat", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("lets the personal assistant's reasoning effort be picked beside the model and saves it on the assistant", async () => {
+  it("lets the personal assistant's reasoning effort be picked in the model picker and saves it on the assistant", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
-    const effort = await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
-    // Beside the model picker, in the composer's send actions.
-    expect(screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })).toBeTruthy();
-    fireEvent.click(effort);
-    fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
+    // One control for both: the level has no button of its own.
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
+    fireEvent.click(within(levels).getByRole("radio", { name: "Hög" }));
 
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
@@ -279,6 +282,68 @@ describe("SpaceChat", () => {
         body: { completion_model_kwargs: { reasoning_effort: "high" } }
       })
     );
+  });
+
+  it("saves a model and a level chosen together in one update", async () => {
+    Object.assign(route.space, personalSpace, {
+      completion_models: [
+        reasoningModel,
+        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
+      ]
+    });
+    renderRoute("/spaces/personal/chat");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+    fireEvent.click(within(panel).getByRole("radio", { name: "Hög" }));
+
+    const saves = () => api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(saves()).toEqual([
+      [
+        "/api/v1/assistants/{id}/",
+        {
+          params: { path: { id: "assistant-1" } },
+          body: {
+            completion_model: { id: "model-2" },
+            completion_model_kwargs: { reasoning_effort: "high" }
+          }
+        }
+      ]
+    ]);
+  });
+
+  it("holds the save queue, and so a question sent meanwhile, until a picked model is saved", async () => {
+    Object.assign(route.space, personalSpace, {
+      completion_models: [
+        reasoningModel,
+        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
+      ]
+    });
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    api.POST.mockImplementation(async (path, init) => {
+      if (path === "/api/v1/assistants/{id}/") await landed;
+      return { data: init?.body, response: new Response() };
+    });
+    try {
+      renderRoute("/spaces/personal/chat");
+
+      fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+      await waitFor(() =>
+        expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", expect.anything())
+      );
+      // Past the rest the picker's own place in the queue is let go: only the save holds it now.
+      expect(hasPendingPartnerUpdates()).toBe(true);
+
+      await act(async () => land());
+      await waitFor(() => expect(hasPendingPartnerUpdates()).toBe(false));
+    } finally {
+      land();
+    }
   });
 
   it("puts the personal chat's Skills beside the tools in the composer", async () => {
@@ -303,7 +368,8 @@ describe("SpaceChat", () => {
       }
     });
     renderRoute("/spaces/personal/chat");
-    await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ });
-    expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    await screen.findByRole("option", { name: /GPT-5/ });
+    expect(screen.queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
   });
 });
