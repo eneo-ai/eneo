@@ -389,8 +389,9 @@ async def test_a_session_takes_a_recording_longer_than_eight_hours(
     [audio] = contract.json()["steps_requiring_input"]
     assert audio["max_duration_seconds"] == 36_000
     assert audio["max_recording_seconds"] == 36_000
-    # Parts that spread the recording over every file slot.
-    assert audio["recording_part_seconds"] == -(-36_000 // audio["max_files"])
+    # Ten parts of an hour: the recording spread over the input's ten file slots.
+    assert audio["max_files"] == 10
+    assert audio["recording_part_seconds"] == 3_600
 
     session = await live_stack.open_session()
 

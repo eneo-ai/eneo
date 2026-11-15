@@ -340,7 +340,7 @@ def test_the_retired_flow_recording_ceiling_starts_and_says_what_governs_it(
     ) in caplog.text
 
 
-@pytest.mark.parametrize("value", ["28800", "90000"])
+@pytest.mark.parametrize("value", ["3600", "90000"])
 def test_the_retired_flow_recording_ceiling_no_longer_moves_the_ceiling(
     value: str,
 ) -> None:
