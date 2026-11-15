@@ -143,6 +143,18 @@ describe("ContextUsageBar", () => {
     expect(row(container)).toBeNull();
   });
 
+  it("keeps its figures while a new estimate is on its way when the conversation already shows the row", () => {
+    // 70 % of the window is the conversation so far: current, not an old estimate.
+    const conversation = usage(7_000, { lockedInputTokens: 7_000, pendingTextTokens: 0 });
+    const { rerender } = renderInApp(
+      <ContextUsageBar usage={conversation} cumulativeTokens={9_000} turnCount={2} />
+    );
+    rerender(
+      <ContextUsageBar usage={conversation} pending cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(meter()?.textContent).toContain("70%");
+  });
+
   it("does not appear for a new draft's estimate while the row was not shown", () => {
     const { container } = renderInApp(
       <ContextUsageBar usage={usage(500)} pending cumulativeTokens={9_000} turnCount={2} />

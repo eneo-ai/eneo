@@ -177,12 +177,14 @@ export function ContextUsageBar({
     (turnCount === 0 && baselineTotal > 0 && !phone);
   const visible = hasUsage && (warranted || pinned);
   // Whether the row was there when the last estimate came, kept while a new one is on
-  // its way: the row then holds its place, without figures (no old estimate is shown),
-  // so the composer, centred before the first question, does not jump as one types or
-  // changes the model. Without an answer the row is as it would be.
+  // its way. A row that would go meanwhile (its estimate is not in yet) holds its place,
+  // without figures (no old estimate is shown), so the composer, centred before the
+  // first question, does not jump as one types or changes the model. A row the
+  // conversation already fills keeps its figures: they are current, not an old estimate.
+  // Without an answer the row is as it would be.
   const [settledVisible, setSettledVisible] = useState(visible);
   if (!pending && settledVisible !== visible) setSettledVisible(visible);
-  if (pending && settledVisible) {
+  if (pending && settledVisible && !visible) {
     return (
       <div aria-hidden="true" className={ROW_CLASS}>
         <div className={TRACK_CLASS} />
