@@ -481,7 +481,7 @@ function ToolsAndSkills({
 /**
  * The personal chat composer's pill for Verktyg and Skills: one control, so
  * the footer holds on a phone. It carries the count of tools that are on and
- * Skills that run, and opens a popover (a bottom sheet on phones) with a tab
+ * of Skills that run, as its tabs do ("Verktyg 3 · Skills 1"), and opens a popover (a bottom sheet on phones) with a tab
  * for each: the tools' switches, and the organisation's Skills, read-only,
  * with the person's own on "Av / Vid behov / Alltid". A chat with only one of
  * the two shows that one under its own name; Skills are shown to people who
@@ -548,15 +548,34 @@ export function ChatSkills({ tools }: { tools?: ChatToolsProps } = {}) {
   const active = withTools.count.active + running;
   return (
     <ComposerPanel
-      icon={Plug}
-      text={t("chat_tools")}
-      // The pill shows the two counts as one; its name says which is which.
+      // The pill reads as its tabs do, each word with its tab's count (a phone shows the
+      // icon and the total). The counts are the name's to say: hidden here, as on the tabs.
+      face={
+        <>
+          <Plug aria-hidden="true" className="size-[15px]" />
+          <span className="max-sm:sr-only">{t("chat_tools")}</span>{" "}
+          <span aria-hidden="true" className={cn(COMPOSER_COUNT_CLASS, "max-sm:hidden")}>
+            {withTools.count.active}
+          </span>{" "}
+          <span aria-hidden="true" className="max-sm:hidden">
+            ·
+          </span>{" "}
+          <span className="max-sm:sr-only">{t("personal_chat_skills_button")}</span>{" "}
+          {skills.running && (
+            <span aria-hidden="true" className={cn(COMPOSER_COUNT_CLASS, "max-sm:hidden")}>
+              {skills.running.total}
+            </span>
+          )}{" "}
+          <span aria-hidden="true" className={cn(COMPOSER_COUNT_CLASS, "sm:hidden")}>
+            {active}
+          </span>
+        </>
+      }
       name={t("chat_tools_and_skills_named", {
         count: active,
         tools: withTools.count.active,
-        skills: running
+        skills: skills.running ? String(skills.running.total) : "none"
       })}
-      count={active}
       label={t("chat_tools_and_skills")}
       open={open}
       onOpenChange={changeOpen}

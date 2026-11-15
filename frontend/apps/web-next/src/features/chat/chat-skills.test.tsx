@@ -523,7 +523,7 @@ describe("ChatSkills", () => {
     expect(within(rowOf(answersMode)).getByText("Spärrad av administratör")).toBeTruthy();
   });
 
-  it("shares one control with the tools: both counts as one, and a tab for each", async () => {
+  it("shares one control with the tools: each with its count, as on its tab, and a tab for each", async () => {
     const onDisabled = vi.fn();
     renderInApp(
       <ChatSkills
@@ -540,7 +540,8 @@ describe("ChatSkills", () => {
       />,
       { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
     );
-    const name = "Verktyg: 3 aktiva (1 verktyg, 2 skills)";
+    // The pill reads as its tabs do: each word with its own count.
+    const name = "Verktyg 1 · Skills 2 (3 aktiva)";
     const trigger = await screen.findByRole("button", { name });
     expectNameToHoldVisibleText(trigger, name);
     expect(screen.queryByRole("button", { name: /^Skills/ })).toBeNull();
@@ -567,12 +568,32 @@ describe("ChatSkills", () => {
   });
 
   it.each([
-    ["sv", sv, "Verktyg: 2 aktiva (1 verktyg, 1 skill)", "Verktyg: 5 aktiva (3 verktyg, 2 skills)"],
-    ["en", en, "Tools: 2 active (1 tool, 1 skill)", "Tools: 5 active (3 tools, 2 skills)"]
-  ])("names the shared pill's counts in the right number in %s", (locale, messages, one, many) => {
+    [
+      "sv",
+      sv,
+      [
+        "Verktyg 1 · Skills 0 (1 aktiv)",
+        "Verktyg 3 · Skills 2 (5 aktiva)",
+        "Verktyg 3 · Skills (3 aktiva)"
+      ]
+    ],
+    [
+      "en",
+      en,
+      [
+        "Tools 1 · Skills 0 (1 active)",
+        "Tools 3 · Skills 2 (5 active)",
+        "Tools 3 · Skills (3 active)"
+      ]
+    ]
+  ])("names the shared pill as it reads, in the right number, in %s", (locale, messages, names) => {
     const t = createTranslator({ locale, messages });
-    expect(t("chat_tools_and_skills_named", { count: 2, tools: 1, skills: 1 })).toBe(one);
-    expect(t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: 2 })).toBe(many);
+    expect([
+      t("chat_tools_and_skills_named", { count: 1, tools: 1, skills: "0" }),
+      t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: "2" }),
+      // Before the chat's Skills are known, the Skills tab has no count either.
+      t("chat_tools_and_skills_named", { count: 3, tools: 3, skills: "none" })
+    ]).toEqual(names);
   });
 
   it.each([
@@ -594,7 +615,7 @@ describe("ChatSkills", () => {
       />,
       { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
     );
-    fireEvent.click(await screen.findByRole("button", { name: /^Verktyg:/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /^Verktyg \d/ }));
     const panel = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
     // The Skills tab's choices: laid out unseen beside the pill, not there in the sheet.
     await waitFor(() =>
@@ -620,7 +641,7 @@ describe("ChatSkills", () => {
       />,
       { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
     );
-    const trigger = await screen.findByRole("button", { name: /^Verktyg:/ });
+    const trigger = await screen.findByRole("button", { name: /^Verktyg \d/ });
     fireEvent.click(trigger);
     let popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
     fireEvent.click(within(popover).getByRole("tab", { name: "Skills" }));

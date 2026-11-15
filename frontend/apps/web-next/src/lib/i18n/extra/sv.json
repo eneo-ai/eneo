@@ -1693,7 +1693,7 @@
   "chat_model_with_reasoning_named": "{label}: {model} · {level} resonemangsnivå",
   "reasoning_effort_not_offered": "Den här modellen har inga resonemangsnivåer.",
   "chat_tools_and_skills": "Verktyg och Skills",
-  "chat_tools_and_skills_named": "Verktyg: {count, plural, one {# aktiv} other {# aktiva}} ({tools} verktyg, {skills, plural, one {# skill} other {# skills}})",
+  "chat_tools_and_skills_named": "Verktyg {tools} · Skills{skills, select, none {} other { {skills}}} ({count, plural, one {# aktiv} other {# aktiva}})",
   "chat_tool_all_arguments": "Visa alla argument",
   "chat_tool_count": "{count} verktyg",
   "chat_tool_review": "Granska",
