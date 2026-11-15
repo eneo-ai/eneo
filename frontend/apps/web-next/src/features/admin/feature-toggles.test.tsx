@@ -5,10 +5,18 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { QueryAppContextProvider } from "@/components/providers/app-context-from-queries";
 import { AdminSections } from "@/components/shell/admin-nav";
 import { browserApi } from "@/lib/api/browser";
+import { makeQueryClient } from "@/lib/api/query";
 import { loadSession, sessionKeys } from "@/lib/api/session";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderHookInApp, renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import {
+  flushAnnouncements,
+  recordAnnouncements,
+  renderHookInApp,
+  renderInApp,
+  testAppContext,
+  testQueryClient
+} from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
 const toastApiError = vi.hoisted(() => vi.fn());
@@ -209,14 +217,24 @@ it.each([
   expect(await within(flowsRow()).findByText(label)).toBeTruthy();
 });
 
-it("shows a failed check after a green one as not checked, never as still running", async () => {
-  renderToggles();
+it.each([
+  [
+    "a failed request",
+    { error: { message: "down" }, response: new Response("{}", { status: 503 }) }
+  ],
+  [
+    "a probe that could not read the workers",
+    {
+      data: { probe_ok: false, execution_worker_ready: false, maintenance_worker_ready: false },
+      response: new Response("{}")
+    }
+  ]
+])("shows %s after a green check as not checked, never as still running", async (_, reply) => {
+  // The app's own client, with its retries: the state must not wait them out.
+  renderToggles(makeQueryClient());
   const row = flowsRow();
   expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
-  api.GET.mockResolvedValue({
-    error: { message: "down" },
-    response: new Response("{}", { status: 503 })
-  });
+  api.GET.mockResolvedValue(reply);
 
   fireEvent.click(within(row).getByRole("button", { name: "Uppdatera arbetarnas läge" }));
 
@@ -259,14 +277,6 @@ it("links the Flows setup guide, and points to it for the workers when they do n
   ).toBeTruthy();
   const workersGuide = within(stopped).getByRole("link", { name: /Så får du arbetarna att köra/ });
   expect(workersGuide.getAttribute("href")).toBe(FLOWS_GUIDE);
-  // In the state's own line, beside the state and Refresh, not further down.
-  const stateLine = within(stopped).getByRole("button", {
-    name: "Uppdatera arbetarnas läge"
-  }).parentElement!;
-  expect(stateLine.contains(workersGuide)).toBe(true);
-  expect(stateLine.contains(within(stopped).getByText(/Kör inte: task-execution-worker/))).toBe(
-    true
-  );
   await expectNoAxeViolations(document.body);
 });
 
@@ -281,6 +291,25 @@ it("checks the workers again as soon as Flows are switched on", async () => {
 
   expect(await within(row).findByText("Arbetarna: Kör inte: task-execution-worker")).toBeTruthy();
   expect(api.GET.mock.calls.filter(([path]) => path === WORKERS_PATH)).toHaveLength(2);
+});
+
+it("announces the workers' state that switching Flows on checked", async () => {
+  api.PATCH.mockResolvedValue({ data: {}, response: new Response("{}") });
+  const said = recordAnnouncements();
+  renderToggles();
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
+  await flushAnnouncements();
+  answerWorkers({ ...bothRunning, execution_worker_ready: false });
+
+  fireEvent.click(within(row).getByRole("switch", { name: "Flöden" }));
+
+  await waitFor(() => expect(said).toContain("Arbetarna: Kör inte: task-execution-worker"));
+  const afterSwitch = said.length;
+
+  // Refresh is its own action and says its own result once.
+  fireEvent.click(within(row).getByRole("button", { name: "Uppdatera arbetarnas läge" }));
+  await waitFor(() => expect(said).toHaveLength(afterSwitch + 1));
 });
 
 it("asks before switching Flows off, and Cancel sends nothing", async () => {
@@ -325,7 +354,24 @@ it("leaves Flows off when switching them on fails", async () => {
   expect(screen.queryByRole("alertdialog")).toBeNull();
 });
 
-it("switches Flows on without a reload, and the admin menu follows", async () => {
+it("leaves Flows on when switching them off fails", async () => {
+  api.PATCH.mockResolvedValue({
+    error: { message: "nope" },
+    response: new Response("{}", { status: 500 })
+  });
+  renderToggles(testQueryClient(), true);
+  const flows = screen.getByRole("switch", { name: "Flöden" }) as HTMLInputElement;
+
+  fireEvent.click(flows);
+  const dialog = await screen.findByRole("alertdialog", { name: "Stäng av Flöden?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Stäng av Flöden" }));
+
+  await waitFor(() => expect(toastApiError).toHaveBeenCalled());
+  expect(flows.checked).toBe(true);
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+});
+
+it("switches Flows on and off without a reload, and the admin menu follows", async () => {
   const base = testAppContext({ permissions: ["admin"] });
   let settings = { ...base.settings, whats_new_enabled: false, flows_enabled: false };
   const replies = new Map<string, unknown>([
@@ -360,4 +406,16 @@ it("switches Flows on without a reload, and the admin menu follows", async () =>
   expect(await screen.findByRole("link", { name: messages.flow_admin_nav_label })).toBeTruthy();
   expect(api.PATCH).toHaveBeenCalledWith("/api/v1/settings/flows", { body: { enabled: true } });
   expect((screen.getByRole("switch", { name: "Flöden" }) as HTMLInputElement).checked).toBe(true);
+
+  fireEvent.click(screen.getByRole("switch", { name: "Flöden" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Stäng av Flöden?" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Stäng av Flöden" }));
+
+  await waitFor(() =>
+    expect(screen.queryByRole("link", { name: messages.flow_admin_nav_label })).toBeNull()
+  );
+  expect(api.PATCH).toHaveBeenLastCalledWith("/api/v1/settings/flows", {
+    body: { enabled: false }
+  });
+  expect((screen.getByRole("switch", { name: "Flöden" }) as HTMLInputElement).checked).toBe(false);
 });

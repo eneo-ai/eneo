@@ -19,7 +19,10 @@ const MAINTENANCE_WORKER = "task-maintenance-worker";
 
 export const taskWorkersQuery = queryOptions({
   queryKey: ["admin-task-workers"],
-  queryFn: () => unwrap(browserApi.GET("/api/v1/settings/task-workers"))
+  queryFn: () => unwrap(browserApi.GET("/api/v1/settings/task-workers")),
+  // A failed check must read "could not be checked" at once; retries would keep an
+  // earlier "running" on screen while they wait. Refresh is the retry.
+  retry: false
 });
 
 /**
@@ -28,8 +31,10 @@ export const taskWorkersQuery = queryOptions({
  * reads "could not be checked" (tone `warning`), never an earlier "running":
  * a failed refetch keeps the old data, so the error is looked at first.
  */
+type WorkersResult = Pick<QueryObserverResult<TaskWorkers>, "status" | "data">;
+
 function workersState(
-  result: Pick<QueryObserverResult<TaskWorkers>, "status" | "data">,
+  result: WorkersResult,
   t: ReturnType<typeof useTranslations>
 ): { tone: StatusTone; label: string } {
   const data = result.data;
@@ -53,6 +58,14 @@ function workersState(
             worker: execution ? MAINTENANCE_WORKER : EXECUTION_WORKER
           })
   };
+}
+
+/** What a screen reader hears after a check: the same words as the state line. */
+export function workersAnnouncement(
+  result: WorkersResult,
+  t: ReturnType<typeof useTranslations>
+): string {
+  return t("flows_switch_workers_state", { state: workersState(result, t).label });
 }
 
 /** The workers' state beside the Flows switch: it warns, it never blocks the switch. */
@@ -106,11 +119,7 @@ export function TaskWorkersStatus() {
           isInterruptible
           onClick={() => {
             if (query.isFetching) return;
-            void query
-              .refetch()
-              .then((result) =>
-                announce(t("flows_switch_workers_state", { state: workersState(result, t).label }))
-              );
+            void query.refetch().then((result) => announce(workersAnnouncement(result, t)));
           }}
         >
           {t("refresh")}

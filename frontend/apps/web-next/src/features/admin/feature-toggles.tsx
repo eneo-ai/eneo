@@ -1,5 +1,6 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Link } from "@astryxdesign/core/Link";
 import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
@@ -19,7 +20,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { sessionKeys } from "@/lib/api/session";
-import { TaskWorkersStatus, taskWorkersQuery } from "./task-workers-status";
+import { TaskWorkersStatus, taskWorkersQuery, workersAnnouncement } from "./task-workers-status";
 import { useSettingSwitch } from "./use-setting-switch";
 
 type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new" | "flows";
@@ -61,6 +62,8 @@ function SettingRow({
   children?: ReactNode;
 }) {
   const queryClient = useQueryClient();
+  const t = useTranslations();
+  const announce = useAnnounce();
   const [confirming, setConfirming] = useState(false);
   const [value, setValue] = useSettingSwitch(
     setting,
@@ -77,12 +80,14 @@ function SettingRow({
         }
       : setting === "flows"
         ? {
-            // Switched on, the admin sees at once whether the workers run.
+            // Switched on, the admin sees and hears at once whether the workers run.
             onSaved: async (enabled) => {
               await Promise.all([
                 queryClient.invalidateQueries({ queryKey: sessionKeys.settings }),
                 enabled && queryClient.invalidateQueries({ queryKey: taskWorkersQuery.queryKey })
               ]);
+              const workers = enabled && queryClient.getQueryState(taskWorkersQuery.queryKey);
+              if (workers) announce(workersAnnouncement(workers, t));
             }
           }
         : undefined
