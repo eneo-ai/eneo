@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { createTranslator } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import en from "@/lib/i18n/messages/en.json";
+import sv from "@/lib/i18n/messages/sv.json";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -521,17 +524,17 @@ describe("ChatSkills", () => {
     expect(screen.queryByRole("button", { name: /^Skills/ })).toBeNull();
 
     fireEvent.click(trigger);
-    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    // The panel and its tabs are named for both; a tab's count is the pill's to say.
+    const popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    expect(within(popover).getByRole("tablist", { name: "Verktyg och Skills" })).toBeTruthy();
     expect(
-      within(popover)
-        .getByRole("tab", { name: /^Verktyg/ })
-        .getAttribute("aria-selected")
+      within(popover).getByRole("tab", { name: "Verktyg" }).getAttribute("aria-selected")
     ).toBe("true");
     fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
     expect(onDisabled).toHaveBeenLastCalledWith(new Set());
     expect(within(popover).queryByRole("radiogroup")).toBeNull();
 
-    fireEvent.click(within(popover).getByRole("tab", { name: /^Skills/ }));
+    fireEvent.click(within(popover).getByRole("tab", { name: "Skills" }));
     const skillsPanel = within(popover).getByRole("tabpanel", { name: "Skills" });
     await waitFor(() => expect(skillsPanel.querySelector('[aria-busy="true"]')).toBeNull());
     expect(
@@ -539,6 +542,15 @@ describe("ChatSkills", () => {
     ).toBeTruthy();
     expect(within(popover).queryByRole("switch", { name: "Diarium" })).toBeNull();
     await expectNoAxeViolations(popover);
+  });
+
+  it.each([
+    ["sv", sv, "Verktyg: 2 aktiva (1 verktyg, 1 skill)", "Verktyg: 5 aktiva (3 verktyg, 2 skills)"],
+    ["en", en, "Tools: 2 active (1 tool, 1 skill)", "Tools: 5 active (3 tools, 2 skills)"]
+  ])("names the shared pill's counts in the right number in %s", (locale, messages, one, many) => {
+    const t = createTranslator({ locale, messages });
+    expect(t("chat_tools_and_skills_named", { count: 2, tools: 1, skills: 1 })).toBe(one);
+    expect(t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: 2 })).toBe(many);
   });
 
   it("puts focus on the chosen tab when the panel opens again", async () => {
@@ -554,14 +566,14 @@ describe("ChatSkills", () => {
     );
     const trigger = await screen.findByRole("button", { name: /^Verktyg:/ });
     fireEvent.click(trigger);
-    let popover = await screen.findByRole("dialog", { name: "Verktyg" });
-    fireEvent.click(within(popover).getByRole("tab", { name: /^Skills/ }));
+    let popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    fireEvent.click(within(popover).getByRole("tab", { name: "Skills" }));
     fireEvent.keyDown(popover, { key: "Escape" });
     await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
 
     fireEvent.click(trigger);
-    popover = await screen.findByRole("dialog", { name: "Verktyg" });
-    const chosen = within(popover).getByRole("tab", { name: /^Skills/ });
+    popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    const chosen = within(popover).getByRole("tab", { name: "Skills" });
     expect(chosen.getAttribute("aria-selected")).toBe("true");
     await waitFor(() => expect(document.activeElement).toBe(chosen));
     // And it stays there once the opening has settled.

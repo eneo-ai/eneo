@@ -99,9 +99,19 @@ export function mcpConversationOptions({
   };
 }
 
-const ROW_CLASS = "flex items-center gap-2.5 py-1.5";
+/**
+ * A tool's row: its switch, centred in the 44 px a touch screen gives it (the
+ * theme's minimum height, which Astryx fills from the top), and a description
+ * under the label's text, past the icon (28 px, 4 px margin, the label's 4 px gap).
+ */
+const ROW_CLASS =
+  "py-1.5 [&>.astryx-switch-field]:flex [&>.astryx-switch-field]:flex-col [&>.astryx-switch-field]:justify-center [&_label+span]:ps-9";
+/**
+ * A row's icon, set in the switch's label (Astryx's `labelIcon`) so it sits on
+ * the label's line: beside the label, a description under it pulled them apart.
+ */
 const ROW_ICON_CLASS =
-  "bg-ax-muted text-ax-text-secondary rounded-ax-inner flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold";
+  "bg-ax-muted text-ax-text-secondary rounded-ax-inner me-1 flex size-7 shrink-0 items-center justify-center overflow-hidden text-xs font-semibold";
 
 function ToolGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -269,25 +279,25 @@ export function ToolsPanel({
               const Icon = CAPABILITIES.find((item) => item.purpose === capability.purpose)?.icon;
               return (
                 <li key={capability.purpose} className={ROW_CLASS}>
-                  <span aria-hidden="true" className={ROW_ICON_CLASS}>
-                    {Icon ? <Icon className="size-4" /> : null}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    {/* An unavailable capability is off whatever the switch
-                        says; its reason replaces the description. */}
-                    <Switch
-                      label={t(capability.purpose)}
-                      description={
-                        capability.available ? undefined : t(readinessKey(capability.reason))
-                      }
-                      labelPosition="start"
-                      labelSpacing="spread"
-                      size="sm"
-                      value={capability.available && !disabledCapabilities.has(capability.purpose)}
-                      isDisabled={!capability.available}
-                      onChange={(value) => setCapability(capability.purpose, value)}
-                    />
-                  </div>
+                  {/* An unavailable capability is off whatever the switch
+                      says; its reason replaces the description. */}
+                  <Switch
+                    label={t(capability.purpose)}
+                    labelIcon={
+                      <span aria-hidden="true" className={ROW_ICON_CLASS}>
+                        {Icon ? <Icon className="size-4" /> : null}
+                      </span>
+                    }
+                    description={
+                      capability.available ? undefined : t(readinessKey(capability.reason))
+                    }
+                    labelPosition="start"
+                    labelSpacing="spread"
+                    size="sm"
+                    value={capability.available && !disabledCapabilities.has(capability.purpose)}
+                    isDisabled={!capability.available}
+                    onChange={(value) => setCapability(capability.purpose, value)}
+                  />
                 </li>
               );
             })}
@@ -300,29 +310,29 @@ export function ToolsPanel({
               const reason = mcpServerUnavailableReason(server, modelSupportsTools);
               return (
                 <li key={server.id} className={ROW_CLASS}>
-                  <span aria-hidden="true" className={ROW_ICON_CLASS}>
-                    {server.icon_url ? (
-                      <img src={server.icon_url} alt="" className="size-full object-cover" />
-                    ) : (
-                      server.name.charAt(0).toUpperCase()
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    {/* An unavailable server is off whatever the switch says: the
-                        backend never calls it. The reason replaces the description. */}
-                    <Switch
-                      label={server.name}
-                      description={
-                        reason ? t(readinessKey(reason)) : (server.description ?? undefined)
-                      }
-                      labelPosition="start"
-                      labelSpacing="spread"
-                      size="sm"
-                      value={reason === null && !disabledServerIds.has(server.id)}
-                      isDisabled={reason !== null}
-                      onChange={(value) => setServer(server.id, value)}
-                    />
-                  </div>
+                  {/* An unavailable server is off whatever the switch says: the
+                      backend never calls it. The reason replaces the description. */}
+                  <Switch
+                    label={server.name}
+                    labelIcon={
+                      <span aria-hidden="true" className={ROW_ICON_CLASS}>
+                        {server.icon_url ? (
+                          <img src={server.icon_url} alt="" className="size-full object-cover" />
+                        ) : (
+                          server.name.charAt(0).toUpperCase()
+                        )}
+                      </span>
+                    }
+                    description={
+                      reason ? t(readinessKey(reason)) : (server.description ?? undefined)
+                    }
+                    labelPosition="start"
+                    labelSpacing="spread"
+                    size="sm"
+                    value={reason === null && !disabledServerIds.has(server.id)}
+                    isDisabled={reason !== null}
+                    onChange={(value) => setServer(server.id, value)}
+                  />
                 </li>
               );
             })}

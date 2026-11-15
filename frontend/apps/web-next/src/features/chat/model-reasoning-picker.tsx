@@ -400,11 +400,17 @@ export function ModelReasoningPicker({
           {/* Below 640 px the provider's logo stands for the model: a name here
               pushed the send button off a 390 px screen. */}
           <span className="max-w-[min(12rem,30vw)] truncate max-sm:sr-only">{shownName}</span>{" "}
+          {/* The dot is an item of its own, so the pill's gap sets the room on both sides;
+              the level is quieter than the model's name. */}
           {ownLevelText && (
-            <span className="font-medium max-sm:sr-only">
-              <span aria-hidden="true">· </span>
-              {ownLevelText}
-            </span>
+            <>
+              <span aria-hidden="true" className="max-sm:hidden">
+                ·
+              </span>{" "}
+              <span className="text-ax-text-tertiary font-medium max-sm:sr-only">
+                {ownLevelText}
+              </span>
+            </>
           )}
           <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
         </>

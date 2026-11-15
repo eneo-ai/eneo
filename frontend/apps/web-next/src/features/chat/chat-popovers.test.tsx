@@ -143,6 +143,18 @@ describe("ChatTools", () => {
     setViewport("desktop");
   });
 
+  it("sets each tool's icon on its label's line, with a description under it or without", async () => {
+    renderInChat(<McpHarness withCapabilities />);
+    fireEvent.click(screen.getByRole("button", { name: "Verktyg: 2 av 4 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    // LOU-register and Bildgenerering have a line under the label; the others not.
+    for (const name of ["LOU-register", "Diarium", "Webbsökning", "Bildgenerering"]) {
+      const label = (within(popover).getByRole("switch", { name }) as HTMLInputElement).labels?.[0];
+      expect(label?.querySelector('[aria-hidden="true"]'), name).toBeTruthy();
+    }
+    await expectNoAxeViolations(popover);
+  });
+
   it("renders every tool unavailable when the model cannot call tools", async () => {
     renderInChat(<McpHarness modelSupportsTools={false} />);
     fireEvent.click(screen.getByRole("button", { name: "Verktyg: 0 av 2 aktiva" }));

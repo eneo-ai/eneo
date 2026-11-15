@@ -417,20 +417,29 @@ function ToolsAndSkills({
           onChange={(value) => onTabChange(value === "skills" ? "skills" : "tools")}
           role="tablist"
           size="sm"
-          aria-label={t("chat_tools")}
+          aria-label={t("chat_tools_and_skills")}
         >
           <Tab
             value="tools"
             label={t("chat_tools")}
             panelId={toolsPanelId}
-            endContent={<span className={COMPOSER_COUNT_CLASS}>{toolCounts(tools).active}</span>}
+            // The pill's name carries the counts; a tab's name is what it holds.
+            endContent={
+              <span aria-hidden="true" className={COMPOSER_COUNT_CLASS}>
+                {toolCounts(tools).active}
+              </span>
+            }
           />
           <Tab
             value="skills"
             label={t("personal_chat_skills_button")}
             panelId={skillsPanelId}
             endContent={
-              skills.running && <span className={COMPOSER_COUNT_CLASS}>{skills.running.total}</span>
+              skills.running && (
+                <span aria-hidden="true" className={COMPOSER_COUNT_CLASS}>
+                  {skills.running.total}
+                </span>
+              )
             }
           />
         </TabList>
@@ -546,7 +555,7 @@ export function ChatSkills({ tools }: { tools?: ChatToolsProps } = {}) {
         skills: running
       })}
       count={active}
-      label={t("chat_tools")}
+      label={t("chat_tools_and_skills")}
       open={open}
       onOpenChange={changeOpen}
       width={480}

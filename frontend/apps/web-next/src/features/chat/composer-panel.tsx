@@ -21,8 +21,9 @@ import { CHAT_PANEL_IDS } from "./chat-url";
  */
 const PILL_CLASS =
   "text-ax-text-secondary hover:bg-ax-hover hover:text-ax-text focus-visible:outline-ring aria-expanded:bg-ax-hover inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:h-11 pointer-coarse:min-w-11";
+/** A count: Astryx's neutral badge fill, a tint that shows on the composer and the tabs in both themes. */
 export const COMPOSER_COUNT_CLASS =
-  "bg-ax-muted text-ax-text flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums";
+  "bg-ax-selected text-ax-text flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-[11px] tabular-nums";
 
 /** Where a panel's content is shown: beside its pill, or in a phone's sheet. */
 export type ComposerPanelSurface = {
