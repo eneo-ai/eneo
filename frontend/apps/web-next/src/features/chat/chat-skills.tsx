@@ -317,7 +317,9 @@ function SkillsPanel({
           <div
             className={cn(
               "flex flex-col gap-4",
-              !stacked && "max-h-[28rem] min-h-0 flex-auto overflow-y-auto pe-1"
+              // Under a tab, the room above the pill is the only limit.
+              !stacked && "scroll-fade min-h-0 flex-auto overflow-y-auto pe-1",
+              !stacked && !tabbed && "max-h-[28rem]"
             )}
           >
             {layer?.status === "suspended" && layer.reason && (
@@ -399,18 +401,24 @@ function ToolsAndSkills({
   const panel = useFitAbove(anchor);
   const toolsPanelId = useId();
   const skillsPanelId = useId();
-  const panelClass = "flex min-h-0 flex-auto flex-col";
+  // Beside the pill both tabs are laid out in one cell, the other one unseen: the panel
+  // is as tall as the taller tab (at most the room there is) and keeps that height when
+  // the tab changes. In the sheet, which scrolls, only the chosen tab is there.
+  const tabPanel = (value: PanelTab, id: string, label: string, content: ReactNode) => (
+    <div
+      id={id}
+      role="tabpanel"
+      aria-label={label}
+      hidden={stacked && tab !== value}
+      style={!stacked && tab !== value ? { visibility: "hidden" } : undefined}
+      className={cn("flex min-h-0 flex-col", !stacked && "[grid-area:1/1]")}
+    >
+      {(!stacked || tab === value) && content}
+    </div>
+  );
 
   return (
-    <div
-      ref={panel}
-      className={cn(
-        "flex min-h-0 flex-col gap-3",
-        // Beside the pill, one height for both tabs (at most the room there is),
-        // so the tab row stays put when the tab changes; the tab's content scrolls.
-        stacked ? "p-4" : "h-96 p-1"
-      )}
-    >
+    <div ref={panel} className={cn("flex min-h-0 flex-col gap-3", stacked ? "p-4" : "p-1")}>
       <div className="flex shrink-0 items-center justify-between gap-3">
         <TabList
           value={tab}
@@ -452,23 +460,17 @@ function ToolsAndSkills({
           />
         )}
       </div>
-      <div
-        id={toolsPanelId}
-        role="tabpanel"
-        aria-label={t("chat_tools")}
-        hidden={tab !== "tools"}
-        className={panelClass}
-      >
-        {tab === "tools" && <ToolsPanel {...tools} stacked={stacked} tabbed />}
-      </div>
-      <div
-        id={skillsPanelId}
-        role="tabpanel"
-        aria-label={t("personal_chat_skills_button")}
-        hidden={tab !== "skills"}
-        className={panelClass}
-      >
-        {tab === "skills" && (
+      <div className={stacked ? "flex min-h-0 flex-col" : "grid min-h-0 flex-auto"}>
+        {tabPanel(
+          "tools",
+          toolsPanelId,
+          t("chat_tools"),
+          <ToolsPanel {...tools} stacked={stacked} tabbed />
+        )}
+        {tabPanel(
+          "skills",
+          skillsPanelId,
+          t("personal_chat_skills_button"),
           <SkillsPanel skills={skills} stacked={stacked} search={search} tabbed />
         )}
       </div>

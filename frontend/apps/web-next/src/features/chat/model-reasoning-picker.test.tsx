@@ -250,8 +250,9 @@ describe("ModelReasoningPicker", () => {
     ).mockReturnValue(DOMRect.fromRect({ x: 600, y: 400, width: 160, height: 32 }));
     const panel = await openPanel();
     const fitted = panel.querySelector<HTMLElement>("[style*='max-height']")!;
-    // 400 less the header's 117 and the popover's 44 px of gap, padding and gutter.
-    expect(fitted.style.maxHeight).toBe("239px");
+    // 400 less the header's 117 and the popover's 28 px of gap and padding: the 16 px
+    // gutter is the window's, and the header is lower than that.
+    expect(fitted.style.maxHeight).toBe("255px");
   });
 
   it("shows a pinned model read-only and still lets the level be chosen", async () => {

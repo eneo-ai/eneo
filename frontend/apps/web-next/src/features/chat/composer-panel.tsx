@@ -37,10 +37,11 @@ export type ComposerPanelSurface = {
 
 /**
  * What Astryx's Popover adds around its content, above the trigger: the 4 px
- * gap, 12 px of padding above and below and the 16 px gutter at the top of
- * the window.
+ * gap and 12 px of padding above and below. It also keeps 16 px from the
+ * window's top (WINDOW_GUTTER), not from the chat's header.
  */
-const POPOVER_CHROME = 44;
+const POPOVER_CHROME = 28;
+const WINDOW_GUTTER = 16;
 
 /**
  * A ref for a panel that keeps it within the room above its trigger and
@@ -49,21 +50,41 @@ const POPOVER_CHROME = 44;
  * not to that room, so where the composer sits mid-page (the start state) a
  * long list grew over the pill and the composer, or over the header; the list
  * scrolls inside instead, and the panel's header and links stay in view.
+ *
+ * The panel's height follows its content, but never shrinks while it is open
+ * (within that room): a search that shortens a list, or a tab with less in
+ * it, would otherwise move the panel's top, and its tabs, under the pointer.
  */
 export function useFitAbove(trigger?: HTMLElement | null) {
   const panel = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const element = panel.current;
     if (!element || !trigger) return;
-    const fit = () => {
-      const ceiling = trigger.closest(`#${CHAT_PANEL_IDS.chat}`)?.getBoundingClientRect().top ?? 0;
-      const room = trigger.getBoundingClientRect().top - Math.max(0, ceiling) - POPOVER_CHROME;
-      element.style.maxHeight = `${Math.max(0, room)}px`;
+    let room = 0;
+    let held = 0;
+    const apply = () => {
+      element.style.maxHeight = `${room}px`;
+      element.style.minHeight = `${Math.min(held, room)}px`;
     };
+    const fit = () => {
+      const header = trigger.closest(`#${CHAT_PANEL_IDS.chat}`)?.getBoundingClientRect().top ?? 0;
+      const ceiling = Math.max(header, WINDOW_GUTTER);
+      room = Math.max(0, trigger.getBoundingClientRect().top - ceiling - POPOVER_CHROME);
+      apply();
+    };
+    const observer = new ResizeObserver(([entry]) => {
+      const height = entry?.borderBoxSize[0]?.blockSize ?? 0;
+      if (height > held) {
+        held = height;
+        apply();
+      }
+    });
     fit();
+    observer.observe(element);
     window.addEventListener("resize", fit);
     window.addEventListener("scroll", fit, true);
     return () => {
+      observer.disconnect();
       window.removeEventListener("resize", fit);
       window.removeEventListener("scroll", fit, true);
     };

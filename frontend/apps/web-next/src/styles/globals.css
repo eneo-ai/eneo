@@ -1442,3 +1442,50 @@
     }
   }
 }
+
+/*
+ * 15. A list that scrolls inside a panel (`scroll-fade`): it fades out at an
+ *     edge with more beyond it, so a row cut at the edge reads as "more", not
+ *     as clipped. The list's own scroll drives it: a list with nothing to
+ *     scroll has no timeline and no fade.
+ *     ponytail: without scroll timelines (Firefox today) there is no fade; a
+ *     scroll listener would add it there if that matters.
+ */
+@property --scroll-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --scroll-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@utility scroll-fade {
+  @supports (animation-timeline: scroll()) {
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      #000 var(--scroll-fade-top),
+      #000 calc(100% - var(--scroll-fade-bottom)),
+      transparent
+    );
+    animation: scroll-fade linear both;
+    animation-timeline: scroll(self block);
+  }
+}
+@keyframes scroll-fade {
+  0% {
+    --scroll-fade-top: 0px;
+    --scroll-fade-bottom: 2rem;
+  }
+  8%,
+  92% {
+    --scroll-fade-top: 2rem;
+    --scroll-fade-bottom: 2rem;
+  }
+  100% {
+    --scroll-fade-top: 2rem;
+    --scroll-fade-bottom: 0px;
+  }
+}

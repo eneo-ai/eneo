@@ -271,7 +271,12 @@ export function ToolsPanel({
       </div>
 
       <div
-        className={cn("flex flex-col", !stacked && "max-h-72 min-h-0 flex-auto overflow-y-auto")}
+        className={cn(
+          "flex flex-col",
+          // Under a tab, the room above the pill is the only limit.
+          !stacked && "scroll-fade min-h-0 flex-auto overflow-y-auto",
+          !stacked && !tabbed && "max-h-72"
+        )}
       >
         {capabilities.length > 0 && (
           <ToolGroup title={t("capabilities")}>

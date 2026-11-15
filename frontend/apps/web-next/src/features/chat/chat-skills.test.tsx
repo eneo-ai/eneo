@@ -7,7 +7,7 @@ import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { ChatSkills } from "./chat-skills";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 
@@ -360,6 +360,28 @@ describe("ChatSkills", () => {
     expect(within(popover).getByRole("link", { name: "Hantera skills" })).toBeTruthy();
   });
 
+  it("keeps the panel's height while it is open, so a search that shortens the list never moves it", async () => {
+    renderSkills();
+    const trigger = await screen.findByRole("button", {
+      name: "Skills: 2 aktiva i din personliga chatt"
+    });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 300, y: 400, width: 96, height: 32 })
+    );
+    const popover = await openSkills();
+    const panel = within(popover)
+      .getByText("Gäller alla dina personliga chattar")
+      .closest("[style*='max-height']") as HTMLElement;
+    act(() => reportResize(panel, { height: 300 }));
+    expect(panel.style.minHeight).toBe("300px");
+    // Fewer rows: the panel stays as tall as it was.
+    act(() => reportResize(panel, { height: 120 }));
+    expect(panel.style.minHeight).toBe("300px");
+    // Never taller than the room above the pill.
+    act(() => reportResize(panel, { height: 500 }));
+    expect(panel.style.minHeight).toBe("356px");
+  });
+
   it("explains a paused layer and counts only the organisation's skills", async () => {
     configuration = {
       ...configuration,
@@ -551,6 +573,40 @@ describe("ChatSkills", () => {
     const t = createTranslator({ locale, messages });
     expect(t("chat_tools_and_skills_named", { count: 2, tools: 1, skills: 1 })).toBe(one);
     expect(t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: 2 })).toBe(many);
+  });
+
+  it.each([
+    [
+      "beside the pill, both tabs laid out, so the panel is as tall as the taller one",
+      "desktop",
+      2
+    ],
+    ["in a phone's sheet, only the chosen tab", "phone", 1]
+  ] as const)("holds %s", async (_name, viewport, laidOut) => {
+    setViewport(viewport);
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [{ id: "lou", name: "LOU-register", description: null, icon_url: null }],
+          autoAcceptTools: false,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^Verktyg:/ }));
+    const panel = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    // The Skills tab's choices: laid out unseen beside the pill, not there in the sheet.
+    await waitFor(() =>
+      expect(within(panel).queryAllByRole("radiogroup", { hidden: true }).length > 0).toBe(
+        laidOut === 2
+      )
+    );
+    // The other tab's controls are there to measure, never to reach.
+    expect(within(panel).getByRole("switch", { name: "LOU-register" })).toBeTruthy();
+    expect(within(panel).queryAllByRole("radiogroup")).toHaveLength(0);
+    expect(within(panel).getAllByRole("tabpanel", { hidden: true })).toHaveLength(2);
+    setViewport("desktop");
   });
 
   it("puts focus on the chosen tab when the panel opens again", async () => {
