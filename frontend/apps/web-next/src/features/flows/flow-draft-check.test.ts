@@ -561,9 +561,13 @@ describe("checkDraft", () => {
       expect(
         speakerProblems(audioFlow({ transcription_diarization: true }), offering([usable]))
       ).toEqual([{ code: "speaker_service_missing", switchable: true }]);
+      // The core asks whenever the flow transcribes, with or without an audio step.
+      expect(speakerProblems(audioFlow({}, "text"), offering([usable]))).toEqual([
+        { code: "speaker_service_missing", switchable: true }
+      ]);
     });
 
-    it("asks nothing with a service chosen, speakers off, text only, no usable service or no audio", () => {
+    it("asks nothing with a service chosen, speakers off, no usable service or transcription off", () => {
       const facts = offering([usable]);
       expect(
         speakerProblems(audioFlow({ transcription_speaker_service: { id: "svc-1" } }), facts)
@@ -582,9 +586,11 @@ describe("checkDraft", () => {
         )
       ).toEqual([]);
       expect(speakerProblems(audioFlow({}), offering([]))).toEqual([]);
-      expect(speakerProblems(audioFlow({}, "text"), facts)).toEqual([]);
       // The core asks only while the flow transcribes.
       expect(speakerProblems(audioFlow({ transcription_enabled: false }), facts)).toEqual([]);
+      expect(speakerProblems(audioFlow({ transcription_enabled: false }, "text"), facts)).toEqual(
+        []
+      );
     });
 
     it("keeps a step's need for speakers as the problem it was, whatever the space offers", () => {
@@ -604,6 +610,27 @@ describe("checkDraft", () => {
       expect(speakerProblems(flow, offering([usable]))).toEqual([
         { code: "speaker_service_missing" }
       ]);
+    });
+
+    it("asks a flow without audio for the service its steps need while it transcribes", () => {
+      const flow = (transcribes: boolean) =>
+        makeFlow({
+          steps: [
+            makeStep(1, { input_type: "text", output_mode: "transcribe_only" }),
+            makeStep(2, {
+              output_mode: "speaker_mapping",
+              output_type: "json",
+              output_config: { speaker_mapping: { infer_names: true } }
+            })
+          ],
+          metadata_json: {
+            wizard: { transcription_enabled: transcribes, transcription_model: { id: "m-1" } }
+          }
+        });
+      expect(speakerProblems(flow(true), offering([]))).toEqual([
+        { code: "speaker_service_missing" }
+      ]);
+      expect(speakerProblems(flow(false), offering([]))).toEqual([]);
     });
   });
 

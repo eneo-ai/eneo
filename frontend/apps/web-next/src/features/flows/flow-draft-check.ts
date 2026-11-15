@@ -431,14 +431,17 @@ export function checkDraft(
   }
   const required = speakersRequired(ordered);
   const takesAudio = flowTakesAudio(ordered);
+  // The core asks for a speaker service whenever the flow transcribes, with or
+  // without an audio step (`require_chosen_speaker_service`); the setting is
+  // reachable in both.
+  const transcribes = takesAudio || transcription.enabled;
   const speakers = speakerServiceState(transcription, facts.transcription.services, required);
-  if (required && takesAudio && speakers.picked === null) {
+  if (required && transcribes && speakers.picked === null) {
     problems.push({ code: "speaker_service_missing" });
   } else if (
-    // The core's other branch (`require_chosen_speaker_service`): the setting
-    // asks for speakers and the space has a service to choose, but none is.
-    // A chosen service the space can no longer use is refused as unavailable.
-    takesAudio &&
+    // The core's other branch: the setting asks for speakers and the space has
+    // a service to choose, but none is. A chosen service the space can no
+    // longer use is refused as unavailable.
     transcription.enabled &&
     speakers.labelled &&
     transcription.speakerService.kind !== "service" &&
