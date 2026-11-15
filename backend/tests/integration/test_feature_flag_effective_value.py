@@ -1,8 +1,10 @@
 """A feature check answers for one tenant from the global flag and that tenant's
-own preference, without reading the other tenants' preferences."""
+own preference, without reading the other tenants' preferences, and a switch
+writes only that tenant's own preference."""
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from uuid import UUID, uuid4
@@ -11,6 +13,7 @@ import pytest
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.database import sessionmanager
 from eneo.database.tables.feature_flag_table import GlobalFeatureFlag, TenantFeatureFlag
 from eneo.feature_flag.feature_flag_repo import FeatureFlagRepository
 from eneo.feature_flag.feature_flag_service import FeatureFlagService
@@ -154,3 +157,65 @@ async def test_a_check_reads_one_row_however_many_tenants_have_preferences(
     with _count_reads(async_session) as aggregate_reads:
         await service.feature_flag_repo.one(name=_FEATURE)
     assert aggregate_reads == {"statements": 2, "rows": 1 + configured}
+
+
+async def test_two_tenants_switching_one_flag_at_once_keep_their_own_choice(
+    setup_database,
+):
+    """B switches its flag off and has not committed when A switches its own
+    on. A neither waits for B nor writes B's row, so both choices stand."""
+    async with sessionmanager.session() as setup, setup.begin():
+        tenant_a, tenant_b = await _new_tenants(setup, 2)
+        feature_id = await _new_flag(setup, enabled=False)
+        await _set_preferences(setup, feature_id, {tenant_b: True})
+
+    async with sessionmanager.session() as b, sessionmanager.session() as a:
+        await b.begin()
+        await a.begin()
+        a_pid = await a.scalar(sa.text("SELECT pg_backend_pid()"))
+        await FeatureFlagService(FeatureFlagRepository(b)).disable_tenant(
+            feature_id, tenant_b
+        )
+        racing = asyncio.create_task(
+            FeatureFlagService(FeatureFlagRepository(a)).enable_tenant(
+                feature_id, tenant_a
+            )
+        )
+        try:
+            outcome = await _wait_until_blocked_or_done(a_pid, racing)
+            await b.commit()
+            await asyncio.wait_for(racing, timeout=5)
+        finally:
+            racing.cancel()
+            await asyncio.gather(racing, return_exceptions=True)
+        await a.commit()
+
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(TenantFeatureFlag.tenant_id, TenantFeatureFlag.enabled).where(
+                TenantFeatureFlag.feature_id == feature_id
+            )
+        )
+        stored = dict(rows.tuples().all())
+    # Checked after B has committed, so a wait does not hang the test.
+    assert (outcome, stored) == ("done", {tenant_a: True, tenant_b: False})
+
+
+async def _wait_until_blocked_or_done(pid: int, task: asyncio.Task) -> str:
+    """Whether ``task`` finished ("done") or its session ``pid`` waits on a lock
+    ("blocked"), whichever comes first."""
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        if task.done():
+            return "done"
+        async with sessionmanager.session() as session, session.begin():
+            wait_event_type = await session.scalar(
+                sa.text(
+                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"
+                ),
+                {"pid": pid},
+            )
+        if wait_event_type == "Lock":
+            return "blocked"
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Session {pid} neither finished nor waited on a lock")

@@ -41,25 +41,3 @@ class FeatureFlag:
             return False
         # No preference: use global default
         return self.is_enabled_globally
-
-    def enable_tenant(self, tenant_id: UUID) -> None:
-        """Set tenant preference to enabled.
-
-        Creates/updates a tenant_feature_flags record with enabled=true.
-
-        Args:
-            tenant_id: The tenant to enable
-        """
-        self.tenant_ids.add(tenant_id)
-        self.disabled_tenant_ids.discard(tenant_id)
-
-    def disable_tenant(self, tenant_id: UUID) -> None:
-        """Set tenant preference to disabled.
-
-        Creates/updates a tenant_feature_flags record with enabled=false.
-
-        Args:
-            tenant_id: The tenant to disable
-        """
-        self.disabled_tenant_ids.add(tenant_id)
-        self.tenant_ids.discard(tenant_id)
