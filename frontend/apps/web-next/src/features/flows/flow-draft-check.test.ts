@@ -532,6 +532,81 @@ describe("checkDraft", () => {
     ]);
   });
 
+  describe("speakers labelled by the flow's own setting, with no step that needs them", () => {
+    const usable = {
+      id: "svc-1",
+      name: "Talare",
+      available: true,
+      meets_security_classification: true,
+      is_default: true
+    };
+    const offering = (services: (typeof usable)[]) => ({
+      ...none,
+      transcription: { models: [], services }
+    });
+    const audioFlow = (wizard: Record<string, unknown>, inputType: "audio" | "text" = "audio") =>
+      makeFlow({
+        steps: [makeStep(1, { input_type: inputType, output_mode: "transcribe_only" })],
+        metadata_json: {
+          wizard: { transcription_enabled: true, transcription_model: { id: "m-1" }, ...wizard }
+        }
+      });
+    const speakerProblems = (flow: ReturnType<typeof makeFlow>, facts: DraftFacts) =>
+      checkDraft(flow, facts).flow.filter((problem) => problem.code === "speaker_service_missing");
+
+    it("asks for a service when speakers are on, none is chosen and the space has one", () => {
+      expect(speakerProblems(audioFlow({}), offering([usable]))).toEqual([
+        { code: "speaker_service_missing", switchable: true }
+      ]);
+      expect(
+        speakerProblems(audioFlow({ transcription_diarization: true }), offering([usable]))
+      ).toEqual([{ code: "speaker_service_missing", switchable: true }]);
+    });
+
+    it("asks nothing with a service chosen, speakers off, text only, no usable service or no audio", () => {
+      const facts = offering([usable]);
+      expect(
+        speakerProblems(audioFlow({ transcription_speaker_service: { id: "svc-1" } }), facts)
+      ).toEqual([]);
+      expect(speakerProblems(audioFlow({ transcription_diarization: false }), facts)).toEqual([]);
+      expect(speakerProblems(audioFlow({ transcription_speaker_service: null }), facts)).toEqual(
+        []
+      );
+      expect(
+        speakerProblems(
+          audioFlow({}),
+          offering([
+            { ...usable, available: false },
+            { ...usable, id: "svc-2", meets_security_classification: false }
+          ])
+        )
+      ).toEqual([]);
+      expect(speakerProblems(audioFlow({}), offering([]))).toEqual([]);
+      expect(speakerProblems(audioFlow({}, "text"), facts)).toEqual([]);
+      // The core asks only while the flow transcribes.
+      expect(speakerProblems(audioFlow({ transcription_enabled: false }), facts)).toEqual([]);
+    });
+
+    it("keeps a step's need for speakers as the problem it was, whatever the space offers", () => {
+      const flow = makeFlow({
+        steps: [
+          makeStep(1, { input_type: "audio", output_mode: "transcribe_only" }),
+          makeStep(2, {
+            output_mode: "speaker_mapping",
+            output_type: "json",
+            output_config: { speaker_mapping: { infer_names: true } }
+          })
+        ],
+        metadata_json: {
+          wizard: { transcription_enabled: true, transcription_model: { id: "m-1" } }
+        }
+      });
+      expect(speakerProblems(flow, offering([usable]))).toEqual([
+        { code: "speaker_service_missing" }
+      ]);
+    });
+  });
+
   it("asks for another live model when the space can no longer stream through the chosen one", () => {
     const whisper = { id: "whisper", name: "kb-whisper-large", supports_realtime: false };
     const live = { id: "live", name: "pianissimo-sv-live", supports_realtime: true };

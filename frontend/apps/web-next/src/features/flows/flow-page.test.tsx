@@ -689,6 +689,68 @@ describe("FlowPage", () => {
     await waitFor(() => expect(document.activeElement).toBe(field));
   });
 
+  it("holds publishing while speakers are on and no service is chosen to label them", async () => {
+    state.prompts = { "assistant-1": "" };
+    state.preview = ok({ steps: [] });
+    const flow = makeFlow({
+      steps: [
+        makeStep(1, {
+          user_description: "Transkribera",
+          input_type: "audio",
+          output_mode: "transcribe_only"
+        })
+      ],
+      metadata_json: {
+        wizard: { transcription_enabled: true, transcription_model: { id: "whisper" } }
+      }
+    });
+    const space = makeSpace({
+      overrides: {
+        transcription_models: [{ id: "whisper", name: "kb-whisper-large" }],
+        transcription_services: [
+          {
+            id: "svc-1",
+            name: "Talare",
+            available: true,
+            meets_security_classification: true,
+            is_default: true
+          }
+        ]
+      }
+    });
+    renderPage(flow, undefined, space);
+
+    expect(
+      await within(draftCheck()).findByText(
+        "Välj en tjänst under Ordtider och talare, eller slå av Märk talare."
+      )
+    ).toBeTruthy();
+    expect(within(draftCheck()).queryByText("Redo att publicera")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("1 sak hindrar publicering")).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalledWith("/api/v1/flows/{id}/publish/", expect.anything());
+  });
+
+  it("says which service to choose when publish is refused for speakers without one", async () => {
+    state.publish = refused(400, {
+      code: "flow_speaker_service_not_chosen",
+      message: "Choose which speaker identification service the flow uses.",
+      context: { issue_code: "flow_speaker_service_not_chosen" }
+    });
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(within(alert).getByText("Flödet publicerades inte")).toBeTruthy();
+    expect(
+      within(alert).getByText(
+        "Välj vilken tjänst som ska märka talarna under Ordtider och talare. Om inget steg kräver talare kan du också slå av Märk talare."
+      )
+    ).toBeTruthy();
+    expect(within(alert).queryByText(messages.request_failed)).toBeNull();
+  });
+
   it("puts focus on Kör flödet once published, where Publicera was", async () => {
     state.publish = ok(makeFlow({ steps, published_version: 1 }));
     renderPage();
