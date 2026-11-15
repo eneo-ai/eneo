@@ -80,14 +80,17 @@ function SettingRow({
         }
       : setting === "flows"
         ? {
-            // Switched on, the admin sees and hears at once whether the workers run.
+            // Switched on, the admin sees and hears at once whether the workers run. The
+            // announcement waits only for the workers check, not for the settings reload
+            // and its retries; the save still ends when both have reloaded.
             onSaved: async (enabled) => {
-              await Promise.all([
-                queryClient.invalidateQueries({ queryKey: sessionKeys.settings }),
-                enabled && queryClient.invalidateQueries({ queryKey: taskWorkersQuery.queryKey })
-              ]);
-              const workers = enabled && queryClient.getQueryState(taskWorkersQuery.queryKey);
-              if (workers) announce(workersAnnouncement(workers, t));
+              const settings = queryClient.invalidateQueries({ queryKey: sessionKeys.settings });
+              if (enabled) {
+                await queryClient.invalidateQueries({ queryKey: taskWorkersQuery.queryKey });
+                const workers = queryClient.getQueryState(taskWorkersQuery.queryKey);
+                if (workers) announce(workersAnnouncement(workers, t));
+              }
+              await settings;
             }
           }
         : undefined

@@ -309,7 +309,58 @@ it("announces the workers' state that switching Flows on checked", async () => {
 
   // Refresh is its own action and says its own result once.
   fireEvent.click(within(row).getByRole("button", { name: "Uppdatera arbetarnas läge" }));
-  await waitFor(() => expect(said).toHaveLength(afterSwitch + 1));
+  await waitFor(() => expect(said.length).toBeGreaterThan(afterSwitch));
+  await flushAnnouncements();
+  expect(said.slice(afterSwitch)).toEqual(["Arbetarna: Kör inte: task-execution-worker"]);
+});
+
+it("announces the workers' state without waiting for the settings to reload", async () => {
+  const queryClient = testQueryClient();
+  let releaseSettings = () => {};
+  const getSettings = vi
+    .fn()
+    .mockResolvedValueOnce({ flows_enabled: false })
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        releaseSettings = () => resolve({ flows_enabled: true });
+      })
+    );
+  renderHookInApp(
+    () => useQuery({ queryKey: sessionKeys.settings, queryFn: getSettings, staleTime: Infinity }),
+    { queryClient }
+  );
+  await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(1));
+  api.PATCH.mockResolvedValue({ data: {}, response: new Response("{}") });
+  const said = recordAnnouncements();
+  renderToggles(queryClient);
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
+  await flushAnnouncements();
+  answerWorkers({ ...bothRunning, execution_worker_ready: false });
+
+  fireEvent.click(within(row).getByRole("switch", { name: "Flöden" }));
+
+  await waitFor(() => expect(said).toContain("Arbetarna: Kör inte: task-execution-worker"));
+  // The settings are still reloading.
+  expect(getSettings).toHaveBeenCalledTimes(2);
+  releaseSettings();
+});
+
+it("announces a check after switching Flows on that could not be made", async () => {
+  api.PATCH.mockResolvedValue({ data: {}, response: new Response("{}") });
+  const said = recordAnnouncements();
+  renderToggles();
+  const row = flowsRow();
+  expect(await within(row).findByText("Arbetarna: Kör")).toBeTruthy();
+  await flushAnnouncements();
+  api.GET.mockResolvedValue({
+    error: { message: "down" },
+    response: new Response("{}", { status: 503 })
+  });
+
+  fireEvent.click(within(row).getByRole("switch", { name: "Flöden" }));
+
+  await waitFor(() => expect(said).toContain("Arbetarna: Kunde inte kontrolleras"));
 });
 
 it("asks before switching Flows off, and Cancel sends nothing", async () => {
