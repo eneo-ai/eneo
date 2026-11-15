@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { createTranslator } from "use-intl";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
+import { testTranslator } from "@/test/i18n";
 import { renderInApp, testAppContext } from "@/test/render";
 import { reportResize, setViewport } from "@/test/setup-dom";
 import { ChatSkills } from "./chat-skills";
@@ -587,7 +587,7 @@ describe("ChatSkills", () => {
       ]
     ]
   ])("names the shared pill as it reads, in the right number, in %s", (locale, messages, names) => {
-    const t = createTranslator({ locale, messages });
+    const t = testTranslator(locale, messages);
     expect([
       t("chat_tools_and_skills_named", { count: 1, tools: 1, skills: "0" }),
       t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: "2" }),

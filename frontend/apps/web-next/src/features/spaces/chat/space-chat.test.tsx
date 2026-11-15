@@ -368,7 +368,9 @@ describe("SpaceChat", () => {
       }
     });
     renderRoute("/spaces/personal/chat");
-    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    // Without levels the composer keeps the plain model picker, which Astryx
+    // names by its label and value ("Chattmodell GPT-5", no colon).
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell GPT-5/ }));
     await screen.findByRole("option", { name: /GPT-5/ });
     expect(screen.queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
   });
