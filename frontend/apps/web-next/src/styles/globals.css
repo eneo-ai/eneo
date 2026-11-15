@@ -1463,6 +1463,8 @@
 }
 @utility scroll-fade {
   @supports (animation-timeline: scroll()) {
+    /* A row scrolled into view (the chosen one, the one with focus) stops clear of the fade. */
+    scroll-padding-block: 2rem;
     mask-image: linear-gradient(
       to bottom,
       transparent,
