@@ -327,19 +327,23 @@ describe("SpaceChat", () => {
       if (path === "/api/v1/assistants/{id}/") await landed;
       return { data: init?.body, response: new Response() };
     });
-    renderRoute("/spaces/personal/chat");
+    try {
+      renderRoute("/spaces/personal/chat");
 
-    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
-    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
-    fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
-    await waitFor(() =>
-      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", expect.anything())
-    );
-    // Past the rest the picker's own place in the queue is let go: only the save holds it now.
-    expect(hasPendingPartnerUpdates()).toBe(true);
+      fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+      await waitFor(() =>
+        expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", expect.anything())
+      );
+      // Past the rest the picker's own place in the queue is let go: only the save holds it now.
+      expect(hasPendingPartnerUpdates()).toBe(true);
 
-    await act(async () => land());
-    await waitFor(() => expect(hasPendingPartnerUpdates()).toBe(false));
+      await act(async () => land());
+      await waitFor(() => expect(hasPendingPartnerUpdates()).toBe(false));
+    } finally {
+      land();
+    }
   });
 
   it("puts the personal chat's Skills beside the tools in the composer", async () => {

@@ -49,7 +49,7 @@ export type ModelReasoningChange = { modelId?: string; level?: string | null };
 type Saving = {
   /** The latest choice, shown until its save settles. */
   latest: { id: number; choice: Choice };
-  /** The parts that saves queued and not yet settled carry. */
+  /** The parts carried by every save queued since saving began, kept until the latest save settles. */
   unsettled: Set<keyof Choice>;
   /** The latest save, which a choice that changes nothing waits for. */
   lastSave: Promise<unknown>;
@@ -73,16 +73,16 @@ function setSaving(assistantId: string, next: Saving | null) {
 /**
  * The model and the level, shown at once and saved together after a rest, in
  * one update with the parts that changed. A level the model the choice rests
- * on does not offer is not saved. A rest also sends again the parts that saves
- * queued and not yet settled carry: a level chosen while a model's save is on
- * its way goes with that model, so were that save refused, the backend checks
- * the level against the model it was chosen for, not the stored one. A model
- * that is pinned, or follows the policy (no id), is never sent: its part is
- * never chosen. Only the save of the latest choice ends the waiting state, so
- * an older save that settles late never shows an older choice. A rejected save
- * falls back to the saved choice (the caller reports the failure). What is
- * still saving is kept per assistant, outside the picker, until the latest
- * save settles.
+ * on does not offer is not saved. A rest also sends again the parts that the
+ * saves queued since saving began carry, until the latest settles: a level
+ * chosen while a model's save is on its way goes with that model, so were that
+ * save refused, the backend checks the level against the model it was chosen
+ * for, not the stored one. A model that is pinned, or follows the policy (no
+ * id), is never sent: its part is never chosen. Only the save of the latest
+ * choice ends the waiting state, so an older save that settles late never
+ * shows an older choice. A rejected save falls back to the saved choice (the
+ * caller reports the failure). What is still saving is kept per assistant,
+ * outside the picker, until the latest save settles.
  */
 function useRestedChoice(
   assistantId: string,

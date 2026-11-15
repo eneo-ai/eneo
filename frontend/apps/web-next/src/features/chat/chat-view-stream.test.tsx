@@ -482,6 +482,7 @@ describe("ChatView streaming an answer", () => {
       } finally {
         first.land();
         await awaitPartnerUpdates();
+        await answered().catch(() => {});
       }
     });
 
@@ -516,6 +517,7 @@ describe("ChatView streaming an answer", () => {
           first.land();
           second.land();
           await awaitPartnerUpdates();
+          await answered().catch(() => {});
         }
       }
     );
