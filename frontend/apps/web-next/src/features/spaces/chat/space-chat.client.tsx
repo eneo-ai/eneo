@@ -92,9 +92,10 @@ function usePersonalChatModel() {
     storedLevel: assistant.completion_model_kwargs?.reasoning_effort ?? null,
     policyDefaultLevel: config?.default_reasoning_effort ?? null,
     /**
-     * The model and the level in one update, so the backend checks the level
-     * against the model it comes with. The kwargs hold the level alone: any
-     * other field makes it a change only an assistant's editor may make.
+     * What the picker changed, in one update: the backend checks a level against
+     * the model sent with it, and the picker sends the model again with a level
+     * chosen while that model's save is on its way. The kwargs hold the level
+     * alone: any other field makes it a change only an assistant's editor may make.
      */
     saveChoice: ({ modelId, level }: ModelReasoningChange) =>
       save({

@@ -43,12 +43,16 @@ export type ModelReasoningChange = { modelId?: string; level?: string | null };
 
 /**
  * The model and the level, shown at once and saved together after a rest, in
- * one update with the parts that changed. A level chosen for a model passed
- * over is not saved: only the levels the model rested on count, so the backend
- * never checks a level against the wrong model. Each choice has an id, and
- * only the save of the latest one ends the waiting state, so an older save
- * that settles late never shows an older choice. A rejected save falls back to
- * the saved choice (the caller reports the failure).
+ * one update with the parts that changed. A level the model the choice rests
+ * on does not offer is not saved. A rest also sends again the parts that saves
+ * still unsettled when it began carry: a level chosen while a model's save is
+ * on its way goes with that model, so were that save refused, the backend
+ * checks the level against the model it was chosen for, not the stored one. A
+ * model that is pinned, or follows the policy (no id), is never sent: its part
+ * is never chosen. Each choice has an id, and only the save of the latest one
+ * ends the waiting state, so an older save that settles late never shows an
+ * older choice. A rejected save falls back to the saved choice (the caller
+ * reports the failure).
  */
 function useRestedChoice(
   saved: Choice,
@@ -64,7 +68,11 @@ function useRestedChoice(
     from: Choice;
     choice: Choice;
     rested: () => void;
+    /** The parts the saves not yet settled when this rest began carry. */
+    carried: Set<keyof Choice>;
   } | null>(null);
+  // The parts the saves not yet settled carry.
+  const unsettled = useRef(new Set<keyof Choice>());
   const lastId = useRef(0);
   // The latest save, which a choice that changes nothing waits for.
   const lastSave = useRef<Promise<unknown>>(Promise.resolve());
@@ -78,25 +86,29 @@ function useRestedChoice(
     if (!rest) return;
     resting.current = null;
     window.clearTimeout(rest.timer);
-    const { id, from, choice } = rest;
+    const { id, from, choice, carried } = rest;
+    // A rest that ends where it began changes nothing, whatever is still on its way.
+    const moved = choice.modelId !== from.modelId || choice.level !== from.level;
     const change: ModelReasoningChange = {};
-    if (choice.modelId !== null && choice.modelId !== from.modelId) change.modelId = choice.modelId;
+    if (choice.modelId !== null && (choice.modelId !== from.modelId || carried.has("modelId")))
+      change.modelId = choice.modelId;
     const levels = levelsOf(choice.modelId);
     if (
-      choice.level !== from.level &&
+      (choice.level !== from.level || carried.has("level")) &&
       levels.length > 0 &&
       (choice.level === null || levels.includes(choice.level))
     ) {
       change.level = choice.level;
     }
-    if (Object.keys(change).length > 0) {
+    if (moved && Object.keys(change).length > 0) {
       lastSave.current = Promise.resolve(save(change)).catch(() => {});
     }
     // Queued behind its place, the save now holds the questions sent meanwhile.
     rest.rested();
-    void lastSave.current.finally(() =>
-      setPending((current) => (current?.id === id ? null : current))
-    );
+    void lastSave.current.finally(() => {
+      if (lastId.current === id && !resting.current) unsettled.current.clear();
+      setPending((current) => (current?.id === id ? null : current));
+    });
   };
   useEffect(() => {
     commitRef.current = commit;
@@ -109,6 +121,8 @@ function useRestedChoice(
       const from = resting.current?.from ?? shown;
       const choice = { ...(resting.current?.choice ?? shown), ...part };
       let rested = resting.current?.rested;
+      const carried = resting.current?.carried ?? new Set(unsettled.current);
+      for (const key of Object.keys(part) as (keyof Choice)[]) unsettled.current.add(key);
       if (resting.current) window.clearTimeout(resting.current.timer);
       else {
         // A question sent while the choice rests (Send pressed with the panel
@@ -123,6 +137,7 @@ function useRestedChoice(
         from,
         choice,
         rested: rested!,
+        carried,
         timer: window.setTimeout(commit, SAVE_DELAY_MS)
       };
     },

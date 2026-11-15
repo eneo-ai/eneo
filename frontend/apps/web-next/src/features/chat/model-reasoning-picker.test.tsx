@@ -385,5 +385,95 @@ describe("ModelReasoningPicker", () => {
         expect(pill().getAttribute("aria-busy")).toBeNull();
       }
     );
+
+    /** Two models with levels, the first in use on Låg. */
+    const LEVEL_MODELS = [
+      MODELS[0]!,
+      model({
+        id: "model-c",
+        name: "model-c",
+        nickname: "Modell C",
+        reasoning: true,
+        supported_model_kwargs: MODELS[0]!.supported_model_kwargs
+      })
+    ];
+
+    it("sends a level chosen while the model's save is open together with that model", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const saves = [deferred(), deferred()];
+      const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
+      renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      // Were the model's save refused, the level is still checked against Modell C, not stored on Modell A.
+      expect(onSave.mock.calls).toEqual([
+        [{ modelId: "model-c" }],
+        [{ modelId: "model-c", level: "high" }]
+      ]);
+      await act(async () => {
+        saves[0]!.reject(new Error("refused"));
+        saves[1]!.resolve();
+        await saves[1]!.promise;
+      });
+    });
+
+    it("sends the level with the model chosen last while two model saves are open", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, /Modell A/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls.at(-1)).toEqual([{ modelId: "model-a", level: "high" }]);
+    });
+
+    it("never sends a pinned model, also with a level's save open", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      renderPicker({ models: LEVEL_MODELS, locked: MODELS[0], storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Medel");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ level: "medium" }]]);
+    });
+
+    it("sends nothing for a rest that ends where it began, also with a model's save open", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Hög");
+      await choose(panel, "Låg");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ modelId: "model-c" }]]);
+    });
+
+    it("with no save open, a rest sends only what it changed", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { onSave } = renderPicker({ models: LEVEL_MODELS, storedLevel: "low" });
+      const panel = await openPanel();
+      // There and back within one rest: nothing.
+      await choose(panel, /Modell C/);
+      await choose(panel, /Modell A/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave).not.toHaveBeenCalled();
+      // A level alone, then a model once that save has settled: each its own part.
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ modelId: "model-c" }]]);
+    });
   });
 });
