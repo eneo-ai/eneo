@@ -460,7 +460,13 @@ function ToolsAndSkills({
           />
         )}
       </div>
-      <div className={stacked ? "flex min-h-0 flex-col" : "grid min-h-0 flex-auto"}>
+      {/* One column no wider than the panel: a tab's rows that do not wrap (a skill's name
+          and its segments) would otherwise widen the cell, and the tab in view with it. */}
+      <div
+        className={
+          stacked ? "flex min-h-0 flex-col" : "grid min-h-0 flex-auto grid-cols-[minmax(0,1fr)]"
+        }
+      >
         {tabPanel(
           "tools",
           toolsPanelId,
