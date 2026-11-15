@@ -9,7 +9,7 @@ import type { Schema } from "@/lib/api/models";
 import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatCapability } from "./chat-capabilities";
-import { ComposerPanel } from "./composer-panel";
+import { ComposerPanel, useFitAbove } from "./composer-panel";
 
 export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
@@ -173,15 +173,19 @@ export function ToolsPanel({
   onAutoAcceptToolsChange,
   stacked,
   tabbed = false,
+  anchor,
   onClose
 }: ChatToolsProps & {
   /** In a phone's sheet: the sheet scrolls, so the list has no height of its own. */
   stacked: boolean;
   /** Under a tab that already names the panel: no title, padding or close button here. */
   tabbed?: boolean;
+  /** Beside the pill: the panel fits between the chat's header and the pill. */
+  anchor?: HTMLElement | null;
   onClose?: () => void;
 }) {
   const t = useTranslations();
+  const panel = useFitAbove(anchor);
   const { total, active } = toolCounts({
     capabilities,
     disabledCapabilities,
@@ -229,7 +233,10 @@ export function ToolsPanel({
   }
 
   return (
-    <div className={cn("flex min-h-0 flex-col", tabbed ? "flex-auto" : stacked && "p-4")}>
+    <div
+      ref={panel}
+      className={cn("flex min-h-0 flex-col", tabbed ? "flex-auto" : stacked && "p-4")}
+    >
       <div className="border-ax-border flex shrink-0 flex-col gap-1 border-b pb-2">
         {!tabbed && (
           <div className="flex items-center justify-between gap-3">
@@ -394,7 +401,9 @@ export function ChatTools(props: ChatToolsProps) {
       width={320}
       sheetHeight="hug"
     >
-      {({ stacked, onClose }) => <ToolsPanel {...props} stacked={stacked} onClose={onClose} />}
+      {({ stacked, anchor, onClose }) => (
+        <ToolsPanel {...props} stacked={stacked} anchor={anchor} onClose={onClose} />
+      )}
     </ComposerPanel>
   );
 }

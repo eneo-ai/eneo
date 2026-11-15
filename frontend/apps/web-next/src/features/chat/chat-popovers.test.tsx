@@ -93,6 +93,27 @@ describe("ChatTools", () => {
     await expectNoAxeViolations(popover);
   });
 
+  it("fits the tools panel between the chat's header and its pill, as in a shared space", async () => {
+    renderInChat(
+      <div id="chat-panel-chat">
+        <McpHarness />
+      </div>
+    );
+    // The chat's panel starts under its header, 117 px down; the pill is 400 px down.
+    vi.spyOn(document.getElementById("chat-panel-chat")!, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 117, width: 1000, height: 700 })
+    );
+    const trigger = screen.getByRole("button", { name: /^Verktyg:/ });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 600, y: 400, width: 120, height: 32 })
+    );
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    const fitted = popover.querySelector<HTMLElement>("[style*='max-height']");
+    // 400 less the header's 117 and the popover's 28 px of gap and padding.
+    expect(fitted?.style.maxHeight).toBe("255px");
+  });
+
   it("opens the tools in a bottom sheet on a phone, with its own close button", async () => {
     setViewport("phone");
     renderInChat(<McpHarness />);
