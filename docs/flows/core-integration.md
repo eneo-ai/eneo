@@ -39,11 +39,14 @@ persistent assistant attachments default to 25 MiB unless
 An administrator (the `admin` permission) switches Flows on and off for their
 own organisation under **Admin > Settings** in web-next, the Flows row among
 the feature switches (`PATCH /api/v1/settings/flows`). The switch writes the
-organisation's own `flows_core` row; the global row stays off, so no other
-organisation is affected. The change is committed before the answer is sent,
-and with the `tenant_settings_updated` action kept in the audit configuration
-it leaves an audit entry with the old and the new value. The Svelte frontend
-has no switch.
+organisation's own `flows_core` row; the global row stays off. Another
+organisation is unaffected unless its own switch overlaps in time: the shared
+flag write rewrites every organisation's row from what it read, so an
+overlapping switch elsewhere can be reverted or its new row removed. The
+change is committed before the answer is sent, and with audit logging, the
+`admin_actions` category and the `tenant_settings_updated` action on it leaves
+an audit entry with the old and the new value. The Svelte frontend has no
+switch.
 
 Flows run on two services, `task-execution-worker` (runs) and
 `task-maintenance-worker` (dispatch of queued runs, recovery and outbox
