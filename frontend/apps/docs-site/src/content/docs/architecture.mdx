@@ -680,7 +680,8 @@ services in this order, gated by health checks:
 Networks: `proxy_tier` (Traefik, frontend, backend, all workers; internet-facing),
 `data_net` (PostgreSQL and Redis; internal only), `module_net` (Traefik and
 backend; reserved for optional module containers), and `tool_runtime_net`
-(backend, general worker and bundled runtime; internal only).
+(backend, general worker, execution worker and bundled runtime; internal
+only).
 
 The runtime starts as a separate service, without gating backend readiness.
 It exposes port 3010 only on the private network and has no database, Redis or
