@@ -83,7 +83,7 @@ If `transcription` is `null`, the flow has no audio input step or does not trans
 
 Apps connect to the live transcription WebSocket at `/api/v1/live-transcription`, under the same `/api/` prefix as the `/api/v1/ws` socket. A reverse proxy that meets the [WebSocket requirement](/guides/deployment#reverse-proxy-requirements) passes it without changes.
 
-A live session accepts at most `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio, the same limit as an uploaded recording. `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` and `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` bound how long a session waits for audio and for the final text; see [Environment configuration](/guides/deployment#environment-configuration).
+A live session accepts at most the flow's longest recording, the same limit as an uploaded recording. A tenant admin sets it in Flow settings (5 hours by default, `FLOW_AUDIO_MAX_DURATION_SECONDS`), up to what `FLOW_AUDIO_MAX_DECODED_BYTES` holds: 18 h 38 min at its default of 2 GiB. `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` and `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` bound how long a session waits for audio and for the final text; see [Environment configuration](/guides/deployment#environment-configuration).
 
 ## Connect a speaker identification service
 
@@ -261,7 +261,7 @@ A current Vemsa lists its tasks in its readiness answer, which is how Eneo knows
 | `VADSA_API_KEYS`            | Comma-separated bearer keys. Enter one as the provider's **API Key** in Eneo.                                                                                                                                                                          |
 | `VADSA_SERVED_MODEL_NAME`   | The name Eneo must use as the transcription model's identifier, `KlangAI/pianissimo-sv` by default.                                                                                                                                                    |
 | `VADSA_BIND`, `VADSA_PORT`  | The Compose file publishes the server on `127.0.0.1:8000`. Set an address that the Eneo backend and workers reach, or attach vadsa to a Docker network that Eneo shares with vadsa's `compose.eneo.yaml`. Eneo then reaches it at `http://vadsa:8000`. |
-| `VADSA_MAX_SESSION_SECONDS` | The most audio a live session may send, 5 hours by default. Keep it at or above Eneo's `FLOW_AUDIO_MAX_DURATION_SECONDS`, so that Eneo's limit and message come first.                                                                                 |
+| `VADSA_MAX_SESSION_SECONDS` | The most audio a live session may send, 5 hours by default. Keep it at or above the longest recording set in Eneo's Flow settings, so that Eneo's limit and message come first.                                                                        |
 | `VADSA_FINALIZE_SECONDS`    | The longest vadsa takes to send the final text of a live session, 45 seconds by default. Keep it below Eneo's `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS`.                                                                                    |
 
 vadsa transcribes Swedish only. In a flow that uses it, set **Language** in the flow's transcription settings to **Svenska** or **Detect the language**.

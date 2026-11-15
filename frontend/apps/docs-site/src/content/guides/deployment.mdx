@@ -454,10 +454,13 @@ value and a comment.
     | `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` | `300` | Ends a live transcription session that receives no audio for this many seconds. A recording sends audio the whole time, silence included, so only a paused or stalled recording reaches it |
     | `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` | `60` | How long Eneo waits for the model server's final text after a recording stops. Raise it for a server that falls behind, such as a CPU server or a busy GPU |
 
-    Both values must be greater than zero. A live session also accepts at most
-    `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio (template value `18000`, 5 hours),
-    the same limit as an uploaded recording. To set up a model for live
-    transcription, see [Set up live transcription](/guides/transcription#set-up-live-transcription).
+    Both values must be greater than zero. A live session follows the flow's
+    **Longest recording** in Flow settings, the same limit as an uploaded
+    recording. The speech server's own limit, such as vadsa's
+    `VADSA_MAX_SESSION_SECONDS` (5 hours by default), can end the live text
+    earlier; the recording goes on, and the model transcribes its files when
+    the form is sent. To set up a model for live transcription, see
+    [Set up live transcription](/guides/transcription#set-up-live-transcription).
 
     **Flows authoring chat:**
 

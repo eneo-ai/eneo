@@ -17,6 +17,7 @@ import {
   MAX_AUDIO_FILES_PER_RUN,
   MAX_FILES_PER_RUN,
   RAG_EVIDENCE_KEYS,
+  WAV_LONGEST_AUDIO_SECONDS,
   type FlagKey
 } from "./flow-settings";
 import {
@@ -35,7 +36,7 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
   const t = useTranslations();
   const locale = useLocale();
   const { inputLimits } = kit.settings;
-  const ceilingMinutes = Math.floor(inputLimits.audio_max_duration_ceiling_seconds / 60);
+  const ceiling = inputLimits.audio_max_duration_ceiling_seconds;
   const duration = kit.draft.audio_max_duration_seconds;
 
   return (
@@ -85,7 +86,14 @@ export function UploadSections({ kit }: { kit: FieldKit }) {
             field="audio_max_duration_seconds"
             label={t("flow_admin_audio_duration_label")}
             description={[
-              t("flow_admin_audio_duration_description", { ceiling: ceilingMinutes }),
+              t("flow_admin_audio_duration_description"),
+              t(
+                ceiling >= WAV_LONGEST_AUDIO_SECONDS
+                  ? "flow_admin_audio_duration_ceiling_wav"
+                  : "flow_admin_audio_duration_ceiling",
+                { ceiling: formatSeconds(ceiling, t) }
+              ),
+              t("flow_admin_audio_duration_step_time"),
               duration !== null && duration >= 3600
                 ? t("flow_admin_duration_equivalent", { duration: formatSeconds(duration, t) })
                 : null,

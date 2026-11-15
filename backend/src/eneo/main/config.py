@@ -316,10 +316,6 @@ _DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
 _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
-# A flow's longest recording, as stored and as a deployment ceiling: whole seconds within a day.
-FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
-
-
 class Settings(BaseSettings):
     # Never echo settings values in validation errors: the environment holds
     # secrets, and a failed startup must not print them.
@@ -552,12 +548,14 @@ class Settings(BaseSettings):
     # its thread, so this bounds how much name resolution a burst of unreachable
     # flow destinations can occupy; a lookup past it fails at once and is retried.
     flow_http_dns_workers: int = Field(default=16, gt=0)
+    # The default longest recording for flows (an admin changes it in Flow
+    # settings), and the longest audio other transcription takes.
     flow_audio_max_duration_seconds: int = 5 * 60 * 60
+    # Audio is decoded to a 16 kHz mono 16-bit WAV file on disk before it is
+    # transcribed; this bounds that file. What it holds, and at most what one WAV
+    # file holds (37 h 16 min), is the longest recording an admin can set for
+    # flows: the default holds 18 h 38 min.
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
-    # The longest recording a tenant admin may let flows take (the flow-settings
-    # page; its default is flow_audio_max_duration_seconds). Flow-only: other
-    # transcription keeps flow_audio_max_duration_seconds.
-    flow_audio_max_duration_ceiling_seconds: int = 8 * 60 * 60
     # How long an audio upload may wait for and take its measuring decode (a few
     # run at a time); past it the upload is refused as busy, to retry.
     flow_audio_measurement_timeout_seconds: int = Field(default=600, gt=0)
@@ -1267,36 +1265,18 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        # The admin's shortest setting is a minute: the ceiling, as the decoded-byte
-        # bound (16 kHz mono 16-bit, 32 000 bytes a second) holds it, must reach one.
-        if (
-            min(
-                self.flow_audio_max_duration_ceiling_seconds,
-                self.flow_audio_max_decoded_bytes // 32_000,
-            )
-            < 60
-        ):
+        # The admin's shortest setting is a minute: the decoded-byte bound
+        # (16 kHz mono 16-bit, 32 000 bytes a second) must hold one.
+        if self.flow_audio_max_decoded_bytes // 32_000 < 60:
             logging.error(
-                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS and FLOW_AUDIO_MAX_DECODED_BYTES must "
-                "allow at least a minute of audio. Current values: %s s, %s bytes",
-                self.flow_audio_max_duration_ceiling_seconds,
+                "FLOW_AUDIO_MAX_DECODED_BYTES must allow at least a minute of audio "
+                "(1920000 bytes). Current value: %s",
                 self.flow_audio_max_decoded_bytes,
-            )
-            sys.exit(1)
-        if (
-            self.flow_audio_max_duration_ceiling_seconds
-            > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
-        ):
-            logging.error(
-                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS must be at most %s. Current value: %s",
-                FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
-                self.flow_audio_max_duration_ceiling_seconds,
             )
             sys.exit(1)
         for name in (
             "flow_audio_max_duration_seconds",
             "flow_audio_max_decoded_bytes",
-            "flow_audio_max_duration_ceiling_seconds",
         ):
             if getattr(self, name) <= 0:
                 logging.error(

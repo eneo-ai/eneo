@@ -3,12 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Protocol, cast
 
-from eneo.files.audio import AudioDecodeLimits
-from eneo.main.config import (
-    FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
-    Settings,
-    get_settings,
-)
+from eneo.files.audio import AudioDecodeLimits, longest_decodable_seconds
+from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import BadRequestException
 
 FLOW_INPUT_MIN_LIMIT_BYTES = 1
@@ -52,13 +48,11 @@ class FlowRuntimeUploadPolicy:
 
 
 def audio_duration_ceiling_seconds(settings: Settings | None = None) -> int:
-    """The longest recording a tenant admin may set for flows: the deployment's
-    flow ceiling, or less when the decoded-byte bound holds less."""
+    """The longest recording a tenant admin may set for flows: what the
+    deployment's decoded-byte bound holds, the guard on disk for audio decoded
+    before transcription."""
     settings = settings or get_settings()
-    return AudioDecodeLimits(
-        max_duration_seconds=settings.flow_audio_max_duration_ceiling_seconds,
-        max_decoded_bytes=settings.flow_audio_max_decoded_bytes,
-    ).longest_audio_seconds
+    return longest_decodable_seconds(settings.flow_audio_max_decoded_bytes)
 
 
 def _default_audio_duration_seconds(settings: Settings | None = None) -> int:
@@ -118,15 +112,13 @@ def _default_limits(defaults: FlowInputLimitDefaults | None) -> FlowInputLimits:
 
 
 def _parse_duration(value: Any, field_name: str) -> int:
+    # No upper bound here: the admin's write refuses more than the decoder holds
+    # and every read clamps to it, so a lowered bound never breaks a stored value.
     if not isinstance(value, int) or isinstance(value, bool):
         raise BadRequestException(f"{field_name} must be an integer.")
-    if (
-        value < FLOW_AUDIO_MIN_DURATION_SECONDS
-        or value > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
-    ):
+    if value < FLOW_AUDIO_MIN_DURATION_SECONDS:
         raise BadRequestException(
-            f"{field_name} must be between {FLOW_AUDIO_MIN_DURATION_SECONDS} and "
-            f"{FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS} seconds."
+            f"{field_name} must be at least {FLOW_AUDIO_MIN_DURATION_SECONDS} seconds."
         )
     return value
 
