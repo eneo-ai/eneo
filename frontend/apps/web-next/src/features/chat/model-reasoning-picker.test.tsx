@@ -85,10 +85,10 @@ describe("ModelReasoningPicker", () => {
       within(levels)
         .getAllByRole("radio")
         .map((radio) => radio.getAttribute("value"))
-    ).toEqual(["low", "medium", "high"]);
-    // The organisation's level is listed once, marked as the default and chosen.
+    ).toEqual(["default", "low", "medium", "high"]);
+    // Following the organisation: its default, with the level it is now, is chosen.
     expect(
-      within(levels).getByRole("radio", { name: "Medel Standard", checked: true })
+      within(levels).getByRole("radio", { name: "Standard Medel", checked: true })
     ).toBeTruthy();
 
     fireEvent.click(within(levels).getByRole("radio", { name: "Hög" }));
@@ -105,8 +105,42 @@ describe("ModelReasoningPicker", () => {
   it("saves null for the organisation's default level", async () => {
     const { onSelectLevel } = renderPicker({ storedLevel: "high" });
     const panel = await openPanel();
-    fireEvent.click(within(panel).getByRole("radio", { name: "Medel Standard" }));
+    fireEvent.click(within(panel).getByRole("radio", { name: "Standard Medel" }));
     await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith(null));
+  });
+
+  it("tells an own level that equals the default apart, and lets it go back to following the default", async () => {
+    const onSelectLevel = vi.fn(() => Promise.resolve());
+    const picker = (storedLevel: string | null, policyDefaultLevel: string) => (
+      <ModelReasoningPicker
+        models={MODELS}
+        selectedId="model-a"
+        onSelectModel={vi.fn()}
+        storedLevel={storedLevel}
+        policyDefaultLevel={policyDefaultLevel}
+        onSelectLevel={onSelectLevel}
+      />
+    );
+    const view = renderInApp(picker("medium", "medium"));
+    // The account has a level of its own, the same as the organisation's.
+    const panel = await openPanel("Chattmodell: Modell A · Medel resonemangsnivå");
+    const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
+    expect(within(levels).getByRole("radio", { name: "Medel", checked: true })).toBeTruthy();
+    expect(
+      within(levels).getByRole("radio", { name: "Standard Medel", checked: false })
+    ).toBeTruthy();
+
+    fireEvent.click(within(levels).getByRole("radio", { name: "Standard Medel" }));
+    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith(null));
+
+    // Saved as no level of its own, it follows when the organisation changes its default.
+    view.rerender(picker(null, "high"));
+    await waitFor(() =>
+      expect(
+        within(levels).getByRole("radio", { name: "Standard Hög", checked: true })
+      ).toBeTruthy()
+    );
+    expect(screen.getByRole("button", { name: "Chattmodell: Modell A" })).toBeTruthy();
   });
 
   it("offers the model's own behaviour as the default when the organisation sets none", async () => {

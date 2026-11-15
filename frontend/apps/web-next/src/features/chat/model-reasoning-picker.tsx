@@ -90,10 +90,11 @@ export type ModelReasoningPickerProps = {
 /**
  * The personal chat composer's model picker where people may also choose the
  * reasoning level: one trigger for both, so the level costs the footer no
- * button of its own. The trigger shows the model, and the level only when it
- * is not the organisation's default. Its panel (a bottom sheet on phones)
- * holds two radio groups, "Chattmodell" with a search and "Resonemangsnivå"
- * with the levels the chosen model offers; a choice is saved without closing
+ * button of its own. The trigger shows the model, and the level only when the
+ * account has one of its own. Its panel (a bottom sheet on phones) holds two
+ * radio groups, "Chattmodell" with a search and "Resonemangsnivå" with
+ * "Standard" (the organisation's level, which it follows) and the levels the
+ * chosen model offers; a choice is saved without closing
  * the panel. A model without levels keeps the second group's place and says
  * so, so the panel does not change shape between models.
  */
@@ -127,21 +128,21 @@ export function ModelReasoningPicker({
 
   const levels = reasoningEffortOptions(shown);
   const chosenLevel = level.pending ? level.pending.value : storedLevel;
-  // The organisation's default, when the shown model offers it: that level's
-  // row is the default's row, marked as such, so no level is listed twice.
+  // The organisation's default, when the shown model offers it: named on the
+  // default's row, which follows the organisation when it changes its level.
   const policyLevel = effectiveReasoningEffort({
     stored: null,
     policyDefault: policyDefaultLevel,
     options: levels
   });
-  // A level the shown model does not offer is not in force, and the
-  // organisation's own level is its default whether stored or not.
-  const inForce = effectiveReasoningEffort({
+  // The account's own level, also when it is the same as the organisation's:
+  // only "Standard" follows a changed default. A level the shown model does
+  // not offer is not in force.
+  const ownLevel = effectiveReasoningEffort({
     stored: chosenLevel,
-    policyDefault: policyDefaultLevel,
+    policyDefault: null,
     options: levels
   });
-  const ownLevel = inForce !== policyLevel ? inForce : null;
   const ownLevelText = ownLevel ? reasoningEffortLabel(ownLevel, t) : null;
 
   const label = t("completion_model");
@@ -251,34 +252,31 @@ export function ModelReasoningPicker({
         {levels.length > 0 ? (
           <RadioList
             label={t("reasoning_effort")}
-            value={ownLevel ?? policyLevel ?? DEFAULT_LEVEL}
+            value={ownLevel ?? DEFAULT_LEVEL}
             onChange={(next) => {
               // The default is saved as no level of one's own, so it follows the organisation's.
-              const picked = next === DEFAULT_LEVEL || next === policyLevel ? null : next;
+              const picked = next === DEFAULT_LEVEL ? null : next;
               if (picked !== ownLevel) level.choose(picked);
             }}
             size="sm"
             width="100%"
           >
-            {/* Without a default the model offers, the model's own behaviour is the default. */}
-            {!policyLevel && <RadioListItem value={DEFAULT_LEVEL} label={t("default_behavior")} />}
-            {levels.map((option) => (
-              <RadioListItem
-                key={option}
-                value={option}
-                label={
-                  option === policyLevel ? (
-                    <span className="flex items-baseline gap-2">
-                      {reasoningEffortLabel(option, t)}
-                      <span className="text-ax-text-secondary text-xs">
-                        {t("default_behavior")}
-                      </span>
+            {/* The organisation's level, named; without one the model offers, the model's own behaviour. */}
+            <RadioListItem
+              value={DEFAULT_LEVEL}
+              label={
+                <span className="flex items-baseline gap-2">
+                  {t("default_behavior")}
+                  {policyLevel && (
+                    <span className="text-ax-text-secondary text-xs">
+                      {reasoningEffortLabel(policyLevel, t)}
                     </span>
-                  ) : (
-                    reasoningEffortLabel(option, t)
-                  )
-                }
-              />
+                  )}
+                </span>
+              }
+            />
+            {levels.map((option) => (
+              <RadioListItem key={option} value={option} label={reasoningEffortLabel(option, t)} />
             ))}
           </RadioList>
         ) : (
