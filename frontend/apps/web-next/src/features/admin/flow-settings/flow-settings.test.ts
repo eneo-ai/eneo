@@ -103,6 +103,17 @@ describe("fieldBounds", () => {
       })
     );
     expect(bounds.audio_max_duration_seconds).toMatchObject({ min: 60, max: 67_080, scale: 60 });
+
+    // 37 h 16 min 57 s, one WAV file: 2236.95 minutes stops at 2236, not 2237.
+    const wav = fieldBounds(
+      flowSettingsFixture({
+        inputLimits: {
+          ...settings.inputLimits,
+          audio_max_duration_ceiling_seconds: 134_217
+        }
+      })
+    );
+    expect(wav.audio_max_duration_seconds).toMatchObject({ min: 60, max: 134_160, scale: 60 });
   });
 });
 

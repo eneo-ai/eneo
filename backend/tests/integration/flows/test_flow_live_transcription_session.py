@@ -380,6 +380,18 @@ async def test_a_session_takes_a_recording_longer_than_eight_hours(
     assert patched.json()["audio_max_duration_seconds"] == 36_000
     assert patched.json()["audio_max_duration_ceiling_seconds"] == 67_108
 
+    # The run contract a client records against follows the stored value.
+    contract = await live_stack.client.get(
+        f"/api/v1/flows/{live_stack.flow.flow_id}/run-contract/",
+        headers=live_stack.headers,
+    )
+    assert contract.status_code == 200, contract.text
+    [audio] = contract.json()["steps_requiring_input"]
+    assert audio["max_duration_seconds"] == 36_000
+    assert audio["max_recording_seconds"] == 36_000
+    # Parts that spread the recording over every file slot.
+    assert audio["recording_part_seconds"] == -(-36_000 // audio["max_files"])
+
     session = await live_stack.open_session()
 
     assert session["max_seconds"] == 36_000

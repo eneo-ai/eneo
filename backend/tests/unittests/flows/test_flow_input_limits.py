@@ -424,3 +424,25 @@ def test_a_runs_audio_decodes_under_the_limit_it_was_admitted_under(
 
     assert decode.max_duration_seconds == 21_600
     assert decode.max_decoded_bytes == 28_800 * 32_000
+
+
+def test_a_lowered_decoded_byte_bound_still_bounds_an_admitted_run(
+    monkeypatch,
+) -> None:
+    from eneo.flows.flow_input_limits import FlowInputLimits, flow_audio_decode_limits
+
+    # The run was admitted for 10 h; the operator then lowered the decoded-byte
+    # bound to what holds 2 h. The bound protects the server's disk, so it also
+    # holds for runs already admitted: their audio decodes under the new bound.
+    monkeypatch.setattr(
+        "eneo.flows.flow_input_limits.get_settings", lambda: _durations(18_000, 7_200)
+    )
+    limits = FlowInputLimits(
+        file_max_size_bytes=1, audio_max_size_bytes=1, audio_max_duration_seconds=36_000
+    )
+
+    decode = flow_audio_decode_limits(limits, admitted_seconds=36_000)
+
+    assert decode.max_duration_seconds == 36_000
+    assert decode.max_decoded_bytes == 7_200 * 32_000
+    assert decode.longest_audio_seconds == 7_200
