@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
@@ -309,6 +310,34 @@ describe("SpaceChat", () => {
         }
       ]
     ]);
+  });
+
+  it("holds the save queue, and so a question sent meanwhile, until a picked model is saved", async () => {
+    Object.assign(route.space, personalSpace, {
+      completion_models: [
+        reasoningModel,
+        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
+      ]
+    });
+    let land!: () => void;
+    const landed = new Promise<void>((resolve) => (land = resolve));
+    api.POST.mockImplementation(async (path, init) => {
+      if (path === "/api/v1/assistants/{id}/") await landed;
+      return { data: init?.body, response: new Response() };
+    });
+    renderRoute("/spaces/personal/chat");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", expect.anything())
+    );
+    // Past the rest the picker's own place in the queue is let go: only the save holds it now.
+    expect(hasPendingPartnerUpdates()).toBe(true);
+
+    await act(async () => land());
+    await waitFor(() => expect(hasPendingPartnerUpdates()).toBe(false));
   });
 
   it("puts the personal chat's Skills beside the tools in the composer", async () => {

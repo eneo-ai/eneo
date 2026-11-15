@@ -336,7 +336,7 @@ describe("Composer panels", () => {
         modelSelector={
           <ModelReasoningPicker
             models={models}
-            selectedId="m-1"
+            selectedId="m-2"
             storedLevel={null}
             policyDefaultLevel={null}
             onSave={() => Promise.resolve()}
@@ -355,15 +355,17 @@ describe("Composer panels", () => {
 
   it("keeps focus on a control chosen in a panel, by arrow key or click, not in the field", async () => {
     renderInApp(<PanelHarness />);
-    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Två" }));
     const models = await screen.findByRole("dialog", { name: "Chattmodell" });
-    // The popover's own first focus lands, on the chosen model.
+    // The popover's own first focus lands on the chosen model, not on the first row.
     await waitFor(() =>
-      expect(document.activeElement).toBe(within(models).getByRole("radio", { checked: true }))
+      expect(document.activeElement).toBe(
+        within(models).getByRole("radio", { name: /Modell Två/, checked: true })
+      )
     );
     // An arrow on a radio moves the choice with a click on the next one.
-    const next = within(models).getByRole("radio", { name: /Modell Två/ });
-    press(next, "ArrowDown");
+    const next = within(models).getByRole("radio", { name: /Modell Ett/ });
+    press(next, "ArrowUp");
     expect(document.activeElement).toBe(next);
     fireEvent.keyDown(models, { key: "Escape" });
 

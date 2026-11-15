@@ -132,8 +132,8 @@ describe("ChatTools", () => {
     fireEvent.keyDown(popover, { key: "Escape" });
     await waitFor(() => expect(pill().getAttribute("aria-expanded")).toBe("false"));
 
-    // The next opening follows the screen it is on now.
-    pill().focus();
+    // The next opening follows the screen it is on now. The pill is clicked, not
+    // focused first: Safari leaves focus elsewhere, and the sheet must give it back.
     fireEvent.click(pill());
     const sheet = await screen.findByRole("dialog", { name: "Verktyg" });
     expect(sheet.tagName).toBe("DIALOG");

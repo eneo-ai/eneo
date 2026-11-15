@@ -167,10 +167,9 @@ describe("ModelReasoningPicker", () => {
     fireEvent.click(within(models).getByRole("radio", { name: /Modell B/ }));
     expect(onSave).not.toHaveBeenCalled();
 
+    // Closing saves it there and then, not after the rest.
     fireEvent.keyDown(panel, { key: "Escape" });
-    fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: Modell B/ }));
-    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ modelId: "model-b" }));
-    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave.mock.calls).toEqual([[{ modelId: "model-b" }]]);
   });
 
   it("keeps the level's place and says so for a model without levels", async () => {
@@ -386,7 +385,16 @@ describe("ModelReasoningPicker", () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         const saves = [deferred(), deferred()];
         const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
-        renderPicker({ models: RACE_MODELS, selectedId: "plain", onSave });
+        const picker = (selectedId: string) => (
+          <ModelReasoningPicker
+            models={RACE_MODELS}
+            selectedId={selectedId}
+            storedLevel={null}
+            policyDefaultLevel="medium"
+            onSave={onSave}
+          />
+        );
+        const { rerender } = renderInApp(picker("plain"));
         const panel = await openPanel("Chattmodell: Enkel");
         const pill = () => screen.getByRole("button", { name: /^Chattmodell: / });
 
@@ -401,6 +409,8 @@ describe("ModelReasoningPicker", () => {
           else saves[0]!.reject(new Error("refused"));
           await saves[0]!.promise.catch(() => {});
         });
+        // A save that lands refetches the chat: its model is then the one stored.
+        if (outcome === "lands") rerender(picker("delta"));
         // The older save is done: the newer choice is still shown, still saving.
         expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Enkel");
         expect(pill().getAttribute("aria-busy")).toBe("true");
@@ -409,10 +419,29 @@ describe("ModelReasoningPicker", () => {
           saves[1]!.resolve();
           await saves[1]!.promise;
         });
+        rerender(picker("plain"));
         expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Enkel");
         expect(pill().getAttribute("aria-busy")).toBeNull();
       }
     );
+
+    it("shows the stored choice again when the latest save is refused", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const refused = deferred();
+      const { onSave } = renderPicker({ models: RACE_MODELS, selectedId: "plain" });
+      onSave.mockImplementation(() => refused.promise);
+      const panel = await openPanel("Chattmodell: Enkel");
+      const pill = () => screen.getByRole("button", { name: /^Chattmodell: / });
+      await choose(panel, /Delta/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Delta");
+      await act(async () => {
+        refused.reject(new Error("refused"));
+        await refused.promise.catch(() => {});
+      });
+      expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Enkel");
+      expect(pill().getAttribute("aria-busy")).toBeNull();
+    });
 
     /** Two models with levels, the first in use on Låg. */
     const LEVEL_MODELS = [

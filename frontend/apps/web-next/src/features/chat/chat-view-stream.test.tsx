@@ -326,38 +326,63 @@ describe("ChatView streaming an answer", () => {
 
   it("holds a question sent while a picked model still rests until that model is saved", async () => {
     spies.mode = "answer";
+    let release!: () => void;
+    const landed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
     const saved: unknown[] = [];
     const models = [
       { id: "m-1", name: "m-1", nickname: "Modell Ett" },
       { id: "m-2", name: "m-2", nickname: "Modell Två" }
     ] as Schema<"CompletionModelPublic">[];
-    renderInApp(
-      <Harness
-        modelSelector={
-          <ModelReasoningPicker
-            models={models}
-            selectedId="m-1"
-            storedLevel={null}
-            policyDefaultLevel={null}
-            onSave={(change) =>
-              queuePartnerUpdate(async () => {
-                saved.push(change);
-              })
-            }
-          />
-        }
-      />
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
-    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
-    fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
-    // Sent with the panel still open: the browser closes it only after the click.
-    ask("Vilken gräns gäller?");
-    expect(spies.sent).toHaveLength(0);
+    // In a conversation the composer stays mounted when a question is sent, so only the
+    // choice's own place in the save queue can hold the question.
+    const earlier: EneoUIMessage[] = [
+      { id: "q0", role: "user", parts: [{ type: "text", text: "Hej" }] },
+      { id: "a0", role: "assistant", parts: [{ type: "text", text: "Hej!", state: "done" }] }
+    ];
+    try {
+      renderInApp(
+        <Harness
+          initialMessages={earlier}
+          modelSelector={
+            <ModelReasoningPicker
+              models={models}
+              selectedId="m-1"
+              storedLevel={null}
+              policyDefaultLevel={null}
+              onSave={(change) =>
+                queuePartnerUpdate(() => {
+                  saved.push(change);
+                  return landed;
+                })
+              }
+            />
+          }
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+      // Sent with the panel still open: the browser closes it only after the click.
+      ask("Vilken gräns gäller?");
 
-    await waitFor(() => expect(spies.sent).toHaveLength(1));
-    expect(saved).toEqual([{ modelId: "m-2" }]);
-    await awaitPartnerUpdates();
+      // Past the rest: the choice is saved, and the question still waits for that save.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      });
+      expect(saved).toEqual([{ modelId: "m-2" }]);
+      expect(spies.sent).toHaveLength(0);
+
+      await act(async () => {
+        release();
+        await landed;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+    } finally {
+      release();
+      await awaitPartnerUpdates();
+    }
   });
 
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {
