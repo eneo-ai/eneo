@@ -341,9 +341,12 @@ it("announces the workers' state without waiting for the settings to reload", as
   fireEvent.click(within(row).getByRole("switch", { name: "Flöden" }));
 
   await waitFor(() => expect(said).toContain("Arbetarna: Kör inte: task-execution-worker"));
-  // The settings are still reloading.
+  // The settings are still reloading, and the save ends only when they have.
   expect(getSettings).toHaveBeenCalledTimes(2);
+  await flushAnnouncements();
+  expect(queryClient.isMutating()).toBe(1);
   releaseSettings();
+  await waitFor(() => expect(queryClient.isMutating()).toBe(0));
 });
 
 it("announces a check after switching Flows on that could not be made", async () => {
