@@ -256,6 +256,34 @@ describe("ModelReasoningPicker", () => {
     }
   });
 
+  it("brings the chosen model into view each time a phone's sheet opens", async () => {
+    setViewport("phone");
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    try {
+      const more = Array.from({ length: 8 }, (_, index) =>
+        model({ id: `extra-${index}`, name: `extra-${index}`, org: "Annan" })
+      );
+      renderPicker({ models: [...more, ...MODELS], selectedId: "model-b" });
+      // The sheet keeps its content while closed: what ran at mount, on a hidden list, does not count.
+      await act(() => new Promise((done) => requestAnimationFrame(done)));
+      const broughtIntoView = () => {
+        const chosen = screen.getByRole("radio", { name: /Modell B/, checked: true, hidden: true });
+        return scrolled.mock.contexts.some((element) => (element as Element).contains(chosen));
+      };
+      for (const time of ["first", "again"]) {
+        scrolled.mockClear();
+        const sheet = await openPanel();
+        await waitFor(() => expect(broughtIntoView(), time).toBe(true));
+        fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
+        await waitFor(() =>
+          expect(screen.queryByRole("dialog", { name: "Chattmodell" })).toBeNull()
+        );
+      }
+    } finally {
+      scrolled.mockRestore();
+    }
+  });
+
   it("fits the panel between the window's top margin and its pill, also over the chat's header", async () => {
     renderInApp(
       <div id="chat-panel-chat">

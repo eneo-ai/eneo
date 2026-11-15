@@ -160,13 +160,13 @@ function matching(models: CompletionModel[], search: string): CompletionModel[] 
 /**
  * Scrolls the chosen model into the list's view as the panel opens: with a
  * long list it is often below the edge. A frame later, once the panel is shown
- * and has its height.
+ * and has its height. Attached only while the panel is open, so it runs on
+ * each opening: a phone's sheet keeps its list mounted, and scrolled, while closed.
  */
 function bringChosenIntoView(list: HTMLDivElement | null) {
   if (!list) return;
   const frame = requestAnimationFrame(() => {
-    const chosen = list.querySelector<HTMLInputElement>('input[type="radio"]:checked');
-    (chosen?.closest("label") ?? chosen)?.scrollIntoView({ block: "nearest" });
+    list.querySelector('input[type="radio"]:checked')?.scrollIntoView({ block: "nearest" });
   });
   return () => cancelAnimationFrame(frame);
 }
@@ -316,7 +316,7 @@ export function ModelReasoningPicker({
               />
             )}
             <div
-              ref={bringChosenIntoView}
+              ref={open ? bringChosenIntoView : undefined}
               className={cn(
                 "scroll-fade min-h-0 flex-auto overflow-y-auto pe-1",
                 // Beside the pill, a list with a search keeps its height, so the
