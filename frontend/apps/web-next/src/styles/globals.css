@@ -810,6 +810,12 @@
     outline-offset: -2px;
   }
 
+  /* A composer pill shows that its panel is open as a tint alone: outline it. */
+  .astryx-chat-composer button[aria-haspopup="dialog"][aria-expanded="true"] {
+    outline: 2px solid Highlight;
+    outline-offset: -2px;
+  }
+
   /* A selected Astryx segment is a Highlight fill (Astryx), opted out of
      forced colours: keep it over the theme's raised plate and edge. */
   .astryx-segmented-control-item[data-selected="selected"] {
