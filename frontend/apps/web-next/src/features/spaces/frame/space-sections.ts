@@ -52,8 +52,9 @@ export function ownKnowledgeCount(space: Space): number {
  * The tabs a user may see, gated exactly like the former space sidebar: the
  * organization space only has knowledge, skills and settings, and
  * every tab needs the matching read (or, for settings, edit) permission.
- * Flows sit with the apps (the reference gates them on reading apps) and
- * only appear when the tenant has them.
+ * Flows appear when the organisation has them and the user may view them
+ * (`options.flows`); they do not depend on the apps, as every flow route
+ * checks the flows permissions and the space role itself.
  */
 export function spaceSections(
   space: Space,
@@ -75,7 +76,7 @@ export function spaceSections(
     );
   }
   if (!isOrg && can("read", "app")) add("apps", space.applications?.apps.count ?? 0);
-  if (!isOrg && can("read", "app") && options.flows) add("flows", options.flowCount);
+  if (!isOrg && options.flows) add("flows", options.flowCount);
   if (can("read", "website") || can("read", "collection")) {
     add("knowledge", ownKnowledgeCount(space));
   }

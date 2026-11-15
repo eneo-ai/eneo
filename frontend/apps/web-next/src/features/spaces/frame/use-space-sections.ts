@@ -13,7 +13,7 @@ import { spaceSections, type SpaceSection } from "./space-sections";
 export function useSpaceSections(): SpaceSection[] {
   const { space, routeId, can } = useSpace();
   const { featureFlags } = useAppContext();
-  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
+  const showsFlows = featureFlags.flows && !space.organization;
   const flows = useQuery({
     ...flowsListQueryOptions(browserApi, space.id),
     enabled: showsFlows
