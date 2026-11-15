@@ -35,6 +35,7 @@ function usage(usedTokens: number, overrides: Partial<ContextUsage> = {}): Conte
 function renderMeter(value: ContextUsage) {
   return renderInApp(
     <ContextUsageBar
+      pending={false}
       usage={value}
       modelName="Claude Haiku 4.5"
       cumulativeTokens={9_000}
@@ -53,6 +54,7 @@ describe("ContextUsageBar", () => {
   it("shows the first question's baseline and the included Skill subset below the usual threshold", async () => {
     renderInApp(
       <ContextUsageBar
+        pending={false}
         usage={usage(800, {
           lockedInputTokens: 0,
           pendingTextTokens: 0,
@@ -89,6 +91,7 @@ describe("ContextUsageBar", () => {
 
     rerender(
       <ContextUsageBar
+        pending={false}
         usage={usage(10_500, { willExceedContext: true })}
         cumulativeTokens={0}
         turnCount={0}
@@ -126,7 +129,7 @@ describe("ContextUsageBar", () => {
   it("keeps its place, without numbers, while the estimate for a new draft or model is on its way", () => {
     const shown = usage(SHOW_FROM_PERCENT * 100 + 500);
     const { container, rerender } = renderInApp(
-      <ContextUsageBar usage={shown} cumulativeTokens={9_000} turnCount={2} />
+      <ContextUsageBar pending={false} usage={shown} cumulativeTokens={9_000} turnCount={2} />
     );
     expect(meter()).toBeTruthy();
     // The new estimate is not there yet: the row stays, with no old figures in it.
@@ -136,10 +139,14 @@ describe("ContextUsageBar", () => {
     expect(row(container)).not.toBeNull();
     expect(container.textContent).toBe("");
     // The answer came: the meter as before.
-    rerender(<ContextUsageBar usage={shown} cumulativeTokens={9_000} turnCount={2} />);
+    rerender(
+      <ContextUsageBar pending={false} usage={shown} cumulativeTokens={9_000} turnCount={2} />
+    );
     expect(meter()).toBeTruthy();
     // No answer (an error, or nothing to estimate): as today, nothing.
-    rerender(<ContextUsageBar usage={waiting} cumulativeTokens={9_000} turnCount={2} />);
+    rerender(
+      <ContextUsageBar pending={false} usage={waiting} cumulativeTokens={9_000} turnCount={2} />
+    );
     expect(row(container)).toBeNull();
   });
 
@@ -147,7 +154,12 @@ describe("ContextUsageBar", () => {
     // 70 % of the window is the conversation so far: current, not an old estimate.
     const conversation = usage(7_000, { lockedInputTokens: 7_000, pendingTextTokens: 0 });
     const { rerender } = renderInApp(
-      <ContextUsageBar usage={conversation} cumulativeTokens={9_000} turnCount={2} />
+      <ContextUsageBar
+        pending={false}
+        usage={conversation}
+        cumulativeTokens={9_000}
+        turnCount={2}
+      />
     );
     rerender(
       <ContextUsageBar usage={conversation} pending cumulativeTokens={9_000} turnCount={2} />

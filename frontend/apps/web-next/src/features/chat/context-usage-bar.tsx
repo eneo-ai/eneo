@@ -83,7 +83,7 @@ const TRACK_CLASS =
  */
 export function ContextUsageBar({
   usage,
-  pending = false,
+  pending,
   modelName,
   cumulativeTokens,
   turnCount,
@@ -91,7 +91,7 @@ export function ContextUsageBar({
 }: {
   usage: ContextUsage;
   /** The estimate for a new draft, file or model is on its way. */
-  pending?: boolean;
+  pending: boolean;
   modelName?: string | null;
   cumulativeTokens: number;
   turnCount: number;
