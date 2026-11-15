@@ -541,6 +541,34 @@ describe("ChatSkills", () => {
     await expectNoAxeViolations(popover);
   });
 
+  it("puts focus on the chosen tab when the panel opens again", async () => {
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [{ id: "lou", name: "LOU-register", description: null, icon_url: null }],
+          autoAcceptTools: false,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    const trigger = await screen.findByRole("button", { name: /^Verktyg:/ });
+    fireEvent.click(trigger);
+    let popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("tab", { name: /^Skills/ }));
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+
+    fireEvent.click(trigger);
+    popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    const chosen = within(popover).getByRole("tab", { name: /^Skills/ });
+    expect(chosen.getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => expect(document.activeElement).toBe(chosen));
+    // And it stays there once the opening has settled.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(chosen);
+  });
+
   it("opens the same choices in a bottom sheet on a phone, with search only beyond seven skills", async () => {
     setViewport("phone");
     renderSkills();

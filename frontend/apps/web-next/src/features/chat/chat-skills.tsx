@@ -397,6 +397,22 @@ function ToolsAndSkills({
   const t = useTranslations();
   const { stacked, anchor, onClose } = surface;
   const panel = useFitAbove(anchor);
+  // The popover and the sheet focus their first button as they open: the first
+  // tab, chosen or not. Focus that enters on a tab not chosen goes to the chosen
+  // one, as a tab list's single tab stop does; arrows inside the list still move.
+  useEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    const toChosenTab = (event: FocusEvent) => {
+      const target = event.target as HTMLElement;
+      if (target.getAttribute("role") !== "tab" || target.getAttribute("aria-selected") === "true")
+        return;
+      if (event.relatedTarget instanceof Node && element.contains(event.relatedTarget)) return;
+      element.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+    };
+    element.addEventListener("focusin", toChosenTab);
+    return () => element.removeEventListener("focusin", toChosenTab);
+  }, [panel]);
   const toolsPanelId = useId();
   const skillsPanelId = useId();
   const panelClass = "flex min-h-0 flex-auto flex-col";

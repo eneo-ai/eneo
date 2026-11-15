@@ -1,9 +1,10 @@
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { Popover } from "@astryxdesign/core/Popover";
 import type { LucideIcon } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 
 /**
  * The composer's panel pills (Verktyg, Skills): icon, label (icon-only on phones) and count.
@@ -65,9 +66,28 @@ type PillFace =
   | { face: ReactNode; icon?: undefined; text?: undefined; count?: undefined };
 
 /**
+ * A panel's content. Astryx's ChatComposer focuses its field on a click that
+ * reaches it outside a button, and a click in a panel reaches it through
+ * React's tree (an arrow key on a radio is a click too): stopped here, focus
+ * stays on the control the click was on. Closing on a click outside is the
+ * popover's and the sheet's own, and still works.
+ */
+function PanelContent({ children }: { children: ReactNode }) {
+  return (
+    <div role="presentation" className="contents" onClick={(event) => event.stopPropagation()}>
+      {children}
+    </div>
+  );
+}
+
+/**
  * A composer pill that opens its panel as a popover above it, or as a bottom
- * sheet on a phone, where a popover anchored to an icon has no room. The
- * popover's content is mounted only while open, so a closed one holds no controls.
+ * sheet in a phone's layout (`usePhoneScreen`, as the rest of the app), where a
+ * popover anchored to an icon has no room. The surface is chosen as the panel
+ * opens and kept until it closes, so a phone turned with the panel open keeps
+ * it. Astryx's Popover chooses per opening too, but its sheet is always tall
+ * and the content cannot tell which surface it is on. The popover's content
+ * is mounted only while open, so a closed one holds no controls.
  */
 export function ComposerPanel({
   icon: Icon,
@@ -101,12 +121,19 @@ export function ComposerPanel({
   const t = useTranslations();
   // Held in state, not a ref: the panel's content measures against it.
   const [pillElement, setPillElement] = useState<HTMLButtonElement | null>(null);
-  // The composer's toolbar goes icon-only below 40rem (max-sm); so does this.
-  const wide = useMediaQuery("(min-width: 40rem)");
+  // The sheet gives focus back to the pill when it closes (Safari would leave it elsewhere).
+  const pillRef = useRef<HTMLButtonElement>(null);
+  const pillRefs = useMergedRefs(pillRef, setPillElement);
+  const phone = usePhoneScreen();
+  const [openedAsSheet, setOpenedAsSheet] = useState<boolean | null>(null);
+  // Latched in render, as the panel opens and closes, so the opening render has its surface.
+  if (open && openedAsSheet === null) setOpenedAsSheet(phone);
+  if (!open && openedAsSheet !== null) setOpenedAsSheet(null);
+  const sheet = openedAsSheet ?? phone;
 
   const pill = (props: { onClick?: () => void }) => (
     <button
-      ref={setPillElement}
+      ref={pillRefs}
       type="button"
       aria-haspopup="dialog"
       aria-expanded={open}
@@ -118,6 +145,7 @@ export function ComposerPanel({
       {Icon ? (
         <>
           <Icon aria-hidden="true" className="size-[15px]" />
+          {/* The composer's toolbar goes icon-only below 40rem (max-sm); so does this. */}
           <span className="max-sm:sr-only">{text}</span>{" "}
           {count != null && (
             <span aria-hidden="true" className={COMPOSER_COUNT_CLASS}>
@@ -131,7 +159,7 @@ export function ComposerPanel({
     </button>
   );
 
-  if (wide) {
+  if (!sheet) {
     return (
       <Popover
         isOpen={open}
@@ -141,7 +169,11 @@ export function ComposerPanel({
         width={width}
         label={label}
         closeButtonLabel={t("close")}
-        content={open ? children({ stacked: false, anchor: pillElement }) : null}
+        content={
+          open ? (
+            <PanelContent>{children({ stacked: false, anchor: pillElement })}</PanelContent>
+          ) : null
+        }
       >
         {pill({})}
       </Popover>
@@ -156,8 +188,11 @@ export function ComposerPanel({
         label={label}
         height={sheetHeight}
         padding={0}
+        finalFocusRef={pillRef}
       >
-        {children({ stacked: true, onClose: () => onOpenChange(false) })}
+        <PanelContent>
+          {children({ stacked: true, onClose: () => onOpenChange(false) })}
+        </PanelContent>
       </BottomSheet>
     </>
   );
