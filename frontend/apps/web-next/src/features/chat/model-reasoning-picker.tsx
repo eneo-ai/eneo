@@ -324,11 +324,12 @@ export function ModelReasoningPicker({
     >
       {/* The column shrinks so its list scrolls, but in a sheet never below the list's
           rows (min-h-40) and the search above them: a sheet shorter than that scrolls,
-          and the levels follow the list instead of being drawn over it. */}
+          and the levels follow the list instead of being drawn over it. A pinned model
+          has no list: its column keeps its content's height, no more and no less. */}
       <div
         className={cn(
           "flex min-w-0 flex-1 flex-col gap-2",
-          stacked ? (searchable ? "min-h-50" : "min-h-40") : "min-h-0"
+          locked ? undefined : stacked ? (searchable ? "min-h-50" : "min-h-40") : "min-h-0"
         )}
       >
         {locked ? (
@@ -495,8 +496,8 @@ export function ModelReasoningPicker({
       width={520}
       alignment="end"
       // A search field brings up the keyboard: only a tall sheet makes room for it.
-      // Without one the sheet is as tall as its two lists.
-      sheetHeight={searchable ? "tall" : "hug"}
+      // Without one (a pinned model has none) the sheet is as tall as its content.
+      sheetHeight={searchable && !locked ? "tall" : "hug"}
     >
       {content}
     </ComposerPanel>
