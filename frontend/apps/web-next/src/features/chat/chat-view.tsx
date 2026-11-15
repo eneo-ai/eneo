@@ -645,7 +645,7 @@ function ConversationView({
     [panel, setInput]
   );
 
-  const preflight = usePreflight({
+  const { estimate: preflight, pending: preflightPending } = usePreflight({
     question: input,
     revision: partner.preflightRevision ?? partner.completionModel?.id,
     fileIds: attachments.fileIds,
@@ -1084,6 +1084,7 @@ function ConversationView({
     contextBar: (
       <ContextUsageBar
         usage={usage}
+        pending={preflightPending}
         modelName={partner.completionModel?.name}
         cumulativeTokens={cumulative.tokens}
         turnCount={cumulative.turns}

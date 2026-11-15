@@ -45,6 +45,9 @@ function renderMeter(value: ContextUsage) {
 
 const meter = () => screen.queryByRole("button", { name: /^Kontextanvändning:/ });
 const rendered = () => screen.queryByText(/Kontextanvändning/) !== null;
+/** What the meter renders, inside the app's theme wrapper. */
+const row = (container: HTMLElement) =>
+  container.querySelector("[data-astryx-theme]")?.firstElementChild ?? null;
 
 describe("ContextUsageBar", () => {
   it("shows the first question's baseline and the included Skill subset below the usual threshold", async () => {
@@ -118,6 +121,33 @@ describe("ContextUsageBar", () => {
     fireEvent.click(within(popover).getByRole("button", { name: "Dölj kontextanvändning" }));
     await waitFor(() => expect(meter()).toBeNull());
     expect(window.localStorage.getItem("contextUsageBarPinned")).toBe("false");
+  });
+
+  it("keeps its place, without numbers, while the estimate for a new draft or model is on its way", () => {
+    const shown = usage(SHOW_FROM_PERCENT * 100 + 500);
+    const { container, rerender } = renderInApp(
+      <ContextUsageBar usage={shown} cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(meter()).toBeTruthy();
+    // The new estimate is not there yet: the row stays, with no old figures in it.
+    const waiting = usage(0, { lockedInputTokens: 0, pendingTextTokens: 0 });
+    rerender(<ContextUsageBar usage={waiting} pending cumulativeTokens={9_000} turnCount={2} />);
+    expect(meter()).toBeNull();
+    expect(row(container)).not.toBeNull();
+    expect(container.textContent).toBe("");
+    // The answer came: the meter as before.
+    rerender(<ContextUsageBar usage={shown} cumulativeTokens={9_000} turnCount={2} />);
+    expect(meter()).toBeTruthy();
+    // No answer (an error, or nothing to estimate): as today, nothing.
+    rerender(<ContextUsageBar usage={waiting} cumulativeTokens={9_000} turnCount={2} />);
+    expect(row(container)).toBeNull();
+  });
+
+  it("does not appear for a new draft's estimate while the row was not shown", () => {
+    const { container } = renderInApp(
+      <ContextUsageBar usage={usage(500)} pending cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(row(container)).toBeNull();
   });
 
   it("renders nothing without a known window, pinned or not", () => {
