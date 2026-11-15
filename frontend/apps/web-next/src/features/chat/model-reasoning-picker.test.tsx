@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
-import { ModelReasoningPicker, type ModelReasoningPickerProps } from "./model-reasoning-picker";
+import {
+  ModelReasoningPicker,
+  type ModelReasoningChange,
+  type ModelReasoningPickerProps
+} from "./model-reasoning-picker";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
 
@@ -43,20 +47,18 @@ afterEach(() => {
 });
 
 function renderPicker(props: Partial<ModelReasoningPickerProps> = {}) {
-  const onSelectModel = vi.fn(() => Promise.resolve());
-  const onSelectLevel = vi.fn(() => Promise.resolve());
+  const onSave = vi.fn<(change: ModelReasoningChange) => Promise<void>>(() => Promise.resolve());
   renderInApp(
     <ModelReasoningPicker
       models={MODELS}
       selectedId="model-a"
-      onSelectModel={onSelectModel}
       storedLevel={null}
       policyDefaultLevel="medium"
-      onSelectLevel={onSelectLevel}
+      onSave={onSave}
       {...props}
     />
   );
-  return { onSelectModel, onSelectLevel };
+  return { onSave };
 }
 
 async function openPanel(name: string | RegExp = /^Chattmodell: /) {
@@ -77,7 +79,7 @@ describe("ModelReasoningPicker", () => {
   });
 
   it("offers the model's levels beside the models and saves a level without closing", async () => {
-    const { onSelectLevel, onSelectModel } = renderPicker();
+    const { onSave } = renderPicker();
     const panel = await openPanel();
 
     const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
@@ -96,29 +98,27 @@ describe("ModelReasoningPicker", () => {
     expect(
       screen.getByRole("button", { name: "Chattmodell: Modell A · Hög resonemangsnivå" })
     ).toBeTruthy();
-    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith("high"));
-    expect(onSelectModel).not.toHaveBeenCalled();
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ level: "high" }));
     expect(screen.getByRole("dialog", { name: "Chattmodell" })).toBeTruthy();
     await expectNoAxeViolations(panel);
   });
 
   it("saves null for the organisation's default level", async () => {
-    const { onSelectLevel } = renderPicker({ storedLevel: "high" });
+    const { onSave } = renderPicker({ storedLevel: "high" });
     const panel = await openPanel();
     fireEvent.click(within(panel).getByRole("radio", { name: "Standard Medel" }));
-    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ level: null }));
   });
 
   it("tells an own level that equals the default apart, and lets it go back to following the default", async () => {
-    const onSelectLevel = vi.fn(() => Promise.resolve());
+    const onSave = vi.fn(() => Promise.resolve());
     const picker = (storedLevel: string | null, policyDefaultLevel: string) => (
       <ModelReasoningPicker
         models={MODELS}
         selectedId="model-a"
-        onSelectModel={vi.fn()}
         storedLevel={storedLevel}
         policyDefaultLevel={policyDefaultLevel}
-        onSelectLevel={onSelectLevel}
+        onSave={onSave}
       />
     );
     const view = renderInApp(picker("medium", "medium"));
@@ -131,7 +131,7 @@ describe("ModelReasoningPicker", () => {
     ).toBeTruthy();
 
     fireEvent.click(within(levels).getByRole("radio", { name: "Standard Medel" }));
-    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ level: null }));
 
     // Saved as no level of its own, it follows when the organisation changes its default.
     view.rerender(picker(null, "high"));
@@ -144,25 +144,25 @@ describe("ModelReasoningPicker", () => {
   });
 
   it("offers the model's own behaviour as the default when the organisation sets none", async () => {
-    const { onSelectLevel } = renderPicker({ policyDefaultLevel: null, storedLevel: "low" });
+    const { onSave } = renderPicker({ policyDefaultLevel: null, storedLevel: "low" });
     const panel = await openPanel("Chattmodell: Modell A · Låg resonemangsnivå");
     const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
     expect(within(levels).getAllByRole("radio")).toHaveLength(4);
     fireEvent.click(within(levels).getByRole("radio", { name: "Standard" }));
-    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith(null));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ level: null }));
   });
 
   it("saves the model the choice rests on, at once when the panel closes", async () => {
-    const { onSelectModel } = renderPicker();
+    const { onSave } = renderPicker();
     const panel = await openPanel();
     const models = within(panel).getByRole("radiogroup", { name: "Chattmodell" });
     fireEvent.click(within(models).getByRole("radio", { name: /Modell B/ }));
-    expect(onSelectModel).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
 
     fireEvent.keyDown(panel, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: /^Chattmodell: Modell B/ }));
-    await waitFor(() => expect(onSelectModel).toHaveBeenCalledWith("model-b"));
-    expect(onSelectModel).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ modelId: "model-b" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the level's place and says so for a model without levels", async () => {
@@ -195,12 +195,12 @@ describe("ModelReasoningPicker", () => {
   });
 
   it("shows a pinned model read-only and still lets the level be chosen", async () => {
-    const { onSelectLevel } = renderPicker({ locked: MODELS[0] });
+    const { onSave } = renderPicker({ locked: MODELS[0] });
     const panel = await openPanel();
     expect(within(panel).queryByRole("radiogroup", { name: "Chattmodell" })).toBeNull();
     expect(within(panel).getByText("Låst av administratör")).toBeTruthy();
     fireEvent.click(within(panel).getByRole("radio", { name: "Låg" }));
-    await waitFor(() => expect(onSelectLevel).toHaveBeenCalledWith("low"));
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith({ level: "low" }));
   });
 
   it("opens in a bottom sheet on a phone", async () => {
@@ -211,5 +211,85 @@ describe("ModelReasoningPicker", () => {
     expect(within(sheet).getByRole("radiogroup", { name: "Resonemangsnivå" })).toBeTruthy();
     fireEvent.click(within(sheet).getByRole("button", { name: "Stäng" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Chattmodell" })).toBeNull());
+  });
+
+  describe("a model and a level chosen together", () => {
+    /** A model without levels, the one in use; one with levels; another without. */
+    const RACE_MODELS = [
+      model({ id: "plain", name: "plain", nickname: "Enkel" }),
+      MODELS[0]!,
+      model({ id: "delta", name: "delta", nickname: "Delta" })
+    ];
+
+    function deferred() {
+      let resolve!: () => void;
+      let reject!: (error: Error) => void;
+      const promise = new Promise<void>((done, fail) => {
+        resolve = done;
+        reject = fail;
+      });
+      return { promise, resolve, reject };
+    }
+
+    async function choose(panel: HTMLElement, name: string | RegExp) {
+      fireEvent.click(within(panel).getByRole("radio", { name }));
+    }
+
+    afterEach(() => vi.useRealTimers());
+
+    it("saves one model without a level when the level was for a model passed over", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { onSave } = renderPicker({ models: RACE_MODELS, selectedId: "plain" });
+      const panel = await openPanel("Chattmodell: Enkel");
+      await choose(panel, /Modell A/);
+      await choose(panel, "Låg");
+      await choose(panel, /Delta/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ modelId: "delta" }]]);
+    });
+
+    it("saves a model and its level in one update", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const { onSave } = renderPicker({ models: RACE_MODELS, selectedId: "plain" });
+      const panel = await openPanel("Chattmodell: Enkel");
+      await choose(panel, /Modell A/);
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ modelId: "model-a", level: "high" }]]);
+    });
+
+    it.each(["lands", "is refused"])(
+      "shows the last choice until its own save is done when an earlier save %s",
+      async (outcome) => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        const saves = [deferred(), deferred()];
+        const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
+        renderPicker({ models: RACE_MODELS, selectedId: "plain", onSave });
+        const panel = await openPanel("Chattmodell: Enkel");
+        const pill = () => screen.getByRole("button", { name: /^Chattmodell: / });
+
+        await choose(panel, /Delta/);
+        await act(() => vi.advanceTimersByTimeAsync(300));
+        await choose(panel, /Enkel/);
+        await act(() => vi.advanceTimersByTimeAsync(300));
+        expect(onSave.mock.calls).toEqual([[{ modelId: "delta" }], [{ modelId: "plain" }]]);
+
+        await act(async () => {
+          if (outcome === "lands") saves[0]!.resolve();
+          else saves[0]!.reject(new Error("refused"));
+          await saves[0]!.promise.catch(() => {});
+        });
+        // The older save is done: the newer choice is still shown, still saving.
+        expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Enkel");
+        expect(pill().getAttribute("aria-busy")).toBe("true");
+
+        await act(async () => {
+          saves[1]!.resolve();
+          await saves[1]!.promise;
+        });
+        expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Enkel");
+        expect(pill().getAttribute("aria-busy")).toBeNull();
+      }
+    );
   });
 });

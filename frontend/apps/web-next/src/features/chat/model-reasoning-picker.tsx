@@ -2,7 +2,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { ChevronDown, Lock, Search, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { TextInput } from "@/components/astryx/text-input";
 import {
@@ -16,6 +16,7 @@ import { sortModels } from "@/features/ai-models/sort-models";
 import type { Schema } from "@/lib/api/models";
 import { cn } from "@/lib/utils";
 import { ComposerPanel, useFitAbove, type ComposerPanelSurface } from "./composer-panel";
+import { queuePartnerUpdate } from "./partner-updates";
 import {
   effectiveReasoningEffort,
   reasoningEffortLabel,
@@ -34,47 +35,104 @@ const SAVE_DELAY_MS = 300;
 /** A list this short is read at a glance: the search comes with more models than this. */
 const SEARCH_FROM = 8;
 
-type Save<Value> = (value: Value) => void | Promise<unknown>;
+/** The model and the level as one choice; the level is null for the organisation's default. */
+type Choice = { modelId: string | null; level: string | null };
+/** What a save changes: only the parts the person changed. */
+export type ModelReasoningChange = { modelId?: string; level?: string | null };
 
 /**
- * A choice shown at once and saved after a rest. A rejected save falls back
- * to the saved value (the caller reports the failure).
+ * The model and the level, shown at once and saved together after a rest, in
+ * one update with the parts that changed. A level chosen for a model passed
+ * over is not saved: only the levels the model rested on count, so the backend
+ * never checks a level against the wrong model. Each choice has an id, and
+ * only the save of the latest one ends the waiting state, so an older save
+ * that settles late never shows an older choice. A rejected save falls back to
+ * the saved choice (the caller reports the failure).
  */
-function useRestedChoice<Value>(save: Save<Value>) {
-  const [pending, setPending] = useState<{ value: Value } | null>(null);
-  const waiting = useRef<{ timer: number; value: Value } | null>(null);
+function useRestedChoice(
+  saved: Choice,
+  save: (change: ModelReasoningChange) => void | Promise<unknown>,
+  levelsOf: (modelId: string | null) => string[]
+) {
+  const [pending, setPending] = useState<{ id: number; choice: Choice } | null>(null);
+  // What was shown when the rest began (a save still under way included), what
+  // is chosen now, and the place it holds in the save queue.
+  const resting = useRef<{
+    timer: number;
+    id: number;
+    from: Choice;
+    choice: Choice;
+    rested: () => void;
+  } | null>(null);
+  const lastId = useRef(0);
+  // The latest save, which a choice that changes nothing waits for.
+  const lastSave = useRef<Promise<unknown>>(Promise.resolve());
+  const shown = pending?.choice ?? saved;
+  // A choice still resting when the picker goes is saved, so its place in the queue is let go.
+  const commitRef = useRef<() => void>(() => {});
+  useEffect(() => () => commitRef.current(), []);
 
-  const commit = (value: Value) => {
-    waiting.current = null;
-    void Promise.resolve(save(value))
-      .catch(() => {})
-      .finally(() => setPending((current) => (current?.value === value ? null : current)));
+  const commit = () => {
+    const rest = resting.current;
+    if (!rest) return;
+    resting.current = null;
+    window.clearTimeout(rest.timer);
+    const { id, from, choice } = rest;
+    const change: ModelReasoningChange = {};
+    if (choice.modelId !== null && choice.modelId !== from.modelId) change.modelId = choice.modelId;
+    const levels = levelsOf(choice.modelId);
+    if (
+      choice.level !== from.level &&
+      levels.length > 0 &&
+      (choice.level === null || levels.includes(choice.level))
+    ) {
+      change.level = choice.level;
+    }
+    if (Object.keys(change).length > 0) {
+      lastSave.current = Promise.resolve(save(change)).catch(() => {});
+    }
+    // Queued behind its place, the save now holds the questions sent meanwhile.
+    rest.rested();
+    void lastSave.current.finally(() =>
+      setPending((current) => (current?.id === id ? null : current))
+    );
   };
+  useEffect(() => {
+    commitRef.current = commit;
+  });
   return {
-    pending,
-    choose(value: Value) {
-      if (waiting.current) window.clearTimeout(waiting.current.timer);
-      setPending({ value });
-      waiting.current = {
-        value,
-        timer: window.setTimeout(() => commit(value), SAVE_DELAY_MS)
+    shown,
+    busy: pending !== null,
+    choose(part: Partial<Choice>) {
+      const id = ++lastId.current;
+      const from = resting.current?.from ?? shown;
+      const choice = { ...(resting.current?.choice ?? shown), ...part };
+      let rested = resting.current?.rested;
+      if (resting.current) window.clearTimeout(resting.current.timer);
+      else {
+        // A question sent while the choice rests (Send pressed with the panel
+        // open, before the panel closes) waits for its save, not just for
+        // saves already made.
+        const place = new Promise<void>((resolve) => (rested = resolve));
+        void queuePartnerUpdate(() => place);
+      }
+      setPending({ id, choice });
+      resting.current = {
+        id,
+        from,
+        choice,
+        rested: rested!,
+        timer: window.setTimeout(commit, SAVE_DELAY_MS)
       };
     },
     /** Saves a choice still resting, now: a question sent next must wait for it. */
-    flush() {
-      const resting = waiting.current;
-      if (!resting) return;
-      window.clearTimeout(resting.timer);
-      commit(resting.value);
-    }
+    flush: commit
   };
 }
 
 export type ModelReasoningPickerProps = {
   models: CompletionModel[];
   selectedId: string | null | undefined;
-  /** Saves a newly chosen model; a rejected save shows `selectedId` again. */
-  onSelectModel: Save<string>;
   /** A model the governance policy pins: shown read-only, with a lock. */
   locked?: ModelRef | null;
   /** When false, input/output prices are hidden (org-controlled). */
@@ -83,8 +141,11 @@ export type ModelReasoningPickerProps = {
   storedLevel: string | null;
   /** The organisation policy's default level, if any. */
   policyDefaultLevel: string | null;
-  /** Saves a level, or null for the organisation default. */
-  onSelectLevel: Save<string | null>;
+  /**
+   * Saves what changed in one update: the model, the level (null for the
+   * organisation default), or both. A rejected save shows the stored choice again.
+   */
+  onSave: (change: ModelReasoningChange) => void | Promise<unknown>;
 };
 
 /**
@@ -101,22 +162,24 @@ export type ModelReasoningPickerProps = {
 export function ModelReasoningPicker({
   models,
   selectedId,
-  onSelectModel,
   locked = null,
   showPricing = true,
   storedLevel,
   policyDefaultLevel,
-  onSelectLevel
+  onSave
 }: ModelReasoningPickerProps) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const model = useRestedChoice(onSelectModel);
-  const level = useRestedChoice(onSelectLevel);
 
   const sorted = useMemo(() => sortModels(models), [models]);
   const byId = useMemo(() => new Map(sorted.map((item) => [item.id, item])), [sorted]);
-  const shownId = locked ? locked.id : (model.pending?.value ?? selectedId ?? null);
+  const choice = useRestedChoice(
+    { modelId: locked ? locked.id : (selectedId ?? null), level: storedLevel },
+    onSave,
+    (id) => reasoningEffortOptions(id ? byId.get(id) : undefined)
+  );
+  const shownId = choice.shown.modelId;
   const shown = shownId ? byId.get(shownId) : undefined;
   const shownName = locked
     ? modelName(locked)
@@ -127,7 +190,7 @@ export function ModelReasoningPicker({
         : t("select_a_model");
 
   const levels = reasoningEffortOptions(shown);
-  const chosenLevel = level.pending ? level.pending.value : storedLevel;
+  const chosenLevel = choice.shown.level;
   // The organisation's default, when the shown model offers it: named on the
   // default's row, which follows the organisation when it changes its level.
   const policyLevel = effectiveReasoningEffort({
@@ -162,8 +225,7 @@ export function ModelReasoningPicker({
 
   const changeOpen = (next: boolean) => {
     if (!next) {
-      model.flush();
-      level.flush();
+      choice.flush();
       setQuery("");
     }
     setOpen(next);
@@ -210,7 +272,7 @@ export function ModelReasoningPicker({
                 isLabelHidden={stacked}
                 value={shownId ?? ""}
                 onChange={(next) => {
-                  if (next !== shownId) model.choose(next);
+                  if (next !== shownId) choice.choose({ modelId: next });
                 }}
                 size="sm"
                 width="100%"
@@ -256,7 +318,7 @@ export function ModelReasoningPicker({
             onChange={(next) => {
               // The default is saved as no level of one's own, so it follows the organisation's.
               const picked = next === DEFAULT_LEVEL ? null : next;
-              if (picked !== ownLevel) level.choose(picked);
+              if (picked !== ownLevel) choice.choose({ level: picked });
             }}
             size="sm"
             width="100%"
@@ -311,7 +373,7 @@ export function ModelReasoningPicker({
         </>
       }
       name={name}
-      busy={model.pending !== null || level.pending !== null}
+      busy={choice.busy}
       label={label}
       open={open}
       onOpenChange={changeOpen}

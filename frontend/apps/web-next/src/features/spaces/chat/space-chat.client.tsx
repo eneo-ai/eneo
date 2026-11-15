@@ -15,7 +15,10 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
-import { ModelReasoningPicker } from "@/features/chat/model-reasoning-picker";
+import {
+  ModelReasoningPicker,
+  type ModelReasoningChange
+} from "@/features/chat/model-reasoning-picker";
 import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
 
@@ -42,23 +45,24 @@ function usePersonalChatModel() {
   const config = assistant?.effective_config ?? null;
 
   const update = useMutation({
-    mutationFn: (
-      body:
-        | { completion_model: { id: string } }
-        | { completion_model_kwargs: { reasoning_effort: string | null } }
-    ) =>
-      queuePartnerUpdate(() =>
-        unwrap(
-          // RB-5(b): assistants use POST-as-update.
-          browserApi.POST("/api/v1/assistants/{id}/", {
-            params: { path: { id: assistant!.id } },
-            body
-          })
-        )
+    mutationFn: (body: {
+      completion_model?: { id: string };
+      completion_model_kwargs?: { reasoning_effort: string | null };
+    }) =>
+      unwrap(
+        // RB-5(b): assistants use POST-as-update.
+        browserApi.POST("/api/v1/assistants/{id}/", {
+          params: { path: { id: assistant!.id } },
+          body
+        })
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
     onError: (error) => toastApiError(error, t)
   });
+  // Queued as the save is made, not when the mutation starts a tick later:
+  // a question sent right after waits for it.
+  const save = (body: Parameters<typeof update.mutateAsync>[0]) =>
+    queuePartnerUpdate(() => update.mutateAsync(body));
 
   if (!assistant) return null;
 
@@ -82,13 +86,21 @@ function usePersonalChatModel() {
     lockedModel,
     // The picker shows the new choice while it saves and keeps focus; a
     // disabled trigger would drop focus to the page.
-    selectModel: (id: string) => update.mutateAsync({ completion_model: { id } }),
+    selectModel: (id: string) => save({ completion_model: { id } }),
     /** Whether the governance policy lets people choose the reasoning level. */
     levelConfigurable: config?.reasoning_effort_user_configurable ?? false,
     storedLevel: assistant.completion_model_kwargs?.reasoning_effort ?? null,
     policyDefaultLevel: config?.default_reasoning_effort ?? null,
-    selectLevel: (effort: string | null) =>
-      update.mutateAsync({ completion_model_kwargs: { reasoning_effort: effort } })
+    /**
+     * The model and the level in one update, so the backend checks the level
+     * against the model it comes with. The kwargs hold the level alone: any
+     * other field makes it a change only an assistant's editor may make.
+     */
+    saveChoice: ({ modelId, level }: ModelReasoningChange) =>
+      save({
+        ...(modelId !== undefined && { completion_model: { id: modelId } }),
+        ...(level !== undefined && { completion_model_kwargs: { reasoning_effort: level } })
+      })
   };
 }
 
@@ -106,12 +118,11 @@ function ComposerPickers() {
       <ModelReasoningPicker
         models={choice.models}
         selectedId={choice.selectedId}
-        onSelectModel={choice.selectModel}
         locked={choice.lockedModel}
         showPricing={tenant.show_model_pricing}
         storedLevel={choice.storedLevel}
         policyDefaultLevel={choice.policyDefaultLevel}
-        onSelectLevel={choice.selectLevel}
+        onSave={choice.saveChoice}
       />
     );
   }

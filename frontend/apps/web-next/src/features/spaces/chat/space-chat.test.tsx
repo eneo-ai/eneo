@@ -281,6 +281,35 @@ describe("SpaceChat", () => {
     );
   });
 
+  it("saves a model and a level chosen together in one update", async () => {
+    Object.assign(route.space, personalSpace, {
+      completion_models: [
+        reasoningModel,
+        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
+      ]
+    });
+    renderRoute("/spaces/personal/chat");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+    fireEvent.click(within(panel).getByRole("radio", { name: "Hög" }));
+
+    await waitFor(() => expect(api.POST).toHaveBeenCalled());
+    expect(api.POST.mock.calls).toEqual([
+      [
+        "/api/v1/assistants/{id}/",
+        {
+          params: { path: { id: "assistant-1" } },
+          body: {
+            completion_model: { id: "model-2" },
+            completion_model_kwargs: { reasoning_effort: "high" }
+          }
+        }
+      ]
+    ]);
+  });
+
   it("puts the personal chat's Skills beside the tools in the composer", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat", ["personal_chat", "personal_skills"]);

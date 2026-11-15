@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
@@ -10,7 +10,9 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
-import { queuePartnerUpdate } from "./partner-updates";
+import type { Schema } from "@/lib/api/models";
+import { ModelReasoningPicker } from "./model-reasoning-picker";
+import { awaitPartnerUpdates, queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -203,12 +205,14 @@ function Harness({
   onSessionCreated,
   onTitle,
   chatPartner = partner,
-  initialMessages
+  initialMessages,
+  modelSelector
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
   chatPartner?: ChatPartner;
   initialMessages?: EneoUIMessage[];
+  modelSelector?: ReactNode;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
@@ -219,6 +223,7 @@ function Harness({
       onActivityChange={setActivity}
       onSessionCreated={onSessionCreated}
       onTitle={onTitle}
+      modelSelector={modelSelector}
     />
   );
 }
@@ -263,6 +268,96 @@ describe("ChatView streaming an answer", () => {
       release();
       await save;
     }
+  });
+
+  it("sends a question asked right after a model was picked and the panel closed once that save lands", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    const landed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saved: unknown[] = [];
+    const models = [
+      { id: "m-1", name: "m-1", nickname: "Modell Ett" },
+      { id: "m-2", name: "m-2", nickname: "Modell Två" }
+    ] as Schema<"CompletionModelPublic">[];
+    try {
+      renderInApp(
+        <Harness
+          modelSelector={
+            <ModelReasoningPicker
+              models={models}
+              selectedId="m-1"
+              storedLevel={null}
+              policyDefaultLevel={null}
+              onSave={(change) =>
+                queuePartnerUpdate(() => {
+                  saved.push(change);
+                  return landed;
+                })
+              }
+            />
+          }
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+      // Closed before the choice has rested: it is saved now, and the question waits for it.
+      fireEvent.keyDown(panel, { key: "Escape" });
+      ask("Vilken gräns gäller?");
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(saved).toEqual([{ modelId: "m-2" }]);
+      expect(spies.sent).toHaveLength(0);
+
+      await act(async () => {
+        release();
+        await landed;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+    } finally {
+      release();
+      await awaitPartnerUpdates();
+    }
+  });
+
+  it("holds a question sent while a picked model still rests until that model is saved", async () => {
+    spies.mode = "answer";
+    const saved: unknown[] = [];
+    const models = [
+      { id: "m-1", name: "m-1", nickname: "Modell Ett" },
+      { id: "m-2", name: "m-2", nickname: "Modell Två" }
+    ] as Schema<"CompletionModelPublic">[];
+    renderInApp(
+      <Harness
+        modelSelector={
+          <ModelReasoningPicker
+            models={models}
+            selectedId="m-1"
+            storedLevel={null}
+            policyDefaultLevel={null}
+            onSave={(change) =>
+              queuePartnerUpdate(async () => {
+                saved.push(change);
+              })
+            }
+          />
+        }
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+    // Sent with the panel still open: the browser closes it only after the click.
+    ask("Vilken gräns gäller?");
+    expect(spies.sent).toHaveLength(0);
+
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(saved).toEqual([{ modelId: "m-2" }]);
+    await awaitPartnerUpdates();
   });
 
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {
