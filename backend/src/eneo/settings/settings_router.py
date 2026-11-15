@@ -1963,10 +1963,8 @@ Switch Flows on or off for your tenant.
 **Admin Only:** Requires admin permissions.
 
 **Behavior:**
-- Writes the tenant's own `flows_core` row; the global row is unchanged.
-  Another tenant is unchanged unless its own switch overlaps this one in
-  time: the shared flag write rewrites every tenant's row from what it read,
-  so an overlapping switch elsewhere can be reverted or its new row removed
+- Writes only the tenant's own `flows_core` row; the global row and other
+  tenants' rows are unchanged
 - Two switches in one tenant run one after the other, so each audit entry's
   old value is the one it changed
 - When enabled: the flow endpoints answer, and members whose roles hold the
