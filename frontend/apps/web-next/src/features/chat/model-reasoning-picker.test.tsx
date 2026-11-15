@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { flushAnnouncements, recordAnnouncements, renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import {
   ModelReasoningPicker,
@@ -192,6 +192,66 @@ describe("ModelReasoningPicker", () => {
       target: { value: "saknas" }
     });
     expect(within(panel).getByText("Inga modeller hittades")).toBeTruthy();
+  });
+
+  it("says how many models a search finds, and when it finds none", async () => {
+    const said = recordAnnouncements();
+    const more = Array.from({ length: 6 }, (_, index) =>
+      model({ id: `extra-${index}`, name: `extra-${index}`, org: "Annan" })
+    );
+    renderPicker({ models: [...MODELS, ...more] });
+    const panel = await openPanel();
+    const search = within(panel).getByLabelText("Sök modeller och leverantörer");
+    fireEvent.change(search, { target: { value: "leverantör b" } });
+    await flushAnnouncements();
+    fireEvent.change(search, { target: { value: "saknas" } });
+    await flushAnnouncements();
+    expect(said).toEqual(["1 modell hittad", "Inga modeller hittades"]);
+  });
+
+  it("brings the chosen model into view as the panel opens", async () => {
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
+    try {
+      const more = Array.from({ length: 8 }, (_, index) =>
+        model({ id: `extra-${index}`, name: `extra-${index}`, org: "Annan" })
+      );
+      renderPicker({ models: [...more, ...MODELS], selectedId: "model-b" });
+      const panel = await openPanel();
+      const chosen = within(panel).getByRole("radio", { name: /Modell B/, checked: true });
+      await waitFor(() =>
+        expect(
+          scrolled.mock.contexts.some((element) => (element as Element).contains(chosen))
+        ).toBe(true)
+      );
+    } finally {
+      scrolled.mockRestore();
+    }
+  });
+
+  it("fits the panel between the chat's header and its pill", async () => {
+    renderInApp(
+      <div id="chat-panel-chat">
+        <ModelReasoningPicker
+          models={MODELS}
+          selectedId="model-a"
+          storedLevel={null}
+          policyDefaultLevel={null}
+          onSave={vi.fn()}
+        />
+      </div>
+    );
+    // The chat's panel starts under its header, 117 px down; the pill is 400 px down.
+    vi.spyOn(document.getElementById("chat-panel-chat")!, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 0, y: 117, width: 1000, height: 700 })
+    );
+    vi.spyOn(
+      screen.getByRole("button", { name: /^Chattmodell/ }),
+      "getBoundingClientRect"
+    ).mockReturnValue(DOMRect.fromRect({ x: 600, y: 400, width: 160, height: 32 }));
+    const panel = await openPanel();
+    const fitted = panel.querySelector<HTMLElement>("[style*='max-height']")!;
+    // 400 less the header's 117 and the popover's 44 px of gap, padding and gutter.
+    expect(fitted.style.maxHeight).toBe("239px");
   });
 
   it("shows a pinned model read-only and still lets the level be chosen", async () => {

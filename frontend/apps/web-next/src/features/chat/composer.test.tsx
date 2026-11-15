@@ -357,6 +357,10 @@ describe("Composer panels", () => {
     renderInApp(<PanelHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
     const models = await screen.findByRole("dialog", { name: "Chattmodell" });
+    // The popover's own first focus lands, on the chosen model.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(models).getByRole("radio", { checked: true }))
+    );
     // An arrow on a radio moves the choice with a click on the next one.
     const next = within(models).getByRole("radio", { name: /Modell Två/ });
     press(next, "ArrowDown");
@@ -365,6 +369,7 @@ describe("Composer panels", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^Verktyg/ }));
     const tools = await screen.findByRole("dialog", { name: "Verktyg" });
+    await waitFor(() => expect(tools.contains(document.activeElement)).toBe(true));
     const lou = within(tools).getByRole("switch", { name: "LOU-register" });
     press(lou);
     expect(document.activeElement).toBe(lou);

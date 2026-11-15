@@ -1,3 +1,4 @@
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { ChevronDown, Lock, Search, X } from "lucide-react";
@@ -130,6 +131,31 @@ function useRestedChoice(
   };
 }
 
+/** The models whose name or provider holds the search. */
+function matching(models: CompletionModel[], search: string): CompletionModel[] {
+  const needle = search.trim().toLowerCase();
+  if (!needle) return models;
+  return models.filter((item) =>
+    [modelName(item), item.name, vendorLabel(item, "")].some((text) =>
+      text.toLowerCase().includes(needle)
+    )
+  );
+}
+
+/**
+ * Scrolls the chosen model into the list's view as the panel opens: with a
+ * long list it is often below the edge. A frame later, once the panel is shown
+ * and has its height.
+ */
+function bringChosenIntoView(list: HTMLDivElement | null) {
+  if (!list) return;
+  const frame = requestAnimationFrame(() => {
+    const chosen = list.querySelector<HTMLInputElement>('input[type="radio"]:checked');
+    (chosen?.closest("label") ?? chosen)?.scrollIntoView({ block: "nearest" });
+  });
+  return () => cancelAnimationFrame(frame);
+}
+
 export type ModelReasoningPickerProps = {
   models: CompletionModel[];
   selectedId: string | null | undefined;
@@ -169,6 +195,7 @@ export function ModelReasoningPicker({
   onSave
 }: ModelReasoningPickerProps) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -214,14 +241,14 @@ export function ModelReasoningPicker({
     : t("chat_model_named", { label, model: shownName });
 
   const searchable = sorted.length >= SEARCH_FROM;
-  const needle = query.trim().toLowerCase();
-  const listed = needle
-    ? sorted.filter((item) =>
-        [modelName(item), item.name, vendorLabel(item, "")].some((text) =>
-          text.toLowerCase().includes(needle)
-        )
-      )
-    : sorted;
+  const listed = matching(sorted, query);
+  // The list changes without moving focus: say what the search found (WCAG 4.1.3).
+  const search = (next: string) => {
+    setQuery(next);
+    if (!next.trim()) return;
+    const found = matching(sorted, next).length;
+    announce(found > 0 ? t("models_found_count", { count: found }) : t("no_models_found"));
+  };
 
   const changeOpen = (next: boolean) => {
     if (!next) {
@@ -257,7 +284,7 @@ export function ModelReasoningPicker({
                 isLabelHidden
                 placeholder={t("search_models_and_providers")}
                 value={query}
-                onChange={setQuery}
+                onChange={search}
                 startIcon={Search}
                 {...KEYBOARD.search}
                 hasClear
@@ -265,7 +292,17 @@ export function ModelReasoningPicker({
                 width="100%"
               />
             )}
-            <div className={cn("min-h-0 flex-auto overflow-y-auto pe-1", !stacked && "max-h-80")}>
+            <div
+              ref={bringChosenIntoView}
+              className={cn(
+                "min-h-0 flex-auto overflow-y-auto pe-1",
+                // Beside the pill, a list with a search keeps its height, so the
+                // panel neither shrinks nor moves as the search narrows it.
+                !stacked && (searchable ? "h-80" : "max-h-80"),
+                // In a short sheet, the list keeps rows to choose from; the sheet scrolls to the levels.
+                stacked && "min-h-40"
+              )}
+            >
               <RadioList
                 label={label}
                 // The sheet's title already says it.

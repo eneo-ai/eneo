@@ -295,8 +295,9 @@ describe("SpaceChat", () => {
     fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
     fireEvent.click(within(panel).getByRole("radio", { name: "Hög" }));
 
-    await waitFor(() => expect(api.POST).toHaveBeenCalled());
-    expect(api.POST.mock.calls).toEqual([
+    const saves = () => api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    await waitFor(() => expect(saves()).toHaveLength(1));
+    expect(saves()).toEqual([
       [
         "/api/v1/assistants/{id}/",
         {

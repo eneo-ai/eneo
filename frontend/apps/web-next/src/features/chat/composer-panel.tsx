@@ -3,8 +3,16 @@ import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { Popover } from "@astryxdesign/core/Popover";
 import type { LucideIcon } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useLayoutEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode
+} from "react";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { CHAT_PANEL_IDS } from "./chat-url";
 
 /**
  * The composer's panel pills (Verktyg, Skills): icon, label (icon-only on phones) and count.
@@ -34,11 +42,12 @@ export type ComposerPanelSurface = {
 const POPOVER_CHROME = 44;
 
 /**
- * A ref for a panel that keeps it within the room above its trigger.
- * Astryx caps a popover to the window, not to that room, so where the
- * composer sits mid-page (the start state) a long list grew over the pill
- * and the composer; the list scrolls inside instead, and the header and
- * links stay in view.
+ * A ref for a panel that keeps it within the room above its trigger and
+ * below the chat's header (the top of the chat's panel, under Chatt and
+ * Historik; the window's top elsewhere). Astryx caps a popover to the window,
+ * not to that room, so where the composer sits mid-page (the start state) a
+ * long list grew over the pill and the composer, or over the header; the list
+ * scrolls inside instead, and the panel's header and links stay in view.
  */
 export function useFitAbove(trigger?: HTMLElement | null) {
   const panel = useRef<HTMLDivElement>(null);
@@ -46,7 +55,8 @@ export function useFitAbove(trigger?: HTMLElement | null) {
     const element = panel.current;
     if (!element || !trigger) return;
     const fit = () => {
-      const room = trigger.getBoundingClientRect().top - POPOVER_CHROME;
+      const ceiling = trigger.closest(`#${CHAT_PANEL_IDS.chat}`)?.getBoundingClientRect().top ?? 0;
+      const room = trigger.getBoundingClientRect().top - Math.max(0, ceiling) - POPOVER_CHROME;
       element.style.maxHeight = `${Math.max(0, room)}px`;
     };
     fit();
@@ -65,16 +75,55 @@ type PillFace =
   | { icon: LucideIcon; text: string; count?: number | null; face?: undefined }
   | { face: ReactNode; icon?: undefined; text?: undefined; count?: undefined };
 
+/** The chosen tab of a tab, or the checked radio of a radio's group, when it is another. */
+function chosenInstead(control: HTMLElement, panel: HTMLElement): HTMLElement | null {
+  if (control.getAttribute("role") === "tab" && control.getAttribute("aria-selected") !== "true") {
+    return (
+      control
+        .closest('[role="tablist"]')
+        ?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]') ?? null
+    );
+  }
+  if (control instanceof HTMLInputElement && control.type === "radio" && !control.checked) {
+    return (
+      [...panel.querySelectorAll<HTMLInputElement>('input[type="radio"]:checked')].find(
+        (radio) => radio.name === control.name
+      ) ?? null
+    );
+  }
+  return null;
+}
+
 /**
  * A panel's content. Astryx's ChatComposer focuses its field on a click that
  * reaches it outside a button, and a click in a panel reaches it through
  * React's tree (an arrow key on a radio is a click too): stopped here, focus
  * stays on the control the click was on. Closing on a click outside is the
  * popover's and the sheet's own, and still works.
+ *
+ * The popover focuses its first control as it opens: the first tab or radio,
+ * chosen or not. That first focus goes to the chosen one instead, the single
+ * tab stop of a tab list and of a radio group. The sheet focuses its own
+ * surface, so it passes no control over.
  */
-function PanelContent({ children }: { children: ReactNode }) {
+function PanelContent({ children, popover }: { children: ReactNode; popover: boolean }) {
+  const content = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = content.current;
+    if (!element || !popover) return;
+    const toChosen = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement) chosenInstead(event.target, element)?.focus();
+    };
+    element.addEventListener("focusin", toChosen, { once: true });
+    return () => element.removeEventListener("focusin", toChosen);
+  }, [popover]);
   return (
-    <div role="presentation" className="contents" onClick={(event) => event.stopPropagation()}>
+    <div
+      ref={content}
+      role="presentation"
+      className="contents"
+      onClick={(event) => event.stopPropagation()}
+    >
       {children}
     </div>
   );
@@ -171,7 +220,7 @@ export function ComposerPanel({
         closeButtonLabel={t("close")}
         content={
           open ? (
-            <PanelContent>{children({ stacked: false, anchor: pillElement })}</PanelContent>
+            <PanelContent popover>{children({ stacked: false, anchor: pillElement })}</PanelContent>
           ) : null
         }
       >
@@ -190,7 +239,7 @@ export function ComposerPanel({
         padding={0}
         finalFocusRef={pillRef}
       >
-        <PanelContent>
+        <PanelContent popover={false}>
           {children({ stacked: true, onClose: () => onOpenChange(false) })}
         </PanelContent>
       </BottomSheet>
