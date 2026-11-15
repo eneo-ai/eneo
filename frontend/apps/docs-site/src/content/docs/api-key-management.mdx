@@ -303,9 +303,23 @@ Tenant administrators can configure API key policies that apply to all keys in t
 | `revocation_cascade_enabled` | false | Reserved for delegated-key cascade support |
 | `require_expiration` | false | All new keys must have an expiry date |
 | `max_expiration_days` | null | Maximum days until expiry (null = unlimited) |
-| `auto_expire_unused_days` | null | Mark keys unused for N days as `EXPIRED` (audited as `API_KEY_EXPIRED`) |
+| `auto_expire_unused_days` | null | Keys, service keys included, not used for N days expire at the [nightly maintenance](#nightly-maintenance) (audited as `API_KEY_EXPIRED`) |
 | `max_rate_limit_override` | null | Absolute ceiling on per-key rate limits |
 | `rotation_grace_hours` | 24 | Grace period for old keys during rotation |
+
+### Nightly maintenance [#nightly-maintenance]
+
+A worker job runs every night at 01:00 UTC and records what the keys' dates already decide:
+
+1. **Expiry.** A key past its end date is recorded as `expired`. A key recorded as `expired` whose end date is later than the run, or missing, gets the run's time as its end date, so it stops signing in.
+2. **Unused keys.** Where the tenant sets `auto_expire_unused_days`, a key not used for that many days (or never used and created that long ago) expires: its end date becomes the time of the run. This includes service keys, such as the ones modules sign in with. A use is stored at most once every 15 minutes by default (`API_KEY_LAST_USED_MIN_INTERVAL_SECONDS`), so set more days than the longest pause of any service that uses a key, for example a weekend for a service used on weekdays.
+3. **Rotation.** An old key stops signing in when its rotation grace period ends; the job then records it as revoked.
+
+Each change is written to the audit log in the same transaction, with the system as actor, also when the tenant has turned off audit logging or the action. Moving a key's end date does not count as a use, so an unused key still expires under the unused-key policy, on that run or a later one. A key's name and description can still be changed after it has expired or been revoked.
+
+One run takes at most 500 keys from each selection, oldest first. The selections are keys past their end date, keys recorded as expired but still open, keys whose rotation grace period has ended, and, per tenant, unused keys. More keys than that are taken on the following nights. A key that fails is reported in the job's `errors` and does not stop the others.
+
+An expired key does not come back when the policy is turned off or changed. Create a new key and replace the old one in the integration, or in the module's configuration for a module's service key.
 
 ---
 

@@ -489,10 +489,21 @@ def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification(
     assert identity.email_verified is False
 
 
-@pytest.mark.parametrize("email", [None, 123, "", "invalid", "user@", "@example.com"])
-def test_invalid_email_is_rejected_before_account_admission(email):
-    with pytest.raises(ValueError):
-        identity_of({"email": email, "email_verified": True})
+@pytest.mark.parametrize(
+    ("email", "error"),
+    [
+        (None, "Email claim not found"),
+        (123, "Email claim not found"),
+        ("", "Email claim not found"),
+        ("invalid", "Email claim from identity provider is invalid"),
+        ("user@", "Email claim from identity provider is invalid"),
+        ("@example.com", "Email claim from identity provider is invalid"),
+    ],
+)
+def test_invalid_email_is_rejected_before_account_admission(email, error):
+    # Every other claim is valid, so the email is what is refused.
+    with pytest.raises(ValueError, match=error):
+        identity_of({**CLAIMS, "email": email})
 
 
 @pytest.mark.parametrize("moved", [False, True], ids=["oidc-env", "moved-into-eneo"])

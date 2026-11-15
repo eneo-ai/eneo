@@ -25,6 +25,8 @@ Each item can stop the backend from starting, stop sign-in or lose data:
 9. Tell users that names and feedback comments of conversations older than their retention period are removed on the first night. See [Names and feedback text](#names-and-feedback-follow-retention).
 10. Plan downtime for `db-init`: migration `202611091200` locks `sessions` while it rewrites every row, and several migrations build indexes concurrently. If `db-init` is interrupted, run it again. See [Migration `202611091200`](#sessions-migration).
 11. Export the audit log first if you need file names: the upgrade removes them for good. See [Exporting audit logs](/guides/audit-logging#exporting-audit-logs).
+12. Run the sessions check against the 2.3 database: a session with both or neither of a user and an API key stops `db-init`. See [Web widgets](#widgets).
+13. Replace API keys that integrations or modules still use but that are listed as Expired, or that the unused-key policy will expire: they stop signing in at the first nightly run. See [API keys that should have expired](#api-keys-expire).
 
 **Rolling back to 2.3:** restore the `pg_dump` backup taken before `db-init`, with a matching object storage snapshot. A schema downgrade stops at migration `202610291900` ("Cannot discard approved Skill reference history") once an approved Skill revision references another Skill. A downgrade never brings back emptied or deleted logs, cleared names or rewritten audit entries.
 
@@ -128,6 +130,7 @@ flowchart TB
 | [One error format](#error-envelope) | API consumers, generated clients | Read `code` and `message` |
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
+| [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |
 
 ### Retention, logs and storage [#retention-logs-storage]
 
@@ -142,6 +145,7 @@ flowchart TB
 | Bundled SeaweedFS image is `4.40-eneo.8` | Bundled SeaweedFS | Set `ENEO_SEAWEEDFS_IMAGE` to the digest in `IMAGE-DIGESTS.txt` ([Pin the release image](/guides/object-content-storage#pin-the-release-image)) |
 | A question whose log holds no request answers `400` instead of `500` | API consumers | Treat `400` as no log |
 | [`UPLOAD_TMP_DIR` must be a local filesystem](#upload-tmp-dir-local) | Operators | Keep it local |
+| [`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated](#inline-maximum-deprecated) | Operators who store files in PostgreSQL | Remove the line. Breaking only for a value above about 512 MiB |
 | [Migration `202611091200` rewrites every conversation row](#sessions-migration) | Operators | Plan downtime |
 | [Names and feedback text follow the retention period](#names-and-feedback-follow-retention) | Administrators, API consumers | Tell users |
 | Failed jobs carry `failure_code` instead of error text | API consumers of failed jobs | Read `failure_code` |
@@ -155,9 +159,10 @@ flowchart TB
 | `MAX_TOOL_ROUNDS` defaults to 40 (was a fixed 10), so a tool-heavy turn can cost up to four times the calls and tokens; LiteLLM's `REQUEST_TIMEOUT` no longer applies | Everyone | `MAX_TOOL_ROUNDS=10` keeps the old cap; move a custom `REQUEST_TIMEOUT` to `COMPLETION_REQUEST_TIMEOUT_SECONDS` (default 600) |
 | Provider types that cannot route are refused with `400`; model names no longer double the prefix | Administrators | Fix `mistral/mistral/…` completion model names; embedding and reranking need new models; [recreate refused providers](/guides/ai-providers#adding-a-provider-admin-ui) |
 | Images have no `apt`; the frontend image also has no `npm`, `npx`, `corepack` or `yarn` | Builds on the images | Install in a separate build stage |
+| The backend needs Python 3.11.5 or a later 3.11 release (`>=3.11.5,<3.12`); 2.3 accepted any 3.11 release | Backends run outside the images | Move to Python 3.11.5 or a later 3.11 release; image-based installations need nothing |
 | `MCP_APP_CONTENT_BASE_URL` is validated at startup | Installations that set it | Nothing; typical values pass |
 | [SharePoint](#sharepoint) | SharePoint installations | Let syncs finish; review Problems; re-import personal sources of deactivated owners |
-| [Web widgets](#widgets) | Operators | Run the sessions check |
+| [Web widgets](#widgets) | Operators | Run the sessions check before upgrading |
 | New permission Own Skills (`personal_skills`) for Owner roles | Administrators | Nothing; grant it to other roles if wanted |
 
 ### Maintainers [#maintainers]
@@ -331,6 +336,17 @@ A migration clears icons that point across tenants. Deleting an icon in use answ
 
 **Rollback:** the clearing cannot be undone.
 
+### API keys that should have expired stop working [#api-keys-expire]
+
+When the unused-key policy (`auto_expire_unused_days`) expired a key, the nightly maintenance recorded it as expired but kept its later end date, and sign-in reads only the dates. Such a key, or one without an end date, went on working. From the first run after the upgrade (01:00 UTC) the job ends access for:
+
+- keys listed as Expired that still sign in, whatever the policy says now;
+- keys the policy expires, including service keys such as the ones modules use, and keys without an end date.
+
+One run takes at most 500 keys from each selection: keys past their end date, keys recorded as expired but still open, keys whose rotation grace period has ended, and, per tenant, unused keys. Keys beyond that wait for a later night. An unused key, or one recorded as expired but still open, keeps working until then; a key past its end date or its rotation grace period already fails sign-in, and only its recorded state and audit row wait. The job's audit rows (`api_key_expired`, and `api_key_revoked` after a rotation) are now written also when the tenant has turned off audit logging or the action.
+
+**Do:** before the upgrade, find in **Admin > API keys** the keys listed as Expired that an integration or module still uses, and the keys the policy will expire. Create a new key and put it in the integration, or in the module's configuration for a module's service key. Set the policy's days longer than the longest pause of any service that uses a key. A key that has expired does not come back when the policy is turned off. See [Nightly maintenance](/docs/api-key-management#nightly-maintenance).
+
 ## Details: retention, logs and storage [#details-retention]
 
 ### One retention engine [#retention-engine]
@@ -373,6 +389,20 @@ Backend and worker refuse to start unless they can read `s3:GetBucketVersioning`
 
 **Rollback:** stop every process, then remove `$UPLOAD_TMP_DIR/eneo-scratch/`.
 
+### `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is deprecated [#inline-maximum-deprecated]
+
+Upload limits are set in **Admin > File storage**. A file stored in PostgreSQL can now be as large as PostgreSQL holds and backs up per file, just under 512 MiB: the [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql). A value that is still set keeps working up to that capacity, and startup logs a warning. Only a value above the capacity is a breaking change.
+
+- **Set to `10485760` (10 MiB), as in the old reference template:** uploads above 10 MiB stop with `413` as before.
+- **Not set:** uploads can go up to the capacity instead of 200 MiB. That changes uploads only where an administrator has set a policy above 200 MiB. Moves from object storage into PostgreSQL, the online adoption of existing File and Icon bytes, and its [preflight](/guides/file-icon-storage-upgrade#run-preflight-while-eneo-21-is-running) also take items up to the capacity. If the preflight counts `extra_large` items (above 200 MiB), measure PostgreSQL memory with one such item first.
+- **Set above the capacity (breaking):** startup continues, the limit is capped at the capacity, and the warning says so. Uploads between the capacity and your value are now refused with `413`, and moves of such files from object storage into PostgreSQL fail. Such files could be stored before but `pg_dump` could not back them up. **Do:** keep files that large in object storage (select it in **Admin > File storage**), or accept the lower limit.
+
+**Do:** remove the line from `env_backend.env` and recreate the backend and worker; the policy then applies.
+
+**Check:** startup logs no warning about the variable, and **Admin > File storage** shows a storage limit below the policy only where the policy is above the capacity.
+
+**Rollback:** the earlier release reads the variable again and uses 200 MiB without it; files stored in the meantime stay readable.
+
 ### Migration `202611091200` rewrites every conversation row [#sessions-migration]
 
 **Do:** plan downtime in proportion to the size of `sessions`.
@@ -403,6 +433,6 @@ The first nightly run empties the name and feedback text of every conversation o
 
 ### Web widgets [#widgets]
 
-**Do:** set `TRUSTED_PROXY_COUNT`; run `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1`, which must return 0.
+**Do:** set `TRUSTED_PROXY_COUNT`. Before the upgrade, run `SELECT count(*) FROM sessions WHERE (user_id IS NOT NULL)::int + (api_key_id IS NOT NULL)::int <> 1` against the 2.3 database; it must return 0. A session it counts stops `db-init`: the new schema allows exactly one of a user, an API key or a widget per session. After the upgrade the query also counts widget conversations, so it no longer applies.
 
 **Rollback:** downgrades delete widget sessions and tables.

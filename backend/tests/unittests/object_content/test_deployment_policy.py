@@ -23,6 +23,11 @@ from eneo.database.database import get_session, get_session_with_transaction
 from eneo.database.tables.object_content_policy_table import (
     ObjectContentDeploymentPolicy,
 )
+from eneo.object_content.configuration import (
+    INLINE_PAYLOAD_CAPACITY_BYTES,
+    ObjectContentCoreSettings,
+    ObjectStoreOperatorSettings,
+)
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import (
     ConstrainingSource,
@@ -796,6 +801,74 @@ def test_limit_projection_applies_inline_ceiling_to_all_new_content() -> None:
     assert projections[3].storage_target is StorageKind.POSTGRES_INLINE
     assert projections[4].effective_bytes == 100
     assert projections[4].operator_ceiling_bytes == 100
+
+
+_MIB = 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    ("environment_limit", "ceiling", "source"),
+    [
+        (None, INLINE_PAYLOAD_CAPACITY_BYTES, ConstrainingSource.ADMIN_POLICY),
+        (10 * _MIB, 10 * _MIB, ConstrainingSource.OPERATOR_CEILING),
+        (
+            INLINE_PAYLOAD_CAPACITY_BYTES + 1,
+            INLINE_PAYLOAD_CAPACITY_BYTES,
+            ConstrainingSource.ADMIN_POLICY,
+        ),
+    ],
+)
+def test_database_storage_lets_the_policy_govern_unless_the_old_variable_is_lower(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_limit: int | None,
+    ceiling: int,
+    source: ConstrainingSource,
+) -> None:
+    if environment_limit is None:
+        monkeypatch.delenv("OBJECT_CONTENT_INLINE_MAXIMUM_BYTES", raising=False)
+    overrides = (
+        {} if environment_limit is None else {"inline_maximum_bytes": environment_limit}
+    )
+    settings = ObjectContentCoreSettings(_env_file=None, **overrides)
+
+    audio = project_upload_limits(
+        _policy(
+            target=StorageKind.POSTGRES_INLINE,
+            session_file=10 * _MIB,
+            session_image=10 * _MIB,
+            knowledge_file=10 * _MIB,
+            transcription_audio=300 * _MIB,
+        ),
+        inline_maximum_bytes=settings.inline_maximum_bytes,
+        object_store_maximum_bytes=None,
+    )[2]
+
+    assert audio.use_case is UploadLimitUseCase.SESSION_AUDIO
+    assert audio.operator_ceiling_bytes == ceiling
+    assert audio.effective_bytes == min(300 * _MIB, ceiling)
+    assert audio.constraining_source is source
+
+
+def test_object_store_ceiling_does_not_follow_the_database_capacity() -> None:
+    operator = ObjectStoreOperatorSettings(_env_file=None)
+
+    audio = project_upload_limits(
+        _policy(
+            target=StorageKind.OBJECT_STORE,
+            session_file=10 * _MIB,
+            session_image=10 * _MIB,
+            knowledge_file=10 * _MIB,
+            transcription_audio=300 * _MIB,
+        ),
+        inline_maximum_bytes=ObjectContentCoreSettings(
+            _env_file=None
+        ).inline_maximum_bytes,
+        object_store_maximum_bytes=operator.maximum_multipart_bytes,
+    )[2]
+
+    assert audio.operator_ceiling_bytes == operator.maximum_multipart_bytes
+    assert audio.effective_bytes == 300 * _MIB
+    assert audio.constraining_source is ConstrainingSource.ADMIN_POLICY
 
 
 def test_limit_projection_applies_portable_ceiling_to_all_object_store_uploads() -> (
