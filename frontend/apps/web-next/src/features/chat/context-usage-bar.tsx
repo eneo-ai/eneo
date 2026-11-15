@@ -67,6 +67,12 @@ const SEGMENT_CLASS: Record<string, string> = {
  */
 export const SHOW_FROM_PERCENT = 60;
 
+/** The meter's row and its track, shared by the meter and its place held while waiting. */
+const ROW_CLASS =
+  "rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-xs leading-none pointer-coarse:min-h-11";
+const TRACK_CLASS =
+  "bg-ax-muted border-ax-border relative h-1.5 flex-1 overflow-hidden rounded-full border";
+
 /**
  * Context-usage meter ported from the Svelte `ContextUsageBar`: a segmented
  * progress bar under the composer with a detailed popover breaking the estimate
@@ -77,12 +83,15 @@ export const SHOW_FROM_PERCENT = 60;
  */
 export function ContextUsageBar({
   usage,
+  pending,
   modelName,
   cumulativeTokens,
   turnCount,
   onNewConversation
 }: {
   usage: ContextUsage;
+  /** The estimate for a new draft, file or model is on its way. */
+  pending: boolean;
   modelName?: string | null;
   cumulativeTokens: number;
   turnCount: number;
@@ -166,7 +175,23 @@ export function ContextUsageBar({
     projectedPercent >= SHOW_FROM_PERCENT ||
     willExceed ||
     (turnCount === 0 && baselineTotal > 0 && !phone);
-  if (!hasUsage || (!warranted && !pinned)) return null;
+  const visible = hasUsage && (warranted || pinned);
+  // Whether the row was there when the last estimate came, kept while a new one is on
+  // its way. A row that would go meanwhile (its estimate is not in yet) holds its place,
+  // without figures (no old estimate is shown), so the composer, centred before the
+  // first question, does not jump as one types or changes the model. A row the
+  // conversation already fills keeps its figures: they are current, not an old estimate.
+  // Without an answer the row is as it would be.
+  const [settledVisible, setSettledVisible] = useState(visible);
+  if (!pending && settledVisible !== visible) setSettledVisible(visible);
+  if (pending && settledVisible && !visible) {
+    return (
+      <div aria-hidden="true" className={ROW_CLASS}>
+        <div className={TRACK_CLASS} />
+      </div>
+    );
+  }
+  if (!visible) return null;
 
   const percentLabel = projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1);
 
@@ -368,13 +393,13 @@ export function ContextUsageBar({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-xs leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+        className={cn(
+          ROW_CLASS,
+          "text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+        )}
       >
         <span className="sr-only">{t("context_usage")}: </span>
-        <div
-          aria-hidden="true"
-          className="bg-ax-muted border-ax-border relative h-1.5 flex-1 overflow-hidden rounded-full border"
-        >
+        <div aria-hidden="true" className={TRACK_CLASS}>
           {segments.map((seg) =>
             seg.widthPct > 0 ? (
               <div
