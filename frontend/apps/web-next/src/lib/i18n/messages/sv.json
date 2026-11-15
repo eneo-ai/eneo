@@ -7333,7 +7333,6 @@
   "chat_debug_action": "Felsök",
   "chat_debug_turn_position": "Meddelande {number} av {count}",
   "chat_debug_turn_navigation": "Sparade meddelanden",
-  "reasoning_effort_value": "Resonemangsnivå: {value}",
   "insights_period_label": "Period",
   "insights_period_placeholder": "Välj period",
   "insights_sessions_heading": "Konversationer",

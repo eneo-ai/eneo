@@ -16,7 +16,11 @@ import { sortModels } from "@/features/ai-models/sort-models";
 import type { Schema } from "@/lib/api/models";
 import { cn } from "@/lib/utils";
 import { ComposerPanel, useFitAbove, type ComposerPanelSurface } from "./composer-panel";
-import { reasoningEffortLabel, reasoningEffortOptions } from "./reasoning-effort";
+import {
+  effectiveReasoningEffort,
+  reasoningEffortLabel,
+  reasoningEffortOptions
+} from "./reasoning-effort";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
 
@@ -125,12 +129,19 @@ export function ModelReasoningPicker({
   const chosenLevel = level.pending ? level.pending.value : storedLevel;
   // The organisation's default, when the shown model offers it: that level's
   // row is the default's row, marked as such, so no level is listed twice.
-  const policyLevel =
-    policyDefaultLevel && levels.includes(policyDefaultLevel) ? policyDefaultLevel : null;
+  const policyLevel = effectiveReasoningEffort({
+    stored: null,
+    policyDefault: policyDefaultLevel,
+    options: levels
+  });
   // A level the shown model does not offer is not in force, and the
   // organisation's own level is its default whether stored or not.
-  const ownLevel =
-    chosenLevel && levels.includes(chosenLevel) && chosenLevel !== policyLevel ? chosenLevel : null;
+  const inForce = effectiveReasoningEffort({
+    stored: chosenLevel,
+    policyDefault: policyDefaultLevel,
+    options: levels
+  });
+  const ownLevel = inForce !== policyLevel ? inForce : null;
   const ownLevelText = ownLevel ? reasoningEffortLabel(ownLevel, t) : null;
 
   const label = t("completion_model");

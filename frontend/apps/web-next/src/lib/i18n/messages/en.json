@@ -7333,7 +7333,6 @@
   "chat_debug_action": "Debug",
   "chat_debug_turn_position": "Message {number} of {count}",
   "chat_debug_turn_navigation": "Saved messages",
-  "reasoning_effort_value": "Reasoning effort: {value}",
   "insights_period_label": "Period",
   "insights_period_placeholder": "Select a period",
   "insights_sessions_heading": "Conversations",
