@@ -9,6 +9,7 @@ row (written by the switch) can open the flow routes.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -204,9 +205,11 @@ async def test_a_member_without_admin_cannot_switch_flows(
 
 
 @pytest.mark.usefixtures("global_flows_off")
-@pytest.mark.parametrize("permission", ["read", "write"])
-async def test_a_key_without_the_admin_permission_cannot_switch_flows(
-    client: AsyncClient, db_container, admin_user, permission
+@pytest.mark.parametrize(
+    ("permission", "status"), [("read", 403), ("write", 403), ("admin", 200)]
+)
+async def test_only_a_key_with_the_admin_permission_switches_flows(
+    client: AsyncClient, db_container, admin_user, permission, status
 ):
     async with db_container() as container:
         key = await mint_v2_api_key(
@@ -221,8 +224,14 @@ async def test_a_key_without_the_admin_permission_cannot_switch_flows(
         SWITCH, json={"enabled": True}, headers={"X-API-Key": key.key}
     )
 
-    assert response.status_code == 403, response.text
-    assert await _flag_rows() == before
+    assert response.status_code == status, response.text
+    if status == 200:
+        assert await _flag_rows() == {
+            **before,
+            "tenants": {**before["tenants"], admin_user.tenant_id: True},
+        }
+    else:
+        assert await _flag_rows() == before
 
 
 @pytest.mark.usefixtures("global_flows_off")
@@ -241,6 +250,53 @@ async def test_an_audited_switch_records_the_old_and_new_value(
         {"flows_enabled": {"old": False, "new": True}},
         {"flows_enabled": {"old": True, "new": False}},
     ]
+
+
+@pytest.mark.usefixtures("global_flows_off")
+async def test_overlapping_switches_audit_the_value_the_later_one_changed(
+    db_container, admin_user
+):
+    """Two administrators of one organisation switch at the same moment. The
+    later switch waits for the earlier one before it reads the old value, so
+    its audit row says what it actually changed."""
+    async with db_container() as later:
+        later_pid = await later.session().scalar(sa.text("SELECT pg_backend_pid()"))
+        async with db_container() as earlier:
+            await earlier.settings_service().update_flows_setting(enabled=True)
+            racing = asyncio.create_task(
+                later.settings_service().update_flows_setting(enabled=False)
+            )
+            try:
+                await _wait_until_waiting_for_a_lock(later_pid)
+            except BaseException:
+                racing.cancel()
+                await asyncio.gather(racing, return_exceptions=True)
+                raise
+        # Leaving `earlier` committed the switch on.
+        await asyncio.wait_for(racing, timeout=5)
+
+    rows = await _switch_audit_rows(admin_user.tenant_id)
+    assert [row["changes"] for row in rows] == [
+        {"flows_enabled": {"old": False, "new": True}},
+        {"flows_enabled": {"old": True, "new": False}},
+    ]
+    assert (await _flag_rows())["tenants"][admin_user.tenant_id] is False
+
+
+async def _wait_until_waiting_for_a_lock(pid: int) -> None:
+    deadline = asyncio.get_running_loop().time() + 5
+    while asyncio.get_running_loop().time() < deadline:
+        async with sessionmanager.session() as session, session.begin():
+            wait_event_type = await session.scalar(
+                sa.text(
+                    "SELECT wait_event_type FROM pg_stat_activity WHERE pid = :pid"
+                ),
+                {"pid": pid},
+            )
+        if wait_event_type == "Lock":
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"Session {pid} never waited on the earlier switch")
 
 
 @pytest.mark.usefixtures("global_flows_off")
@@ -351,9 +407,18 @@ async def test_an_admin_reads_the_workers_state_without_flows_and_without_tenant
 
 
 async def test_only_an_admin_with_an_admin_key_reads_the_workers_state(
-    client: AsyncClient, db_container, admin_user, user_factory, patch_auth_service_jwt
+    client: AsyncClient,
+    db_container,
+    admin_user,
+    user_factory,
+    patch_auth_service_jwt,
+    monkeypatch,
 ):
     _ = patch_auth_service_jwt
+    monkeypatch.setattr(
+        "eneo.settings.settings_router.load_task_worker_readiness",
+        AsyncMock(return_value=TaskWorkerReadiness(True, True, probe_ok=True)),
+    )
     async with db_container() as container:
         session = container.session()
         member = await user_factory(session)
@@ -375,13 +440,20 @@ async def test_only_an_admin_with_an_admin_key_reads_the_workers_state(
             user_id=admin_user.id,
             permission="write",
         )
+        admin_key = await mint_v2_api_key(
+            container.api_key_v2_repo(),
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+        )
 
     anonymous = await client.get(WORKERS)
     member_response = await client.get(
         WORKERS, headers={"Authorization": f"Bearer {token}"}
     )
     key_response = await client.get(WORKERS, headers={"X-API-Key": write_key.key})
+    admin_key_response = await client.get(WORKERS, headers={"X-API-Key": admin_key.key})
 
     assert anonymous.status_code == 401, anonymous.text
     assert member_response.status_code == 403, member_response.text
     assert key_response.status_code == 403, key_response.text
+    assert admin_key_response.status_code == 200, admin_key_response.text

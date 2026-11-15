@@ -1325,11 +1325,20 @@ class SettingService:
     async def update_flows_setting(self, enabled: bool) -> SettingsPublic:
         """Switch Flows on or off for the tenant with the tenant's own flag row.
 
-        The global row stays as it is, so no other tenant is affected. The
-        audit row is written in the same transaction as the flag when the
-        audit configuration keeps the action, so a kept row and the change
-        commit or fail together. Role permissions are not touched.
+        The global row stays as it is. Another tenant is unaffected unless its
+        own switch overlaps this one in time: the shared flag write rewrites
+        every tenant's `flows_core` row from what it read, so an overlapping
+        switch in another tenant can be written back to its earlier value, or
+        a row it just created removed. Switches that do not overlap never
+        change another tenant.
+
+        The tenant row is locked before the old value is read, so two switches
+        in one tenant serialize and each audit row's old value is the one it
+        changed. The audit row is written in the same transaction as the flag
+        when the audit configuration keeps the action, so a kept row and the
+        change commit or fail together. Role permissions are not touched.
         """
+        await self.tenant_repo.lock(self.user.tenant_id)
         old_enabled = await self.feature_flag_service.check_is_feature_enabled(
             feature_name=FLOW_FEATURE,
             tenant_id=self.user.tenant_id,

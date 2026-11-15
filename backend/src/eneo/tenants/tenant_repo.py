@@ -309,6 +309,19 @@ class TenantRepository:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         return model
 
+    async def lock(self, tenant_id: UUID) -> None:
+        """Row-lock the tenant until the transaction ends, reading nothing.
+
+        A change kept outside the tenant row (a tenant feature flag) takes this
+        lock before it reads its old value, so two changes for one tenant
+        serialize and the later one reads what the earlier one committed.
+        """
+        locked = await self.session.scalar(
+            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+        )
+        if locked is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
     async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
         """The stored widget policy, row-locked until the transaction ends.
 
