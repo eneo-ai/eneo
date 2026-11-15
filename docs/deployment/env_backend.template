@@ -462,11 +462,13 @@ FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS=900
 # before transcription; what it holds, at most one WAV file (37 h 16 min), is the
 # longest recording admins can set: 18 h 38 min at 2 GiB. The whole run, all
 # steps together, must fit TASK_EXECUTION_TIMEOUT_SECONDS (default 8 h). A
-# hosted model took about 0.07 times the recording's length, measured on one
-# short recording; raise the timeout when transcription, speaker labelling or
-# later steps take longer.
+# model took about 0.07 times the length of a 92 s recording sent as one part;
+# how that grows with longer recordings is not measured. Raise the timeout when
+# transcription, speaker labelling or later steps take longer.
 # FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS is no longer read: remove it, and lower
-# FLOW_AUDIO_MAX_DECODED_BYTES to keep admins below what 2 GiB holds.
+# FLOW_AUDIO_MAX_DECODED_BYTES to keep admins below what 2 GiB holds. The bound
+# also applies to runs already admitted: set it to hold the old 8 h cap
+# (921600000), or wait until running flows have finished before lowering it.
 FLOW_AUDIO_MAX_DURATION_SECONDS=18000
 FLOW_AUDIO_MAX_DECODED_BYTES=2147483648
 # An audio upload is decoded to measure it before it is kept, a few at a time; past
