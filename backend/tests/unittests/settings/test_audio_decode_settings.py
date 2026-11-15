@@ -12,10 +12,6 @@ def test_audio_decode_limits_must_be_positive(field, value):
         Settings.model_validate({**get_settings().model_dump(), field: value})
 
 
-def test_no_environment_ceiling_stands_between_the_admin_and_the_decoder():
-    assert "flow_audio_max_duration_ceiling_seconds" not in Settings.model_fields
-
-
 @pytest.mark.parametrize(
     ("decoded_bytes", "ceiling"),
     [

@@ -94,10 +94,11 @@ REMOVED_VARIABLES: tuple[RemovedVariable, ...] = (
     RemovedVariable(
         "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS",
         note=(
-            "The longest recording an admin can set in Admin > Flow settings is "
-            "what FLOW_AUDIO_MAX_DECODED_BYTES holds."
+            "The longest recording an admin can set (Admin > Flows, Longest "
+            "recording) is what FLOW_AUDIO_MAX_DECODED_BYTES holds."
         ),
-        removed_in="Eneo 2.3",
+        # No release read it: it lived only on the Flows branch.
+        removed_in=None,
         guide_url=None,
     ),
     RemovedVariable("INTRIC_SUPER_API_KEY", replacement="ENEO_SUPER_API_KEY"),
