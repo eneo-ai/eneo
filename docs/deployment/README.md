@@ -93,7 +93,7 @@ The stack uses five Docker networks:
 |---|---|---|
 | `proxy_tier` (external, created in step 7) | Traefik, frontend, backend, general worker, execution worker, maintenance worker, crawler-worker | Ingress and outbound access (LLM APIs, OIDC, crawling, webhooks) |
 | `data_net` (`internal: true`) | db, redis, backend, all workers, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
-| `tool_runtime_net` (`internal: true`) | tool-runtime, backend, general worker | Bundled tools runtime; no internet, database, or Redis route (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md)) |
+| `tool_runtime_net` (`internal: true`) | tool-runtime, backend, general worker, execution worker | Bundled tools runtime; no internet, database, or Redis route (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md)) |
 | `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker, crawler-worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 

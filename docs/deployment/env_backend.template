@@ -625,9 +625,9 @@ EXPORT_MAX_AGE_HOURS=24
 
 # Bundled tool runtime (part of the standard stack, see TOOL_RUNTIME.md).
 # docker-compose.yml passes TOOL_RUNTIME_URL, TOOL_RUNTIME_TOKEN and
-# FILE_REFERENCE_BASE_URL to the backend and worker from the deployment .env
-# (python3 setup.py generates the token), and those values take precedence
-# over this file; do not set them here.
+# FILE_REFERENCE_BASE_URL to the backend, the general worker and the execution
+# worker from the deployment .env (python3 setup.py generates the token), and
+# those values take precedence over this file; do not set them here.
 
 # Optional interactive tool views (MCP Apps, see MCP_APPS.md). Views are served
 # from a second hostname that reaches the backend; it must differ from the

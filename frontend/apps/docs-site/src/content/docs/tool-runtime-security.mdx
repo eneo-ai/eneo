@@ -90,8 +90,8 @@ trust.
 
 ### Layer 1: ingress
 
-The runtime answers only to the backend and worker, and even then only in a
-narrow shape (`src/server.ts`):
+The runtime answers only to the backend, the general worker and the execution
+worker, and even then only in a narrow shape (`src/server.ts`):
 
 - Every tool endpoint requires `Authorization: Bearer <TOOL_RUNTIME_TOKEN>`.
   The token must be at least 32 characters, is compared in constant time, and
@@ -247,13 +247,13 @@ capped at 200 KiB.
 The reference Compose stack bounds the container itself, independently of
 the per-job confinement:
 
-| Control      | Setting                                                                                                           |
-| ------------ | ----------------------------------------------------------------------------------------------------------------- |
-| Network      | `tool_runtime_net`, `internal: true`; only the backend and worker join it; port 3010 exposed to that network only |
-| Filesystem   | `read_only: true`; `/tmp` is a 512 MiB tmpfs mounted `noexec,nosuid,nodev`                                        |
-| Privileges   | `cap_drop: ALL`, `no-new-privileges: true`, process runs as the unprivileged `bun` user                           |
-| Resources    | `mem_limit: 2g`, `cpus: 2`, `pids_limit: 256`                                                                     |
-| Supply chain | landrun built from a pinned release; Python packages installed with `--require-hashes`                            |
+| Control      | Setting                                                                                                                                             |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Network      | `tool_runtime_net`, `internal: true`; only the backend, the general worker and the execution worker join it; port 3010 exposed to that network only |
+| Filesystem   | `read_only: true`; `/tmp` is a 512 MiB tmpfs mounted `noexec,nosuid,nodev`                                                                          |
+| Privileges   | `cap_drop: ALL`, `no-new-privileges: true`, process runs as the unprivileged `bun` user                                                             |
+| Resources    | `mem_limit: 2g`, `cpus: 2`, `pids_limit: 256`                                                                                                       |
+| Supply chain | landrun built from a pinned release; Python packages installed with `--require-hashes`                                                              |
 
 Deployments that do not use the reference stack (another orchestrator, the
 development container) must provide this layer themselves: no egress, a

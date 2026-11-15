@@ -253,7 +253,7 @@ The Docker Compose stack uses five networks:
 | `proxy_tier` (external)                 | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access for APIs, OIDC, crawls, model calls, and webhooks |
 | `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init                                   | Data layer without internet egress, isolated from Traefik and frontend        |
 | `module_net` (`internal: true`)         | Traefik, backend, optional module containers                                     | Modules reach only `backend:8000`; no internet egress                         |
-| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, general worker                                            | Bundled tools runtime; no internet, database, or Redis route                  |
+| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, general worker, execution worker                          | Bundled tools runtime; no internet, database, or Redis route                  |
 | `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker               | Private S3-compatible byte plane when enabled; never routed publicly          |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.

@@ -103,10 +103,17 @@ describe("spaceSections", () => {
     expect(
       spaceSections(org, canFor(org), "organization", { flows: true }).map((section) => section.id)
     ).not.toContain("flows");
-    const noApps = makeSpace({ resourcePermissions: [], permissions: ["read"] });
-    expect(
-      spaceSections(noApps, canFor(noApps), "space-1", { flows: true }).map((s) => s.id)
-    ).not.toContain("flows");
+  });
+
+  it("shows flows by the tenant's flows gate alone, apart from the apps", () => {
+    const noApps = makeSpace({});
+    noApps.applications!.apps.permissions = [];
+    const ids = (space: ReturnType<typeof makeSpace>, flows: boolean) =>
+      spaceSections(space, canFor(space), "space-1", { flows }).map((section) => section.id);
+    expect(ids(noApps, true)).toContain("flows");
+    expect(ids(noApps, true)).not.toContain("apps");
+    expect(ids(makeSpace({}), false)).toContain("apps");
+    expect(ids(makeSpace({}), false)).not.toContain("flows");
   });
 
   it("counts only the space's own knowledge", () => {

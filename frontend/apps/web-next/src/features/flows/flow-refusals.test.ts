@@ -34,6 +34,18 @@ describe("flowRefusalMessage", () => {
     expect(flowRefusalMessage(error, steps, tEn)).toContain("Step 2: Skriv svar reads");
   });
 
+  it("says where to choose the service that labels the speakers, in both languages", () => {
+    const error = refusal("flow_speaker_service_not_chosen", {
+      issue_code: "flow_speaker_service_not_chosen"
+    });
+    expect(flowRefusalMessage(error, steps, t)).toBe(
+      "Välj vilken tjänst som ska märka talarna under Ordtider och talare. Om inget steg kräver talare kan du också slå av Märk talare."
+    );
+    expect(flowRefusalMessage(error, steps, tEn)).toBe(
+      "Choose which service labels the speakers under Word timings and speakers. If no step needs speakers, you can also switch off Label speakers."
+    );
+  });
+
   it("says which of the two steps the change moved, or that it removes the producer", () => {
     const read = { step_id: "step-2", step_order: 2, site: "prompt", reads_step: 1 };
     expect(

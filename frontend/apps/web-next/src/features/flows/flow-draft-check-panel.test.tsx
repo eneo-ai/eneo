@@ -263,6 +263,60 @@ describe("FlowDraftCheck", () => {
     expect(onProblemCount).toHaveBeenLastCalledWith(2);
   });
 
+  it("says where a service for the speakers is chosen, or that they can be switched off", async () => {
+    route(ASSISTANTS);
+    const onOpenSettings = vi.fn();
+    const service = {
+      id: "svc-1",
+      name: "Talare",
+      available: true,
+      meets_security_classification: true,
+      is_default: true
+    };
+    const transcribe = makeStep(1, { input_type: "audio", output_mode: "transcribe_only" });
+    const wizard = { transcription_enabled: true, transcription_model: { id: "m-1" } };
+    const check = (flow: ReturnType<typeof makeFlow>) =>
+      renderInApp(
+        <FlowDraftCheck
+          flow={flow}
+          transcription={{ models: [], services: [service] }}
+          onOpenStep={vi.fn()}
+          onOpenSettings={onOpenSettings}
+        />
+      );
+
+    check(makeFlow({ steps: [transcribe], metadata_json: { wizard } }));
+    const line = await screen.findByText(
+      "Välj en tjänst under Ordtider och talare, eller slå av Märk talare."
+    );
+    const open = screen.getByRole("button", { name: "Öppna inställningar" });
+    expect(open.getAttribute("aria-describedby")).toBe(line.id);
+    fireEvent.click(open);
+    expect(onOpenSettings).toHaveBeenLastCalledWith("speaker_service");
+    expect(screen.queryByText("Redo att publicera")).toBeNull();
+    cleanup();
+
+    // A step that names the speakers keeps its own line: the setting cannot be switched off.
+    check(
+      makeFlow({
+        steps: [
+          transcribe,
+          makeStep(2, {
+            output_mode: "speaker_mapping",
+            output_type: "json",
+            output_config: { speaker_mapping: { infer_names: true } }
+          })
+        ],
+        metadata_json: { wizard }
+      })
+    );
+    expect(
+      await screen.findByText(
+        "Ett steg namnger talarna. Välj en tjänst för ordtider och talare i flödets inställningar."
+      )
+    ).toBeTruthy();
+  });
+
   it("holds the clean result's one line while it checks, so what follows stays put", async () => {
     route(ASSISTANTS);
     let answer!: (value: unknown) => void;

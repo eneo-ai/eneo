@@ -137,6 +137,15 @@ describe("SpaceOverview", () => {
     expect(tiles()).toHaveLength(6);
   });
 
+  it("counts the flows for a user who may not read the apps", async () => {
+    state.flows = [{ id: "f1" }];
+    const space = busySpace();
+    space.applications!.apps.permissions = [];
+    show(space, { flows: true });
+    await waitFor(() => expect(tiles()[1]).toEqual(["Flöden 1", "/spaces/space-1/flows"]));
+    expect(tiles().map(([label]) => label)).not.toContain("Appar 1");
+  });
+
   it("shows only the tiles the user may read", () => {
     show(makeSpace({ resourcePermissions: [], permissions: ["read"] }));
     expect(screen.queryByRole("list")).toBeNull();
