@@ -12,7 +12,6 @@ import {
   type ReactNode
 } from "react";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
-import { CHAT_PANEL_IDS } from "./chat-url";
 
 /**
  * The composer's panel pills (Verktyg, Skills): icon, label (icon-only on phones) and count.
@@ -38,18 +37,19 @@ export type ComposerPanelSurface = {
 /**
  * What Astryx's Popover adds around its content, above the trigger: the 4 px
  * gap and 12 px of padding above and below. It also keeps 16 px from the
- * window's top (WINDOW_GUTTER), not from the chat's header.
+ * window's top (WINDOW_GUTTER).
  */
 const POPOVER_CHROME = 28;
 const WINDOW_GUTTER = 16;
 
 /**
- * A ref for a panel that keeps it within the room above its trigger and
- * below the chat's header (the top of the chat's panel, under Chatt and
- * Historik; the window's top elsewhere). Astryx caps a popover to the window,
- * not to that room, so where the composer sits mid-page (the start state) a
- * long list grew over the pill and the composer, or over the header; the list
- * scrolls inside instead, and the panel's header and links stay in view.
+ * A ref for a panel that keeps it within the room above its trigger, up to the
+ * window's top margin. Astryx caps a popover to the window, not to that room,
+ * so where the composer sits mid-page (the start state) a long list grew over
+ * the pill and the composer; the list scrolls inside instead, and the panel's
+ * header and links stay in view. The room is not cut at the chat's header
+ * (Chatt, Historik): a list that fits in the window never scrolls, and the
+ * panel covers the header while it is open.
  *
  * The panel's height follows its content, but never shrinks while it is open
  * (within that room): a search that shortens a list, or a tab with less in
@@ -67,9 +67,7 @@ export function useFitAbove(trigger?: HTMLElement | null) {
       element.style.minHeight = `${Math.min(held, room)}px`;
     };
     const fit = () => {
-      const header = trigger.closest(`#${CHAT_PANEL_IDS.chat}`)?.getBoundingClientRect().top ?? 0;
-      const ceiling = Math.max(header, WINDOW_GUTTER);
-      room = Math.max(0, trigger.getBoundingClientRect().top - ceiling - POPOVER_CHROME);
+      room = Math.max(0, trigger.getBoundingClientRect().top - WINDOW_GUTTER - POPOVER_CHROME);
       apply();
     };
     const observer = new ResizeObserver(([entry]) => {

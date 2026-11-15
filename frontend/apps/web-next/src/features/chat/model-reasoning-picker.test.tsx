@@ -256,7 +256,7 @@ describe("ModelReasoningPicker", () => {
     }
   });
 
-  it("fits the panel between the chat's header and its pill", async () => {
+  it("fits the panel between the window's top margin and its pill, also over the chat's header", async () => {
     renderInApp(
       <div id="chat-panel-chat">
         <ModelReasoningPicker
@@ -277,15 +277,15 @@ describe("ModelReasoningPicker", () => {
       .mockReturnValue(DOMRect.fromRect({ x: 600, y: 400, width: 160, height: 32 }));
     const panel = await openPanel();
     const fitted = panel.querySelector<HTMLElement>("[style*='max-height']")!;
-    // 400 less the header's 117 and the popover's 28 px of gap and padding: the 16 px
-    // gutter is the window's, and the header is lower than that.
-    expect(fitted.style.maxHeight).toBe("255px");
+    // 400 less the window's 16 px margin and the popover's 28 px of gap and padding: a list
+    // that fits there never scrolls, even where the panel then covers the header.
+    expect(fitted.style.maxHeight).toBe("356px");
 
     // The page around the composer settles while the panel is open (a list or the context
     // meter comes in) and the pill moves 16 px up: the room shrinks with it.
     pill.mockReturnValue(DOMRect.fromRect({ x: 600, y: 384, width: 160, height: 32 }));
     act(() => reportResize(document.getElementById("chat-panel-chat")!, { height: 716 }));
-    expect(fitted.style.maxHeight).toBe("239px");
+    expect(fitted.style.maxHeight).toBe("340px");
   });
 
   it("shows a pinned model read-only and still lets the level be chosen", async () => {
