@@ -96,6 +96,7 @@ export declare const FLOW_API_ERROR_CODE: Readonly<{
   ASSISTANT_SNAPSHOT_DRIFT: "flow_assistant_snapshot_drift";
   INPUT_CONTRACT_INAPPLICABLE: "flow_input_contract_inapplicable";
   STEP_LIMIT_EXCEEDED: "flow_step_limit_exceeded";
+  SPEAKER_SERVICE_NOT_CHOSEN: "flow_speaker_service_not_chosen";
   REQUEST_BODY_TOO_LARGE: "flow_request_body_too_large";
   STEP_SECURITY_CLASSIFICATION_MISMATCH: "flow_step_security_classification_mismatch";
   STEP_OUTPUT_CLASSIFICATION_WRITE_DOWN: "flow_step_output_classification_write_down";
@@ -347,6 +348,7 @@ export type FlowApiErrorCode =
   | "flow_assistant_snapshot_drift"
   | "flow_input_contract_inapplicable"
   | "flow_step_limit_exceeded"
+  | "flow_speaker_service_not_chosen"
   | "flow_request_body_too_large"
   | "flow_step_security_classification_mismatch"
   | "flow_step_output_classification_write_down"
