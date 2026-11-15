@@ -39,7 +39,7 @@ persistent assistant attachments default to 25 MiB unless
 An administrator (the `admin` permission) switches Flows on and off for their
 own organisation under **Admin > Settings** in web-next, the Flows row among
 the feature switches (`PATCH /api/v1/settings/flows`). The switch writes the
-organisation's own `flows_core` row and no other: the global row stays off and
+organisation's own `flows_core` row and no other: the global row is unchanged and
 other organisations are unaffected. The change is committed before the answer
 is sent, and with audit logging, the `admin_actions` category and the
 `tenant_settings_updated` action on it leaves an audit entry with the old and
