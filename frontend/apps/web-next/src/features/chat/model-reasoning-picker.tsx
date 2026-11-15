@@ -414,12 +414,13 @@ export function ModelReasoningPicker({
               <span aria-hidden="true" className="max-sm:hidden">
                 ·
               </span>{" "}
-              <span className="text-ax-text-tertiary font-medium max-sm:sr-only">
-                {ownLevelText}
-              </span>
+              {/* A level of one's own stays in view on a phone too: the logo alone
+                  is the same for every level. */}
+              <span className="text-ax-text-tertiary font-medium">{ownLevelText}</span>
             </>
           )}
-          <ChevronDown aria-hidden="true" className="size-3.5 shrink-0" />
+          {/* On a phone the room goes to the level; the composer's other pills have no chevron. */}
+          <ChevronDown aria-hidden="true" className="size-3.5 shrink-0 max-sm:hidden" />
         </>
       }
       name={name}

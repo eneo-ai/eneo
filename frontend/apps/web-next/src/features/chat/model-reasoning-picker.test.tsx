@@ -78,6 +78,14 @@ describe("ModelReasoningPicker", () => {
     expectNameToHoldVisibleText(screen.getByRole("button", { name }), name);
   });
 
+  it("keeps a chosen level in view on a phone, where the logo stands for the model", () => {
+    renderPicker({ storedLevel: "high" });
+    const pill = screen.getByRole("button", { name: /^Chattmodell: / });
+    // Tailwind's phone classes do not apply in the test DOM, so the classes are the evidence.
+    expect(within(pill).getByText("Modell A").className).toMatch(/max-sm:sr-only/);
+    expect(within(pill).getByText("Hög").className).not.toMatch(/sr-only/);
+  });
+
   it("offers the model's levels beside the models and saves a level without closing", async () => {
     const { onSave } = renderPicker();
     const panel = await openPanel();
