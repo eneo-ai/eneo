@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { flushAnnouncements, recordAnnouncements, renderInApp } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import {
   ModelReasoningPicker,
   type ModelReasoningChange,
@@ -272,15 +272,20 @@ describe("ModelReasoningPicker", () => {
     vi.spyOn(document.getElementById("chat-panel-chat")!, "getBoundingClientRect").mockReturnValue(
       DOMRect.fromRect({ x: 0, y: 117, width: 1000, height: 700 })
     );
-    vi.spyOn(
-      screen.getByRole("button", { name: /^Chattmodell/ }),
-      "getBoundingClientRect"
-    ).mockReturnValue(DOMRect.fromRect({ x: 600, y: 400, width: 160, height: 32 }));
+    const pill = vi
+      .spyOn(screen.getByRole("button", { name: /^Chattmodell/ }), "getBoundingClientRect")
+      .mockReturnValue(DOMRect.fromRect({ x: 600, y: 400, width: 160, height: 32 }));
     const panel = await openPanel();
     const fitted = panel.querySelector<HTMLElement>("[style*='max-height']")!;
     // 400 less the header's 117 and the popover's 28 px of gap and padding: the 16 px
     // gutter is the window's, and the header is lower than that.
     expect(fitted.style.maxHeight).toBe("255px");
+
+    // The page around the composer settles while the panel is open (a list or the context
+    // meter comes in) and the pill moves 16 px up: the room shrinks with it.
+    pill.mockReturnValue(DOMRect.fromRect({ x: 600, y: 384, width: 160, height: 32 }));
+    act(() => reportResize(document.getElementById("chat-panel-chat")!, { height: 716 }));
+    expect(fitted.style.maxHeight).toBe("239px");
   });
 
   it("shows a pinned model read-only and still lets the level be chosen", async () => {

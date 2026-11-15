@@ -79,11 +79,22 @@ export function useFitAbove(trigger?: HTMLElement | null) {
         apply();
       }
     });
+    // The pill moves when the page around it changes size, as the start state's centred
+    // column does when its lists or the context meter come in; a move has no event of its
+    // own, so the room is measured again whenever one of the pill's ancestors resizes.
+    const around = new ResizeObserver(fit);
+    for (
+      let node = trigger.parentElement;
+      node && node !== document.body;
+      node = node.parentElement
+    )
+      around.observe(node);
     fit();
     observer.observe(element);
     window.addEventListener("resize", fit);
     window.addEventListener("scroll", fit, true);
     return () => {
+      around.disconnect();
       observer.disconnect();
       window.removeEventListener("resize", fit);
       window.removeEventListener("scroll", fit, true);
