@@ -194,6 +194,26 @@ describe("ModelReasoningPicker", () => {
     expect(within(panel).getByText("Inga modeller hittades")).toBeTruthy();
   });
 
+  it("heads both columns at the top, with the search under the model column's heading", async () => {
+    const more = Array.from({ length: 6 }, (_, index) =>
+      model({ id: `extra-${index}`, name: `extra-${index}`, org: "Annan" })
+    );
+    renderPicker({ models: [...MODELS, ...more], storedLevel: "high" });
+    const panel = await openPanel();
+    const models = within(panel).getByRole("radiogroup", { name: "Chattmodell" });
+    const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
+    const search = within(panel).getByLabelText("Sök modeller och leverantörer");
+    // The model column's heading stands above the search, out of the list that scrolls.
+    const heading = within(panel).getByText("Chattmodell", { selector: "p" });
+    expect(heading.compareDocumentPosition(search) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(models.contains(heading)).toBe(false);
+    // The groups keep their names; the level column's heading is its group's own label.
+    expect(document.getElementById(levels.getAttribute("aria-labelledby")!)?.textContent).toBe(
+      "Resonemangsnivå"
+    );
+    await expectNoAxeViolations(panel);
+  });
+
   it("says how many models a search finds, and when it finds none", async () => {
     const said = recordAnnouncements();
     const more = Array.from({ length: 6 }, (_, index) =>

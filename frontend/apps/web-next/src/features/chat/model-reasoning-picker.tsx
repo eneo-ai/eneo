@@ -278,6 +278,14 @@ export function ModelReasoningPicker({
           </div>
         ) : (
           <>
+            {/* Beside the pill the column's heading stands above the search, level with the
+                level column's, and stays as the list scrolls; the group keeps it as its name.
+                The sheet's title says it there. */}
+            {!stacked && (
+              <p aria-hidden="true" className="text-ax-text-secondary text-sm font-medium">
+                {label}
+              </p>
+            )}
             {searchable && (
               <TextInput
                 label={t("search_models_and_providers")}
@@ -295,7 +303,7 @@ export function ModelReasoningPicker({
             <div
               ref={bringChosenIntoView}
               className={cn(
-                "min-h-0 flex-auto overflow-y-auto pe-1",
+                "scroll-fade min-h-0 flex-auto overflow-y-auto pe-1",
                 // Beside the pill, a list with a search keeps its height, so the
                 // panel neither shrinks nor moves as the search narrows it.
                 !stacked && (searchable ? "h-80" : "max-h-80"),
@@ -305,8 +313,7 @@ export function ModelReasoningPicker({
             >
               <RadioList
                 label={label}
-                // The sheet's title already says it.
-                isLabelHidden={stacked}
+                isLabelHidden
                 value={shownId ?? ""}
                 onChange={(next) => {
                   if (next !== shownId) choice.choose({ modelId: next });
