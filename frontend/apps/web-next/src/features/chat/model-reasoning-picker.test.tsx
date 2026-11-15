@@ -272,9 +272,12 @@ describe("ModelReasoningPicker", () => {
       renderPicker({ models: [...more, ...MODELS], selectedId: "model-b" });
       // The sheet keeps its content while closed: what ran at mount, on a hidden list, does not count.
       await act(() => new Promise((done) => requestAnimationFrame(done)));
+      // The row, not its radio: a description that wraps comes into view with it.
       const broughtIntoView = () => {
-        const chosen = screen.getByRole("radio", { name: /Modell B/, checked: true, hidden: true });
-        return scrolled.mock.contexts.some((element) => (element as Element).contains(chosen));
+        const chosen = screen
+          .getByRole("radio", { name: /Modell B/, checked: true, hidden: true })
+          .closest(".astryx-radio-list-item");
+        return chosen !== null && scrolled.mock.contexts.includes(chosen);
       };
       for (const time of ["first", "again"]) {
         scrolled.mockClear();

@@ -199,7 +199,11 @@ function matching(models: CompletionModel[], search: string): CompletionModel[] 
 function bringChosenIntoView(list: HTMLDivElement | null) {
   if (!list) return;
   const frame = requestAnimationFrame(() => {
-    list.querySelector('input[type="radio"]:checked')?.scrollIntoView({ block: "nearest" });
+    // The row, not its radio: a description that wraps comes into view clear of the fade too.
+    list
+      .querySelector('input[type="radio"]:checked')
+      ?.closest(".astryx-radio-list-item")
+      ?.scrollIntoView({ block: "nearest" });
   });
   return () => cancelAnimationFrame(frame);
 }
