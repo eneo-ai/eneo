@@ -281,7 +281,15 @@ export function ModelReasoningPicker({
       title={label}
       filling={searchable}
     >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+      {/* The column shrinks so its list scrolls, but in a sheet never below the list's
+          rows (min-h-40) and the search above them: a sheet shorter than that scrolls,
+          and the levels follow the list instead of being drawn over it. */}
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col gap-2",
+          stacked ? (searchable ? "min-h-50" : "min-h-40") : "min-h-0"
+        )}
+      >
         {locked ? (
           <div className="flex flex-col gap-1">
             <p className="text-sm font-medium">{label}</p>
