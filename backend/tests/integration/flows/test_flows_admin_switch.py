@@ -261,19 +261,20 @@ async def test_overlapping_switches_audit_the_value_the_later_one_changed(
     its audit row says what it actually changed."""
     async with db_container() as later:
         later_pid = await later.session().scalar(sa.text("SELECT pg_backend_pid()"))
-        async with db_container() as earlier:
-            await earlier.settings_service().update_flows_setting(enabled=True)
-            racing = asyncio.create_task(
-                later.settings_service().update_flows_setting(enabled=False)
-            )
-            try:
+        racing: asyncio.Task[Any] | None = None
+        try:
+            async with db_container() as earlier:
+                await earlier.settings_service().update_flows_setting(enabled=True)
+                racing = asyncio.create_task(
+                    later.settings_service().update_flows_setting(enabled=False)
+                )
                 await _wait_until_waiting_for_a_lock(later_pid)
-            except BaseException:
+            # Leaving `earlier` committed the switch on.
+            await asyncio.wait_for(racing, timeout=5)
+        finally:
+            if racing is not None:
                 racing.cancel()
                 await asyncio.gather(racing, return_exceptions=True)
-                raise
-        # Leaving `earlier` committed the switch on.
-        await asyncio.wait_for(racing, timeout=5)
 
     rows = await _switch_audit_rows(admin_user.tenant_id)
     assert [row["changes"] for row in rows] == [
@@ -338,18 +339,17 @@ async def test_a_failed_commit_answers_with_an_error_and_keeps_flows_off(
 ):
     """The response is sent after the commit, so a commit that fails reaches
     the caller instead of a success the database never kept."""
-    original = FeatureFlagRepository.update
+    original = FeatureFlagRepository.set_tenant
 
-    async def _mark(self, obj):
-        updated = await original(self, obj)
+    async def _mark(self, *args, **kwargs):
+        await original(self, *args, **kwargs)
         self.db_session.sync_session.info["fail_commit"] = True
-        return updated
 
     def _before_commit(session: Session) -> None:
         if session.info.pop("fail_commit", False):
             raise RuntimeError("commit failed")
 
-    monkeypatch.setattr(FeatureFlagRepository, "update", _mark)
+    monkeypatch.setattr(FeatureFlagRepository, "set_tenant", _mark)
     event.listen(Session, "before_commit", _before_commit)
     try:
         response = await raw_client.patch(
