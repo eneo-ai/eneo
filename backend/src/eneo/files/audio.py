@@ -44,6 +44,9 @@ _DECODE_CHANNELS = 1
 _DECODE_SAMPLE_WIDTH = 2
 _DECODE_BYTES_PER_SECOND = _DECODE_SAMPLE_RATE * _DECODE_CHANNELS * _DECODE_SAMPLE_WIDTH
 _DECODE_BLOCK_BYTES = 64 * 1024
+# The decoded audio is one WAV file, whose RIFF size field counts the 36 header
+# bytes after it and the data in 32 bits.
+_WAV_MAX_DATA_BYTES = 2**32 - 1 - 36
 
 # Concrete numpy array type used throughout this module.
 # soundfile.blocks() yields float64 arrays; we use this alias for clarity.
@@ -66,6 +69,12 @@ class AudioMimeTypes(MimeTypesBase):
     MP4A = "audio/mp4"
 
 
+def longest_decodable_seconds(max_decoded_bytes: int) -> int:
+    """Whole seconds of audio a decode can hold: what the decoded-byte bound
+    allows, and at most what one WAV file holds (37 h 16 min)."""
+    return min(max_decoded_bytes, _WAV_MAX_DATA_BYTES) // _DECODE_BYTES_PER_SECOND
+
+
 @dataclass(frozen=True, slots=True)
 class AudioDecodeLimits:
     max_duration_seconds: float
@@ -85,7 +94,7 @@ class AudioDecodeLimits:
         return int(
             min(
                 self.max_duration_seconds,
-                self.max_decoded_bytes / _DECODE_BYTES_PER_SECOND,
+                longest_decodable_seconds(self.max_decoded_bytes),
             )
         )
 

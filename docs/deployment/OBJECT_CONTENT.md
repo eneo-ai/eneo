@@ -326,6 +326,12 @@ For larger files, configure and select object storage in the same page. Its
 capacity follows the S3 multipart protocol and configured part size. There is
 no separate 2 GiB Flow file-size ceiling.
 
+The PostgreSQL inline capacity assumes PostgreSQL's default
+`bytea_output = hex`: do not change it at server, database or role level,
+because with `escape` a COPY row takes up to five characters per byte and
+`pg_dump` fails for large files (the backup command below also sets it for its
+own session).
+
 Policy does not reserve resources. Inline uploads materialize bytes in memory;
 budget for payload copies in the API/driver and larger allocations in pg_dump.
 Verify memory, WAL and backup capacity at the selected sizes and concurrency.
@@ -693,7 +699,7 @@ backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
 docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
-docker compose exec -T db pg_dump -U postgres -Fc eneo \
+docker compose exec -T -e PGOPTIONS='-c bytea_output=hex' db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content
 

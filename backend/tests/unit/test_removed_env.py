@@ -316,3 +316,44 @@ def test_settings_refuses_a_mobilityguard_variable_from_an_env_file(
 
     with pytest.raises(SystemExit):
         Settings(_env_file=env_file)
+
+
+@pytest.mark.parametrize("value", ["28800", "86400"])
+def test_the_retired_flow_recording_ceiling_starts_and_says_what_governs_it(
+    value: str, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS={value}\n", encoding="utf-8"
+    )
+
+    # Required settings may be missing here; they are validated after the
+    # removed-variable check, which must not exit.
+    with contextlib.suppress(ValidationError):
+        Settings(_env_file=env_file)
+
+    assert (
+        "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS is no longer read. The longest "
+        "recording an admin can set (Admin > Flows, Longest recording) is what "
+        "FLOW_AUDIO_MAX_DECODED_BYTES holds. Remove the variable."
+    ) in caplog.text
+
+
+@pytest.mark.parametrize("value", ["3600", "90000"])
+def test_the_retired_flow_recording_ceiling_no_longer_moves_the_ceiling(
+    value: str,
+) -> None:
+    from eneo.flows.flow_input_limits import audio_duration_ceiling_seconds
+    from eneo.main.config import get_settings
+
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "flow_audio_max_decoded_bytes": 2 * 1024**3,
+            "flow_audio_max_duration_ceiling_seconds": value,
+        }
+    )
+
+    # What the default 2 GiB decoded-audio bound holds: 18 h 38 min.
+    assert audio_duration_ceiling_seconds(settings) == 67_108

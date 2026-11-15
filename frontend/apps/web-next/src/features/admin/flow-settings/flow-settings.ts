@@ -182,6 +182,10 @@ export function draftFrom(settings: FlowSettings): FlowSettingsDraft {
 export const MAX_FILES_PER_RUN = 1000;
 export const MAX_AUDIO_FILES_PER_RUN = 100;
 export const MIN_AUDIO_DURATION_SECONDS = 60;
+// The longest audio one decode holds whatever the decoded-byte bound allows:
+// one 16 kHz mono 16-bit WAV file, whose size field has 32 bits
+// (longest_decodable_seconds in files/audio.py).
+export const WAV_LONGEST_AUDIO_SECONDS = 134_217;
 export const MIN_MAPPED_PROVIDER_CALLS = 2;
 export const KILOBYTE = 1024;
 const RAG_EVIDENCE_CEILINGS = {
@@ -243,7 +247,8 @@ export function fieldBounds(settings: FlowSettings): { [Key in NumberKey]: Numbe
     audio_max_files_per_run: plain(MAX_AUDIO_FILES_PER_RUN),
     audio_max_duration_seconds: {
       min: MIN_AUDIO_DURATION_SECONDS,
-      max: inputLimits.audio_max_duration_ceiling_seconds,
+      // The field counts whole minutes, below the server's ceiling in seconds.
+      max: Math.floor(inputLimits.audio_max_duration_ceiling_seconds / 60) * 60,
       scale: 60,
       clearable: true,
       required: false
