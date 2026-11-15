@@ -453,13 +453,7 @@ class SettingService:
         return feature_flag
 
     async def _set_feature_flag_for_tenant(self, *, name: str, enabled: bool) -> None:
-        feature_flag = await self.feature_flag_service.feature_flag_repo.one_or_none(
-            name=name
-        )
-        if feature_flag is None:
-            feature_flag = await self.feature_flag_service.create_feature_flag(
-                name=name
-            )
+        feature_flag = await self._require_feature_flag(name)
         if feature_flag.feature_id is None:
             raise ValueError(f"{name} feature flag is missing an id")
 
@@ -523,9 +517,13 @@ class SettingService:
             )
         )
 
-        flows_enabled = await self.feature_flag_service.check_is_feature_enabled(
-            feature_name=FLOW_FEATURE,
-            tenant_id=self.user.tenant_id,
+        flows_enabled = (
+            overrides["flows_enabled"]
+            if "flows_enabled" in overrides
+            else await self.feature_flag_service.check_is_feature_enabled(
+                feature_name=FLOW_FEATURE,
+                tenant_id=self.user.tenant_id,
+            )
         )
 
         tenant = await self.tenant_repo.get(self.user.tenant_id)
@@ -1322,3 +1320,38 @@ class SettingService:
             settings_in_db=settings,
             overrides={"whats_new_enabled": enabled},
         )
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_flows_setting(self, enabled: bool) -> SettingsPublic:
+        """Switch Flows on or off for the tenant with the tenant's own flag row.
+
+        Only that row is written: the global row and other tenants' rows stay
+        as they are.
+
+        The tenant row is locked before the old value is read, so two switches
+        in one tenant serialize and each audit row's old value is the one it
+        changed. The audit row is written in the same transaction as the flag
+        when the audit configuration keeps the action, so a kept row and the
+        change commit or fail together. Role permissions are not touched.
+        """
+        await self.tenant_repo.lock(self.user.tenant_id)
+        old_enabled = await self.feature_flag_service.check_is_feature_enabled(
+            feature_name=FLOW_FEATURE,
+            tenant_id=self.user.tenant_id,
+        )
+        await self._set_feature_flag_for_tenant(name=FLOW_FEATURE, enabled=enabled)
+
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description=f"Toggled flows_enabled to {enabled}",
+            metadata={
+                "setting": "flows_enabled",
+                "changes": {"flows_enabled": {"old": old_enabled, "new": enabled}},
+            },
+        )
+
+        return await self._build_settings_public(overrides={"flows_enabled": enabled})

@@ -192,6 +192,7 @@ GET /api/v1/settings/flow-runtime-policy
 GET /api/v1/settings/formats/
 GET /api/v1/settings/models/
 GET /api/v1/settings/skills/{skill_id}/execution-block
+GET /api/v1/settings/task-workers
 GET /api/v1/skills/catalogue/
 GET /api/v1/skills/catalogue/{skill_id}/
 GET /api/v1/skills/organization/

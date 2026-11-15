@@ -18,7 +18,8 @@ role `flows_trace`, gave every role with `admin` `retention_manage` and
 that. An installation that upgrades from 2.3 or installs fresh with this
 version therefore needs these steps before Flows and retention can be used:
 
-1. An operator switches Flows on for each organisation that uses them (below).
+1. An administrator switches Flows on for their organisation in
+   **Admin > Settings** (below).
 2. An administrator grants the flow permissions and the retention permissions
    to the roles that need them in **Admin > Roles**. Until then nobody can
    change retention rules or legal holds; the retention endpoints answer 403
@@ -35,36 +36,36 @@ persistent assistant attachments default to 25 MiB unless
 
 ## Turning Flows on
 
-Switch Flows on for one organisation with that organisation's own flag row,
-then give the roles that should use them the flow permissions. The global row
-stays off, so no other organisation is affected. Replace `<organisation>` with
-the name in `tenants.name`:
+An administrator (the `admin` permission) switches Flows on and off for their
+own organisation under **Admin > Settings** in web-next, the Flows row among
+the feature switches (`PATCH /api/v1/settings/flows`). The switch writes the
+organisation's own `flows_core` row and no other: the global row stays off and
+other organisations are unaffected. The change is committed before the answer
+is sent, and with audit logging, the `admin_actions` category and the
+`tenant_settings_updated` action on it leaves an audit entry with the old and
+the new value. The Svelte frontend has no switch.
 
-```sql
-INSERT INTO tenant_feature_flags (name, feature_id, tenant_id, enabled)
-SELECT 'flows_core', flag.id, tenant.id, true
-FROM global_feature_flags AS flag, tenants AS tenant
-WHERE flag.name = 'flows_core' AND tenant.name = '<organisation>'
-ON CONFLICT (feature_id, tenant_id)
-DO UPDATE SET enabled = true, updated_at = now();
+Flows run on two services, `task-execution-worker` (runs) and
+`task-maintenance-worker` (dispatch of queued runs, recovery and outbox
+work). The Flows row shows whether they run, from each worker's latest health
+signal (`GET /api/v1/settings/task-workers`, `admin` only, no organisation
+data): running, not running with the worker named, or "could not be checked"
+when Redis cannot be read. The signal lives for about a minute, so a worker
+that just stopped can still read as running. It warns and never blocks the
+switch. With Flows on and the execution worker down, a new run waits as
+`queued` without a warning in the run view; it starts once the worker runs
+again.
 
-UPDATE roles
-SET permissions = permissions || ARRAY(
-    SELECT permission
-    FROM unnest('{flows_view,flows_run,flows_manage,flows_trace}'::varchar[])
-        AS permission
-    WHERE permission <> ALL (permissions)
-)
-WHERE predefined_source = 'Owner'
-  AND tenant_id = (SELECT id FROM tenants WHERE name = '<organisation>');
-```
+The switch changes no role permissions. Roles that already hold the flow
+permissions get access at once; an administrator grants them in
+**Admin > Roles**. `flows_view` reads flows, `flows_run` runs them,
+`flows_manage` builds and publishes them, and `flows_trace` reads run traces.
+Resetting a role to its template removes flow permissions granted by hand.
 
-`flows_view` reads flows, `flows_run` runs them, `flows_manage` builds and
-publishes them, and `flows_trace` reads run traces. Grant other roles the
-permissions they need in the same way, selecting them by `name` instead of
-`predefined_source`. Resetting the Owner role to its template removes the flow
-permissions again. To switch Flows off for the organisation, set `enabled` on
-its row to `false`.
+Switching Flows off asks for confirmation first. Every flow route then
+answers `404`, but runs are not stopped: a queued run can still start, a
+running run carries on, and neither can be followed or cancelled until Flows
+are switched on again.
 
 ### Retention permissions
 

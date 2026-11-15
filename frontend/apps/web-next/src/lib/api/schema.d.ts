@@ -9173,6 +9173,41 @@ export interface paths {
     patch: operations["update_flow_runtime_policy"];
     trace?: never;
   };
+  "/api/v1/settings/flows": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Switch Flows on or off
+     * @description Switch Flows on or off for your tenant.
+     *
+     *     **Admin Only:** Requires admin permissions.
+     *
+     *     **Behavior:**
+     *     - Writes only the tenant's own `flows_core` row; the global row and other
+     *       tenants' rows are unchanged
+     *     - Two switches in one tenant run one after the other, so each audit entry's
+     *       old value is the one it changed
+     *     - When enabled: the flow endpoints answer, and members whose roles hold the
+     *       flow permissions can use them at once. No role permission is changed
+     *     - When disabled: every flow endpoint answers `404`. Queued runs can still
+     *       start and running runs are not stopped
+     *     - Flows need the `task-execution-worker` and `task-maintenance-worker`
+     *       services; `GET /settings/task-workers` reports whether they run
+     *     - The response is sent after the change is committed
+     */
+    patch: operations["update_flows_setting_api_v1_settings_flows_patch"];
+    trace?: never;
+  };
   "/api/v1/settings/formats/": {
     parameters: {
       query?: never;
@@ -9360,6 +9395,26 @@ export interface paths {
      * @description Release the exact active execution block reviewed by the tenant administrator.
      */
     post: operations["unblock_skill_execution_api_v1_settings_skills__skill_id__execution_block_unblock_post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/settings/task-workers": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Report whether the task workers run
+     * @description Whether `task-execution-worker` and `task-maintenance-worker`, the two services Flows run on, are up, from each worker's latest health signal. Answers whether or not Flows are switched on. `probe_ok` is false when the signals could not be read. Deployment state only: the answer carries no tenant data.
+     */
+    get: operations["get_task_workers_status_api_v1_settings_task_workers_get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -38304,7 +38359,7 @@ export interface components {
       file_references_enabled?: boolean;
       /**
        * Flows Enabled
-       * @description Read-only: whether flows are switched on for the tenant (the `flows_core` feature). When false every flow endpoint answers `404`. It says nothing about the caller's own access: showing or running flows still needs the `flows_view` and `flows_run` permissions.
+       * @description Whether flows are switched on for the tenant (the `flows_core` feature); an administrator switches it with `PATCH /settings/flows`. When false every flow endpoint answers `404`. It says nothing about the caller's own access: showing or running flows still needs the `flows_view` and `flows_run` permissions.
        * @default false
        * @example true
        */
@@ -40168,6 +40223,29 @@ export interface components {
       | "analyze_conversation_insights"
       | "export_audit_logs"
       | "log_audit_event";
+    /**
+     * TaskWorkersStatusPublic
+     * @description Whether the two platform task workers that run flows are up, from each
+     *     worker's latest health signal. Deployment state only: nothing about any
+     *     tenant.
+     */
+    TaskWorkersStatusPublic: {
+      /**
+       * Execution Worker Ready
+       * @description Whether `task-execution-worker`, which runs flow runs, is up.
+       */
+      execution_worker_ready: boolean;
+      /**
+       * Maintenance Worker Ready
+       * @description Whether `task-maintenance-worker`, which dispatches queued runs and recovers stalled ones, is up.
+       */
+      maintenance_worker_ready: boolean;
+      /**
+       * Probe Ok
+       * @description False when the health signals could not be read; both workers then read as not ready, which says nothing about whether they run.
+       */
+      probe_ok: boolean;
+    };
     /** TemplateCheckPublic */
     TemplateCheckPublic: {
       /** Detail */
@@ -78211,6 +78289,48 @@ export interface operations {
       };
     };
   };
+  update_flows_setting_api_v1_settings_flows_patch: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ToggleSettingUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SettingsPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_formats_api_v1_settings_formats__get: {
     parameters: {
       query?: never;
@@ -78604,6 +78724,35 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_task_workers_status_api_v1_settings_task_workers_get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["TaskWorkersStatusPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };

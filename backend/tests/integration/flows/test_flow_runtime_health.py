@@ -214,6 +214,7 @@ async def test_flow_runtime_health_endpoint_requires_super_key_and_returns_probe
             return_value=TaskWorkerReadiness(
                 execution_ready=True,
                 maintenance_ready=True,
+                probe_ok=True,
             )
         ),
     )

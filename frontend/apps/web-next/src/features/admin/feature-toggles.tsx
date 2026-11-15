@@ -1,4 +1,8 @@
+import { Badge } from "@astryxdesign/core/Badge";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Link } from "@astryxdesign/core/Link";
+import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@astryxdesign/core/Switch";
 import {
@@ -6,17 +10,23 @@ import {
   PartyPopper,
   ScrollText,
   UserRoundPlus,
+  Workflow,
   type LucideIcon
 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId } from "react";
+import { useId, useState, type ReactNode } from "react";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { sessionKeys } from "@/lib/api/session";
+import { TaskWorkersStatus, taskWorkersQuery, workersAnnouncement } from "./task-workers-status";
 import { useSettingSwitch } from "./use-setting-switch";
 
-type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new";
+type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new" | "flows";
+
+/** What a confirmation before switching a setting off says. */
+type ConfirmOff = { title: string; description: string; confirmLabel: string };
 
 /** openapi-fetch needs literal paths, so dispatch per toggle (same body/response shape). */
 function patchSetting(key: ToggleKey, enabled: boolean) {
@@ -24,6 +34,7 @@ function patchSetting(key: ToggleKey, enabled: boolean) {
   if (key === "templates") return browserApi.PATCH("/api/v1/settings/templates", { body });
   if (key === "audit-logging") return browserApi.PATCH("/api/v1/settings/audit-logging", { body });
   if (key === "whats-new") return browserApi.PATCH("/api/v1/settings/whats-new", { body });
+  if (key === "flows") return browserApi.PATCH("/api/v1/settings/flows", { body });
   return browserApi.PATCH("/api/v1/settings/provisioning", { body });
 }
 
@@ -33,7 +44,10 @@ function SettingRow({
   label,
   description,
   icon: Icon,
-  tone
+  tone,
+  badge,
+  confirmOff,
+  children
 }: {
   setting: ToggleKey;
   initial: boolean;
@@ -41,8 +55,16 @@ function SettingRow({
   description: string;
   icon: LucideIcon;
   tone: string;
+  badge?: string;
+  /** Asked before the setting is switched off; Cancel saves nothing. */
+  confirmOff?: ConfirmOff;
+  /** Shown under the switch. */
+  children?: ReactNode;
 }) {
   const queryClient = useQueryClient();
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const [confirming, setConfirming] = useState(false);
   const [value, setValue] = useSettingSwitch(
     setting,
     initial,
@@ -56,7 +78,22 @@ function SettingRow({
             ]);
           }
         }
-      : undefined
+      : setting === "flows"
+        ? {
+            // Switched on, the admin sees and hears at once whether the workers run. The
+            // announcement waits only for the workers check, not for the settings reload
+            // and its retries; the save still ends when both have reloaded.
+            onSaved: async (enabled) => {
+              const settings = queryClient.invalidateQueries({ queryKey: sessionKeys.settings });
+              if (enabled) {
+                await queryClient.invalidateQueries({ queryKey: taskWorkersQuery.queryKey });
+                const workers = queryClient.getQueryState(taskWorkersQuery.queryKey);
+                if (workers) announce(workersAnnouncement(workers, t));
+              }
+              await settings;
+            }
+          }
+        : undefined
   );
   return (
     <div className="flex min-w-0 items-start gap-3">
@@ -69,16 +106,50 @@ function SettingRow({
         <Icon className="size-5" />
       </span>
       <div className="min-w-0 flex-1">
+        {badge ? <Badge variant="warning" label={badge} className="mb-1" /> : null}
         <Switch
           label={label}
           description={description}
           labelPosition="start"
           labelSpacing="spread"
           value={value}
-          onChange={setValue}
+          onChange={(next) => (confirmOff && !next ? setConfirming(true) : setValue(next))}
         />
+        {children}
       </div>
+      {confirmOff ? (
+        <ConfirmDialogControlled
+          open={confirming}
+          onOpenChange={setConfirming}
+          title={confirmOff.title}
+          description={confirmOff.description}
+          confirmLabel={confirmOff.confirmLabel}
+          onConfirm={() => {
+            setConfirming(false);
+            setValue(false);
+          }}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/** Beside the Flows switch: the workers Flows need, and how roles get access. */
+function FlowsDetails() {
+  const t = useTranslations();
+  return (
+    <>
+      <TaskWorkersStatus />
+      <Text type="supporting" className="mt-2 block">
+        {t.rich("flows_switch_roles", {
+          link: (chunks) => (
+            <Link href="/admin/roles" hasUnderline className="pointer-coarse:min-h-11">
+              {chunks}
+            </Link>
+          )
+        })}
+      </Text>
+    </>
   );
 }
 
@@ -99,6 +170,9 @@ export function FeatureToggles() {
     description: string;
     icon: LucideIcon;
     tone: string;
+    badge?: string;
+    confirmOff?: ConfirmOff;
+    details?: ReactNode;
   }[] = [
     {
       key: "templates",
@@ -131,6 +205,21 @@ export function FeatureToggles() {
       description: t("enable_whats_new_description"),
       icon: PartyPopper,
       tone: "bg-ax-orange-muted text-ax-orange"
+    },
+    {
+      key: "flows",
+      initial: settings.flows_enabled === true,
+      label: t("flows_switch_label"),
+      description: t("flows_switch_description"),
+      icon: Workflow,
+      tone: "bg-ax-green-muted text-ax-green",
+      badge: t("flows_switch_alpha"),
+      confirmOff: {
+        title: t("flows_switch_off_title"),
+        description: t("flows_switch_off_description"),
+        confirmLabel: t("flows_switch_off_confirm")
+      },
+      details: <FlowsDetails />
     }
   ];
 
@@ -154,7 +243,11 @@ export function FeatureToggles() {
               description={row.description}
               icon={row.icon}
               tone={row.tone}
-            />
+              badge={row.badge}
+              confirmOff={row.confirmOff}
+            >
+              {row.details}
+            </SettingRow>
           </li>
         ))}
       </ul>

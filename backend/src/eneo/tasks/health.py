@@ -34,6 +34,7 @@ async def load_task_worker_readiness(
         return TaskWorkerReadiness(
             execution_ready=False,
             maintenance_ready=False,
+            probe_ok=False,
         )
     finally:
         await redis.aclose()
@@ -41,4 +42,5 @@ async def load_task_worker_readiness(
     return TaskWorkerReadiness(
         execution_ready=execution_ready is not None,
         maintenance_ready=maintenance_ready is not None,
+        probe_ok=True,
     )

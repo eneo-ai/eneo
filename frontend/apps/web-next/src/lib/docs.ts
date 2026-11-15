@@ -14,6 +14,7 @@ export function docsVersionPath(release: Pick<Release, "version" | "date"> | und
 /** Pages the app links, by the What's new entry of the release that documents them. */
 const INTRODUCED_BY = {
   "guides/embed-widget": "web-widgets",
+  "guides/flows/integrating-flows": "flows",
   "guides/oidc-federation/single-tenant": "admin-sign-in-settings"
 } as const;
 
