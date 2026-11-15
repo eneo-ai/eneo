@@ -78,6 +78,7 @@ function usePersonalChatModel() {
     : null;
 
   return {
+    assistantId: assistant.id,
     models: allowedIds
       ? space.completion_models.filter((model) => allowedIds.has(model.id))
       : space.completion_models,
@@ -119,6 +120,7 @@ function ComposerPickers() {
   if (choice.levelConfigurable) {
     return (
       <ModelReasoningPicker
+        assistantId={choice.assistantId}
         models={choice.models}
         selectedId={choice.selectedId}
         locked={choice.lockedModel}

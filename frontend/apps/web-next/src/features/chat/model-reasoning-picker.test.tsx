@@ -46,10 +46,15 @@ afterEach(() => {
   setViewport("desktop");
 });
 
+/** A choice still saving outlives the picker, per assistant: each render has its own. */
+let renders = 0;
+const anotherAssistant = () => `assistant-${++renders}`;
+
 function renderPicker(props: Partial<ModelReasoningPickerProps> = {}) {
   const onSave = vi.fn<(change: ModelReasoningChange) => Promise<void>>(() => Promise.resolve());
   renderInApp(
     <ModelReasoningPicker
+      assistantId={anotherAssistant()}
       models={MODELS}
       selectedId="model-a"
       storedLevel={null}
@@ -120,8 +125,10 @@ describe("ModelReasoningPicker", () => {
 
   it("tells an own level that equals the default apart, and lets it go back to following the default", async () => {
     const onSave = vi.fn(() => Promise.resolve());
+    const assistantId = anotherAssistant();
     const picker = (storedLevel: string | null, policyDefaultLevel: string) => (
       <ModelReasoningPicker
+        assistantId={assistantId}
         models={MODELS}
         selectedId="model-a"
         storedLevel={storedLevel}
@@ -287,6 +294,7 @@ describe("ModelReasoningPicker", () => {
     renderInApp(
       <div id="chat-panel-chat">
         <ModelReasoningPicker
+          assistantId={anotherAssistant()}
           models={MODELS}
           selectedId="model-a"
           storedLevel={null}
@@ -385,8 +393,10 @@ describe("ModelReasoningPicker", () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         const saves = [deferred(), deferred()];
         const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
+        const assistantId = anotherAssistant();
         const picker = (selectedId: string) => (
           <ModelReasoningPicker
+            assistantId={assistantId}
             models={RACE_MODELS}
             selectedId={selectedId}
             storedLevel={null}
@@ -531,6 +541,62 @@ describe("ModelReasoningPicker", () => {
       await choose(panel, /Modell C/);
       await act(() => vi.advanceTimersByTimeAsync(300));
       expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ modelId: "model-c" }]]);
+    });
+
+    it("carries a level whose save is open into a later model's save", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const saves = [deferred(), deferred(), deferred()];
+      const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
+      renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await act(async () => {
+        saves[0]!.resolve();
+        await saves[0]!.promise;
+      });
+      await choose(panel, /Modell A/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls.at(-1)).toEqual([{ modelId: "model-a", level: "high" }]);
+    });
+
+    it("carries only what a save sent, not a model chosen and let go within a rest", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
+      const panel = await openPanel();
+      await choose(panel, "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      // There and back within one rest, with the level's save open: nothing saved, nothing carried.
+      await choose(panel, /Modell C/);
+      await choose(panel, /Modell A/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      await choose(panel, "Medel");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ level: "medium" }]]);
+    });
+
+    it("keeps a choice still saving to its own assistant", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      renderPicker({
+        models: LEVEL_MODELS,
+        storedLevel: "low",
+        onSave: vi.fn(() => new Promise<void>(() => {}))
+      });
+      await choose(await openPanel(), /Modell C/);
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      cleanup();
+
+      // Another assistant's picker, while that save is still on its way.
+      const { onSave } = renderPicker({ models: LEVEL_MODELS, storedLevel: "low" });
+      const pill = screen.getByRole("button", { name: /^Chattmodell: / });
+      expect(pill.getAttribute("aria-label")).toBe("Chattmodell: Modell A · Låg resonemangsnivå");
+      expect(pill.getAttribute("aria-busy")).toBeNull();
+      await choose(await openPanel(), "Hög");
+      await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave.mock.calls).toEqual([[{ level: "high" }]]);
     });
   });
 });

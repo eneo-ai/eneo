@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
+import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
@@ -78,8 +78,10 @@ beforeEach(() => {
   }));
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A save and the choice it carries are module state: let them settle before the next case.
+  await awaitPartnerUpdates();
   api.GET.mockClear();
   api.POST.mockReset();
   api.POST.mockImplementation(async (_path, init) => ({

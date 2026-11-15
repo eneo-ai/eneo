@@ -3,7 +3,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { ChevronDown, Lock, Search, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { TextInput } from "@/components/astryx/text-input";
 import {
@@ -42,24 +42,58 @@ type Choice = { modelId: string | null; level: string | null };
 export type ModelReasoningChange = { modelId?: string; level?: string | null };
 
 /**
+ * A choice still saving, per assistant. It is kept here rather than in the
+ * picker because it outlives the picker: the first question moves the
+ * composer, which mounts the picker anew while the save is on its way.
+ */
+type Saving = {
+  /** The latest choice, shown until its save settles. */
+  latest: { id: number; choice: Choice };
+  /** The parts that saves queued and not yet settled carry. */
+  unsettled: Set<keyof Choice>;
+  /** The latest save, which a choice that changes nothing waits for. */
+  lastSave: Promise<unknown>;
+};
+const saving = new Map<string, Saving>();
+const savingListeners = new Set<() => void>();
+// One count for every assistant, so an older save never ends a newer choice's wait.
+let lastChoiceId = 0;
+
+function subscribeSaving(listener: () => void) {
+  savingListeners.add(listener);
+  return () => void savingListeners.delete(listener);
+}
+
+function setSaving(assistantId: string, next: Saving | null) {
+  if (next) saving.set(assistantId, next);
+  else saving.delete(assistantId);
+  for (const listener of savingListeners) listener();
+}
+
+/**
  * The model and the level, shown at once and saved together after a rest, in
  * one update with the parts that changed. A level the model the choice rests
  * on does not offer is not saved. A rest also sends again the parts that saves
- * still unsettled when it began carry: a level chosen while a model's save is
- * on its way goes with that model, so were that save refused, the backend
- * checks the level against the model it was chosen for, not the stored one. A
- * model that is pinned, or follows the policy (no id), is never sent: its part
- * is never chosen. Each choice has an id, and only the save of the latest one
- * ends the waiting state, so an older save that settles late never shows an
- * older choice. A rejected save falls back to the saved choice (the caller
- * reports the failure).
+ * queued and not yet settled carry: a level chosen while a model's save is on
+ * its way goes with that model, so were that save refused, the backend checks
+ * the level against the model it was chosen for, not the stored one. A model
+ * that is pinned, or follows the policy (no id), is never sent: its part is
+ * never chosen. Only the save of the latest choice ends the waiting state, so
+ * an older save that settles late never shows an older choice. A rejected save
+ * falls back to the saved choice (the caller reports the failure). What is
+ * still saving is kept per assistant, outside the picker, until the latest
+ * save settles.
  */
 function useRestedChoice(
+  assistantId: string,
   saved: Choice,
   save: (change: ModelReasoningChange) => void | Promise<unknown>,
   levelsOf: (modelId: string | null) => string[]
 ) {
-  const [pending, setPending] = useState<{ id: number; choice: Choice } | null>(null);
+  const latest = useSyncExternalStore(
+    subscribeSaving,
+    () => saving.get(assistantId)?.latest ?? null
+  );
   // What was shown when the rest began (a save still under way included), what
   // is chosen now, and the place it holds in the save queue.
   const resting = useRef<{
@@ -68,15 +102,8 @@ function useRestedChoice(
     from: Choice;
     choice: Choice;
     rested: () => void;
-    /** The parts the saves not yet settled when this rest began carry. */
-    carried: Set<keyof Choice>;
   } | null>(null);
-  // The parts the saves not yet settled carry.
-  const unsettled = useRef(new Set<keyof Choice>());
-  const lastId = useRef(0);
-  // The latest save, which a choice that changes nothing waits for.
-  const lastSave = useRef<Promise<unknown>>(Promise.resolve());
-  const shown = pending?.choice ?? saved;
+  const shown = latest?.choice ?? saved;
   // A choice still resting when the picker goes is saved, so its place in the queue is let go.
   const commitRef = useRef<() => void>(() => {});
   useEffect(() => () => commitRef.current(), []);
@@ -86,7 +113,11 @@ function useRestedChoice(
     if (!rest) return;
     resting.current = null;
     window.clearTimeout(rest.timer);
-    const { id, from, choice, carried } = rest;
+    // The rest's choice is the latest, so its record is there; were it not, the queue is still let go.
+    const record = saving.get(assistantId);
+    if (!record) return rest.rested();
+    const { id, from, choice } = rest;
+    const carried = record.unsettled;
     // A rest that ends where it began changes nothing, whatever is still on its way.
     const moved = choice.modelId !== from.modelId || choice.level !== from.level;
     const change: ModelReasoningChange = {};
@@ -101,13 +132,13 @@ function useRestedChoice(
       change.level = choice.level;
     }
     if (moved && Object.keys(change).length > 0) {
-      lastSave.current = Promise.resolve(save(change)).catch(() => {});
+      for (const key of Object.keys(change) as (keyof Choice)[]) carried.add(key);
+      record.lastSave = Promise.resolve(save(change)).catch(() => {});
     }
     // Queued behind its place, the save now holds the questions sent meanwhile.
     rest.rested();
-    void lastSave.current.finally(() => {
-      if (lastId.current === id && !resting.current) unsettled.current.clear();
-      setPending((current) => (current?.id === id ? null : current));
+    void record.lastSave.finally(() => {
+      if (saving.get(assistantId)?.latest.id === id) setSaving(assistantId, null);
     });
   };
   useEffect(() => {
@@ -115,14 +146,12 @@ function useRestedChoice(
   });
   return {
     shown,
-    busy: pending !== null,
+    busy: latest !== null,
     choose(part: Partial<Choice>) {
-      const id = ++lastId.current;
+      const id = ++lastChoiceId;
       const from = resting.current?.from ?? shown;
       const choice = { ...(resting.current?.choice ?? shown), ...part };
       let rested = resting.current?.rested;
-      const carried = resting.current?.carried ?? new Set(unsettled.current);
-      for (const key of Object.keys(part) as (keyof Choice)[]) unsettled.current.add(key);
       if (resting.current) window.clearTimeout(resting.current.timer);
       else {
         // A question sent while the choice rests (Send pressed with the panel
@@ -131,13 +160,17 @@ function useRestedChoice(
         const place = new Promise<void>((resolve) => (rested = resolve));
         void queuePartnerUpdate(() => place);
       }
-      setPending({ id, choice });
+      const record = saving.get(assistantId);
+      setSaving(assistantId, {
+        latest: { id, choice },
+        unsettled: record?.unsettled ?? new Set(),
+        lastSave: record?.lastSave ?? Promise.resolve()
+      });
       resting.current = {
         id,
         from,
         choice,
         rested: rested!,
-        carried,
         timer: window.setTimeout(commit, SAVE_DELAY_MS)
       };
     },
@@ -172,6 +205,8 @@ function bringChosenIntoView(list: HTMLDivElement | null) {
 }
 
 export type ModelReasoningPickerProps = {
+  /** The assistant the choice is saved on: a choice still saving is kept per assistant. */
+  assistantId: string;
   models: CompletionModel[];
   selectedId: string | null | undefined;
   /** A model the governance policy pins: shown read-only, with a lock. */
@@ -201,6 +236,7 @@ export type ModelReasoningPickerProps = {
  * so, so the panel does not change shape between models.
  */
 export function ModelReasoningPicker({
+  assistantId,
   models,
   selectedId,
   locked = null,
@@ -217,6 +253,7 @@ export function ModelReasoningPicker({
   const sorted = useMemo(() => sortModels(models), [models]);
   const byId = useMemo(() => new Map(sorted.map((item) => [item.id, item])), [sorted]);
   const choice = useRestedChoice(
+    assistantId,
     { modelId: locked ? locked.id : (selectedId ?? null), level: storedLevel },
     onSave,
     (id) => reasoningEffortOptions(id ? byId.get(id) : undefined)

@@ -335,6 +335,7 @@ describe("Composer panels", () => {
         }
         modelSelector={
           <ModelReasoningPicker
+            assistantId="assistant-composer"
             models={models}
             selectedId="m-2"
             storedLevel={null}
