@@ -848,6 +848,25 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Remove steps or split the work into several flows, then send the request again.",
         user_action="Remove steps or split the work into several flows.",
     ),
+    FlowApiErrorCode.SPEAKER_SERVICE_NOT_CHOSEN: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A flow that transcribes was published with no speaker identification "
+            "service chosen while a step needs speakers, or while Label speakers "
+            "is on and the space has one it can use."
+        ),
+        consumer_action=(
+            "Choose a speaker identification service the space can use, made "
+            "available first if none is, then publish again; switching off Label "
+            "speakers helps only if no step needs speakers."
+        ),
+        user_action=(
+            "Choose a service under Word timings and speakers, asking an "
+            "administrator for one if none is listed; switch off Label speakers "
+            "only if no step needs speakers."
+        ),
+    ),
     FlowApiErrorCode.STEP_SECURITY_CLASSIFICATION_MISMATCH: _entry(
         category="Published definition",
         surfaced_through="API error response",

@@ -19223,6 +19223,7 @@ export interface components {
       | "flow_assistant_snapshot_drift"
       | "flow_input_contract_inapplicable"
       | "flow_step_limit_exceeded"
+      | "flow_speaker_service_not_chosen"
       | "flow_request_body_too_large"
       | "flow_step_security_classification_mismatch"
       | "flow_step_output_classification_write_down"
