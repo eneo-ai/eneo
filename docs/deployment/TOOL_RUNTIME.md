@@ -64,8 +64,9 @@ The setup helper creates a strong runtime token only when absent, protects
 secrets. Without a bundle, `python3 setup.py --version X.Y.Z` selects one
 explicit shared version. Digest-pinned bundles are preferred.
 
-The standard stack starts the runtime and connects the backend and general
-worker to it over `tool_runtime_net`. File references default to
+The standard stack starts the runtime and connects the backend, the general
+worker and the execution worker (which renders a flow's Word and PDF steps) to
+it over `tool_runtime_net`. File references default to
 `http://backend:8000`. Override `FILE_REFERENCE_BASE_URL` in Compose's `.env`
 when needed; `TOOL_RUNTIME_FILE_ORIGINS` follows it unless explicitly
 overridden. The setup helper carries existing runtime URL, token and

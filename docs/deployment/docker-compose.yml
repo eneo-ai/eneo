@@ -40,9 +40,10 @@
 #                           their calls go to backend:8000, and user login is
 #                           handed off from the Eneo session (SSO) rather than
 #                           the module talking to an IdP itself.
-#   tool_runtime_net (internal) - tool-runtime, backend and worker. The
-#                           bundled tools runtime has no internet, database
-#                           or Redis route (see TOOL_RUNTIME.md).
+#   tool_runtime_net (internal) - tool-runtime, backend, worker and the
+#                           execution worker. The bundled tools runtime has
+#                           no internet, database or Redis route (see
+#                           TOOL_RUNTIME.md).
 #   object_content_net (internal) - added by docker-compose.object-content.yml
 #                           only for the optional bundled endpoint.
 #   Backend is the single gateway between the outside world, the data layers,
@@ -224,13 +225,20 @@ services:
     restart: unless-stopped
     stop_grace_period: 70s  # arq drain (60 s) + margin
     command: ["task-execution-worker"]
+    environment:
+      # A flow's Word and PDF steps render in the tool runtime from here.
+      - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
+      - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
+      - FILE_REFERENCE_BASE_URL=${FILE_REFERENCE_BASE_URL:-http://backend:8000}
     env_file:
       - env_backend.env
     volumes:
       - eneo_backend_data:/app/data
       - eneo_temp_files:/tmp
     networks:
-      # data_net carries Redis and PostgreSQL; proxy_tier carries outbound calls.
+      # tool_runtime_net reaches the tool runtime; data_net carries Redis and
+      # PostgreSQL; proxy_tier carries outbound calls.
+      - tool_runtime_net
       - proxy_tier
       - data_net
     healthcheck:

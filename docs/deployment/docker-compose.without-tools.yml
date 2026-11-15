@@ -10,3 +10,7 @@ services:
     environment:
       TOOL_RUNTIME_URL: ""
       TOOL_RUNTIME_TOKEN: ""
+  task-execution-worker:
+    environment:
+      TOOL_RUNTIME_URL: ""
+      TOOL_RUNTIME_TOKEN: ""

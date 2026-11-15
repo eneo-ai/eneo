@@ -762,6 +762,51 @@ class ComposeTests(unittest.TestCase):
         return config, env, images
 
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
+    def test_every_document_runtime_consumer_reaches_the_runtime(self):
+        # Kills: a flow's Word or PDF step renders in the execution worker,
+        # which without the runtime's address fails only when the flow runs.
+        config, env, _ = self.deployment_config()
+        consumers = ("backend", "worker", "task-execution-worker")
+
+        def environment(services, name):
+            return services[name].get("environment", {})
+
+        services = config()["services"]
+        for name in consumers:
+            with self.subTest(service=name):
+                values = environment(services, name)
+                self.assertEqual(
+                    values.get("TOOL_RUNTIME_URL"), "http://tool-runtime:3010"
+                )
+                self.assertEqual(values.get("TOOL_RUNTIME_TOKEN"), "x" * 64)
+                self.assertEqual(
+                    values.get("FILE_REFERENCE_BASE_URL"), "http://backend:8000"
+                )
+                self.assertIn("tool_runtime_net", services[name].get("networks", {}))
+        omitted = config("docker-compose.without-tools.yml")["services"]
+        for name in consumers:
+            with self.subTest(service=name, tools="off"):
+                values = environment(omitted, name)
+                self.assertEqual(values.get("TOOL_RUNTIME_URL"), "")
+                self.assertEqual(values.get("TOOL_RUNTIME_TOKEN"), "")
+        env.update(
+            TOOL_RUNTIME_URL="http://tools.internal:3010",
+            TOOL_RUNTIME_TOKEN="y" * 64,
+            FILE_REFERENCE_BASE_URL="http://custom-backend:8000",
+        )
+        custom = config()["services"]
+        for name in consumers:
+            with self.subTest(service=name, values="custom"):
+                values = environment(custom, name)
+                self.assertEqual(
+                    values.get("TOOL_RUNTIME_URL"), "http://tools.internal:3010"
+                )
+                self.assertEqual(values.get("TOOL_RUNTIME_TOKEN"), "y" * 64)
+                self.assertEqual(
+                    values.get("FILE_REFERENCE_BASE_URL"), "http://custom-backend:8000"
+                )
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
     def test_main_host_serves_react_and_preserves_svelte_rollback(self):
         config, env, _ = self.deployment_config()
         for priority in (None, "7"):
