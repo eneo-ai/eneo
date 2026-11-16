@@ -1,5 +1,5 @@
 import { isRedirect, type Cookies } from "@sveltejs/kit";
-import { beforeEach, describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, onTestFinished, test, vi } from "vitest";
 import { encodeState } from "$lib/features/auth/auth.server";
 
 const state = vi.hoisted(() => ({ env: {} as Record<string, string> }));
@@ -10,12 +10,18 @@ import { authHandle } from "../../../hooks.server";
 import { actions, load } from "./+page.server";
 import type { PageServerLoad } from "./$types";
 
-function requestEvent(path: string, method = "GET", body?: URLSearchParams) {
+function requestEvent(
+  path: string,
+  method = "GET",
+  body?: URLSearchParams,
+  auth: string | null = "existing-id-token"
+) {
   const values = new Map([
-    ["auth", "existing-id-token"],
+    ["auth", auth ?? ""],
     ["acc", "existing-access-token"],
     ["PARAGLIDE_LOCALE", "sv"]
   ]);
+  if (auth === null) values.delete("auth");
   const cookies: Cookies = {
     get: (name) => values.get(name),
     getAll: () => [...values].map(([name, value]) => ({ name, value })),
@@ -152,5 +158,122 @@ describe("deliberate session actions", () => {
     );
     event.locals.id_token = null;
     expect(load(event)).toEqual({ message: "expired", signedIn: false });
+  });
+});
+
+/** An unsigned token: the frontend only reads its claims. */
+function token(claims: Record<string, unknown>) {
+  const part = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+  return `${part({ alg: "HS256", typ: "JWT" })}.${part(claims)}.signature`;
+}
+
+const ENEO_CLAIMS = {
+  token_version: 2,
+  user_id: "6f1c2a4e-0b7d-4e8f-9a3c-5d2e1f0a9b8c",
+  tenant_id: "1e2d3c4b-5a69-4788-9a0b-c1d2e3f4a5b6",
+  credential_version: 0,
+  sub: "user@example.com",
+  exp: 4102444800
+};
+const SESSION_TOKEN = token({
+  ...ENEO_CLAIMS,
+  sid: "s".repeat(43),
+  session_ref: "0b9f3c1e-2d4a-4b6c-8e7f-9a0b1c2d3e4f"
+});
+const SIGN_OUT = "https://backend.example/api/v1/users/logout/";
+const ACTIONS = ["logout", "switchOrganisation", "clearCookies"] as const;
+
+describe("ending the Eneo session before the cookies", () => {
+  beforeEach(() => {
+    state.env.PUBLIC_ORIGIN = "https://eneo.example";
+    state.env.ENEO_BACKEND_URL = "https://backend.example";
+  });
+
+  function signOut(action: (typeof ACTIONS)[number], auth: string | null) {
+    const { event, values } = requestEvent(
+      `/logout?/${action}`,
+      "POST",
+      new URLSearchParams({ message: "expired" }),
+      auth
+    );
+    return { event, values, run: () => allowRedirect(() => actions[action](event)) };
+  }
+
+  test.each(ACTIONS)("%s ends the session on the backend, then clears", async (action) => {
+    const { event, values, run } = signOut(action, SESSION_TOKEN);
+    let cookiesWhenSignedOut: Map<string, string> | undefined;
+    vi.mocked(event.fetch).mockImplementation(async () => {
+      cookiesWhenSignedOut = new Map(values);
+      return new Response(null, { status: 204 });
+    });
+
+    const result = await run();
+
+    expect(event.fetch).toHaveBeenCalledExactlyOnceWith(SIGN_OUT, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${SESSION_TOKEN}` },
+      signal: expect.any(AbortSignal)
+    });
+    expect(cookiesWhenSignedOut?.get("auth")).toBe(SESSION_TOKEN);
+    expect(isRedirect(result)).toBe(true);
+    expect(values.has("auth")).toBe(false);
+  });
+
+  test.each(
+    ACTIONS.flatMap((action) =>
+      (["503", "unreachable", "stalled"] as const).map((failure) => [action, failure] as const)
+    )
+  )("%s keeps every cookie when the backend cannot confirm (%s)", async (action, failure) => {
+    const { event, values, run } = signOut(action, SESSION_TOKEN);
+    // The action's deadline, fired by hand: a stalled transport answers only
+    // when it is aborted.
+    const deadline = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline.signal);
+    onTestFinished(() => timeout.mockRestore());
+    vi.mocked(event.fetch).mockImplementation(async (_url, init) => {
+      if (failure === "unreachable") throw new TypeError("fetch failed");
+      if (failure === "stalled") {
+        return new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+          deadline.abort(new DOMException("The operation timed out.", "TimeoutError"));
+        });
+      }
+      return Response.json({ code: "sign_out_unavailable" }, { status: 503 });
+    });
+    const before = new Map(values);
+
+    const result = await run();
+
+    expect(result).toMatchObject({
+      status: 503,
+      data: { signOutFailed: action, message: action === "logout" ? "expired" : "logout" }
+    });
+    expect(values).toEqual(before);
+    // Longer than the backend's own five seconds to confirm the deletion.
+    if (failure === "stalled") expect(timeout).toHaveBeenCalledWith(10_000);
+  });
+
+  // Tokens without an Eneo session (a provider's ID token may carry an OIDC
+  // sid of its own) sign out as before, with no backend to wait for.
+  test.each(
+    ACTIONS.flatMap((action) => [
+      [action, "an Eneo token without a session", token(ENEO_CLAIMS)] as const,
+      [
+        action,
+        "a provider ID token with its own sid",
+        token({ iss: "https://identity.example", sub: "subject", sid: "provider-session" })
+      ] as const,
+      [action, "no token", null] as const
+    ])
+  )("%s with %s clears without the backend", async (action, _case, auth) => {
+    const { event, values, run } = signOut(action, auth);
+    vi.mocked(event.fetch).mockRejectedValue(new TypeError("fetch failed"));
+
+    const result = await run();
+
+    expect(event.fetch).not.toHaveBeenCalled();
+    expect(isRedirect(result)).toBe(true);
+    expect(values.has("auth")).toBe(false);
+    expect(values.has("acc")).toBe(false);
   });
 });

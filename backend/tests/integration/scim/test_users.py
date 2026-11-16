@@ -685,3 +685,83 @@ async def test_create_logs_warning_when_tenant_has_no_default_role(
         f"Expected WARNING with 'No default role configured' in log. "
         f"Got records: {[(r.levelname, r.getMessage()) for r in caplog.records]}"
     )
+
+
+async def _race_a_sign_in_to(monkeypatch, db_session, test_tenant, **winner) -> str:
+    """The account appears between the precheck and the insert: the first
+    insert commits it in a session of its own, then runs as it would."""
+    winner_id = str(uuid.uuid4())
+    create = ScimUserRepository.create
+    raced = False
+
+    async def committed_first(self, model):
+        nonlocal raced
+        if not raced:
+            raced = True
+            async with db_session() as session:
+                session.add(
+                    Users(
+                        id=uuid.UUID(winner_id),
+                        state="active",
+                        tenant_id=test_tenant.id,
+                        **winner,
+                    )
+                )
+        return await create(self, model)
+
+    monkeypatch.setattr(ScimUserRepository, "create", committed_first)
+    return winner_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_create_that_loses_to_a_first_sign_in_claims_that_account(
+    client, bypass_scim_auth, db_session, test_tenant, monkeypatch
+):
+    winner_id = await _race_a_sign_in_to(
+        monkeypatch,
+        db_session,
+        test_tenant,
+        email="raced-jit@example.com",
+        username="raced-jit",
+    )
+
+    response = await client.post(
+        "/scim/v2/Users",
+        json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "raced-jit@example.com",
+            "externalId": "ext-raced-jit",
+        },
+    )
+
+    # As without the race: SCIM takes over the account the sign-in created.
+    assert response.status_code == 201, response.text
+    assert response.json()["id"] == winner_id
+    assert response.json()["externalId"] == "ext-raced-jit"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_create_that_loses_to_another_scim_create_is_a_conflict(
+    client, bypass_scim_auth, db_session, test_tenant, monkeypatch
+):
+    await _race_a_sign_in_to(
+        monkeypatch,
+        db_session,
+        test_tenant,
+        email="raced-scim@example.com",
+        username="raced-scim-first",
+        external_id="ext-first",
+    )
+
+    response = await client.post(
+        "/scim/v2/Users",
+        json={
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "raced-scim@example.com",
+            "externalId": "ext-second",
+        },
+    )
+
+    assert response.status_code == 409, response.text

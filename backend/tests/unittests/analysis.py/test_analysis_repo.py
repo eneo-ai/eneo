@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -21,7 +22,7 @@ async def test_hydrates_all_info_blobs_before_file_projection(monkeypatch):
     repo = AnalysisRepository(AsyncMock(), MagicMock())
     questions = [SimpleNamespace(info_blobs=blobs, questions_files=[])]
 
-    await repo._hydrate_sessions([SimpleNamespace(questions=questions)])
+    await repo._hydrate_sessions([SimpleNamespace(id=uuid4(), questions=questions)])
 
     hydrate.assert_awaited_once_with(blobs)
     attach_files.assert_awaited_once_with(questions, loader=repo.file_content_loader)

@@ -38,9 +38,12 @@ def test_each_adopter_declares_its_released_vocabulary() -> None:
                 "by_assistant_or_app_rule",
                 "by_space_rule",
                 "by_organization_rule",
+                "names_cleared",
+                "feedback_texts_cleared",
             },
             {
                 "owners_examined",
+                "sessions_examined",
                 "files_in_use",
                 "files_missing",
                 "files_not_root",
@@ -55,7 +58,11 @@ def test_each_adopter_declares_its_released_vocabulary() -> None:
                 "files_family_exceeds_budget",
             },
         ),
-        ({"sessions_deleted"}, {"sessions_examined"}, {"no_longer_due"}),
+        (
+            {"sessions_deleted"},
+            {"sessions_examined"},
+            {"no_longer_due", "root_locked"},
+        ),
         (
             {"roots_deleted", "files_deleted", "file_dependencies_deleted"},
             {"files_in_use", "files_missing", "files_not_root"},

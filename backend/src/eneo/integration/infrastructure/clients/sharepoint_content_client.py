@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Optional, Sequence, cast
@@ -26,6 +27,7 @@ from eneo.libs.clients.throttle_retry import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -729,7 +731,12 @@ class SharePointContentClient(BaseClient):
                 await self.refresh_token()
                 return {"value": await self._get_all_paged_items(endpoint)}
             else:
-                logger.error(f"SharePoint API error when getting page content: {e}")
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "SharePoint API error when getting page content",
+                    error=e,
+                )
                 raise
 
     async def get_default_drive_id(self, site_id: str) -> Optional[str]:
@@ -768,7 +775,7 @@ class SharePointContentClient(BaseClient):
                 await self.refresh_token()
                 response = await self.client.get(endpoint, headers=self.headers)
             else:
-                logger.error(f"Error listing drives: {e}")
+                log_error(logger, logging.ERROR, "Error listing drives", error=e)
                 raise
 
         drives = cast(list[dict[str, Any]], response.get("value", []))
@@ -810,7 +817,12 @@ class SharePointContentClient(BaseClient):
                 endpoint = f"v1.0/drives/{drive_id}/items/{item_id}"
                 return await self._get_item(endpoint)
             else:
-                logger.error(f"SharePoint API error when getting file metadata: {e}")
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "SharePoint API error when getting file metadata",
+                    error=e,
+                )
                 raise
 
     async def get_item_metadata_batch(
@@ -926,7 +938,12 @@ class SharePointContentClient(BaseClient):
                 )
                 return await self._get_items(endpoint)
             else:
-                logger.error(f"SharePoint API error while getting folder items: {e}")
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "SharePoint API error while getting folder items",
+                    error=e,
+                )
                 raise
 
     async def get_page_content(self, site_id: str, page_id: str) -> dict[str, Any]:
@@ -940,7 +957,12 @@ class SharePointContentClient(BaseClient):
                 )
                 await self.refresh_token()
                 return await self.client.get(endpoint, headers=self.headers)
-            logger.error(f"SharePoint API error when getting page content: {e}")
+            log_error(
+                logger,
+                logging.ERROR,
+                "SharePoint API error when getting page content",
+                error=e,
+            )
             raise
 
     async def get_file_extraction_by_id(
@@ -962,7 +984,12 @@ class SharePointContentClient(BaseClient):
                 return await self._download_by_id(
                     drive_id, item_id, after_token_refresh=True
                 )
-            logger.error(f"SharePoint API error when getting file content: {e}")
+            log_error(
+                logger,
+                logging.ERROR,
+                "SharePoint API error when getting file content",
+                error=e,
+            )
             raise
 
     async def _download_by_id(
@@ -1061,7 +1088,9 @@ class SharePointContentClient(BaseClient):
                 await self.refresh_token()
                 return await self.initialize_delta_token(drive_id, _retried=True)
             else:
-                logger.error(f"Error initializing delta token: {e}")
+                log_error(
+                    logger, logging.ERROR, "Error initializing delta token", error=e
+                )
                 raise
 
     async def get_delta_changes(
@@ -1137,5 +1166,5 @@ class SharePointContentClient(BaseClient):
                     drive_id, delta_token, _retried=True
                 )
             else:
-                logger.error(f"Error getting delta changes: {e}")
+                log_error(logger, logging.ERROR, "Error getting delta changes", error=e)
                 raise

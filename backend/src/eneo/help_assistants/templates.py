@@ -51,7 +51,8 @@ class HelperAssistantTemplate:
     prompt_text: str
     logging_enabled: bool = False
     insight_enabled: bool = False
-    data_retention_days: int | None = 30
+    # No period until an administrator chooses one for the installed assistant.
+    data_retention_days: int | None = None
 
 
 PROMPT_GUIDE_TEMPLATE = HelperAssistantTemplate(

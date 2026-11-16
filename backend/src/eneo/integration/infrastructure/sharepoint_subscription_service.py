@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import socket
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -23,6 +24,7 @@ from eneo.integration.infrastructure.content_service.types import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 logger = get_logger(__name__)
@@ -515,9 +517,12 @@ class SharePointSubscriptionService:
                         return False
 
         except Exception as exc:
-            logger.error(
-                f"Error renewing subscription {subscription.subscription_id}: {exc}",
-                exc_info=True,
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error renewing subscription %s",
+                subscription.subscription_id,
+                error=exc,
             )
             return False
 
@@ -673,9 +678,13 @@ class SharePointSubscriptionService:
         except Exception as exc:
             resource_kind = "drive" if not site_id else "site"
             resource_id = drive_id if not site_id else site_id
-            logger.error(
-                f"Error creating subscription for {resource_kind} {resource_id}: {exc}",
-                exc_info=True,
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error creating subscription for %s %s",
+                resource_kind,
+                resource_id,
+                error=exc,
             )
             return None
 
@@ -723,8 +732,12 @@ class SharePointSubscriptionService:
                         return False
 
         except Exception as exc:
-            logger.error(
-                f"Error deleting subscription {subscription_id}: {exc}", exc_info=True
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error deleting subscription %s",
+                subscription_id,
+                error=exc,
             )
             return False
 
@@ -774,7 +787,11 @@ class SharePointSubscriptionService:
                 drive_id = await content_client.get_default_drive_id(site_id=site_id)
                 return drive_id
         except Exception as exc:
-            logger.error(
-                f"Error resolving drive ID for site {site_id}: {exc}", exc_info=True
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error resolving drive ID for site %s",
+                site_id,
+                error=exc,
             )
             return None

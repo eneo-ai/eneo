@@ -19,6 +19,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
@@ -184,11 +185,12 @@ async def _validate_conversation_scope(
 
     space_repo = container.space_repo()
 
-    # If continuing an existing session, resolve it to validate scope
+    # If continuing an existing session, resolve its owner and partner (not its
+    # turns, which a copy of removed content no longer returns) to validate scope
     if session_id is not None:
         session_service = container.session_service()
         try:
-            session = await session_service.get_session_by_uuid(session_id)
+            owner = await session_service.get_session_ownership(session_id)
         except NotFoundException:
             # Session doesn't exist — return 403 (not 404) to prevent
             # scoped keys from enumerating session existence.
@@ -206,10 +208,9 @@ async def _validate_conversation_scope(
                 http_request, "Unable to verify API key scope for this session."
             )
 
-        assert session is not None
+        assert owner is not None
         if scope_type == "assistant":
-            session_assistant_id = session.assistant.id if session.assistant else None
-            if session_assistant_id != scope_id:
+            if owner.assistant_id != scope_id:
                 _raise_conversation_scope_denied(
                     http_request,
                     (
@@ -333,6 +334,30 @@ async def _authorize_partner_access(
         assert assistant_id is not None
         assistant_service = container.assistant_service()
         await assistant_service.get_assistant(assistant_id)
+
+
+async def _authorized_session(container: Container, session_id: UUID) -> SessionInDB:
+    """The caller's conversation with its turns, after the partner check.
+
+    A conversation whose turns are no longer readable (a copy of removed
+    content) is explained only to its owner, and only once the owner's current
+    access to the chat partner holds; anyone else gets the same refusal as for
+    any conversation that is not theirs or does not exist.
+    """
+    session_service = container.session_service()
+    try:
+        session = await session_service.get_session_by_uuid(session_id)
+    except NotFoundException:
+        owner = await session_service.get_session_ownership(session_id)
+        await _authorize_partner_access(
+            container,
+            assistant_id=owner.assistant_id,
+            group_chat_id=owner.group_chat_id,
+        )
+        await session_service.refuse_removed_copy(session_id)
+        raise
+    await _authorize_session_access(container, session)
+    return session
 
 
 @router.post(
@@ -707,7 +732,7 @@ async def list_recent_conversations(
 @router.get(
     "/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -722,11 +747,7 @@ async def get_conversation(
     container: Annotated[Container, Depends(get_container(with_user=True))],  # pyright: ignore[reportCallInDefaultInitializer]  # FastAPI DI; evaluated at request time
 ):
     """Gets a specific conversation by its session ID"""
-    session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
-
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
 
     return to_session_public(session)
 
@@ -734,7 +755,7 @@ async def get_conversation(
 @router.get(
     "/{session_id}/tool-calls/{tool_call_id}/result/",
     response_model=ToolCallResultPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -753,8 +774,7 @@ async def get_tool_call_result(
 ):
     """Lazy-load a single tool call's upstream response text."""
     session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
     tool_call = await session_service.get_tool_call_result(
         session=session, tool_call_id=tool_call_id
     )
@@ -773,7 +793,7 @@ async def get_tool_call_result(
     "/{session_id}/tool-calls/{tool_call_id}/app-calls/",
     response_model=ViewToolCallResultPublic,
     description="Call an approved tool on the originating server for an authorized interactive view.",
-    responses=responses.get_responses([400, 403, 404, 409, 429, 503]),
+    responses=responses.get_responses([400, 403, 404, 409, 410, 429, 503]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -836,8 +856,7 @@ async def call_tool_from_app_view(
         group_chat_id=None,
         session_id=session_id,
     )
-    session = await container.session_service().get_session_by_uuid(session_id)
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
 
     audit_service = container.audit_service()
 
@@ -924,9 +943,7 @@ async def call_tool_from_app_view(
             action=ActionType.FILE_SIGNED_URL_MINTED,
             entity_type=EntityType.FILE,
             entity_id=file.id,
-            description=(
-                f"Minted signed URL for file '{file.name}' for a tool view's call"
-            ),
+            description=FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED],
             metadata=AuditMetadata.standard(
                 actor=current_user,
                 target=file,
@@ -950,7 +967,7 @@ async def call_tool_from_app_view(
     "/{session_id}/documents/{file_id}/export/",
     response_model=DocumentExportAvailability,
     description="Check which formats the current provider can export for this conversation document.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -974,8 +991,7 @@ async def get_document_export_availability(
         group_chat_id=None,
         session_id=session_id,
     )
-    session = await container.session_service().get_session_by_uuid(session_id)
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
     response.headers["Cache-Control"] = "no-store"
     return await document_export_availability(
         conversation=session,
@@ -1000,7 +1016,7 @@ async def get_document_export_availability(
             "description": "The document in the format asked for, as a download.",
             "content": {mime: {} for mime in EXPORT_MIME_TYPES.values()},
         },
-        **responses.get_responses([400, 403, 404, 409, 502]),
+        **responses.get_responses([400, 403, 404, 409, 410, 502]),
     },
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
@@ -1034,8 +1050,7 @@ async def export_conversation_document(
         group_chat_id=None,
         session_id=session_id,
     )
-    session = await container.session_service().get_session_by_uuid(session_id)
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
 
     audit_service = container.audit_service()
 
@@ -1121,7 +1136,7 @@ async def export_conversation_document(
     response_model=FilePublic,
     status_code=201,
     description="Save the reader's edited Markdown of a conversation document as its next version.",
-    responses=responses.get_responses([400, 403, 404, 413]),
+    responses=responses.get_responses([400, 403, 404, 410, 413]),
     dependencies=[
         Depends(require_user_for_creation),
         Depends(require_resource_permission_for_method("conversations")),
@@ -1162,8 +1177,7 @@ async def save_conversation_document_version(
         group_chat_id=None,
         session_id=session_id,
     )
-    session = await container.session_service().get_session_by_uuid(session_id)
-    await _authorize_session_access(container, session)
+    session = await _authorized_session(container, session_id)
     response.headers["Cache-Control"] = "no-store"
 
     try:
@@ -1254,7 +1268,7 @@ async def delete_conversation(
     "/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback for a conversation.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1279,17 +1293,23 @@ async def leave_feedback(
         container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
     )
 
-    if owner.group_chat_id:
-        updated_session = await session_service.leave_feedback(
-            session_id=session_id,
-            group_chat_id=owner.group_chat_id,
-            feedback=feedback,
-        )
-    else:
-        assert owner.assistant_id is not None
-        updated_session = await session_service.leave_feedback(
-            session_id=session_id, assistant_id=owner.assistant_id, feedback=feedback
-        )
+    try:
+        if owner.group_chat_id:
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                group_chat_id=owner.group_chat_id,
+                feedback=feedback,
+            )
+        else:
+            assert owner.assistant_id is not None
+            updated_session = await session_service.leave_feedback(
+                session_id=session_id,
+                assistant_id=owner.assistant_id,
+                feedback=feedback,
+            )
+    except NotFoundException:
+        await session_service.refuse_removed_copy(session_id)
+        raise
 
     return to_session_public(updated_session)
 
@@ -1383,7 +1403,7 @@ async def delete_message_feedback(
     "/{session_id}/title/",
     response_model=SessionPublic,
     description="Generate and set the title of a conversation.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1399,13 +1419,16 @@ async def set_title_of_conversation(
     # Authorize before generating the title — set_title invokes the model, so
     # the permission check must run first to keep a revoked user from triggering
     # inference on a historical session.
-    session_service = container.session_service()
-    session = await session_service.get_session_by_uuid(session_id)
-    assert session is not None
-    await _authorize_session_access(container, session)
+    await _authorized_session(container, session_id)
 
     conversation_service = container.conversation_service()
-    updated_session = await conversation_service.set_title_of_conversation(session_id)
+    try:
+        updated_session = await conversation_service.set_title_of_conversation(
+            session_id
+        )
+    except NotFoundException:
+        await container.session_service().refuse_removed_copy(session_id)
+        raise
     assert updated_session is not None
     return to_session_public(updated_session)
 
@@ -1587,7 +1610,7 @@ async def approve_tools(
 @router.patch(
     "/{session_id}/name/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
     description="Rename a conversation (session).",
 )
@@ -1610,7 +1633,11 @@ async def rename_conversation(
         container, assistant_id=owner.assistant_id, group_chat_id=owner.group_chat_id
     )
 
-    updated_session = await session_service.update_session(
-        SessionUpdate(id=session_id, name=payload.name)
-    )
+    try:
+        updated_session = await session_service.update_session(
+            SessionUpdate(id=session_id, name=payload.name)
+        )
+    except NotFoundException:
+        await session_service.refuse_removed_copy(session_id)
+        raise
     return to_session_public(updated_session)

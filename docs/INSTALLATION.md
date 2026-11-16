@@ -150,9 +150,9 @@ required.
 
 Administrators with the Storage permission set upload limits and choose storage
 for eligible new File and Icon writes in **Admin > File storage**. Changes take effect
-without restarting the backend or worker. Operators keep
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
-safety ceiling; it is not the upload policy.
+without restarting the backend or worker. Files stored in PostgreSQL also have
+a [storage limit](deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql); leave the deprecated
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` unset so that the policy governs.
 
 ## Common Issues & Solutions
 
@@ -174,8 +174,8 @@ Then restart the backend.
 
 Ask an administrator with the Storage permission to review the configured and
 effective limits in **Admin > File storage**. For PostgreSQL-inline session uploads,
-the effective limit is the smaller of the admin policy and the operator's
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
+the effective limit is the smaller of the admin policy and the
+[storage limit for files stored in PostgreSQL](deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql). For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured
 portable multipart envelope. The page identifies which value constrains the
 upload. FastAPI/Starlette multipart parsing happens before route admission and

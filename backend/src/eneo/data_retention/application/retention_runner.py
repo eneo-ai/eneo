@@ -81,6 +81,7 @@ from eneo.data_retention.domain.retention import (
     retention_run_audit_id,
     retention_summary,
 )
+from eneo.observability.error_log import log_error
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,11 @@ class RetentionTask(Protocol):
     @property
     def blocked_keys(self) -> frozenset[str]: ...
 
+    # The blocked reasons that say the work is not due (any longer, or yet):
+    # audited like any blocked reason, but they leave nothing due in place.
+    @property
+    def not_due_keys(self) -> frozenset[str]: ...
+
     def steps(self) -> Sequence[RetentionStep]: ...
 
 
@@ -211,6 +217,23 @@ class RetentionOverdueReporter(Protocol):
 
 def overdue_reporter(task: RetentionTask) -> RetentionOverdueReporter | None:
     return task if isinstance(task, RetentionOverdueReporter) else None
+
+
+@runtime_checkable
+class RetentionDueProbe(Protocol):
+    """A task that runs frequently: one bounded read, with the same selection
+    as its removal (held content and other lasting reasons left out), of
+    whether anything is due at the task's time.
+
+    The five-minute run asks it before claiming, so a task with nothing due
+    writes no job row; health asks it an hour back instead of reading an
+    overdue snapshot (due_probe)."""
+
+    async def has_due(self) -> bool: ...
+
+
+def due_probe(task: RetentionTask) -> RetentionDueProbe | None:
+    return task if isinstance(task, RetentionDueProbe) else None
 
 
 class RetentionJobRunStore(Protocol):
@@ -258,6 +281,18 @@ class RetentionChunkLimits:
 
 
 @dataclass(frozen=True, slots=True)
+class RetentionStepPass:
+    """Where one step's pass stood when the execution first called the step
+    and after its last call."""
+
+    # None: the pass began in this execution.
+    started_at: RetentionKeyset | None
+    # None once the pass finished.
+    ended_at: RetentionKeyset | None
+    finished: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RetentionRunReport:
     task: str
     # None: another execution holds the task, nothing ran.
@@ -267,6 +302,15 @@ class RetentionRunReport:
     counts: Mapping[str, int] = field(default_factory=dict[str, int])
     blocked: Mapping[str, int] = field(default_factory=dict[str, int])
     error_code: RetentionErrorCode | None = None
+    # The disposal facts among the counts.
+    disposed: Mapping[str, int] = field(default_factory=dict[str, int])
+    # Every step of the task in order; None for a step the execution never
+    # called (the budget was spent, or an earlier step failed).
+    steps: Mapping[str, RetentionStepPass | None] = field(
+        default_factory=dict[str, RetentionStepPass | None]
+    )
+    # The task's blocked reasons that say the work is not due.
+    not_due: frozenset[str] = frozenset()
 
 
 class RetentionOwnershipLost(RuntimeError):
@@ -313,6 +357,11 @@ def _transient_state(exc: BaseException) -> _TransientSQLState | None:
 def is_retention_timeout(exc: BaseException) -> bool:
     """A statement or lock timeout: the claim and finish wait limits."""
     return _transient_state(exc) in _TIMEOUT_STATES
+
+
+def is_statement_timeout(exc: BaseException) -> bool:
+    """A statement ran past the statement timeout (57014), and no other state."""
+    return _transient_state(exc) is _TransientSQLState.STATEMENT_CANCELLED
 
 
 def is_lock_wait_timeout(exc: BaseException) -> bool:
@@ -374,7 +423,51 @@ class RetentionRunner:
             )
             yield
 
+    async def run_when_due(self, task: RetentionTask) -> RetentionRunReport | None:
+        """Run `task` only when its due probe finds work; None when nothing is
+        due, with nothing claimed, written or audited.
+
+        The probe reads in a short transaction of its own, under the retention
+        timeouts and without the lease. A probe that fails or times out is
+        rolled back before any claim and logged, and the task runs anyway: a
+        broken probe must not stop removal quietly, and the run's job row
+        shows that it ran.
+        """
+        probe = due_probe(task)
+        if probe is None:
+            raise RetentionContractError(
+                f"{task.name} runs frequently without a due probe."
+            )
+        try:
+            async with self._transaction():
+                due = await probe.has_due()
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s could not read whether work is due; running it",
+                task.name,
+                error=exc,
+            )
+            due = True
+        if not due:
+            return None
+        # A claim whose lock wait times out waited on the chunk another tick
+        # is running: the task is held, as with a lost claim, and that
+        # execution's row records the work. Any other timeout, and every
+        # timeout on the nightly run, records a claim timeout.
+        return await self._run(task, record_claim_timeout=False)
+
     async def run(self, task: RetentionTask) -> RetentionRunReport:
+        return await self._run(task, record_claim_timeout=True)
+
+    async def _run(
+        self, task: RetentionTask, *, record_claim_timeout: bool
+    ) -> RetentionRunReport:
+        if not task.not_due_keys <= task.blocked_keys:
+            raise RetentionContractError(
+                f"{task.name} declares not-due reasons that are not blocked reasons."
+            )
         try:
             async with self._transaction():
                 job_run_id = await self.job_runs.claim(
@@ -384,17 +477,38 @@ class RetentionRunner:
                     raise _ClaimLost
                 cursors = await self.job_runs.cursors(job_run_id)
         except _ClaimLost:
-            return RetentionRunReport(task=task.name, job_run_id=None, outcome=None)
+            return RetentionRunReport(
+                task=task.name,
+                job_run_id=None,
+                outcome=None,
+                not_due=task.not_due_keys,
+            )
         except Exception as exc:
             if not is_retention_timeout(exc):
                 raise
+            if not record_claim_timeout and is_lock_wait_timeout(exc):
+                logger.warning(
+                    "Retention task %s is held by another execution; not started.",
+                    task.name,
+                )
+                return RetentionRunReport(
+                    task=task.name,
+                    job_run_id=None,
+                    outcome=None,
+                    not_due=task.not_due_keys,
+                )
             return await self._record_claim_timeout(task.name)
 
-        progress = _Progress(started=self.clock(), cursors=cursors)
+        steps = task.steps()
+        progress = _Progress(
+            started=self.clock(),
+            cursors=cursors,
+            passes={step.name: None for step in steps},
+        )
         outcome = RetentionJobOutcome.SUCCEEDED
         error_code: RetentionErrorCode | None = None
         try:
-            for step in task.steps():
+            for step in steps:
                 if not await self._run_step(task, step, job_run_id, progress):
                     outcome = RetentionJobOutcome.PARTIAL
                 if progress.budget_spent:
@@ -403,10 +517,13 @@ class RetentionRunner:
             logger.warning("Retention task %s was superseded; stopping.", task.name)
             return RetentionRunReport(
                 task=task.name,
+                not_due=task.not_due_keys,
                 job_run_id=job_run_id,
                 outcome=RetentionJobOutcome.SUPERSEDED,
                 counts=progress.counts,
                 blocked=progress.blocked,
+                disposed=progress.disposed,
+                steps=progress.passes,
             )
         except Exception as exc:
             outcome, error_code = _chunk_ending(exc)
@@ -418,11 +535,14 @@ class RetentionRunner:
                     error_code.value,
                 )
             else:
-                logger.exception(
+                log_error(
+                    logger,
+                    logging.ERROR,
                     "Retention task %s chunk %s failed: %s",
                     task.name,
                     progress.batch_seq,
                     error_code.value,
+                    error=exc,
                 )
 
         reporter = overdue_reporter(task)
@@ -449,21 +569,27 @@ class RetentionRunner:
             )
             return RetentionRunReport(
                 task=task.name,
+                not_due=task.not_due_keys,
                 job_run_id=job_run_id,
                 outcome=RetentionJobOutcome.RUNNING,
                 counts=progress.counts,
                 blocked=progress.blocked,
                 error_code=RetentionErrorCode.FINISH_TIMEOUT,
+                disposed=progress.disposed,
+                steps=progress.passes,
             )
         if not finished:
             outcome = RetentionJobOutcome.SUPERSEDED
         return RetentionRunReport(
             task=task.name,
+            not_due=task.not_due_keys,
             job_run_id=job_run_id,
             outcome=outcome,
             counts=progress.counts,
             blocked=progress.blocked,
             error_code=error_code,
+            disposed=progress.disposed,
+            steps=progress.passes,
         )
 
     async def _run_step(
@@ -475,11 +601,19 @@ class RetentionRunner:
     ) -> bool:
         """Call the step until it is exhausted; False if it ended early."""
         retention_name(step.name)
+        started_at = progress.cursors.get(step.name)
+        called = False
         while True:
             elapsed = self.clock() - progress.started
             left = self.budget.left(progress.used, elapsed_seconds=elapsed)
             if left.rows == 0:
                 progress.budget_spent = True
+                if called:
+                    progress.passes[step.name] = RetentionStepPass(
+                        started_at=started_at,
+                        ended_at=progress.cursors.get(step.name),
+                        finished=False,
+                    )
                 return False
             progress.batch_seq += 1
             batch = RetentionBatch(
@@ -536,6 +670,13 @@ class RetentionRunner:
             progress.disposal_totals = _summed(progress.disposal_totals, disposed)
             progress.cursors = cursors
             progress.used = progress.used.plus(rows=result.rows, files=result.files)
+            called = True
+            if result.exhausted or result.deferred or stalled:
+                progress.passes[step.name] = RetentionStepPass(
+                    started_at=started_at,
+                    ended_at=progress.cursors.get(step.name),
+                    finished=result.exhausted,
+                )
             if result.exhausted:
                 return True
             if result.deferred:
@@ -563,8 +704,14 @@ class RetentionRunner:
                     logger.warning(
                         "Retention task %s was superseded; no overdue snapshot.", name
                     )
-        except Exception:
-            logger.exception("Retention task %s could not record overdue work.", name)
+        except Exception as exc:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Retention task %s could not record overdue work",
+                name,
+                error=exc,
+            )
 
     async def _audit_run(
         self,
@@ -799,6 +946,9 @@ class _Progress:
     budget_spent: bool = False
     cursors: dict[str, RetentionKeyset] = field(
         default_factory=dict[str, RetentionKeyset]
+    )
+    passes: dict[str, RetentionStepPass | None] = field(
+        default_factory=dict[str, RetentionStepPass | None]
     )
 
 

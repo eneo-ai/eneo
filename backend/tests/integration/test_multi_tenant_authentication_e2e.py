@@ -18,8 +18,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.authentication.auth_service import AuthService
-
 
 async def _create_tenant(client, super_api_key: str, name: str):
     payload = {
@@ -96,25 +94,6 @@ async def _complete_oidc(client, code: str, state: str):
     return response
 
 
-def _fake_payload_factory(token_email_map: dict[str, str]):
-    def _fake_get_payload(
-        self,
-        *,
-        id_token,
-        access_token,
-        key,
-        signing_algos,
-        client_id,
-        correlation_id,
-        options=None,
-    ):
-        if id_token not in token_email_map:
-            raise AssertionError(f"Unexpected id_token: {id_token}")
-        return {"email": token_email_map[id_token]}
-
-    return _fake_get_payload
-
-
 def _build_oidc_maps(tenant_slug: str, issuer_base: str):
     discovery_url = f"{issuer_base}/.well-known/openid-configuration"
     discovery_payload = {
@@ -133,9 +112,7 @@ async def test_multi_tenant_oidc_login_isolated(
     client,
     super_admin_token,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
-    monkeypatch,
+    fake_idp,
     mock_transcription_models,
 ):
     slug_a = f"tenant-a-{uuid4().hex[:6]}"
@@ -158,40 +135,15 @@ async def test_multi_tenant_oidc_login_isolated(
         slug_b, f"https://idp.{slug_b}.local"
     )
 
-    oidc_calls = oidc_mock(
-        discovery={
-            discovery_a_url: discovery_a_payload,
-            discovery_b_url: discovery_b_payload,
-        },
-        tokens={
-            (discovery_a_payload["token_endpoint"], "code-tenant-a"): {
-                "id_token": "id-token-tenant-a",
-                "access_token": "access-token-tenant-a",
-            },
-            (discovery_b_payload["token_endpoint"], "code-tenant-b"): {
-                "id_token": "id-token-tenant-b",
-                "access_token": "access-token-tenant-b",
-            },
-            (discovery_b_payload["token_endpoint"], "code-tenant-b-cross"): {
-                "id_token": "id-token-tenant-b-cross",
-                "access_token": "access-token-tenant-b-cross",
-            },
-        },
+    provider_a = fake_idp(
+        issuer=f"https://idp.{slug_a}.local",
+        client_id=f"client-{slug_a}",
+        client_secret="super-secret",
     )
-
-    jwks_mock()
-
-    token_email_map = {
-        "id-token-tenant-a": email_a,
-        "id-token-tenant-b": email_b,
-        # Cross attempt uses tenant A email to trigger domain mismatch in tenant B
-        "id-token-tenant-b-cross": email_a,
-    }
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        _fake_payload_factory(token_email_map),
+    provider_b = fake_idp(
+        issuer=f"https://idp.{slug_b}.local",
+        client_id=f"client-{slug_b}",
+        client_secret="super-secret",
     )
 
     await _configure_federation(
@@ -226,7 +178,8 @@ async def test_multi_tenant_oidc_login_isolated(
     state_a = initiate_a["state"]
     state_b = initiate_b["state"]
 
-    callback_a = await _complete_oidc(client, "code-tenant-a", state_a)
+    answer_a = provider_a.authorize(initiate_a["authorization_url"], email=email_a)
+    callback_a = await _complete_oidc(client, answer_a.code, state_a)
     assert callback_a.status_code == 200, callback_a.text
     token_a = callback_a.json()["access_token"]
 
@@ -238,7 +191,8 @@ async def test_multi_tenant_oidc_login_isolated(
     assert me_a.json()["name"] == tenant_a["slug"]
     assert me_a.json()["id"] == tenant_a["id"]
 
-    callback_b = await _complete_oidc(client, "code-tenant-b", state_b)
+    answer_b = provider_b.authorize(initiate_b["authorization_url"], email=email_b)
+    callback_b = await _complete_oidc(client, answer_b.code, state_b)
     assert callback_b.status_code == 200, callback_b.text
     token_b = callback_b.json()["access_token"]
 
@@ -251,19 +205,12 @@ async def test_multi_tenant_oidc_login_isolated(
     assert me_b.json()["id"] == tenant_b["id"]
     assert me_b.json()["id"] != me_a.json()["id"]
 
-    callback_cross = await _complete_oidc(client, "code-tenant-b-cross", state_b)
-    assert callback_cross.status_code == 400  # Domain mismatch returns 400 Bad Request
-    # Check for domain validation error message
-    detail = callback_cross.json()["detail"]
-    assert (
-        "invalid" in detail.lower()
-        or "expired" in detail.lower()
-        or "not allowed" in detail.lower()
-    )
-
-    # Ensure tests never escape to the real network
-    requests = oidc_calls()["requests"]
-    assert all(url.startswith("https://idp.") for _, url in requests)
+    # Tenant B's used sign-in cannot carry tenant A's person in.
+    cross = provider_b.authorize(initiate_b["authorization_url"], email=email_a)
+    callback_cross = await _complete_oidc(client, cross.code, state_b)
+    assert callback_cross.status_code == 400
+    assert callback_cross.json()["code"] == "oidc_transaction_invalid"
+    assert provider_a.token_requests and len(provider_b.token_requests) == 1
 
 
 @pytest.mark.integration

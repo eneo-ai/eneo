@@ -9,12 +9,14 @@ reference and would otherwise let the garbage collector cancel them mid-way.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Awaitable, Callable, Coroutine
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -58,4 +60,4 @@ async def _start(start: Callable[[], Awaitable[None]]) -> None:
     try:
         await start()
     except Exception as exc:
-        logger.warning("Detached SharePoint task failed: %s", exc, exc_info=True)
+        log_error(logger, logging.WARNING, "Detached SharePoint task failed", error=exc)

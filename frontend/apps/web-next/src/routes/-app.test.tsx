@@ -61,6 +61,11 @@ function EditorDraft({ id }: { id: string }) {
   );
 }
 
+// The first load of the app's route graph takes seconds on a busy runner. File
+// collection has no timeout, so pay it here; each beforeEach then only
+// re-evaluates the graph for its fresh module registry.
+await import("@/router");
+
 beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
@@ -166,7 +171,7 @@ beforeEach(async () => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
-  // Transform the app graph during fixture setup, outside each behavior assertion's timeout.
+  // Evaluate this registry's graph in fixture setup, outside each assertion's timeout.
   await import("@/router");
 });
 
@@ -1739,14 +1744,22 @@ it("opens enabled federation administration with its navigation and title", asyn
   expect(requestedPaths()).toContain("/api/v1/admin/federation");
 });
 
-it("hides disabled federation administration and rejects its URL before the API read", async () => {
+it("lists federation administration while the settings live in the server configuration", async () => {
   setViewport("desktop");
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set(
+    "/api/v1/admin/federation",
+    new Response(JSON.stringify({ detail: { code: "federation_disabled", message: "Off." } }), {
+      status: 404,
+      headers: { "content-type": "application/json" }
+    })
+  );
   const { router } = await renderRoute("/admin/federation");
-  await screen.findByRole("heading", { name: messages.page_not_found });
-  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
-  expect(screen.queryByRole("link", { name: messages.federation_admin_nav })).toBeNull();
-  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+  await screen.findByRole("heading", { level: 1, name: messages.federation_admin_title });
+  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(false);
+  expect(
+    screen.getByRole("link", { name: messages.federation_admin_nav }).getAttribute("href")
+  ).toBe("/admin/federation");
 });
 
 it("keeps federation administration behind the existing admin guard", async () => {

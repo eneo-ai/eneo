@@ -32,6 +32,8 @@ EMPTY_SESSIONS_TASK = "sessions.empty"
 
 class EmptySessionBlockReason(StrEnum):
     NO_LONGER_DUE = "no_longer_due"
+    # Another transaction held the empty, due session: it stays for a later run.
+    ROOT_LOCKED = "root_locked"
 
 
 class EmptySessionRetentionTask:
@@ -40,6 +42,7 @@ class EmptySessionRetentionTask:
     # Examined rows are progress, not disposal.
     observation_keys = frozenset({"sessions_examined"})
     blocked_keys = frozenset(reason.value for reason in EmptySessionBlockReason)
+    not_due_keys = frozenset({EmptySessionBlockReason.NO_LONGER_DUE.value})
 
     def __init__(
         self, session: AsyncSession, *, now: datetime, grace: timedelta
@@ -73,14 +76,24 @@ class EmptySessionRetentionTask:
             await self.sessions.lock_empty(candidates) if candidates else {}
         )
         admitted = [identifier for identifier in candidates if identifier in costs]
+        skipped = [identifier for identifier in candidates if identifier not in costs]
+        if skipped:
+            out.blocked[
+                EmptySessionBlockReason.ROOT_LOCKED.value
+            ] += await self.sessions.count_empty(skipped)
         deleted = await self.sessions.delete_due(admitted) if admitted else ()
         out.blocked[EmptySessionBlockReason.NO_LONGER_DUE.value] += len(admitted) - len(
             deleted
         )
         out.add(None, "sessions_examined", len(window))
         out.add(None, "sessions_deleted", len(deleted))
+        # A skipped session costs its discovery row and one counted row, within
+        # the release it would otherwise have had.
         return out.result(
-            rows=len(window) + len(costs) + sum(costs[root] for root in deleted),
+            rows=len(window)
+            + len(costs)
+            + len(skipped)
+            + sum(costs[root] for root in deleted),
             exhausted=len(window) < limit,
             cursor=window[-1][0],
         )

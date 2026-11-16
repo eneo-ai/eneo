@@ -7,6 +7,8 @@ from pathlib import Path
 backend_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(backend_dir / "src"))
 
+from fastapi import HTTPException
+
 from eneo.database.database import sessionmanager
 from eneo.main.config import get_settings
 from eneo.tenants.federation_startup_migration import (
@@ -20,6 +22,11 @@ async def main() -> int:
 
     try:
         migrated = await run_env_oidc_to_tenant_federation_migration()
+    except (ValueError, HTTPException) as error:
+        # Nothing was stored. A refused setting is named, never its value.
+        detail = error.detail if isinstance(error, HTTPException) else error
+        print(f"Federation migration failed: {detail}")
+        return 1
     finally:
         await sessionmanager.close()
 

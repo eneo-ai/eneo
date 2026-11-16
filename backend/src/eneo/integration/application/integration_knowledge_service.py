@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, Protocol, cast
 from uuid import UUID, uuid4
@@ -29,6 +30,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 from eneo.roles.permissions import Permission
 from eneo.spaces.space_repo import INTEGRATION_KNOWLEDGE_SOURCE
@@ -498,11 +500,12 @@ class IntegrationKnowledgeService:
                     subscription.subscription_id,
                 )
         except Exception as exc:
-            logger.warning(
-                "Failed to ensure subscription for knowledge %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Failed to ensure subscription for knowledge %s",
                 knowledge.id,
-                exc,
-                exc_info=True,
+                error=exc,
             )
 
     async def create_space_integration_knowledge_batch(
@@ -550,11 +553,12 @@ class IntegrationKnowledgeService:
                         wrapper_name=batch_wrapper_name,
                     )
             except Exception as exc:
-                logger.warning(
-                    "Failed to create integration knowledge batch item at index %s: %s",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Failed to create integration knowledge batch item at index %s",
                     index,
-                    exc,
-                    exc_info=True,
+                    error=exc,
                 )
                 results.append(_failed_batch_item(index, item, user_visible_error(exc)))
                 continue
@@ -715,11 +719,12 @@ class IntegrationKnowledgeService:
                     "token": token,
                 }
             except Exception as exc:
-                logger.warning(
-                    "Failed to prepare subscription cleanup for %s: %s",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Failed to prepare subscription cleanup for %s",
                     subscription_id,
-                    exc,
-                    exc_info=True,
+                    error=exc,
                 )
 
         # Delete from database FIRST (within transaction)
@@ -837,12 +842,12 @@ class IntegrationKnowledgeService:
                         )
                         knowledge.sharepoint_subscription_id = subscription_db_id
             except Exception as exc:
-                logger.warning(
-                    "Failed to ensure SharePoint subscription during full sync "
-                    "for knowledge %s: %s",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Failed to ensure SharePoint subscription during full sync for knowledge %s",
                     knowledge.id,
-                    exc,
-                    exc_info=True,
+                    error=exc,
                 )
         else:
             logger.warning(

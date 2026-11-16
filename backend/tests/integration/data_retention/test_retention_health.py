@@ -6,6 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.data_retention.application.conversation_history_retention_task import (
     CONVERSATION_HISTORY_TASK,
@@ -21,11 +22,16 @@ from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
 )
+from eneo.data_retention.infrastructure.retention_worker import (
+    database_now,
+    run_retention_at,
+)
 from eneo.database.database import sessionmanager
 from eneo.database.tables.retention_tables import RetentionJobRuns
 from eneo.main.config import Settings, get_settings
 from eneo.main.retention_tasks import (
     EXISTING_WITHOUT_CHOICE,
+    FOLLOWS_A_REMOVAL,
     _read_retention_health,
     retention_task_registrations,
 )
@@ -38,6 +44,7 @@ HEALTHY = RetentionHealthStatus.HEALTHY
 # Every registered task with the setting that switches it off.
 SWITCHES = {
     CONVERSATION_HISTORY_TASK: "retention_conversations_history_enabled",
+    **FOLLOWS_A_REMOVAL,
     **EXISTING_WITHOUT_CHOICE,
 }
 
@@ -144,3 +151,27 @@ async def test_a_failed_task_degrades_health_beside_a_disabled_one(
     history = tasks[CONVERSATION_HISTORY_TASK]
     assert (history.status, history.failed) == (RetentionHealthStatus.DEGRADED, True)
     assert _tasks(health)[EMPTY_SESSIONS_TASK] == (RetentionHealthStatus.DISABLED, True)
+
+
+async def test_every_way_to_run_retention_measures_overdue_work(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """The scheduled run and the readback's rounds both end a task with its
+    overdue work measured, so a completed run without a measurement means the
+    read failed.
+
+    Mutant: a path finishes a run without trying to measure it."""
+    await run_nightly_retention(monkeypatch, get_settings())
+    await run_retention_at(await database_now())
+
+    async with sessionmanager.session() as session, session.begin():
+        observed = (
+            await session.scalars(
+                sa.select(RetentionJobRuns.overdue_observed_at)
+                .where(RetentionJobRuns.task == CONVERSATION_HISTORY_TASK)
+                .order_by(RetentionJobRuns.started_at)
+            )
+        ).all()
+
+    assert len(observed) == 2
+    assert None not in observed

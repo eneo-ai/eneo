@@ -9,7 +9,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.sql import SQLColumnExpression
 
-from eneo.data_retention.constants import DEFAULT_AUDIT_RETENTION_DAYS
+from eneo.audit.domain.constants import DEFAULT_RETENTION_DAYS
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -53,10 +53,11 @@ def deployment_tenant_id() -> sa.ScalarSelect[UUID]:
 
 
 def deployment_audit_retention_days() -> sa.ColumnElement[int]:
-    """The deployment's audit retention in days (365 when unset); evaluated once."""
+    """The deployment's audit retention in days (the default when unset);
+    evaluated once."""
     return sa.func.coalesce(
         sa.select(AuditRetentionPolicy.retention_days)
         .where(AuditRetentionPolicy.tenant_id == deployment_tenant_id())
         .scalar_subquery(),
-        DEFAULT_AUDIT_RETENTION_DAYS,
+        DEFAULT_RETENTION_DAYS,
     )

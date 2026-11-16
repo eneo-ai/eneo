@@ -12,6 +12,7 @@ elsewhere; do not add another implementation of their rules here.
 
 import asyncio
 import hashlib
+import logging
 import time
 from collections.abc import Callable, Coroutine
 from contextlib import AbstractAsyncContextManager, nullcontext
@@ -94,6 +95,7 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
     SyncProgressReporter,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
@@ -128,10 +130,8 @@ logger = get_logger(__name__)
 
 def _log_pass_failure(context: str, failure: Exception) -> None:
     """A pass that could not finish every item is a designed outcome, not a fault."""
-    if isinstance(failure, SyncItemsFailed):
-        logger.warning("%s: %s", context, failure)
-    else:
-        logger.error("%s: %s", context, failure, exc_info=True)
+    level = logging.WARNING if isinstance(failure, SyncItemsFailed) else logging.ERROR
+    log_error(logger, level, "%s", context, error=failure)
 
 
 class SimpleSharePointToken:
@@ -981,12 +981,14 @@ class SharePointContentService:
                 not isinstance(exc, aiohttp.ClientResponseError)
                 or exc.status not in ITEM_LEVEL_HTTP_STATUSES
             ):
-                logger.warning(
-                    "Could not read where %s %s (%s) is: %s",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not read where %s %s (%s) is",
                     kind,
                     item_name,
                     item_id,
-                    exc,
+                    error=exc,
                 )
                 sync_results.count_failure(
                     stats,
@@ -1034,10 +1036,11 @@ class SharePointContentService:
                     delta_pass.integration_knowledge.id
                 )
             except Exception as exc:
-                logger.warning(
-                    "Could not read the indexed SharePoint items: %s",
-                    exc,
-                    exc_info=True,
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not read the indexed SharePoint items",
+                    error=exc,
                 )
                 sync_results.count_failure(
                     delta_pass.stats,
@@ -1066,10 +1069,12 @@ class SharePointContentService:
                     knowledge_id
                 )
         except Exception as exc:
-            logger.warning(
-                "Could not read the failed SharePoint items of %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not read the failed SharePoint items of %s",
                 knowledge_id,
-                exc,
+                error=exc,
             )
             return {}
         return decode_failed_items(stored)
@@ -1215,10 +1220,12 @@ class SharePointContentService:
                     knowledge_id, sync_failed_items=encode_failed_items(kept)
                 )
         except Exception as exc:
-            logger.warning(
-                "Could not record the failed SharePoint items of %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not record the failed SharePoint items of %s",
                 knowledge_id,
-                exc,
+                error=exc,
             )
             return False
         return recorded
@@ -1230,10 +1237,12 @@ class SharePointContentService:
         try:
             await self._walk_generations.advance(knowledge_id)
         except Exception as exc:
-            logger.warning(
-                "Could not invalidate the folder walk cache of %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not invalidate the folder walk cache of %s",
                 knowledge_id,
-                exc,
+                error=exc,
             )
 
     async def _walk_cache_suffix(self, delta_pass: "_DeltaPass") -> Optional[str]:
@@ -1247,7 +1256,12 @@ class SharePointContentService:
                         delta_pass.integration_knowledge.id
                     )
                 except Exception as exc:
-                    logger.warning("Could not read the walk cache generation: %s", exc)
+                    log_error(
+                        logger,
+                        logging.WARNING,
+                        "Could not read the walk cache generation",
+                        error=exc,
+                    )
                 else:
                     delta_pass.walk_cache_suffix = f"@{generation}"
         return delta_pass.walk_cache_suffix
@@ -1286,7 +1300,13 @@ class SharePointContentService:
                     change_key=location_key,
                 )
             except Exception as exc:
-                logger.warning("Could not read the walk cache for %s: %s", item_id, exc)
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not read the walk cache for %s",
+                    item_id,
+                    error=exc,
+                )
                 walked_here = False
             if walked_here:
                 return
@@ -1468,55 +1488,50 @@ class SharePointContentService:
         delta_baseline: str | None = None
         baseline_failure: str | None = None
 
-        try:
-            site_id_value = site_id
-            if resource_type != "onedrive":
-                site_id_value = require_text(site_id_value, "site_id")
+        site_id_value = site_id
+        if resource_type != "onedrive":
+            site_id_value = require_text(site_id_value, "site_id")
 
-            async with self._graph_client(
-                token, oauth_token_id, access_token_provider
-            ) as content_client:
-                actual_drive_id = drive_id
-                if not actual_drive_id and site_id_value:
-                    actual_drive_id = await content_client.get_default_drive_id(
-                        site_id_value
-                    )
+        async with self._graph_client(
+            token, oauth_token_id, access_token_provider
+        ) as content_client:
+            actual_drive_id = drive_id
+            if not actual_drive_id and site_id_value:
+                actual_drive_id = await content_client.get_default_drive_id(
+                    site_id_value
+                )
 
-                if not actual_drive_id:
-                    raise ValueError(
-                        "Could not determine drive_id - need either drive_id or site_id"
-                    )
+            if not actual_drive_id:
+                raise ValueError(
+                    "Could not determine drive_id - need either drive_id or site_id"
+                )
 
-                if not integration_knowledge.delta_token:
-                    (
-                        delta_baseline,
-                        baseline_failure,
-                    ) = await self._mint_delta_baseline(
-                        content_client, actual_drive_id, integration_knowledge_id
-                    )
+            if not integration_knowledge.delta_token:
+                (
+                    delta_baseline,
+                    baseline_failure,
+                ) = await self._mint_delta_baseline(
+                    content_client, actual_drive_id, integration_knowledge_id
+                )
 
-                if integration_knowledge.folder_id:
-                    await self._pull_selected_item(
-                        content_client=content_client,
-                        drive_id=actual_drive_id,
-                        site_id=site_id_value,
-                        resource_type=resource_type,
-                        integration_knowledge=integration_knowledge,
-                        stats=stats,
-                    )
-                else:
-                    await self._pull_site_root(
-                        content_client=content_client,
-                        drive_id=actual_drive_id,
-                        site_id=site_id_value,
-                        resource_type=resource_type,
-                        integration_knowledge=integration_knowledge,
-                        stats=stats,
-                    )
-
-        except Exception as e:
-            logger.error(f"Error processing document {site_id}: {e}", exc_info=True)
-            raise
+            if integration_knowledge.folder_id:
+                await self._pull_selected_item(
+                    content_client=content_client,
+                    drive_id=actual_drive_id,
+                    site_id=site_id_value,
+                    resource_type=resource_type,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
+                )
+            else:
+                await self._pull_site_root(
+                    content_client=content_client,
+                    drive_id=actual_drive_id,
+                    site_id=site_id_value,
+                    resource_type=resource_type,
+                    integration_knowledge=integration_knowledge,
+                    stats=stats,
+                )
 
         return delta_baseline, baseline_failure
 
@@ -1670,10 +1685,12 @@ class SharePointContentService:
         try:
             delta_token = await content_client.initialize_delta_token(drive_id)
         except Exception as e:
-            logger.warning(
-                "Failed to initialize delta token for integration knowledge %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Failed to initialize delta token for integration knowledge %s",
                 integration_knowledge_id,
-                e,
+                error=e,
             )
             return None, user_visible_error(e)
         if not delta_token:
@@ -1770,8 +1787,12 @@ class SharePointContentService:
                 )
                 sync_results.count_outcome(stats, outcome, page_name, page=True)
             except Exception as e:
-                logger.error(
-                    f"Error processing site page {page_name}: {e}", exc_info=True
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "Error processing site page %s",
+                    page_name,
+                    error=e,
                 )
                 sync_results.count_failure(stats, error_skipped(page_name, e))
 
@@ -1810,13 +1831,13 @@ class SharePointContentService:
                 folder_id=folder_id,
             )
         except Exception as exc:
-            logger.warning(
-                "Could not list folder %s (%s) entering scope; the next pass "
-                "replays the folder: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not list folder %s (%s) entering scope; the next pass replays the folder",
                 folder_name,
                 folder_id,
-                exc,
-                exc_info=True,
+                error=exc,
             )
             sync_results.count_failure(
                 stats,
@@ -1931,8 +1952,12 @@ class SharePointContentService:
                     change_key=change_key,
                 )
             except Exception as exc:
-                logger.warning(
-                    "Deferred ChangeKey write failed for item %s: %s", item_id, exc
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Deferred ChangeKey write failed for item %s",
+                    item_id,
+                    error=exc,
                 )
 
     async def _fetch_and_process_content(

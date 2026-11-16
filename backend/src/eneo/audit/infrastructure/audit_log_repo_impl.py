@@ -16,6 +16,7 @@ from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.audit.domain.removable_names import without_removable_names
 from eneo.audit.domain.repositories.audit_log_repository import (
     AuditLogRawRow,
     AuditLogRepository,
@@ -82,7 +83,14 @@ class AuditLogRepositoryImpl(AuditLogRepository):
 
     @override
     async def create(self, audit_log: AuditLog) -> AuditLog:
-        """Create a new audit log entry."""
+        """Create a new audit log entry, without names retention removes.
+
+        Every row is stored here, from a request or from a queued job, so a
+        job queued in an older form is stored without the names too.
+        """
+        description, metadata = without_removable_names(
+            audit_log.action, audit_log.description, audit_log.metadata
+        )
         query = (
             sa.insert(AuditLogTable)
             .values(
@@ -94,8 +102,8 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 entity_type=audit_log.entity_type.value,
                 entity_id=audit_log.entity_id,
                 timestamp=audit_log.timestamp,
-                description=audit_log.description,
-                log_metadata=audit_log.metadata,
+                description=description,
+                log_metadata=metadata,
                 outcome=audit_log.outcome.value,
                 ip_address=audit_log.ip_address,
                 user_agent=audit_log.user_agent,

@@ -7,8 +7,10 @@ surface as 401-mapping exceptions, never 500s.
 """
 
 import asyncio
+import contextlib
 import json
 import time
+from collections.abc import AsyncGenerator
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 from uuid import uuid4
@@ -19,14 +21,20 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import HTTPException
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication import auth_service as auth_service_module
 from eneo.authentication import oidc_resource_server
+from eneo.authentication.auth_models import CredentialFacts
 from eneo.authentication.auth_service import AuthService
+from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.exceptions import AuthenticationException, UniqueException
 from eneo.tenants.tenant import TenantInDB, TenantState
 from eneo.users import user_service as user_service_module
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.fake_oidc_provider import _Response as FakeResponse
+from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
 ISSUER = "https://idp.example.com"
 AUDIENCE = "eneo-backend"
@@ -56,6 +64,7 @@ def _make_idp_token(
     email_verified: bool | None = True,
     exp_offset: int = 3600,
     algorithm: str = "RS256",
+    **claims: object,
 ) -> str:
     now = int(time.time())
     payload = {
@@ -64,27 +73,13 @@ def _make_idp_token(
         "sub": "idp-subject-id",
         "iat": now - 5,
         "exp": now + exp_offset,
+        **claims,
     }
     if email is not None:
         payload["email"] = email
     if email_verified is not None:
         payload["email_verified"] = email_verified
     return jwt.encode(payload, private_pem, algorithm=algorithm, headers={"kid": kid})
-
-
-class FakeResponse:
-    def __init__(self, payload: dict, status: int = 200):
-        self._payload = payload
-        self.status = status
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):  # noqa: ARG002
-        return False
-
-    async def json(self):
-        return self._payload
 
 
 class FakeHttpClient:
@@ -143,6 +138,16 @@ class UserRepoStub:
 
     async def get_user_by_email(self, email: str):
         return self.users_by_email.get(email.lower())
+
+    async def get_users_by_email(self, email: str, *, limit: int):
+        user = await self.get_user_by_email(email)
+        return [user] if user else []
+
+    async def get_user_by_id(self, user_id, with_deleted: bool = False):  # noqa: ARG002
+        return next((u for u in self.users_by_email.values() if u.id == user_id), None)
+
+    async def get_user_by_id_for_update(self, user_id):
+        return await self.get_user_by_id(user_id)
 
     async def get_user_by_id_and_tenant_id(self, user_id, tenant_id):
         for user in self.users_by_email.values():
@@ -208,6 +213,12 @@ class AuditServiceStub:
     async def log(self, **kwargs):
         self.logged_events.append(kwargs)
 
+    async def log_async(self, **kwargs):
+        self.logged_events.append(kwargs)
+
+    def of(self, action: ActionType) -> list[dict]:
+        return [event for event in self.logged_events if event["action"] == action]
+
 
 def _make_settings(**overrides) -> SimpleNamespace:
     defaults = dict(
@@ -219,8 +230,14 @@ def _make_settings(**overrides) -> SimpleNamespace:
         oidc_accepted_audience=AUDIENCE,
         oidc_jwks_cache_ttl_seconds=3600,
         oidc_tenant_id=None,
-        # JIT admission requires allowed domains (resolve_federated_user).
+        # Stored mode: the tenant's config names the subject claim.
+        federation_enabled=True,
+        # Ignored in stored mode; the env-mode cases name their own.
         oidc_allowed_domains=["example.com"],
+        # What FEDERATION_ENABLED=false signs in with.
+        oidc_discovery_endpoint=DISCOVERY_URL,
+        oidc_client_id="eneo-client",
+        oidc_client_secret="env-client-secret",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -236,6 +253,7 @@ def _make_user_service(user_repo, tenant_repo, audit_service) -> UserService:
         settings_repo=MagicMock(),
         tenant_repo=tenant_repo,
         info_blob_repo=MagicMock(),
+        identity_binding_repo=IdentityBindingsInMemory(),
     )
 
 
@@ -244,6 +262,18 @@ def fresh_jwks_cache():
     oidc_resource_server.reset_jwks_cache()
     yield
     oidc_resource_server.reset_jwks_cache()
+
+
+@pytest.fixture(autouse=True)
+def admission_without_a_database(monkeypatch):
+    """Admit on the service under test: these tests have no database for the
+    transaction of its own, which the integration tests cover."""
+
+    @contextlib.asynccontextmanager
+    async def admission(self: UserService) -> AsyncGenerator[UserService]:
+        yield self
+
+    monkeypatch.setattr(UserService, "_admission", admission)
 
 
 @pytest.fixture
@@ -271,7 +301,7 @@ def setup(monkeypatch, idp_key):
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, tenant_repo, audit_service)
 
@@ -296,6 +326,8 @@ async def test_valid_idp_token_resolves_correct_user(setup):
 
     assert user.id == setup.user.id
     assert user.email == "user@example.com"
+    # A provider's token authenticates on its own; it starts no session.
+    assert user.credential == CredentialFacts(kind="bearer")
 
 
 @pytest.mark.asyncio
@@ -364,7 +396,9 @@ async def test_unknown_email_with_provisioning_off_is_forbidden(setup):
 @pytest.mark.asyncio
 async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key):
     private_pem, jwk = idp_key
-    tenant = _make_tenant(provisioning=True)
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(["example.com"])
+    )
     user_repo = UserRepoStub(tenant)
     audit_service = AuditServiceStub()
     http = FakeHttpClient(
@@ -374,7 +408,7 @@ async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key)
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, TenantRepoStub(tenant), audit_service)
     token = _make_idp_token(private_pem, "kid-a", email="new@example.com")
@@ -384,8 +418,7 @@ async def test_provisioning_on_creates_user_with_audit_row(monkeypatch, idp_key)
     assert user.email == "new@example.com"
     assert user.tenant_id == tenant.id
     assert user_repo.add_calls == 1
-    assert len(audit_service.logged_events) == 1
-    event = audit_service.logged_events[0]
+    [event] = audit_service.of(ActionType.USER_CREATED)
     assert event["metadata"]["provisioning_method"] == "jit_federation"
     assert event["tenant_id"] == tenant.id
 
@@ -395,7 +428,9 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     monkeypatch, idp_key
 ):
     private_pem, jwk = idp_key
-    tenant = _make_tenant(provisioning=True)
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(["example.com"])
+    )
     user_repo = RacingUserRepoStub(tenant)
     audit_service = AuditServiceStub()
     http = FakeHttpClient(
@@ -405,7 +440,7 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     settings = _make_settings()
     monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
     monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
-    monkeypatch.setattr(oidc_resource_server, "aiohttp_client", lambda: http)
+    monkeypatch.setattr(aiohttp_client, "session", http)
 
     service = _make_user_service(user_repo, TenantRepoStub(tenant), audit_service)
     token = _make_idp_token(private_pem, "kid-a", email="new@example.com")
@@ -420,7 +455,9 @@ async def test_concurrent_first_requests_create_one_user_one_audit_row(
     assert len(user_repo.users_by_email) == 1
     # ...both raced into the insert, and exactly one audit row was emitted.
     assert user_repo.add_calls == 2
-    assert len(audit_service.logged_events) == 1
+    assert len(audit_service.of(ActionType.USER_CREATED)) == 1
+    # The losing request finds the identity already bound to that user.
+    assert len(audit_service.of(ActionType.IDENTITY_BOUND)) == 1
 
 
 @pytest.mark.asyncio
@@ -530,3 +567,211 @@ async def test_idp_access_token_must_include_expiry(setup):
     )
     with pytest.raises(AuthenticationException):
         await setup.service.authenticate(token=token)
+
+
+@pytest.mark.asyncio
+async def test_the_token_identity_reaches_account_admission(setup, monkeypatch):
+    seen = []
+    admit = UserService.resolve_federated_user
+
+    async def spy(self, *, identity, **kwargs):
+        seen.append(identity)
+        return await admit(self, identity=identity, **kwargs)
+
+    monkeypatch.setattr(UserService, "resolve_federated_user", spy)
+
+    await setup.service.authenticate(token=_make_idp_token(setup.private_pem, "kid-a"))
+
+    (identity,) = seen
+    # The key a binding holds: the subject belongs to the accepted API audience.
+    assert (identity.issuer, identity.audience, identity.subject) == (
+        ISSUER,
+        AUDIENCE,
+        "idp-subject-id",
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_tenant_subject_claim_names_the_token_identity(setup, monkeypatch):
+    seen = []
+    admit = UserService.resolve_federated_user
+
+    async def spy(self, *, identity, **kwargs):
+        seen.append(identity)
+        return await admit(self, identity=identity, **kwargs)
+
+    monkeypatch.setattr(UserService, "resolve_federated_user", spy)
+    setup.tenant.federation_config = {
+        "claims_mapping": {"email": "email", "subject": "oid"}
+    }
+
+    await setup.service.authenticate(
+        token=_make_idp_token(setup.private_pem, "kid-a", oid="person-1")
+    )
+
+    (identity,) = seen
+    assert (identity.subject_claim, identity.subject) == ("oid", "person-1")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "mapping, claims",
+    [
+        ({"subject": "oid"}, {}),
+        ({"subject": "oid"}, {"oid": 7}),
+        ({"subject": "email"}, {}),
+    ],
+    ids=["claim-missing", "claim-not-text", "subject-is-the-email-claim"],
+)
+async def test_an_unusable_subject_claim_is_a_credentials_failure(
+    setup, mapping, claims
+):
+    setup.tenant.federation_config = {"claims_mapping": mapping}
+
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a", **claims)
+        )
+
+
+@pytest.mark.asyncio
+async def test_a_conflicting_identity_is_refused_typed(setup):
+    await setup.service.identity_binding_repo.bind(
+        tenant_id=setup.tenant.id,
+        user_id=setup.user.id,
+        issuer=ISSUER,
+        audience=AUDIENCE,
+        subject_claim="sub",
+        subject="another-subject",
+    )
+
+    with pytest.raises(IdentityConflictError):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a")
+        )
+
+    [conflict] = setup.audit_service.of(ActionType.IDENTITY_CONFLICT)
+    assert conflict["metadata"]["reason"] == "subject_mismatch"
+
+
+def _stored_provider(allowed_domains: list[str]) -> dict[str, object]:
+    return {
+        "provider": "example",
+        "discovery_endpoint": DISCOVERY_URL,
+        "client_id": "eneo-client",
+        "client_secret": "stored-client-secret",
+        "allowed_domains": allowed_domains,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("federation_enabled", "stored_domains", "email", "admitted"),
+    [
+        # The OIDC_* settings: their domains, whatever is stored.
+        (False, ["stored.example"], "new@example.org", True),
+        (False, ["stored.example"], "new@stored.example", False),
+        # Stored in Eneo: the stored domains only, as at browser sign-in. An
+        # empty stored list creates no account from OIDC_ALLOWED_DOMAINS.
+        (True, ["stored.example"], "new@stored.example", True),
+        (True, ["stored.example"], "new@example.org", False),
+        (True, [], "new@example.org", False),
+    ],
+)
+async def test_access_tokens_create_accounts_by_the_domains_browser_sign_in_uses(
+    monkeypatch, idp_key, federation_enabled, stored_domains, email, admitted
+):
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(
+        provisioning=True, federation_config=_stored_provider(stored_domains)
+    )
+    user_repo = UserRepoStub(tenant)
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(
+        federation_enabled=federation_enabled, oidc_allowed_domains=["example.org"]
+    )
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+    token = _make_idp_token(private_pem, "kid-a", email=email)
+
+    if admitted:
+        assert (await service.authenticate(token=token)).email == email
+        assert user_repo.add_calls == 1
+    else:
+        with pytest.raises(HTTPException) as refused:
+            await service.authenticate(token=token)
+        assert refused.value.status_code == 403
+        assert user_repo.add_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_with_no_stored_domains_an_existing_account_is_admitted_as_in_the_browser(
+    monkeypatch, idp_key
+):
+    """An empty stored list filters no domain, for an access token as for
+    browser sign-in; OIDC_ALLOWED_DOMAINS does not narrow it."""
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(federation_config=_stored_provider([]))
+    user = _make_user("person@elsewhere.example", tenant)
+    user_repo = UserRepoStub(tenant, users=[user])
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(oidc_allowed_domains=["example.org"])
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+
+    admitted = await service.authenticate(
+        token=_make_idp_token(private_pem, "kid-a", email="person@elsewhere.example")
+    )
+
+    assert admitted.id == user.id
+
+
+@pytest.mark.asyncio
+async def test_keys_on_another_host_than_the_issuer_are_never_fetched(setup):
+    """Resource-server mode has no list of other hosts: a jwks_uri off the
+    issuer's host fails every bearer token, and nothing is sent there."""
+    other = "https://keys.other.example/jwks"
+    setup.http.routes[DISCOVERY_URL] = {"jwks_uri": other}
+    setup.http.routes[other] = setup.http.routes[JWKS_URL]
+
+    with pytest.raises(AuthenticationException):
+        await setup.service.authenticate(
+            token=_make_idp_token(setup.private_pem, "kid-a")
+        )
+
+    assert other not in setup.http.calls
+
+
+@pytest.mark.asyncio
+async def test_without_a_stored_provider_access_tokens_create_no_account(
+    monkeypatch, idp_key
+):
+    """FEDERATION_ENABLED=true and no provider stored: there is no browser
+    sign-in, and OIDC_ALLOWED_DOMAINS does not let a token create one."""
+    private_pem, jwk = idp_key
+    tenant = _make_tenant(provisioning=True, federation_config={})
+    user_repo = UserRepoStub(tenant)
+    http = FakeHttpClient(
+        {DISCOVERY_URL: {"jwks_uri": JWKS_URL}, JWKS_URL: {"keys": [jwk]}}
+    )
+    settings = _make_settings(oidc_allowed_domains=["example.org"])
+    monkeypatch.setattr(user_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(oidc_resource_server, "get_settings", lambda: settings)
+    monkeypatch.setattr(aiohttp_client, "session", http)
+    service = _make_user_service(user_repo, TenantRepoStub(tenant), AuditServiceStub())
+
+    with pytest.raises(HTTPException) as refused:
+        await service.authenticate(
+            token=_make_idp_token(private_pem, "kid-a", email="new@example.org")
+        )
+
+    assert refused.value.status_code == 403
+    assert user_repo.add_calls == 0

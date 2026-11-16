@@ -282,10 +282,12 @@ state first. Target changes, upload limits, and existing-content moves remain
 separate actions, while detailed limits and PostgreSQL allocation are available
 under technical details.
 
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` remains an operator-owned ceiling for
-safe PostgreSQL rows, WAL, backups, and process memory. It is not a business
-upload limit. For PostgreSQL-inline session uploads and knowledge originals,
-Eneo uses the smaller of the admin policy and this ceiling. **Admin > File storage**
+Files stored in PostgreSQL also have a
+[storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql): the most PostgreSQL holds and backs up per file, or lower
+while the deprecated `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is still set. Leave
+that variable unset. For PostgreSQL-inline session uploads and knowledge
+originals, Eneo uses the smaller of the admin policy and this storage limit.
+**Admin > File storage**
 shows the configured limit, effective limit, and constraining source for
 knowledge files and transcription audio as well as File and Icon. Object-store
 uploads use the same rule with the portable multipart envelope derived from
@@ -313,13 +315,13 @@ the previous active version remains available and no original is retained.
 
 Business limits apply to the user's original upload. Generated text, model
 input, and page variants can be larger; Eneo bounds those internal variants by
-the selected backend's operator ceiling instead of rejecting an otherwise valid
+the selected backend's storage limit instead of rejecting an otherwise valid
 upload against a second business limit.
 
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the storage limit can still make the
 effective limit lower.
 
 ## Set up your choice
@@ -344,10 +346,10 @@ curl -fsS https://eneo.example.eu/api/readyz \
 the control records and bounded payload bytes, so the normal PostgreSQL backup
 is the complete content backup.
 
-Set `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` in `env_backend.env` to a measured
-deployment ceiling. Admin policy may exceed this value, but inline session
-writes use the lower effective limit and report the ceiling as the constraining
-source.
+Leave the deprecated `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` unset. Each file
+stored in PostgreSQL is read into memory in full on upload and is part of every
+database backup; the [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) caps it at what PostgreSQL holds per
+file.
 
 In **Admin > File storage**, keep the target for new files set to **PostgreSQL**
 and set the four business limits. The update applies to backend and worker
@@ -444,7 +446,10 @@ Create a non-admin application identity with bucket-scoped permissions for:
 
 - bucket and multipart listing;
 - `GetObject`, `PutObject`, and `DeleteObject`;
-- multipart upload, ordered part listing, completion, and abort.
+- multipart upload, ordered part listing, completion, and abort;
+- `s3:GetBucketVersioning`, `s3:GetBucketObjectLockConfiguration`, and
+  `s3:ListBucketVersions`, so Eneo can confirm that a deleted file leaves no
+  old version behind.
 
 MinIO policy files use `arn:aws:s3` syntax locally; those strings do not connect
 Eneo or MinIO to AWS.
@@ -489,14 +494,23 @@ backend or worker restart.
 
 Before production, test the exact service version and configuration: single and
 multipart write, `HEAD`, full and single-range read, deletion, pagination, TLS,
-and paired restore. Use one dedicated private active-content bucket with
-versioning and Object Lock disabled. Eneo currently deletes one opaque key and
-does not claim to purge retained historical object versions; snapshots and
+and paired restore. Use one dedicated private active-content bucket that has
+never had versioning or Object Lock turned on. With either of them, a deleted
+file stays readable as an old version, so Eneo refuses the bucket: the
+connection test fails, and backend and worker do not start, when versioning is
+enabled or suspended or Object Lock is enabled. Suspending versioning does not remove the old versions,
+so a bucket that once had versioning cannot be used; move the content to a new
+bucket. Eneo never deletes old versions itself.
+
+When the service refuses one of the three permissions above, Eneo does not start and its
+log names the bucket and the missing permission. MinIO does not enforce
+`s3:ListBucketVersions`: it lists versions without that permission, even when a
+policy denies it, so Eneo starts and the listing works. A bucket that gets versioning while Eneo runs
+is refused from the next readiness check: readiness reports
+`configuration_required` and new uploads to object storage fail. No deletion
+in it is reported as done while a version of the file remains; the deletion is
+retried. Deletion confirmation does not cover provider replicas; snapshots and
 paired backups own recovery.
-The connection test does not inspect versioning or Object Lock settings. Verify
-these with the provider, including whether earlier versioning left historical
-versions behind: suspending versioning does not remove them. Eneo's deletion
-confirmation checks the current key, not those versions or provider replicas.
 
 Range reads reuse the verification chunks calculated during the original
 upload. Eneo stores each object's chunk size, so changing multipart tuning later
@@ -711,12 +725,9 @@ restore both halves in isolation, verify checksums and sample reads, then reopen
 traffic. Never combine a newer database with an older bucket or the reverse.
 
 Define backup retention periods, access restrictions and responsibility for
-expiry with the provider. PostgreSQL row deletion and current-key deletion in
-S3 do not remove backup copies. Before reopening a restored system, reconcile
-deletions made since the recovery point so erased data does not become available
-again. Keep the evidence needed for that reconciliation outside the restored
-snapshot. Eneo does not automatically replay manual deletions or certify backup
-expiry; a successful retention run is not evidence that all copies are gone.
+expiry with the provider. Before traffic opens on a restored system, follow
+[After a restore](/guides/data-retention#after-a-restore): it says how retention
+catches up, what can still come back and what Eneo does not do for backups.
 These operational procedures follow the concerns described in
 [IMY's guidance on deletion routines, section 5.1.3](https://www.imy.se/globalassets/dokument/rapporter/transkribering-inom-socialtjansten.pdf)
 and its [report on erasure and backups, page 17](https://www.imy.se/globalassets/dokument/rapporter/imy-nationell-rapport-till-edpb-svenska.pdf).

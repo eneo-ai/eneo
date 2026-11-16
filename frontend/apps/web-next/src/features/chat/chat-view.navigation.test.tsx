@@ -25,6 +25,10 @@ vi.mock("@/features/workspace/preview/load-preview", () => ({
   loadPreview: vi.fn(),
   PreviewTooLargeError: class extends Error {}
 }));
+// The document editor (TipTap, ProseMirror) loads on demand, and its first load
+// takes about a second on a busy runner. Load it while the file is collected,
+// as the idle prefetch would, so opening the document times the panel only.
+await import("./side-panel/file-panel");
 afterEach(() => vi.restoreAllMocks());
 const file = { id: "file-1", name: "Plan.md", mimetype: "text/markdown", size: 10 };
 const messages: EneoUIMessage[] = [

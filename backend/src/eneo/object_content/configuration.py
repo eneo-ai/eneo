@@ -13,6 +13,8 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from eneo.main.logging import get_logger
+
 _DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
@@ -42,6 +44,18 @@ _MAXIMUM_MULTIPART_PART_BYTES = 5 * 1024 * _MEBIBYTE
 _MAXIMUM_MULTIPART_PARTS = 10_000
 _MAXIMUM_S3_OBJECT_BYTES = 5 * 1024 * 1024 * _MEBIBYTE
 _MAXIMUM_S3_PAGE_SIZE = 1_000
+# PostgreSQL byteaout doubles payload bytes; COPY (including pg_dump) must fit
+# that text plus the row in MaxAllocSize (see varlena.c, stringinfo.c, copyto.c).
+# The allowance covers UUID, storage kind, timestamps and COPY framing. Keep
+# its column-set test in sync when inline_content_payloads gains columns.
+_POSTGRES_MAX_ALLOC_SIZE = 2**30 - 1
+_INLINE_ROW_TEXT_ALLOWANCE = 1024
+INLINE_PAYLOAD_CAPACITY_BYTES = (
+    _POSTGRES_MAX_ALLOC_SIZE - 1 - _INLINE_ROW_TEXT_ALLOWANCE
+) // 2
+_DEPRECATED_INLINE_LIMIT_VARIABLE = "OBJECT_CONTENT_INLINE_MAXIMUM_BYTES"
+
+logger = get_logger(__name__)
 
 
 class ObjectContentCoreSettings(BaseSettings):
@@ -52,10 +66,11 @@ class ObjectContentCoreSettings(BaseSettings):
         hide_input_in_errors=True,
     )
 
-    # Preserve the established maximum audio upload when upgrading an existing
-    # deployment without this new setting. Operators can lower both limits
-    # together after measuring their PostgreSQL capacity.
-    inline_maximum_bytes: int = Field(default=200 * _MEBIBYTE, ge=1)
+    # Without a value, a file stored in the database may be as large as
+    # PostgreSQL can hold and dump; the upload policy in Admin > File storage
+    # is the business limit. A set value is deprecated, still lowers the
+    # ceiling, and is capped at the capacity rather than refusing to start.
+    inline_maximum_bytes: int = Field(default=INLINE_PAYLOAD_CAPACITY_BYTES, ge=1)
     inline_io_chunk_bytes: int = Field(default=256 * 1024, ge=1)
     reconciliation_batch_size: int = Field(
         default=100,
@@ -67,6 +82,11 @@ class ObjectContentCoreSettings(BaseSettings):
     reconciliation_retry_base_seconds: int = Field(default=30, ge=1)
     reconciliation_retry_max_seconds: int = Field(default=3600, ge=1)
     pending_stale_seconds: int = Field(default=300, ge=1)
+
+    @field_validator("inline_maximum_bytes")
+    @classmethod
+    def cap_inline_maximum_at_capacity(cls, value: int) -> int:
+        return min(value, INLINE_PAYLOAD_CAPACITY_BYTES)
 
     @model_validator(mode="after")
     def validate_core_bounds(self) -> Self:
@@ -262,7 +282,30 @@ def load_object_content_core_settings() -> ObjectContentCoreSettings:
         Callable[[], ObjectContentCoreSettings],
         ObjectContentCoreSettings,
     )
-    return settings_factory()
+    settings = settings_factory()
+    if any(name.upper() == _DEPRECATED_INLINE_LIMIT_VARIABLE for name in os.environ):
+        _warn_deprecated_inline_limit(settings.inline_maximum_bytes)
+    return settings
+
+
+def _warn_deprecated_inline_limit(inline_maximum_bytes: int) -> None:
+    if inline_maximum_bytes == INLINE_PAYLOAD_CAPACITY_BYTES:
+        effect = (
+            "Its value is at or above the most PostgreSQL holds per file, so "
+            f"the ceiling is capped at {INLINE_PAYLOAD_CAPACITY_BYTES} bytes."
+        )
+    else:
+        effect = (
+            "It still limits each file stored in the database to "
+            f"{inline_maximum_bytes} bytes, below the upload policy if the "
+            "policy is higher."
+        )
+    logger.warning(
+        "%s is deprecated. %s Set upload limits in Admin > File storage and "
+        "remove the variable from the environment.",
+        _DEPRECATED_INLINE_LIMIT_VARIABLE,
+        effect,
+    )
 
 
 def load_object_store_operator_settings() -> ObjectStoreOperatorSettings:

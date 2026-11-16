@@ -276,10 +276,12 @@ When a call names a file, the runtime fetches it under a fixed policy
   token, at the exact origin the backend sent in `X-Eneo-File-Origin`.
   `TOOL_RUNTIME_FILE_ORIGINS` additionally pins the origins the runtime will
   accept at all; the reference stack sets it to the file-reference base URL.
-- The origin is resolved and every address checked. Private and loopback
-  addresses are allowed because the backend normally lives there; link-local,
-  reserved and multicast ranges are refused. Redirects are followed at most
-  three hops and must stay on the same origin.
+- The origin is resolved and every address checked. Private, loopback,
+  IPv6 unique-local and shared (100.64.0.0/10, common for pod and service
+  networks) addresses are allowed because the backend normally lives there;
+  link-local, reserved and multicast ranges and the cloud metadata endpoints
+  `100.100.100.200` and `fd00:ec2::254` are refused. Redirects are followed at
+  most three hops and must stay on the same origin.
 - Downloads are capped at 20 MiB and 15 seconds, must be uncompressed, and an
   empty body is an error. A link whose token was redacted for storage is
   refused as stale so the model asks for a fresh reference instead of retrying.

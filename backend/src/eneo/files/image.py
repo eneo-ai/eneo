@@ -19,13 +19,8 @@ class ImageExtractor:
         with open(filepath, "rb") as image_file:
             return image_file.read()
 
-    def extract(
-        self, filepath: Path, mimetype: str, filename: str | None = None
-    ) -> bytes:
+    def extract(self, filepath: Path, mimetype: str) -> bytes:
         if ImageMimeTypes.has_value(mimetype):
             return self.extract_from_image(filepath)
 
-        display_name = filename or filepath.name
-        raise FileNotSupportedException(
-            f"Image format not supported for '{display_name}'"
-        )
+        raise FileNotSupportedException("Image format not supported")

@@ -9,7 +9,9 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 import unicodedata
+from contextlib import suppress
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -75,6 +77,7 @@ from eneo.integration.infrastructure.sharepoint_sync_progress import (
     SyncProgressReporter,
     sync_progress_key,
 )
+from tests.log_capture import chained_error, emitted, logged_errors
 from tests.unittests.integration.infrastructure.content_service.helpers import (
     delta_file,
     descendant,
@@ -2391,9 +2394,7 @@ class TestSyncStatus:
             patch(
                 "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient"
             ) as mock_client_class,
-            patch(
-                "eneo.integration.infrastructure.content_service.sharepoint_content_service.logger"
-            ) as log,
+            emitted(content_service_module.logger) as records,
             pytest.raises(SyncItemsFailed, match=ONE_FILE_FAILED),
         ):
             mock_graph_client(
@@ -2413,13 +2414,15 @@ class TestSyncStatus:
                     token_id=mock_oauth_token.id, integration_knowledge_id=ik.id
                 )
 
-        assert any(
-            isinstance(call.args[-1], SyncItemsFailed)
-            for call in log.warning.call_args_list
-        )
-        assert not any(
-            isinstance(call.args[-1], SyncItemsFailed)
-            for call in log.error.call_args_list
+        partial = [
+            record
+            for record in records
+            if str(getattr(record, "error_type", "")).startswith("SyncItemsFailed")
+        ]
+        assert partial, [record.getMessage() for record in records]
+        assert all(
+            record.levelno == logging.WARNING and not record.exc_info
+            for record in partial
         )
 
     async def test_reconcile_warning_reaches_summary_and_sync_log(
@@ -5502,3 +5505,84 @@ class TestUserVisibleErrors:
             "Orphan cleanup skipped (https://contoso.sharepoint.com/sites/KS/"
             "_layouts/15/download.aspx)"
         )
+
+
+class _FailingGraph:
+    """A Graph client whose every call fails quoting what it read."""
+
+    async def __aenter__(self) -> "_FailingGraph":
+        return self
+
+    async def __aexit__(self, *_: object) -> None:
+        return None
+
+    def __getattr__(self, name: str):
+        async def fail(*_: object, **__: object):
+            raise chained_error()
+
+        return fail
+
+
+class _FailingItemGraph(_FailingGraph):
+    """Graph reports one changed file; reading anything else fails."""
+
+    async def get_delta_changes(self, *_: object, **__: object):
+        item = {
+            "id": "item-1",
+            "name": "report.docx",
+            "file": {},
+            "parentReference": {"id": "root", "path": "/drives/drive-123/root:"},
+        }
+        return [item], "new-delta-token"
+
+
+def _integration_loggers() -> list[logging.Logger]:
+    return [
+        module.logger
+        for name, module in list(sys.modules.items())
+        if name.startswith("eneo.integration")
+        and isinstance(getattr(module, "logger", None), logging.Logger)
+    ]
+
+
+@pytest.mark.parametrize(
+    "method, graph",
+    [
+        ("pull_content", _FailingGraph),
+        ("process_delta_changes", _FailingGraph),
+        ("process_delta_changes", _FailingItemGraph),
+    ],
+    ids=["full", "delta", "delta_item"],
+)
+async def test_a_failed_pass_logs_the_kind_of_error_not_its_text(
+    service,
+    mock_dependencies,
+    mock_oauth_token,
+    mock_integration_knowledge,
+    method,
+    graph,
+):
+    """Graph's errors can quote the documents and folders a pass read. Mutant:
+    the service logs a failed pass or item with the error's text or traceback."""
+    mock_integration_knowledge.delta_token = "existing-delta-token"
+    mock_dependencies["oauth_token_repo"].one.return_value = mock_oauth_token
+    mock_dependencies[
+        "integration_knowledge_repo"
+    ].one.return_value = mock_integration_knowledge
+
+    with (
+        patch(
+            "eneo.integration.infrastructure.content_service.sharepoint_content_service.SharePointContentClient",
+            return_value=graph(),
+        ),
+        emitted(*_integration_loggers()) as records,
+        suppress(Exception),
+    ):
+        await getattr(service, method)(
+            token_id=mock_oauth_token.id,
+            integration_knowledge_id=mock_integration_knowledge.id,
+            site_id="site-123",
+            drive_id="drive-123",
+        )
+
+    assert logged_errors(records), [record.getMessage() for record in records]

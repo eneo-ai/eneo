@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import AsyncExitStack, asynccontextmanager
 from time import monotonic
@@ -10,6 +11,7 @@ from redis.exceptions import RedisError
 from eneo.database.database import sessionmanager
 from eneo.database.tables.integration_table import OauthToken as OauthTokenDBModel
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.worker.redis.lease import redis_lease
 
 if TYPE_CHECKING:
@@ -132,11 +134,12 @@ class OauthTokenService:
                     except (RedisError, OSError) as exc:
                         # A Redis outage must not take user integrations down
                         # with it; the process lock still serialises this host.
-                        logger.warning(
-                            "Redis unavailable for the refresh lease of OAuth token "
-                            "%s (%s); refreshing under the process lock only",
+                        log_error(
+                            logger,
+                            logging.WARNING,
+                            "Redis unavailable for the refresh lease of OAuth token %s; refreshing under the process lock only",
                             token_id,
-                            exc,
+                            error=exc,
                         )
                         return await self._refresh_unless_changed(token)
                     if acquired:

@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from datetime import datetime
 from enum import StrEnum
 from typing import Optional
+from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import JsonValue
@@ -17,7 +18,11 @@ from eneo.data_retention.domain.retention import (
     RetentionErrorCode,
     RetentionJobOutcome,
 )
-from eneo.database.tables.base_class import BaseWithTableName, IdMixin
+from eneo.database.tables.base_class import (
+    BaseWithTableName,
+    CreatedAtMixin,
+    IdMixin,
+)
 
 
 def _sql_values(values: Iterable[StrEnum]) -> str:
@@ -123,4 +128,24 @@ class RetentionJobRuns(IdMixin, BaseWithTableName):
         ),
         # Pruning after audit retention.
         sa.Index("ix_retention_job_runs_finished_at", "finished_at"),
+    )
+
+
+class ContentDerivations(IdMixin, CreatedAtMixin, BaseWithTableName):
+    """A copy session holds content copied from this source question.
+
+    Ids only and no foreign keys: no deletion path writes here, so removing a
+    source leaves the edge dangling, which is what makes the copy invalid. The
+    unique key is also the index the validity check and the cleanup read.
+    """
+
+    copy_session_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
+    source_question_id: Mapped[UUID] = mapped_column(sa.Uuid, nullable=False)
+
+    __table_args__ = (
+        sa.UniqueConstraint(
+            "copy_session_id",
+            "source_question_id",
+            name="uq_content_derivations_copy_source",
+        ),
     )
