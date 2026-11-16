@@ -7,6 +7,7 @@ import {
   type LeaveConfirmationHandle
 } from "@/components/composites/leave-confirmation";
 import { expect, it, vi } from "vitest";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderWithRouter } from "@/test/router";
 import Link from "./link";
 import { pushUrl, replaceUrl, useLeaveConfirmation, useRouter } from "./navigation";
@@ -80,6 +81,28 @@ it("shares the leave decision with an in-place reset and never runs it on teardo
   await click("Reset editor");
   unmount();
   expect(reset).toHaveBeenCalledTimes(1);
+});
+
+it("tells the editor when the user stays, so it can place focus, and not when they leave", async () => {
+  const onStay = vi.fn();
+  const { router } = await renderWithRouter(<LeaveConfirmation active onStay={onStay} />, {
+    route: "/a",
+    routes
+  });
+  await act(async () => {
+    void router.navigate({ href: "/b" });
+  });
+  await expectNoAxeViolations(await screen.findByRole("alertdialog"));
+  await click("Avbryt");
+  expect(onStay).toHaveBeenCalledTimes(1);
+  expect(router.state.location.pathname).toBe("/a");
+
+  await act(async () => {
+    void router.navigate({ href: "/b" });
+  });
+  await click("Lämna utan att spara");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/b"));
+  expect(onStay).toHaveBeenCalledTimes(1);
 });
 
 it("lets an inactive editor follow links", async () => {

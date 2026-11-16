@@ -1,14 +1,27 @@
+from datetime import datetime, timezone
+from typing import Literal
+from uuid import UUID
+
 import sqlalchemy as sa
 from pydantic import EmailStr, TypeAdapter
+from sqlalchemy.exc import IntegrityError
 
 from eneo.admin.admin_models import (
+    AccountIdentity,
     AdminUsersQueryParams,
+    IdentityBindingPublic,
+    IdentityMigrationWindowCreate,
+    IdentityMigrationWindowPublic,
     PaginatedUsersResponse,
     PaginationMetadata,
     PrivacyPolicy,
     UserDeletedListItem,
     UserStateListItem,
 )
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyStateReasonCode
 from eneo.database.tables.users_table import Users
@@ -20,6 +33,10 @@ from eneo.main.exceptions import (
 from eneo.main.logging import get_logger
 from eneo.roles.permissions import Permission, validate_permissions
 from eneo.tenants.tenant_service import TenantService
+from eneo.users.identity_binding_repo import (
+    IdentityBindingRepository,
+    IdentityMigrationWindow,
+)
 from eneo.users.user import (
     PaginationParams,
     SearchFilters,
@@ -29,12 +46,16 @@ from eneo.users.user import (
     UserAdminView,
     UserInDB,
     UserState,
+    UserUpdate,
     UserUpdatePublic,
 )
 from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
 
 logger = get_logger(__name__)
+
+# The users table's unique index on the address of live accounts.
+_ACTIVE_EMAIL_INDEX = "idx_unique_active_user_email"
 
 _EMAIL: TypeAdapter[str] = TypeAdapter(EmailStr)
 
@@ -46,6 +67,8 @@ class AdminService:
         user_repo: UsersRepository,
         tenant_service: TenantService,
         user_service: UserService,
+        identity_binding_repo: IdentityBindingRepository,
+        audit_service: AuditService,
         api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
     ):
         super().__init__()
@@ -53,6 +76,8 @@ class AdminService:
         self.user_repo = user_repo
         self.tenant_service = tenant_service
         self.user_service = user_service
+        self.identity_binding_repo = identity_binding_repo
+        self.audit_service = audit_service
         self.api_key_scope_revoker = api_key_scope_revoker
 
     @validate_permissions(Permission.ADMIN)
@@ -324,8 +349,13 @@ class AdminService:
         return result
 
     @validate_permissions(Permission.ADMIN)
-    async def reactivate_tenant_user(self, username: str) -> UserInDB:
-        """Reactivate user from any state (INACTIVE or DELETED)"""
+    async def reactivate_tenant_user(self, username: str) -> tuple[UserState, UserInDB]:
+        """Reactivate a user from any state (INACTIVE or DELETED).
+
+        Returns the state the user had and the reactivated user. A removed
+        account's deletion timestamp is cleared in the same update: sign-in
+        skips removed accounts, so a reactivated one must not stay one.
+        """
         logger.info(
             f"Admin user {self.user.username} reactivating user {username} in tenant {self.user.tenant_id}"
         )
@@ -349,19 +379,33 @@ class AdminService:
 
         # Reactivate user: set to ACTIVE and clear deleted_at if present
         if user_in_db.deleted_at is not None:
+            # One live account per address, in any organisation; another may
+            # have taken a removed account's address since. This check ignores
+            # case, as account creation does; the unique index below does not.
+            if await self.user_repo.get_users_by_email(user_in_db.email, limit=1):
+                raise UniqueUserException("That email is already taken.")
             # Clear deletion timestamp when reactivating from DELETED state
             logger.info(
                 f"Clearing deletion timestamp for user {username} during reactivation"
             )
 
-        result = await self.user_service.update_user(
-            user_in_db.id, UserUpdatePublic(state=UserState.ACTIVE)
-        )
+        try:
+            result = await self.user_repo.update(
+                UserUpdate(id=user_in_db.id, state=UserState.ACTIVE, deleted_at=None)
+            )
+        except IntegrityError as exc:
+            # Another account took the address after the check; the request's
+            # transaction rolls back.
+            if _ACTIVE_EMAIL_INDEX not in str(exc.orig):
+                raise
+            raise UniqueUserException("That email is already taken.") from exc
+        if result is None:
+            raise NotFoundException(f"User '{username}' not found in your tenant")
 
         logger.info(
             f"Successfully reactivated user {username} in tenant {self.user.tenant_id}"
         )
-        return result
+        return user_in_db.state, result
 
     @validate_permissions(Permission.ADMIN)
     async def get_inactive_tenant_users(self) -> list[UserStateListItem]:
@@ -479,3 +523,140 @@ class AdminService:
         # The decorator handles the actual validation
         # This method just serves as a permission gate
         return True
+
+    # Sign-in identities. An account bound to a provider identity no longer
+    # takes another one by email; these let an admin re-open that on purpose,
+    # for one account or for every account bound under one provider pair.
+
+    async def _account_identity(self, account: UserInDB) -> AccountIdentity:
+        until = await self.identity_binding_repo.rebinding_until(account.id)
+        return AccountIdentity(
+            bindings=[
+                IdentityBindingPublic.model_validate(binding, from_attributes=True)
+                for binding in await self.identity_binding_repo.of_user(account.id)
+            ],
+            rebinding_allowed_until=(
+                until if until and until > datetime.now(timezone.utc) else None
+            ),
+        )
+
+    async def _tenant_account(self, user_id: UUID) -> UserInDB:
+        """The caller's tenant's account with this id, unless it is deleted.
+
+        By id, not by username: usernames are not unique, so a username can
+        name more than one account. Another tenant's account is not found.
+        """
+        account = await self.user_repo.get_user_by_id_and_tenant_id(
+            user_id, self.user.tenant_id
+        )
+        if account is None:
+            raise NotFoundException("User not found in your tenant")
+        return account
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_account_identity(self, user_id: UUID) -> AccountIdentity:
+        return await self._account_identity(await self._tenant_account(user_id))
+
+    @validate_permissions(Permission.ADMIN)
+    async def set_identity_rebinding(
+        self, user_id: UUID, allowed_until: datetime | None
+    ) -> AccountIdentity:
+        """Open the account's single-use allowance to bind a new identity by
+        email until ``allowed_until``, or withdraw it with None."""
+        account = await self._tenant_account(user_id)
+        before = await self.identity_binding_repo.rebinding_until(account.id)
+        await self.identity_binding_repo.set_rebinding(account.id, allowed_until)
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.IDENTITY_REBINDING_UPDATED,
+            entity_type=EntityType.USER,
+            entity_id=account.id,
+            description=(
+                f"Admin allowed '{account.username}' to bind a new sign-in "
+                f"identity until {allowed_until.isoformat()}"
+                if allowed_until
+                else f"Admin withdrew the sign-in re-binding of '{account.username}'"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=account,
+                changes={
+                    "rebinding_allowed_until": {
+                        "old": before.isoformat() if before else None,
+                        "new": allowed_until.isoformat() if allowed_until else None,
+                    }
+                },
+            ),
+        )
+        return await self._account_identity(account)
+
+    @validate_permissions(Permission.ADMIN)
+    async def list_identity_migration_windows(
+        self,
+    ) -> list[IdentityMigrationWindowPublic]:
+        windows = await self.identity_binding_repo.list_open_windows(
+            self.user.tenant_id
+        )
+        return [_window_public(window) for window in windows]
+
+    @validate_permissions(Permission.ADMIN)
+    async def open_identity_migration_window(
+        self, window: IdentityMigrationWindowCreate
+    ) -> IdentityMigrationWindowPublic:
+        opened = await self.identity_binding_repo.add_window(
+            tenant_id=self.user.tenant_id,
+            from_issuer=window.from_issuer,
+            from_audience=window.from_audience,
+            to_issuer=window.to_issuer,
+            to_audience=window.to_audience,
+            closes_at=window.closes_at,
+            created_by=self.user.id,
+        )
+        await self._audit_window(opened, "opened")
+        return _window_public(opened)
+
+    @validate_permissions(Permission.ADMIN)
+    async def close_identity_migration_window(
+        self, window_id: UUID
+    ) -> IdentityMigrationWindowPublic:
+        closed = await self.identity_binding_repo.close_window(
+            tenant_id=self.user.tenant_id, window_id=window_id
+        )
+        if closed is None:
+            raise NotFoundException("No open identity migration window with this id")
+        await self._audit_window(closed, "closed")
+        return _window_public(closed)
+
+    async def _audit_window(
+        self, window: IdentityMigrationWindow, change: Literal["opened", "closed"]
+    ) -> None:
+        await self.audit_service.log(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.IDENTITY_MIGRATION_WINDOW_UPDATED,
+            entity_type=EntityType.FEDERATION_CONFIG,
+            entity_id=self.user.tenant_id,
+            description=(
+                f"Admin {change} an identity migration window from "
+                f"{window.from_issuer} ({window.from_audience}) to "
+                f"{window.to_issuer} ({window.to_audience})"
+            ),
+            metadata=AuditMetadata.standard(
+                actor=self.user,
+                target=window,
+                extra={
+                    "change": change,
+                    "window_id": str(window.id),
+                    "from_issuer": window.from_issuer,
+                    "from_audience": window.from_audience,
+                    "to_issuer": window.to_issuer,
+                    "to_audience": window.to_audience,
+                    "closes_at": window.closes_at.isoformat(),
+                },
+            ),
+        )
+
+
+def _window_public(window: IdentityMigrationWindow) -> IdentityMigrationWindowPublic:
+    return IdentityMigrationWindowPublic.model_validate(window, from_attributes=True)

@@ -19,7 +19,6 @@ All deployment specific settings are configured via runtime environment variable
 | `JWT_SECRET`          | Secret to use when signing JWT tokens on the frontend, used for logging in users.                                     |
 | `ENEO_BACKEND_URL`  | The base url of your Eneo backend instance.                                                                         |
 | `ENEO_BACKEND_SERVER_URL` | _Optional._ The url of the Eneo backend server, for server-side rendering. Useful when running the backend with the frontend. Defaults to `ENEO_BACKEND_URL` |
-| `MOBILITY_GUARD_AUTH` | _Optional. Required for OIDC/MobilityGuard._ `Authorize` endpoint for the MobilityGuard flow, more info further down. |
 
 ### Example config
 
@@ -28,7 +27,6 @@ Your environment could look something like this:
 ```
 JWT_SECRET="abc123"
 ENEO_BACKEND_URL="https://backend.example.com:1234"
-MOBILITY_GUARD_AUTH="https://example.com/mg-local/eneo/oauth2/authorize"
 ```
 
 ## Local Development
@@ -45,11 +43,11 @@ bun run dev
 
 If you want to work on the client and the UI library at the same time as developing the Web GUI, you should run `bun -w run dev` to run all dev scripts simultaneously.
 
-## OpenId Connect / MobilityGuard
+## Single sign-on (OpenID Connect)
 
-We do support logging in through MobilityGuard. If the `MOBILITY_GUARD_AUTH` environment variable is set, a new login button will appear on the login screen that will handle the MobilityGuard flow. If the variable does not exist this feature is not enabled. For MobilityGuard to work, a user with the exact matching username and the `"created_with": "mobility_guard"` property needs to exist in the eneo user table, otherwise the login will fail. Depending on the setup it is also necessary that the mobilityguard operator whitelists our deployment domains as redirect URIs.
+Sign-in through an identity provider is configured in the backend, with the `OIDC_*` variables or per organisation; the web app needs no variables of its own. The login page offers it when the backend reports a configuration. See the [OIDC guide](https://docs.eneo.ai/guides/oidc-federation).
 
-The callback URI will always be in the format `https://<deployment>.<tld>/login/callback`, e.g. `https://app.example.com/login/callback`
+Register the callback URI `https://<deployment>.<tld>/login/callback` with the identity provider, e.g. `https://app.example.com/login/callback`.
 
 ## Formatting
 

@@ -8,6 +8,7 @@ from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
+from eneo.analysis import analysis_service as service_module
 from eneo.analysis.analysis import (
     AnalysisJobStatus,
     AnalysisProcessingMode,
@@ -21,6 +22,7 @@ from eneo.analysis.analysis_service import (
     NO_QUESTIONS_ANSWER,
     AnalysisService,
 )
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -28,7 +30,9 @@ from eneo.main.exceptions import (
 )
 from eneo.questions.questions_repo import QuestionSessionPartner
 from eneo.roles.permissions import Permission
+from eneo.sessions.sessions_repo import SessionOwnership
 from tests.fixtures import TEST_UUID
+from tests.log_capture import chained_error, emitted, logged_errors
 
 
 def _make_completion_model() -> CompletionModel:
@@ -105,6 +109,36 @@ def analysis_service(user, mock_space_service):
         session_service=AsyncMock(),
         completion_service=AsyncMock(),
     )
+
+
+@pytest.mark.parametrize("has_access", [True, False])
+@pytest.mark.parametrize("removed_copy", [True, False])
+async def test_unreadable_insight_session_is_explained_only_after_authorization(
+    service: AnalysisService,
+    mock_actor: SpaceActor,
+    has_access: bool,
+    removed_copy: bool,
+):
+    service.session_repo.get_ownership.return_value = SessionOwnership(
+        user_id=TEST_UUID,
+        api_key_id=None,
+        widget_id=None,
+        visitor_id=None,
+        assistant_id=uuid4(),
+    )
+    service.session_repo.get.return_value = None
+    service.session_repo.is_removed_copy.return_value = removed_copy
+    mock_actor.can_access_insight_assistant.return_value = has_access
+
+    expected_error = (
+        UnauthorizedException
+        if not has_access
+        else DerivedSourceRemovedError
+        if removed_copy
+        else NotFoundException
+    )
+    with pytest.raises(expected_error):
+        await service.get_insight_session(uuid4())
 
 
 async def test_insight_job_poll_rechecks_access_after_revocation(
@@ -824,6 +858,27 @@ async def test_chunk_partial_failure(service: AnalysisService):
 
     assert len(summaries) >= 1
     assert all("Summary" in s for s in summaries)
+
+
+async def test_a_failed_chunk_logs_the_kind_of_error_not_its_text(
+    service: AnalysisService,
+):
+    """A provider's error can echo the questions of the chunk. Mutant: the
+    failed chunk is logged with the error's message."""
+
+    async def failing_response(*, question, completion_service, prompt, stream):
+        raise chained_error()
+
+    model = AsyncMock()
+    model.get_response = failing_response
+
+    with emitted(service_module.logger) as records:
+        summaries = await service._summarize_question_chunks(
+            model=model, questions=["Question"], days=30
+        )
+
+    assert summaries == []
+    assert logged_errors(records), [record.getMessage() for record in records]
 
 
 @pytest.mark.parametrize("allowed", [True, False])

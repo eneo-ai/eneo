@@ -80,6 +80,22 @@ describe("admin layout navigation", () => {
     }
   );
 
+  test("lists the sign-in settings last among the access pages", async () => {
+    await page.viewport(1280, 800);
+    render(AdminLayout);
+
+    const signIn = page.getByRole("link", { name: "federation_admin_nav" });
+    await expect.element(signIn).toHaveAttribute("href", "/admin/federation");
+    const accessLinks = [...signIn.element().closest("ul")!.querySelectorAll("a")];
+    expect(accessLinks.map((link) => link.textContent?.trim())).toEqual([
+      "users",
+      "user_groups",
+      "roles",
+      "api_keys",
+      "federation_admin_nav"
+    ]);
+  });
+
   test("opens the mobile drawer and restores focus to its localized trigger", async () => {
     render(AdminLayout);
 

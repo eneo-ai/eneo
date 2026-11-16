@@ -77,8 +77,6 @@ class ServiceRunner:
             model_kwargs=self.service.completion_model_kwargs,
         )
 
-        logger.debug(f"Service response: '{ai_response.completion.text}'")  # type: ignore[union-attr]
-
         try:
             output = self.output_parser.parse(ai_response.completion.text)  # type: ignore[union-attr]
         except pydantic.ValidationError as e:

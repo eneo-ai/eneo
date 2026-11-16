@@ -39,7 +39,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.database.database import AsyncSession
 from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import (
     NOT_PROVIDED,
     CursorPaginatedResponse,
@@ -458,13 +458,14 @@ def _build_assistant_update_changes(
 
         def extract_item_info(
             item: object, assistant_space_id: UUID | None
-        ) -> tuple[str, str, str | None]:
+        ) -> tuple[str, str | None, str | None]:
             """Extract ID, name, and scope from an item, handling attachments specially."""
             item_id = str(getattr(item, "id", item))
 
-            # Special handling for FileAttachment objects
+            # A file is recorded by its id alone: retention removes its name.
+            item_name: str | None
             if is_attachment:
-                item_name = str(getattr(item, "name", "unknown_file"))
+                item_name = None
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
@@ -494,10 +495,9 @@ def _build_assistant_update_changes(
         added: list[dict[str, str | None]] = []
         for k in new_items:
             if k not in old_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": new_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if new_items[k]["name"] is not None:
+                    item_data["name"] = new_items[k]["name"]
                 if new_items[k]["scope"]:
                     item_data["scope"] = new_items[k]["scope"]
                 added.append(item_data)
@@ -505,10 +505,9 @@ def _build_assistant_update_changes(
         removed: list[dict[str, str | None]] = []
         for k in old_items:
             if k not in new_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": old_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if old_items[k]["name"] is not None:
+                    item_data["name"] = old_items[k]["name"]
                 if old_items[k]["scope"]:
                     item_data["scope"] = old_items[k]["scope"]
                 removed.append(item_data)
@@ -556,7 +555,6 @@ def _build_assistant_update_changes(
     attachment_modes_changed: list[dict[str, str | None]] = [
         {
             "id": str(file.id),
-            "name": file.name,
             "mode": (
                 "inline"
                 if updated_assistant.attachment_inline_text.get(file.id, True)
@@ -1084,7 +1082,7 @@ async def get_assistant_sessions(
 @router.get(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1101,7 +1099,13 @@ async def get_assistant_session(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    try:
+        session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    except NotFoundException:
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
+        await session_service.refuse_removed_copy(session_id)
+        raise
     return to_session_public(session)
 
 
@@ -1220,7 +1224,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback on a session.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1241,9 +1245,15 @@ async def leave_feedback(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.leave_feedback(
-        session_id=session_id, assistant_id=id, feedback=feedback
-    )
+    try:
+        session = await session_service.leave_feedback(
+            session_id=session_id, assistant_id=id, feedback=feedback
+        )
+    except NotFoundException:
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
+        await session_service.refuse_removed_copy(session_id)
+        raise
 
     return to_session_public(session)
 

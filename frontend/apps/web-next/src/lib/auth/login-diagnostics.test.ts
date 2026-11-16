@@ -53,6 +53,21 @@ describe("login diagnostics", () => {
     );
   });
 
+  it("maps the backend's typed sign-in refusals", () => {
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_login_unavailable" })).toBe(
+      "oidc_error_login_unavailable"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_response_not_verified" })).toBe(
+      "oidc_error_unauthorized"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_transaction_invalid" })).toBe(
+      "oidc_error_attempt_rejected"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "identity_conflict" })).toBe(
+      "oidc_error_identity_conflict"
+    );
+  });
+
   it("builds bounded diagnostic redirect URLs", () => {
     const url = buildLoginDiagnosticsUrl("/login/failed", "https://app.example", {
       message: "oidc_callback_failed",

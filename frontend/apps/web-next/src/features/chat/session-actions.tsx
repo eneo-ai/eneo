@@ -212,7 +212,7 @@ export function DeleteSessionDialog({
       open={session !== null}
       onOpenChange={(open) => !open && onCancel()}
       title={t("chat_delete_conversation")}
-      description={session?.name ?? ""}
+      description={session?.name || t("chat_history_untitled")}
       confirmLabel={t("confirm_deletion")}
       pending={pending}
       onConfirm={onConfirm}

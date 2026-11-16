@@ -36,7 +36,8 @@ def to_question(question: Question, service: Service, *, show_pricing: bool = Tr
     try:
         output = json.loads(question.answer)
     except json.JSONDecodeError:
-        logger.warning("%s is not valid JSON. Returning raw", question.answer)
+        # The answer is a run's content, which retention removes: name the run.
+        logger.warning("Service run %s answer is not valid JSON", question.id)
         output = question.answer
 
     assert service.completion_model is not None, "Service must have a completion model"

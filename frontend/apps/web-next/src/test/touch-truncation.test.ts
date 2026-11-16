@@ -1,16 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-const srcDir = path.resolve(import.meta.dirname, "..");
-
-function sources(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) return sources(file);
-    return /\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name) ? [file] : [];
-  });
-}
+import { appSources } from "./app-sources";
 
 /**
  * A name cut off with an ellipsis whose full text is only in a `title` attribute: a tooltip a
@@ -20,13 +9,13 @@ function sources(directory: string): string[] {
 describe("truncated text with a title", () => {
   it("wraps on a touch screen", () => {
     const faults: string[] = [];
-    for (const file of sources(srcDir)) {
-      const lines = readFileSync(file, "utf8").split("\n");
-      lines.forEach((line, index) => {
+    for (const { file, text } of appSources) {
+      if (!file.endsWith(".tsx")) continue;
+      text.split("\n").forEach((line, index) => {
         const truncated = /className="[^"]*\btruncate\b[^"]*"/.exec(line)?.[0];
         if (!truncated || !/\btitle=\{/.test(line)) return;
         if (!truncated.includes("pointer-coarse:whitespace-normal"))
-          faults.push(`${path.relative(srcDir, file)}:${index + 1}`);
+          faults.push(`${file}:${index + 1}`);
       });
     }
     expect(faults).toEqual([]);

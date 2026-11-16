@@ -83,24 +83,24 @@ async def extract_in_process(
                 output = bytearray()
                 while block := await process.stdout.read(64 * 1024):
                     if len(output) + len(block) > limits.max_output_bytes:
-                        raise ExtractionLimitError(filename, "text output limit")
+                        raise ExtractionLimitError("text output limit")
                     output.extend(block)
                 status = await process.wait()
                 if status == ExtractionExit.PDF_PAGE_LIMIT:
-                    raise PdfPageLimitError(filename, limits.max_pdf_pages)
+                    raise PdfPageLimitError(limits.max_pdf_pages)
                 if status in (ExtractionExit.LIMIT, -signal.SIGKILL, -signal.SIGXCPU):
-                    raise ExtractionLimitError(filename, "document resource limit")
+                    raise ExtractionLimitError("document resource limit")
                 if status == ExtractionExit.ENCRYPTED:
-                    raise EncryptedFileError(filename)
+                    raise EncryptedFileError()
                 if status == ExtractionExit.CORRUPT:
-                    raise CorruptFileError(filename)
+                    raise CorruptFileError()
                 if status == ExtractionExit.UNSUPPORTED:
-                    raise UnsupportedFormatError(filename, mimetype or filepath.suffix)
+                    raise UnsupportedFormatError(mimetype or "unknown")
                 if status != ExtractionExit.SUCCESS:
-                    raise ExtractionError(f"Extraction failed for '{filename}'")
+                    raise ExtractionError("Extraction failed")
                 return output.decode("utf-8")
         except TimeoutError as error:
-            raise ExtractionLimitError(filename, "extraction deadline") from error
+            raise ExtractionLimitError("extraction deadline") from error
         finally:
             # Shield the launch and reap even when the owning crawl or upload
             # is cancelled. No acknowledgement or input-file cleanup precedes this.

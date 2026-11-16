@@ -118,3 +118,70 @@ it("refreshes storage capabilities and dependent data after a connection change 
   ]);
   expect(api.PUT).not.toHaveBeenCalled();
 });
+
+const MIB = 1024 * 1024;
+const limitsWith = (
+  target: "postgres_inline" | "object_store",
+  ceiling: number,
+  configured: number
+): Schema<"DeploymentPolicyPublic">["limits"] =>
+  (
+    ["session_file", "session_image", "session_audio", "knowledge_file", "knowledge_audio"] as const
+  ).map((use_case) => ({
+    use_case,
+    configured_bytes: configured,
+    effective_bytes: Math.min(configured, ceiling),
+    storage_target: target,
+    operator_ceiling_bytes: ceiling,
+    constraining_source: ceiling < configured ? "operator_ceiling" : "admin_policy"
+  }));
+
+const databaseCeiling =
+  "Filer som lagras i databasen har också en lagringsgräns: det mesta PostgreSQL rymmer per fil, eller mindre om den föråldrade miljövariabeln OBJECT_CONTENT_INLINE_MAXIMUM_BYTES fortfarande är satt. Driften tar bort variabeln så att gränserna ovan gäller.";
+const databaseCost =
+  "Varje uppladdning läses in helt i minnet, och varje fil hamnar i databasens säkerhetskopia.";
+
+it("says the deprecated variable can hold the database storage limit below the policy", async () => {
+  // A set OBJECT_CONTENT_INLINE_MAXIMUM_BYTES of 10 MiB under a 300 MiB policy.
+  api.GET.mockResolvedValue({
+    data: { ...policy, limits: limitsWith("postgres_inline", 10 * MIB, 300 * MIB) },
+    response: new Response("{}")
+  });
+  renderInApp(<StorageAdminPage />, { appContext: testAppContext({ permissions: ["storage"] }) });
+
+  expect(await screen.findByText(databaseCeiling)).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Lagringsgränsen är 10 MB, lägre än några av gränserna ovan, så de uppladdningarna stoppas där."
+    )
+  ).toBeTruthy();
+  expect(screen.getByText(databaseCost)).toBeTruthy();
+});
+
+it("explains the database storage limit without a lower limit once the variable is gone", async () => {
+  api.GET.mockResolvedValue({
+    data: { ...policy, limits: limitsWith("postgres_inline", 536_870_399, 300 * MIB) },
+    response: new Response("{}")
+  });
+  renderInApp(<StorageAdminPage />, { appContext: testAppContext({ permissions: ["storage"] }) });
+
+  expect(await screen.findByText(databaseCeiling)).toBeTruthy();
+  expect(screen.getByText(databaseCost)).toBeTruthy();
+  expect(screen.queryByText(/^Lagringsgränsen är/)).toBeNull();
+});
+
+it("keeps the database storage notes away from object storage", async () => {
+  api.GET.mockResolvedValue({
+    data: {
+      ...policy,
+      policy: { ...policy.policy, new_write_storage_target: "object_store" },
+      limits: limitsWith("object_store", 83_886_080_000, 300 * MIB)
+    },
+    response: new Response("{}")
+  });
+  renderInApp(<StorageAdminPage />, { appContext: testAppContext({ permissions: ["storage"] }) });
+
+  await screen.findByLabelText("Gräns för sessionsbild");
+  expect(screen.queryByText(databaseCeiling)).toBeNull();
+  expect(screen.queryByText(databaseCost)).toBeNull();
+});

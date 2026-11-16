@@ -544,6 +544,7 @@ describe("DesktopSideNav (admin)", () => {
     expect(hrefsIn("Anslutningar")).toEqual([
       "/admin/models",
       "/admin/integrations",
+      "/admin/federation",
       "/admin/tools",
       "/admin/api-keys"
     ]);

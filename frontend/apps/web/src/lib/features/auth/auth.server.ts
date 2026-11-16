@@ -1,6 +1,7 @@
 import { dev } from "$app/environment";
 import { getRequestEvent } from "$app/server";
 import { DEFAULT_LANDING_PAGE } from "$lib/core/constants";
+import { getBackendUrl } from "$lib/core/environment.server";
 import { type Cookies, type RequestEvent } from "@sveltejs/kit";
 
 export const EneoIdTokenCookie = "auth";
@@ -86,6 +87,50 @@ export const clearFrontendCookies = (event: RequestEvent) => {
   });
 };
 
+/** Longer than the backend's own 5 seconds to confirm the deletion, so a
+ * stalled connection cannot hold the logout: it counts as unconfirmed. */
+const SIGN_OUT_DEADLINE_MS = 10_000;
+
+/**
+ * End the Eneo session the `auth` cookie's token names, before its cookies
+ * are cleared, so a copy of the token stops working too. Returns false when
+ * the backend could not confirm it (503, unreachable, no answer within the
+ * deadline): the caller keeps the cookies, as the handle for a retry.
+ *
+ * Only a token Eneo issued for a session names one. Its claims are read
+ * without verification, only to choose this path; the backend verifies the
+ * token. Any other token (a provider's ID token may carry an OIDC `sid` of
+ * its own, a token issued before sessions) has nothing to end here.
+ */
+export async function endEneoSession(event: RequestEvent): Promise<boolean> {
+  const token = event.cookies.get(EneoIdTokenCookie);
+  if (!token || !namesEneoSession(await parseJwt(token))) return true;
+  try {
+    const response = await event.fetch(`${getBackendUrl()}/api/v1/users/logout/`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(SIGN_OUT_DEADLINE_MS)
+    });
+    if (!response.ok) console.error("Sign-out not confirmed. Status: %s", response.status);
+    return response.ok;
+  } catch {
+    console.error("Sign-out not confirmed: the backend did not answer");
+    return false;
+  }
+}
+
+/** The claims of an Eneo session token (`JWTCreds` with `sid`). */
+function namesEneoSession(claims: unknown): boolean {
+  if (typeof claims !== "object" || claims === null) return false;
+  const { token_version, user_id, credential_version, sid } = claims as Record<string, unknown>;
+  return (
+    token_version === 2 &&
+    typeof user_id === "string" &&
+    typeof credential_version === "number" &&
+    typeof sid === "string"
+  );
+}
+
 // -------- HELPER functions ---------------------------------------------------------------------------
 /** Will try to parse a JWT, returns an empty object on failure */
 export async function parseJwt(token: string) {
@@ -132,7 +177,7 @@ async function generateCodeChallenge(verifier: string) {
 }
 
 // Helpers for state shared by every login provider.
-type LoginMethod = "zitadel" | "mobilityguard" | "oidc";
+type LoginMethod = "zitadel" | "oidc";
 
 export type LoginStateParam = {
   loginMethod: LoginMethod;
@@ -230,28 +275,41 @@ export function resolveOptionalLoginStateDestination(state: string | null): stri
  * Bind generic OIDC authentication to the browser that started it, whether or
  * not it has a post-login destination. Unsafe or oversized destinations are
  * discarded without weakening the mandatory attempt binding.
+ *
+ * The cookie also keeps the binding verifier, whose S256 hash the backend
+ * stored at initiate. The attempt id travels in the state and is readable by
+ * anyone who sees the callback URL; the verifier never leaves this server and
+ * the browser's HttpOnly cookie, so a leaked code and state cannot be redeemed
+ * elsewhere.
  */
 type OidcLoginAttempt = {
   attemptId: string;
   destination: string | null;
   expiresAt: number;
+  bindingVerifier: string;
 };
 
 export type OidcLoginAttemptResult =
-  | { status: "matched"; destination: string | null }
+  | { status: "matched"; destination: string | null; bindingVerifier: string }
   | { status: "missing" | "invalid" | "expired" | "mismatch" };
 
 const OIDC_ATTEMPT_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// The verifier format of RFC 7636 4.1, which the backend also enforces.
+const OIDC_BINDING_VERIFIER_PATTERN = /^[A-Za-z0-9._~-]{43,128}$/;
 
 export function startOidcLoginAttempt(
   cookies: Cookies,
   destination: unknown,
   attemptId: string,
-  expiresAt: number
+  expiresAt: number,
+  bindingVerifier: string
 ): void {
   if (!OIDC_ATTEMPT_ID_PATTERN.test(attemptId)) {
     throw new Error("Invalid OIDC login attempt ID");
+  }
+  if (!OIDC_BINDING_VERIFIER_PATTERN.test(bindingVerifier)) {
+    throw new Error("Invalid OIDC binding verifier");
   }
   const maxAge = expiresAt - Math.floor(Date.now() / 1000);
   if (!Number.isSafeInteger(expiresAt) || maxAge <= 0) {
@@ -261,7 +319,8 @@ export function startOidcLoginAttempt(
   const attempt: OidcLoginAttempt = {
     attemptId,
     destination: resolveValidatedLoginDestination(destination),
-    expiresAt
+    expiresAt,
+    bindingVerifier
   };
 
   try {
@@ -315,7 +374,10 @@ export async function consumeOidcLoginAttempt(
         resolveValidatedLoginDestination(candidate.destination) === null) ||
       !("expiresAt" in candidate) ||
       typeof candidate.expiresAt !== "number" ||
-      !Number.isSafeInteger(candidate.expiresAt)
+      !Number.isSafeInteger(candidate.expiresAt) ||
+      !("bindingVerifier" in candidate) ||
+      typeof candidate.bindingVerifier !== "string" ||
+      !OIDC_BINDING_VERIFIER_PATTERN.test(candidate.bindingVerifier)
     ) {
       clearOidcLoginAttempt(cookies);
       return { status: "invalid" };
@@ -323,7 +385,8 @@ export async function consumeOidcLoginAttempt(
     attempt = {
       attemptId: candidate.attemptId,
       destination: resolveValidatedLoginDestination(candidate.destination),
-      expiresAt: candidate.expiresAt
+      expiresAt: candidate.expiresAt,
+      bindingVerifier: candidate.bindingVerifier
     };
   } catch {
     clearOidcLoginAttempt(cookies);
@@ -351,7 +414,11 @@ export async function consumeOidcLoginAttempt(
   }
 
   clearOidcLoginAttempt(cookies);
-  return { status: "matched", destination: attempt.destination };
+  return {
+    status: "matched",
+    destination: attempt.destination,
+    bindingVerifier: attempt.bindingVerifier
+  };
 }
 
 export function clearOidcLoginAttempt(cookies: Cookies): void {

@@ -3,7 +3,6 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.authentication.auth_models import AccessToken
 from eneo.main.exceptions import AuthenticationException, UniqueUserException
 from eneo.main.models import ModelId
 from eneo.settings.settings import SettingsUpsert
@@ -52,19 +51,15 @@ async def test_login_user_fails_if_hashed_passwords_do_not_match(service: UserSe
         )
 
 
-async def test_login_successful_returns_access_token(service: UserService):
+async def test_login_successful_returns_the_user(service: UserService):
     service.auth_service.verify_password = MagicMock()
     service.auth_service.verify_password.return_value = True
-    service.auth_service.create_access_token_for_user = MagicMock()
-    service.auth_service.create_access_token_for_user.return_value = (
-        "bingobongo you have access"
-    )
 
-    access_token = await service.login(email="realuser@indatabase.com", password="1234")
+    user = await service.login(email="realuser@indatabase.com", password="1234")
 
-    assert access_token == AccessToken(
-        access_token="bingobongo you have access", token_type="bearer"
-    )
+    # The route starts the user's session; login itself mints no token.
+    assert user is service.repo.get_user_by_email.return_value
+    service.auth_service.create_access_token_for_user.assert_not_called()
 
 
 async def test_register_user_fails_if_email_is_taken(service: UserService):

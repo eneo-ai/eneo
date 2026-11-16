@@ -159,11 +159,7 @@ class FileProtocol:
                 # would stall every request and stream on this event loop.
                 processed = await _IMAGE_DECODER.run(
                     lambda: downscale_image(
-                        self.image_extractor.extract(
-                            filepath,
-                            media_type,
-                            upload_file.filename,
-                        ),
+                        self.image_extractor.extract(filepath, media_type),
                         media_type,
                     ),
                 )

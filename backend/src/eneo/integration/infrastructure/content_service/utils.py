@@ -6,6 +6,7 @@ deadline limits (``eneo.files.bounded_extraction``). Skip reasons and their
 codes are owned by ``eneo.integration.domain.skip_reasons``.
 """
 
+import logging
 import tempfile
 from dataclasses import dataclass
 from logging import getLogger
@@ -38,6 +39,8 @@ from eneo.integration.domain.skip_reasons import (
     unsupported_type_reason,
 )
 from eneo.integration.infrastructure.content_service.types import SharePointItem
+from eneo.main import process_scratch
+from eneo.observability.error_log import log_error
 
 logger = getLogger(__name__)
 
@@ -388,7 +391,9 @@ _MIME_BY_KIND: dict[str, str] = {
 async def _parse_in_sandbox(
     kind: str, payload: bytes, filename: str, limits: FileExtractionLimits
 ) -> str:
-    with tempfile.TemporaryDirectory(prefix="sharepoint-extract-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix="sharepoint-extract-", dir=process_scratch.directory()
+    ) as tmp:
         # Keep the extension so parsers see the same name shape as uploads.
         path = Path(tmp) / f"download{_extension(filename)}"
         path.write_bytes(payload)
@@ -468,7 +473,13 @@ async def extract_sharepoint_content(
         except ExtractionError as e:
             return ExtractionResult.error(e.message, content_type)
         except Exception as e:
-            logger.error(f"Unexpected extraction error for '{filename}': {e}")
+            log_error(
+                logger,
+                logging.ERROR,
+                "Unexpected extraction error for '%s'",
+                filename,
+                error=e,
+            )
             return ExtractionResult.error(
                 f"{type(e).__name__} while extracting {kind}", content_type
             )

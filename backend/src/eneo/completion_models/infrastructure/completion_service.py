@@ -19,6 +19,7 @@ from eneo.assistants.delegation import current_assistant_delegation
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS
 from eneo.authentication.signed_urls import build_signed_original_download_url
 from eneo.completion_models.domain.execution_budget import current_execution_budget
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
@@ -340,9 +341,7 @@ class CompletionService:
                 action=ActionType.FILE_SIGNED_URL_MINTED,
                 entity_type=EntityType.FILE,
                 entity_id=file.id,
-                description=(
-                    f"Minted signed URL for file '{file.name}' for LLM/MCP context"
-                ),
+                description=FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED],
                 metadata=AuditMetadata.standard(
                     actor=self.user,
                     target=file,

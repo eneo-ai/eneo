@@ -69,7 +69,6 @@ class AppRunService:
                 id=app_run_in_db.id,
                 user_id=self.user.id,
                 file_ids=file_ids,
-                text=text,
                 app_id=app.id,
             ),
         )
@@ -111,15 +110,15 @@ class AppRunService:
 
         await self.repo.delete(id)
 
-    async def run_app(
-        self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID], text: str | None
-    ):
+    async def run_app(self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID]):
         app_run = await self.get_app_run(app_run_id)
 
+        # The prompt comes from the stored run, not the job payload, so the
+        # job queue never holds a copy of it.
         execution: AppExecutionResult = await self.app_service.run_app(
             app_id,
             file_ids=file_ids,
-            text=text,
+            text=app_run.input_text,
             skill_provenance=app_run.skill_provenance,
         )
         response = execution.response

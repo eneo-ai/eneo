@@ -93,3 +93,44 @@ def test_main_lists_and_enqueues(
     assert run_cron.main(["cron:crawl_all_websites"]) == 0
     assert enqueued == registry
     assert "job-2" in capsys.readouterr().out
+
+
+def test_until_complete_needs_a_cron_that_can_show_completion(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    registry = [RegisteredCron("crawl_all_websites", DEFAULT_QUEUE_NAME)]
+    monkeypatch.setattr(run_cron, "_load_registry", lambda: registry)
+    monkeypatch.setattr(run_cron, "enqueue_cron", AsyncMock())
+
+    assert run_cron.main(["--until-complete", "crawl_all_websites"]) == 2
+    assert "--until-complete" in capsys.readouterr().err
+    run_cron.enqueue_cron.assert_not_awaited()
+
+
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_until_complete_runs_the_cron_here_and_returns_its_verdict(
+    monkeypatch: pytest.MonkeyPatch, exit_code: int
+) -> None:
+    """Never through the queue: the readback runs with the workers stopped."""
+    registry = [RegisteredCron("run_retention", DEFAULT_QUEUE_NAME)]
+    monkeypatch.setattr(run_cron, "_load_registry", lambda: registry)
+    monkeypatch.setattr(run_cron, "enqueue_cron", AsyncMock())
+    ran: list[str] = []
+
+    def readback() -> int:
+        ran.append("run_retention")
+        return exit_code
+
+    monkeypatch.setattr(
+        run_cron, "_completion_checks", lambda: {"run_retention": readback}
+    )
+
+    assert run_cron.main(["--until-complete", "run_retention"]) == exit_code
+    assert ran == ["run_retention"]
+    run_cron.enqueue_cron.assert_not_awaited()
+
+
+def test_the_retention_cron_can_show_completion() -> None:
+    from eneo.main.retention_readback import main as retention_readback
+
+    assert run_cron._completion_checks()["run_retention"] is retention_readback

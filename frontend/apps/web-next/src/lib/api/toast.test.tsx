@@ -40,6 +40,15 @@ describe("toastApiError", () => {
     expect(screen.queryByText(/Trace/)).toBeNull();
   });
 
+  it("names the file an upload error is about, since the server does not", async () => {
+    toastApiError(new EneoApiError("The file is corrupted or malformed", { status: 400 }), t, {
+      fileName: "Rapport.pdf"
+    });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+
+    expect(screen.getByText("Rapport.pdf: The file is corrupted or malformed")).toBeTruthy();
+  });
+
   it("offers the way out the error names beside its message and references", async () => {
     const onClick = vi.fn();
     toastApiError(

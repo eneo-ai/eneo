@@ -26,6 +26,7 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
+    CredentialFacts,
 )
 from eneo.conversations.conversations_router import _validate_conversation_scope
 from eneo.main.request_context import clear_request_context, set_request_context
@@ -1047,7 +1048,7 @@ class TestScopeBodyDriven:
         self,
         space_by_assistant: Any = None,
         space_by_session: Any = None,
-        session_obj: Any = None,
+        owner: Any = None,
         session_not_found: bool = False,
     ) -> MagicMock:
         container = MagicMock()
@@ -1074,16 +1075,16 @@ class TestScopeBodyDriven:
         container.space_repo = MagicMock(return_value=space_repo)
 
         session_service = AsyncMock()
-        if session_obj is not None:
-            session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
+        if owner is not None:
+            session_service.get_session_ownership = AsyncMock(return_value=owner)
         elif session_not_found:
             from eneo.main.exceptions import NotFoundException
 
-            session_service.get_session_by_uuid = AsyncMock(
+            session_service.get_session_ownership = AsyncMock(
                 side_effect=NotFoundException()
             )
         else:
-            session_service.get_session_by_uuid = AsyncMock(
+            session_service.get_session_ownership = AsyncMock(
                 side_effect=Exception("not found")
             )
         container.session_service = MagicMock(return_value=session_service)
@@ -1212,11 +1213,9 @@ class TestScopeBodyDriven:
         """Assistant-scoped key + session_id of own assistant → pass."""
         assistant_id = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=assistant_id),
-        )
+        owner = SimpleNamespace(assistant_id=assistant_id)
         request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
-        container = self._make_container(session_obj=session_obj)
+        container = self._make_container(owner=owner)
 
         await _validate_conversation_scope(
             http_request=request,
@@ -1231,13 +1230,11 @@ class TestScopeBodyDriven:
         key_assistant = uuid4()
         other_assistant = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=other_assistant),
-        )
+        owner = SimpleNamespace(assistant_id=other_assistant)
         request = self._make_http_request(
             scope_type="assistant", scope_id=key_assistant
         )
-        container = self._make_container(session_obj=session_obj)
+        container = self._make_container(owner=owner)
 
         with pytest.raises(HTTPException) as exc_info:
             await _validate_conversation_scope(
@@ -1286,12 +1283,10 @@ class TestScopeBodyDriven:
         """Space-scoped key + session in own space → pass."""
         space_id = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=uuid4()),
-        )
+        owner = SimpleNamespace(assistant_id=uuid4())
         request = self._make_http_request(scope_type="space", scope_id=space_id)
         container = self._make_container(
-            session_obj=session_obj,
+            owner=owner,
             space_by_session=_make_space(space_id),
         )
 
@@ -1308,12 +1303,10 @@ class TestScopeBodyDriven:
         key_space = uuid4()
         other_space = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=uuid4()),
-        )
+        owner = SimpleNamespace(assistant_id=uuid4())
         request = self._make_http_request(scope_type="space", scope_id=key_space)
         container = self._make_container(
-            session_obj=session_obj,
+            owner=owner,
             space_by_session=_make_space(other_space),
         )
 
@@ -1721,8 +1714,9 @@ class TestFileDeleteScopeEnforcement:
         self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
-        _, returned_key = await svc._resolve_api_key("sk_test", request=request)
+        user, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
+        assert user.credential == CredentialFacts(kind="api_key")
         svc._log_api_key_auth_failed.assert_not_awaited()
 
     @pytest.mark.asyncio

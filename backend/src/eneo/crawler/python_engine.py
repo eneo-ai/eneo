@@ -61,6 +61,7 @@ from eneo.crawler.sitemap import (
     parse_sitemap,
     snapshot_sitemap,
 )
+from eneo.main import process_scratch
 from eneo.websites.domain.crawl_run import CrawlType
 
 logger = logging.getLogger(__name__)
@@ -82,8 +83,16 @@ _process_capacity_limit: int | None = None
 
 
 def cleanup_orphaned_crawl_directories(temp_root: Path | None = None) -> int:
-    """Remove abandoned workspaces from a temp root private to this worker."""
+    """Remove crawl workspaces that an earlier version left in the default
+    temporary directory.
 
+    Workspaces now live in the process's scratch directory, which goes with
+    the process. Earlier versions created them here, so a crash left the
+    downloaded files of a crawl behind; this removes them at the crawler
+    worker's start.
+    """
+    # ponytail: kept only for upgrades from versions that wrote workspaces
+    # here; remove once no supported upgrade starts from such a version.
     root = temp_root or Path(gettempdir())
     removed = 0
     for path in root.glob(f"{_CRAWL_TEMP_PREFIX}*"):
@@ -668,7 +677,9 @@ class PythonCrawlEngine:
                 termination_reason = "item_limit" if item_limit_reached else None
 
                 if request.download_files and file_links and remaining_file_items:
-                    files_dir = TemporaryDirectory(prefix=_CRAWL_TEMP_PREFIX)
+                    files_dir = TemporaryDirectory(
+                        prefix=_CRAWL_TEMP_PREFIX, dir=process_scratch.directory()
+                    )
                     try:
                         async for result in self._download_files(
                             session=session,

@@ -9,18 +9,16 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
-from httpx import ASGITransport, AsyncClient
+from httpx import AsyncClient
 from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.tenant_table import Tenants
@@ -325,6 +323,43 @@ async def test_an_edit_keeps_every_other_stored_setting(
     assert response.json()["revision"] != view["revision"]
 
 
+async def test_an_edit_to_a_moved_config_fetches_nothing(
+    client: AsyncClient,
+    admin_token: str,
+    configured: dict[str, str],
+    test_tenant,
+    oidc_mock,
+):
+    # A config moved from the OIDC_* settings stores no issuer or endpoints:
+    # sign-in reads them from discovery. Editing it needs no provider.
+    moved = {
+        key: value
+        for key, value in (await _stored(test_tenant.id)).items()
+        if key
+        not in (
+            "issuer",
+            "authorization_endpoint",
+            "token_endpoint",
+            "userinfo_endpoint",
+            "jwks_uri",
+            "token_endpoint_auth_method",
+            "token_endpoint_auth_methods_supported",
+        )
+    }
+    await _store(test_tenant.id, moved)
+    oidc_mock(discovery={configured["discovery_endpoint"]: ({}, 503)})
+    view = await _view(client, admin_token)
+
+    response = await client.patch(
+        URL,
+        json={"revision": view["revision"], "provider": "Org Entra"},
+        headers=_bearer(admin_token),
+    )
+
+    assert response.status_code == 200, response.text
+    assert await _stored(test_tenant.id) == {**moved, "provider": "Org Entra"}
+
+
 async def test_a_legacy_row_saves_with_the_revision_its_view_shows(
     client: AsyncClient, admin_token: str, configured: dict[str, str], test_tenant
 ):
@@ -493,6 +528,51 @@ async def test_changes_are_audited_even_with_auditing_switched_off(
     assert operator_row["changes"]["client_secret"] == {"replaced": True}
 
 
+async def test_an_admin_sets_the_subject_claim_audited_and_never_the_email_claim(
+    client: AsyncClient,
+    admin_token: str,
+    admin_user,
+    configured: dict[str, str],
+    test_tenant,
+):
+    headers = _bearer(admin_token)
+    view = await _view(client, admin_token)
+    assert view["subject_claim"] == "sub"
+    before = await _stored(test_tenant.id)
+
+    refused = await client.patch(
+        URL,
+        json={"revision": view["revision"], "subject_claim": "email"},
+        headers=headers,
+    )
+    assert refused.status_code == 422, refused.text
+    assert refused.json()["code"] == "federation_subject_claim_is_email_claim"
+    assert await _stored(test_tenant.id) == before
+
+    response = await client.patch(
+        URL,
+        json={"revision": view["revision"], "subject_claim": "oid"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["subject_claim"] == "oid"
+    stored = await _stored(test_tenant.id)
+    assert stored == {
+        **before,
+        "claims_mapping": {**before["claims_mapping"], "subject": "oid"},
+    }
+    rows = await _audit_rows(test_tenant.id)
+    assert len(rows) == 2  # the operator's PUT and this change
+    assert rows[-1]["actor_id"] == admin_user.id
+    assert rows[-1]["metadata"]["changes"] == {
+        "claims_mapping": {
+            "old": before["claims_mapping"],
+            "new": stored["claims_mapping"],
+        }
+    }
+
+
 async def test_the_secret_never_reaches_the_logs(
     client: AsyncClient, admin_token: str, configured: dict[str, str]
 ):
@@ -521,16 +601,6 @@ async def test_the_secret_never_reaches_the_logs(
     assert response.status_code == 200, response.text
     assert handler.lines
     assert not any(NEW_SECRET in line for line in handler.lines)
-
-
-@pytest.fixture
-async def raw_client(app) -> AsyncIterator[AsyncClient]:
-    """A client that receives the 500 instead of the server's exception."""
-    async with AsyncClient(
-        transport=ASGITransport(app=app, raise_app_exceptions=False),
-        base_url="http://test.local",
-    ) as client:
-        yield client
 
 
 async def test_a_failed_audit_write_keeps_the_old_settings(
@@ -617,43 +687,37 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
     client: AsyncClient,
     admin_token: str,
     super_admin_token: str,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     db_container,
     test_tenant,
-    monkeypatch,
 ):
     """Fake IdP: knows two clients; sign-in uses whatever the tenant stores."""
     idp = _idp("org")
-    codes = [f"code-{i}" for i in range(6)]
-    fake_idp = oidc_mock(
-        discovery=_discovery(idp),
-        tokens={
-            (idp["token_endpoint"], code): {"id_token": "id", "access_token": "at"}
-            for code in codes
-        },
-        clients={"operator-client": SECRET, "second-client": "second-secret"},
-    )
-    jwks_mock()
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda self, **kwargs: {"email": "test@example.com", "email_verified": True},
+    provider = fake_idp(
+        issuer=idp["issuer"],
+        client_id="operator-client",
+        client_secret=SECRET,
+        other_clients={"second-client": "second-secret"},
+        token_claims={"email": "test@example.com"},
     )
     await _register(client, super_admin_token, test_tenant.id, idp)
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def sign_in(code: str) -> int:
+    async def sign_in() -> int:
         initiated = await client.get(f"/api/v1/auth/initiate?tenant={slug}")
         assert initiated.status_code == 200, initiated.text
+        answer = provider.authorize(initiated.json()["authorization_url"])
         callback = await client.post(
             "/api/v1/auth/callback",
-            json={"code": code, "state": initiated.json()["state"]},
+            json={"code": answer.code, "state": initiated.json()["state"]},
         )
         return callback.status_code
 
-    assert await sign_in(codes[0]) == 200
+    def last_client() -> str:
+        return provider.token_requests[-1]["client_id"]
+
+    assert await sign_in() == 200
 
     # The admin points sign-in at another registered client and drops the
     # user's domain: the next sign-in uses both and refuses the user ...
@@ -669,8 +733,8 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
         headers=_bearer(admin_token),
     )
     assert switched.status_code == 200, switched.text
-    assert await sign_in(codes[1]) == 403
-    assert fake_idp()["token_clients"][-1] == "second-client"
+    assert await sign_in() == 403
+    assert last_client() == "second-client"
 
     # ... and admits them once the domain is back.
     readmitted = await client.patch(
@@ -682,8 +746,8 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
         headers=_bearer(admin_token),
     )
     assert readmitted.status_code == 200, readmitted.text
-    assert await sign_in(codes[2]) == 200
-    assert fake_idp()["token_clients"][-1] == "second-client"
+    assert await sign_in() == 200
+    assert last_client() == "second-client"
 
     # A wrong client ID locks every SSO user out ...
     broken = await client.patch(
@@ -692,7 +756,7 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
         headers=_bearer(admin_token),
     )
     assert broken.status_code == 200, broken.text
-    assert await sign_in(codes[3]) == 401
+    assert await sign_in() == 401
 
     # ... until one operator PATCH puts the registered client back.
     restored = await client.patch(
@@ -701,5 +765,5 @@ async def test_after_a_bad_admin_save_one_operator_patch_restores_sign_in(
         headers={"X-API-Key": super_admin_token},
     )
     assert restored.status_code == 200, restored.text
-    assert await sign_in(codes[4]) == 200
-    assert fake_idp()["token_clients"][-1] == "operator-client"
+    assert await sign_in() == 200
+    assert last_client() == "operator-client"

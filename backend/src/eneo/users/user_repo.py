@@ -138,6 +138,20 @@ class UsersRepository:
 
         return await self._get_model_from_query(query, with_deleted=with_deleted)
 
+    async def get_users_by_email(self, email: str, *, limit: int) -> list[UserInDB]:
+        """Live accounts whose address equals this one ignoring case.
+
+        The unique index is on the raw address, so case variants can coexist;
+        a caller that must name one account asks for two to see that.
+        """
+        query = (
+            sa.select(Users)
+            .where(sa.func.lower(Users.email) == sa.func.lower(email))
+            .order_by(Users.created_at)
+            .limit(limit)
+        )
+        return await self._get_models_from_query(query, include_system_user=True)
+
     async def has_removed_user_by_email(self, email: str, tenant_id: UUID) -> bool:
         """Keep removed tenant members from being recreated by JIT login.
 

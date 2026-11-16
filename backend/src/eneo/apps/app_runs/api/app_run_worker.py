@@ -7,7 +7,7 @@ from eneo.worker.worker import Worker
 worker = Worker()
 
 
-@worker.task(channel_type=ChannelType.APP_RUN_UPDATES)
+@worker.task(channel_type=ChannelType.APP_RUN_UPDATES, keep_result=0)
 async def run_app(
     params: AppRunParams, container: Container, worker_config: WorkerConfig
 ):
@@ -28,5 +28,4 @@ async def run_app(
         app_run_id=params.id,
         app_id=params.app_id,
         file_ids=params.file_ids,
-        text=params.text,
     )

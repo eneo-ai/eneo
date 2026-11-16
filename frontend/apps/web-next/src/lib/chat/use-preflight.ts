@@ -10,6 +10,11 @@ const DEBOUNCE_MS = 400;
 /**
  * Debounced token preflight for the context bar. Stale responses are
  * aborted on key changes and discarded if they arrive after cancellation.
+ *
+ * `estimate` is the current request's answer: null while it is on its way,
+ * after an error (a 429 among them) and when nothing is asked. `pending` is
+ * true only while a request for the current key is scheduled or out, so the
+ * bar can hold its place instead of disappearing and coming back.
  */
 export function usePreflight(request: {
   question: string;
@@ -17,7 +22,7 @@ export function usePreflight(request: {
   sessionId?: string | null;
   assistantId?: string | null;
   revision?: string | null;
-}): PreflightState {
+}): { estimate: PreflightState; pending: boolean } {
   const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
     null
   );
@@ -57,7 +62,10 @@ export function usePreflight(request: {
           setPreflight({ key, response });
         }
       } catch {
-        // Preflight is best-effort UX; stay silent on errors (incl. 429).
+        // Preflight is best-effort UX; stay silent on errors (incl. 429): no estimate.
+        if (!controller.signal.aborted && generation.current === current) {
+          setPreflight({ key, response: null });
+        }
       }
     }, DEBOUNCE_MS);
 
@@ -68,7 +76,11 @@ export function usePreflight(request: {
   }, [question, fileKey, sessionId, assistantId, key, shouldRequest]);
 
   // A new draft/partner/session must not expose the old estimate while waiting.
-  return shouldRequest && preflight?.key === key ? preflight.response : null;
+  const answered = preflight?.key === key;
+  return {
+    estimate: shouldRequest && answered ? preflight.response : null,
+    pending: shouldRequest && !answered
+  };
 }
 
 /**
