@@ -18,7 +18,7 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.data_retention.domain.retention import RetentionKeyset, RetentionOverdue
 from eneo.data_retention.infrastructure.conversation_retention_policy import (
-    conversation_retention_policy,
+    conversation_text_retention_days,
 )
 from eneo.data_retention.infrastructure.retention_sql import outside_widgets, uuid_in
 from eneo.database.tables.assistant_table import Assistants
@@ -32,9 +32,7 @@ _Row = TypeVar("_Row", bound=tuple[Any, ...])
 class ConversationNameRepository:
     def __init__(self, session: AsyncSession, *, now: datetime) -> None:
         self.session = session
-        days = conversation_retention_policy(
-            Assistants.data_retention_days.expression
-        ).days
+        days = conversation_text_retention_days()
         self.cutoff = now - sa.func.make_interval(0, 0, 0, days)
         self.days = days
 

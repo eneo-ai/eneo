@@ -135,7 +135,10 @@ history replaces the name with an empty one, which both apps show as Untitled, a
 removes the feedback text; the feedback vote stays. This holds whether or not the
 conversation's questions are still there, so a name chosen later is kept as long as
 its own time allows. With specialists, the name and feedback text follow the
-orchestrating assistant's period. A conversation from before the upgrade that recorded these
+orchestrating assistant's period. Former groups retain their shortest effective member
+period through the migrated specialist links; a shorter explicit period on the
+migrated assistant also applies. These are resolved from current settings,
+without restarting the age of old text. A conversation from before the upgrade that recorded these
 times counts from when it was created. After the upgrade, health can therefore read
 `degraded` until the step has cleared the older names and feedback texts: they are
 overdue, not a false alarm. The step `names_and_feedback` reports them as

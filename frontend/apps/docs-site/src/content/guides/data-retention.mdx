@@ -147,7 +147,7 @@ bytes still wait. See
 
 | Copy | How it follows |
 | --- | --- |
-| A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Once the time it was written is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. Conversations with specialists follow the orchestrating assistant's period |
+| A conversation's name (its first question, a generated title or a name someone chose) and its feedback text | Once the time it was written is older than the conversation's period, the name is emptied (both apps show Untitled) and the feedback text removed, even while questions remain. The thumbs up or down stays. Conversations with specialists follow the orchestrating assistant's period. Former group chats keep the shortest effective period of their former members (now specialists); an explicit shorter period on the migrated assistant also applies |
 | A conversation copied from another one | Unreadable as soon as a question it was copied from is removed, and then removed itself. See [Copies of removed conversations](/docs/audit-logging#copies-of-removed-conversations) |
 | Temporary files of an upload, a transcription, a crawl or a SharePoint import | Removed when the process stops; after a crash, by the next process on the same volume. See [Temporary files](/guides/deployment#temporary-files) |
 | The record of a failed job | Keeps a failure code, never the error text. Jobs recorded before the upgrade keep their text |

@@ -60,6 +60,8 @@ def upgrade() -> None:
                 FROM spaces_completion_models scm
                 JOIN completion_models cm ON cm.id = scm.completion_model_id
                 WHERE scm.space_id = g.space_id
+                  AND cm.is_enabled
+                  AND cm.deleted_at IS NULL
                   AND cm.supports_tool_calling
                   AND NOT cm.is_deprecated
                 ORDER BY cm.created_at
