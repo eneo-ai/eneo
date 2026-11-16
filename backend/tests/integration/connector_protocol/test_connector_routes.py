@@ -731,7 +731,8 @@ async def test_a_question_is_answered_as_the_person_and_can_be_followed_up(
     assert call["user_id"] == member.id
     assert call["stream"] is True
     assert call["require_tool_approval"] is False
-    assert call["offer_handback"] is True
+    # The assistant is not offered the hand_back tool: it answers, or says it cannot.
+    assert call["offer_handback"] is False
     assert set(call["disabled_capabilities"]) == {
         "image_generation",
         "file_creation",
@@ -1001,7 +1002,7 @@ def _hands_back(reason: str) -> Completion:
     )
 
 
-async def test_an_assistant_hands_a_question_that_is_not_its_own_back(
+async def test_a_question_from_another_system_is_answered_and_never_handed_back(
     raw_client,
     client,
     space,  # noqa: F811
@@ -1011,12 +1012,12 @@ async def test_an_assistant_hands_a_question_that_is_not_its_own_back(
     signing_key,
     model,
 ):
+    # The assistant is not offered the hand_back tool (2026-11-16): one that
+    # cannot answer says so in its own words, and the stream ends as any other.
     await _calls_tools(space)
     assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
     model["answer"] = [
         Completion(text="Det vet jag inte.", response_type=ResponseType.TEXT),
-        _hands_back("declined"),
-        Completion(text=" Fråga någon annan.", response_type=ResponseType.TEXT),
     ]
 
     response = await _post(
@@ -1030,46 +1031,12 @@ async def test_an_assistant_hands_a_question_that_is_not_its_own_back(
 
     assert response.status_code == 200, response.text
     events = _events(response.text)
-    assert events[:-1] == [{"type": "text", "delta": "Det vet jag inte."}]
-    # The reason and the session, and no text of the assistant's.
-    assert set(events[-1]) <= {"type", "reason", "session", "link"}
-    assert (events[-1]["type"], events[-1]["reason"]) == ("handback", "declined")
-    UUID(events[-1]["session"])
-    # The turn was offered the tool, and told when to use it.
-    assert ("handback", ["hand_back"]) in model["offered"][-1]
-    assert "hand_back" in model["prompts"][-1]
-
-
-async def test_an_assistant_that_is_done_hands_back_after_its_answer(
-    raw_client,
-    client,
-    space,  # noqa: F811
-    admin_headers,  # noqa: F811
-    installation,
-    provider_token,  # noqa: F811
-    signing_key,
-    model,
-):
-    await _calls_tools(space)
-    assistant_id = await _assistant(client, admin_headers, space, "Bygglovshjälpen")
-    model["answer"] = [
-        Completion(text="Du har 25 dagar.", response_type=ResponseType.TEXT),
-        _hands_back("completed"),
-    ]
-
-    response = await _post(
-        raw_client,
-        ASK,
-        {"ask": {"assistant": assistant_id, "question": "Hur många dagar?"}},
-        key=installation["key"],
-        signing_key=signing_key,
-        token=provider_token,
-    )
-
-    events = _events(response.text)
-    assert events[0] == {"type": "text", "delta": "Du har 25 dagar."}
-    assert (events[-1]["type"], events[-1]["reason"]) == ("handback", "completed")
-    assert [event["type"] for event in events] == ["text", "handback"]
+    assert events[0] == {"type": "text", "delta": "Det vet jag inte."}
+    assert [event["type"] for event in events] == ["text", "done"]
+    assert all(name != "handback" for name, _tools in model["offered"][-1])
+    assert "hand_back" not in model["prompts"][-1]
+    # It is still told where the person writes from.
+    assert "another system" in model["prompts"][-1]
 
 
 async def test_a_turn_in_eneo_itself_is_never_offered_the_handback_tool(

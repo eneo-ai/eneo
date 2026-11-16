@@ -67,18 +67,17 @@ _NO_FILES: list[CapabilityPurpose] = [
     "compute",
     "charts",
 ]
-# Added to the assistant's prompt for these turns only, never stored: who the
-# person is writing from, and when the conversation goes back there.
-HANDBACK_PROMPT = (
+# Added to the assistant's prompt for these turns only, never stored: where the
+# person is writing from. The assistant is not offered the hand_back tool
+# (2026-11-16): it returned questions it could have answered and wrote refusals
+# without calling the tool, and the other system lets the person put a question
+# to its own assistant themself. An assistant that cannot answer says so.
+EXTERNAL_CLIENT_PROMPT = (
     "The person is writing to you from another system that has an assistant "
-    "of its own. You hold the conversation until you return it with the "
-    "hand_back tool. If the question is not yours to answer here, because it "
-    "is about something you have no knowledge of or access to (the person's "
-    "own calendar, mail or tasks, a colleague's data, another system), call "
-    'hand_back with the reason "declined" instead of answering or guessing. '
-    "If you have fully answered and nothing more is expected from you, call "
-    'hand_back with the reason "completed". Otherwise answer as usual and do '
-    "not call the tool: writing a reply is not a reason to hand back."
+    "of its own. Answer as usual. If the question is about something you have "
+    "no knowledge of or access to (the person's own calendar, mail or tasks, a "
+    "colleague's data, another system), say so in one sentence instead of "
+    "guessing: the person can then ask that system's own assistant."
 )
 _MAX_NAME = 120
 _MAX_DESCRIPTION = 400
@@ -286,8 +285,8 @@ async def ask_assistant(call: VerifiedCall):
                 version=2,
                 require_tool_approval=False,
                 disabled_capabilities=_NO_FILES,
-                prompt_addendum=HANDBACK_PROMPT,
-                offer_handback=True,
+                prompt_addendum=EXTERNAL_CLIENT_PROMPT,
+                offer_handback=False,
             )
     except ConnectorProtocolError:
         raise
