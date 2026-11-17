@@ -1135,6 +1135,7 @@ class Container(containers.DeclarativeContainer):
         repository=audit_log_repo,
         audit_config_service=audit_config_service,
         feature_flag_service=feature_flag_service,
+        session=session,
     )
     tenant_federation_service = providers.Factory(
         TenantFederationService,

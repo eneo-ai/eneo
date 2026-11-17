@@ -404,6 +404,12 @@ class Settings(BaseSettings):
     # model must answer from what it gathered. Parallel calls in one response
     # count once.
     max_tool_rounds: int = Field(default=40, gt=0)
+    # Tool calls one model response may run. Further calls in the same response
+    # are refused, so a burst of parallel calls cannot flood a server.
+    max_tool_calls_per_round: int = Field(default=10, gt=0)
+    # Tool calls one chat turn may run in total before the model must answer
+    # from what it gathered.
+    max_tool_calls_per_turn: int = Field(default=60, gt=0)
     # Upper bound for each wait on a completion provider: connecting, the
     # response, and in a stream each next chunk. A slow model that keeps
     # streaming is never cut off; a provider that stops answering is.

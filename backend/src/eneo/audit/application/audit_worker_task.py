@@ -1,5 +1,6 @@
 """Audit logging worker task."""
 
+import logging
 from dataclasses import replace
 from typing import Any
 from uuid import UUID, uuid4
@@ -12,6 +13,7 @@ from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.database import AsyncSession
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -96,6 +98,23 @@ async def log_audit_event_task(
             repository,
             replace(audit_log, actor_id=None, actor_api_key_id=None),
         )
+    except Exception as error:
+        # The job is not retried, so this line is the only trace of the event.
+        log_error(
+            logger,
+            logging.ERROR,
+            "Audit event not stored: action=%s entity_type=%s",
+            audit_log.action.value,
+            audit_log.entity_type.value,
+            error=error,
+            extra={
+                "job_id": str(job_id),
+                "tenant_id": str(audit_log.tenant_id),
+                "action": audit_log.action.value,
+                "entity_type": audit_log.entity_type.value,
+            },
+        )
+        raise
 
     logger.info(
         "Audit log created",

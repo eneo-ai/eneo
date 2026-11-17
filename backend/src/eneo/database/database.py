@@ -1,6 +1,8 @@
 import contextlib
 from collections.abc import AsyncGenerator
 
+import anyio
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncConnection,
     AsyncEngine,
@@ -14,6 +16,8 @@ from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+_SESSION_CLOSE_BUDGET_SECONDS = 10.0
 
 
 class SafeAsyncSession(AsyncSession):
@@ -77,7 +81,11 @@ class DatabaseSessionManager:
             settings.db_pool_max_overflow,
             settings.db_pool_size + settings.db_pool_max_overflow,
         )
-        logger.debug(f"Database connected to {host}")
+        # Never log the URL as given: it carries the password.
+        logger.debug(
+            "Database connected to %s",
+            make_url(host).render_as_string(hide_password=True),
+        )
 
     async def close(self):
         if self._engine is None:
@@ -127,7 +135,21 @@ class DatabaseSessionManager:
             await session.rollback()
             raise
         finally:
-            await session.close()
+            # A cancelled request, such as a stream whose client hung up, has
+            # every await in this block cancelled as well. Unshielded, the
+            # close stops at its first one and the connection never returns
+            # to the pool.
+            with anyio.CancelScope(
+                shield=True,
+                deadline=anyio.current_time() + _SESSION_CLOSE_BUDGET_SECONDS,
+            ) as close_scope:
+                await session.close()
+            if close_scope.cancelled_caught:
+                logger.warning(
+                    "Closing a database session exceeded %ss; its connection "
+                    "is left for the pool to reclaim",
+                    _SESSION_CLOSE_BUDGET_SECONDS,
+                )
 
 
 sessionmanager = DatabaseSessionManager()

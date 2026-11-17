@@ -126,6 +126,21 @@ def _log_startup_diagnostics(settings: Settings) -> None:
     )
 
 
+def _log_arq_records_once() -> None:
+    """Give arq's records one way out.
+
+    arq's CLI attaches a handler of its own to the ``arq`` logger while the
+    records still propagate to the root handlers, so each line was written
+    twice. The root handlers, which carry the level, are kept when there are
+    any.
+    """
+    arq_logger = logging.getLogger("arq")
+    if logging.getLogger().handlers:
+        arq_logger.handlers.clear()
+    else:
+        arq_logger.propagate = False
+
+
 class Worker:
     """
     Worker class responsible for managing and executing functions, tasks, and cron jobs.
@@ -252,6 +267,7 @@ class Worker:
         from eneo.main.observability import init_observability
 
         init_observability()
+        _log_arq_records_once()
 
         await lifespan.startup()
         # Log effective settings at startup for observability

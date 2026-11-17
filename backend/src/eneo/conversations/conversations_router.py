@@ -359,6 +359,15 @@ async def _authorized_session(container: Container, session_id: UUID) -> Session
     return session
 
 
+def _answering_version(version: int) -> int:
+    """The retrieval and generation version behind a chat API version.
+
+    Version 3 is version 2 with another stream framing. The services below
+    the router know only 1 and 2, and reject anything else.
+    """
+    return 2 if version == 3 else version
+
+
 @router.post(
     "/",
     description="Chat with an assistant or group chat; starts or continues a conversation and streams the response as Server-Sent Events when stream is true.",
@@ -451,8 +460,6 @@ async def chat(
             tool_assistant_id = request.tools.assistants[0].id
 
         # Use the dedicated ConversationService to handle routing logic.
-        # version=3 only changes the stream framing; retrieval and generation
-        # behave exactly like version=2.
         conversation_service = container.conversation_service()
         response = await conversation_service.ask_conversation(
             question=request.question,
@@ -462,7 +469,7 @@ async def chat(
             file_ids=file_ids,
             stream=request.stream,
             tool_assistant_id=tool_assistant_id,
-            version=version,
+            version=_answering_version(version),
             require_tool_approval=request.require_tool_approval,
             allow_questions=request.allow_questions,
             disabled_mcp_server_ids=request.disabled_mcp_server_ids,

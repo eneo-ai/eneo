@@ -298,6 +298,11 @@ The knowledge tools are deliberately paged and capped:
   last two rounds the model is told how many remain, and a further request for
   tools is refused so the model answers from what it gathered instead of the
   turn failing.
+- one model response may run at most `MAX_TOOL_CALLS_PER_ROUND` tool calls
+  (10 by default) and a turn at most `MAX_TOOL_CALLS_PER_TURN` (60 by default).
+  Calls beyond the first limit are refused with a message the model can act
+  on; reaching the second ends tool use for the turn the same way the round
+  limit does.
 
 When the aggregate budget is exhausted, later results are replaced with an
 explicit instruction to stop calling tools and answer from the information
@@ -643,7 +648,9 @@ Eneo contains failures at the smallest useful boundary where possible.
 | An external server connection fails | Its tools return an unavailable result; other servers and the model turn may continue. Repeated failures open a server-specific circuit breaker temporarily. |
 | A loopback connection fails | That completion loses the affected built-in tool. Because its server entity is ephemeral, failure state does not accumulate across requests. |
 | A tool result is too large | The proxy keeps bounded text and adds a truncation notice; built-in readers offer offset-based continuation. |
-| The turn-wide tool-result budget is exhausted | Later results are withheld with an instruction to answer from material already gathered. |
+| The turn-wide tool-result budget is exhausted | Results after the one that used it up are withheld. No further tools run: pending calls are refused and one final request without tools asks the model to answer from material already gathered. |
+| One model response asks for more than `MAX_TOOL_CALLS_PER_ROUND` tool calls | The first calls up to the limit run. The rest are refused, each with a result telling the model to work with what it has and ask again later if still needed. |
+| The turn reaches `MAX_TOOL_CALLS_PER_TURN` | Pending calls are refused and one final request without tools asks the model to answer and name anything left unfinished. |
 | The turn reaches `MAX_TOOL_ROUNDS` | Pending calls are refused and one final request without tools asks the model to answer and name anything left unfinished. |
 | A provider stops responding | The request fails after `COMPLETION_REQUEST_TIMEOUT_SECONDS` without a response or, while streaming, without a new chunk, and the turn reports the provider as unavailable. |
 | An external live definition is unknown or changed | It is staged for admin approval and omitted or kept at its prior approved version. |
@@ -665,6 +672,8 @@ The most relevant backend settings are:
 | `MCP_CLIENT_LIST_TOOLS_TIMEOUT_SECONDS` | Deadline for external tool discovery. |
 | `MCP_CLIENT_CALL_TIMEOUT_SECONDS` | Deadline for an MCP tool call. |
 | `MAX_TOOL_ROUNDS` | Model responses with tool calls that one turn may make (default 40). Parallel calls in one response count once. |
+| `MAX_TOOL_CALLS_PER_ROUND` | Tool calls one model response may run (default 10). Further calls in the same response are refused. |
+| `MAX_TOOL_CALLS_PER_TURN` | Tool calls one turn may run in total (default 60) before the model must answer from what it gathered. |
 | `COMPLETION_REQUEST_TIMEOUT_SECONDS` | Longest wait for a completion provider: for the connection, the response, and while streaming each next chunk (default 600). A slow model that keeps streaming is not cut off. |
 | `MCP_CIRCUIT_BREAKER_FAILURE_THRESHOLD` | Failures before a persistent external server's circuit opens. |
 | `MCP_CIRCUIT_BREAKER_COOLDOWN_SECONDS` | How long that circuit remains open before retry. |

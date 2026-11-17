@@ -1278,10 +1278,12 @@ class CompletionService:
             )
         )
         if usage is not None:
+            # The estimate is of the first request; the usage totals sum
+            # every request a tool-using turn made.
             log_token_count_drift(
                 model_name=model_adapter.get_model_route(),
                 predicted=total_token_count,
-                actual=usage.prompt_tokens,
+                actual=usage.first_request_prompt_tokens,
             )
 
         return CompletionModelResponse(

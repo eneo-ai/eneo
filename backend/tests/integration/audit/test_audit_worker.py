@@ -2,9 +2,9 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, cast
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -127,6 +127,53 @@ async def test_a_file_event_queued_with_its_name_is_stored_and_logged_without_it
     assert name not in json.dumps(metadata)
     assert metadata["target"] == {"id": str(file_id), "name": "file"}
     assert metadata["extra"] == {"size_bytes": 7, "mimetype": "application/pdf"}
+
+
+@pytest.mark.asyncio
+async def test_an_event_described_with_dates_and_ids_is_stored(
+    db_session, test_tenant, test_user
+):
+    # A queued event is pickled, so whatever the caller put in its metadata
+    # reaches the insert unchanged. An API key's expiry change put datetimes
+    # there; the JSONB column's encoder raised and the event was lost.
+    expires_at = datetime(2027, 1, 1, 12, 0, tzinfo=timezone.utc)
+    key_id = uuid4()
+    async with db_session() as session:
+        result = await log_audit_event_task(
+            job_id=str(uuid4()),
+            params={
+                "tenant_id": str(test_tenant.id),
+                "actor_id": str(test_user),
+                "actor_type": ActorType.USER.value,
+                "action": ActionType.API_KEY_EXPIRATION_EXTENDED.value,
+                "entity_type": EntityType.API_KEY.value,
+                "entity_id": str(key_id),
+                "timestamp": datetime.utcnow().isoformat(),
+                "description": "Extended an API key's expiry",
+                "metadata": {
+                    "changes": {"expires_at": {"old": None, "new": expires_at}},
+                    "extra": {"key_id": key_id, "scopes": {"read"}},
+                },
+                "outcome": Outcome.SUCCESS.value,
+                "ip_address": None,
+                "user_agent": None,
+                "request_id": None,
+                "error_message": None,
+            },
+            session=session,
+        )
+
+        stored = await session.scalar(
+            sa.select(AuditLogTable.log_metadata).where(
+                AuditLogTable.id == UUID(result["audit_log_id"])
+            )
+        )
+
+    assert stored["changes"]["expires_at"] == {
+        "old": None,
+        "new": "2027-01-01T12:00:00Z",
+    }
+    assert stored["extra"] == {"key_id": str(key_id), "scopes": ["read"]}
 
 
 @pytest.mark.asyncio
