@@ -45,6 +45,21 @@ const PREVIOUS = {
   answer_ratings: { positive: 7, negative: 3, with_comment: 0, negative_with_comment: 0 }
 };
 
+/** A period without a single conversation. */
+const EMPTY_PERIOD = {
+  ...PERIOD,
+  conversations: counts(0, 0, 0),
+  questions: counts(0, 0, 0),
+  followups: 0,
+  users: 0,
+  single_question_conversations: 0,
+  returning_users: 0,
+  unanswered: 0,
+  knowledge: { searched: 0, missed: 0 },
+  answer_ratings: { positive: 0, negative: 0, with_comment: 0, negative_with_comment: 0 },
+  conversation_ratings: { positive: 0, negative: 0, with_comment: 0, negative_with_comment: 0 }
+};
+
 /** A knowledge miss behind the "Många frågor får inget stöd i kunskapen" finding. */
 const miss = (id: string, reason: string, rating: number | null) => ({
   kind: "knowledge_missed",
@@ -136,7 +151,9 @@ const spies = vi.hoisted(() => ({
   findings: [] as unknown[],
   cases: [] as unknown[],
   knowledge: { sources: [] as unknown[], unused: [] as unknown[] },
-  tools: [] as unknown[]
+  tools: [] as unknown[],
+  /** The period has no conversations. */
+  empty: false
 }));
 
 /** The options of a typed request, as far as these fakes read them. */
@@ -155,7 +172,7 @@ vi.mock("@/lib/api/browser", () => ({
           data: {
             timezone: query.timezone,
             source: query.source ?? null,
-            period: PERIOD,
+            period: spies.empty ? EMPTY_PERIOD : PERIOD,
             previous: query.compare ? PREVIOUS : null
           },
           response: new Response()
@@ -396,6 +413,7 @@ afterEach(() => {
   spies.cases = [];
   spies.knowledge = { sources: [], unused: [] };
   spies.tools = [];
+  spies.empty = false;
 });
 
 const partner: ChatPartner & { type: "assistant" } = {
@@ -1218,5 +1236,40 @@ describe("InsightsPanel", () => {
       expect(screen.queryByRole("region", { name: "Kunskapen som används" })).toBeNull()
     );
     expect(screen.queryByRole("region", { name: "Verktyg" })).toBeNull();
+  });
+
+  it("shows one empty state for a period without conversations, under the filters", async () => {
+    spies.empty = true;
+    renderPanel();
+    expect(
+      await screen.findByRole("heading", { name: "Inga konversationer i perioden" })
+    ).toBeTruthy();
+    expect(screen.getByText("Välj en längre period.")).toBeTruthy();
+    // No section of an empty period: no figures, findings, activity, questions or ratings.
+    for (const name of [
+      "Nyckeltal",
+      "Det här kan du förbättra",
+      "Aktivitet per dag",
+      "Vanligaste frågorna",
+      "Återkoppling från användarna"
+    ]) {
+      expect(screen.queryByRole("region", { name })).toBeNull();
+    }
+    expect(screen.queryByRole("table", { name: "Frågehistorik" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Utforska konversationer" })).toBeNull();
+    // The filters and the analysis stay.
+    expect(screen.getByRole("region", { name: "Filter" })).toBeTruthy();
+    expect(askButton()).toBeTruthy();
+
+    // Another source: the hint names it, and the hidden sections ask for nothing.
+    fireEvent.click(screen.getByRole("radio", { name: "Widget" }));
+    expect(await screen.findByText("Välj en längre period eller en annan källa.")).toBeTruthy();
+    await waitFor(() => expect(queriesOf("summary").at(-1)).toMatchObject({ source: "widget" }));
+    expect(queriesOf("findings").some((query) => query.source === "widget")).toBe(false);
+    expect(queriesOf("activity").some((query) => query.source === "widget")).toBe(false);
+
+    // Compared, a drop to none shows: the previous period's conversations.
+    fireEvent.click(screen.getByRole("switch", { name: "Jämför med föregående period" }));
+    expect(await screen.findByText("Föregående period: 10 konversationer")).toBeTruthy();
   });
 });

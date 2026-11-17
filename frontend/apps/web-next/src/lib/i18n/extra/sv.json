@@ -4744,5 +4744,9 @@
   "insights_targets_personal": "Personliga assistenter",
   "insights_targets_personal_summary": "sammanlagt",
   "insights_targets_personal_count": "{count, plural, one {# assistent} other {# assistenter}} i personliga utrymmen",
-  "insights_targets_personal_no_ratings": "Visas inte för personliga assistenter"
+  "insights_targets_personal_no_ratings": "Visas inte för personliga assistenter",
+  "insights_empty_title": "Inga konversationer i perioden",
+  "insights_empty_hint": "Välj en längre period.",
+  "insights_empty_hint_source": "Välj en längre period eller en annan källa.",
+  "insights_empty_previous": "Föregående period: {count, plural, one {# konversation} other {# konversationer}}"
 }

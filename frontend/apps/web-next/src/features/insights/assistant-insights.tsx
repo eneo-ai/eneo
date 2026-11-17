@@ -3,7 +3,7 @@ import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Switch } from "@astryxdesign/core/Switch";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { Lock, MessageSquareText } from "lucide-react";
+import { ArrowLeft, Lock, MessagesSquare, MessageSquareText } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -56,6 +56,51 @@ type FindingSuggestion = AnalysisSuggestion & { kind: OpenableFindingKind };
 let suggestionCounter = 0;
 
 /**
+ * A period without conversations (for the chosen source): one empty state in
+ * place of the sections, with what to change, and with the comparison on the
+ * previous period's conversations, so a drop to none is not hidden. A
+ * finding opened in it keeps its way back.
+ */
+function NoConversations({
+  filters,
+  previous,
+  onBack
+}: {
+  filters: InsightFilters;
+  /** The previous period's conversations, when compared. */
+  previous: number;
+  /** The way back from a finding opened here; null on the overview. */
+  onBack: (() => void) | null;
+}) {
+  const t = useTranslations();
+  return (
+    <div className="flex flex-col items-start gap-3">
+      {onBack ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          icon={<ArrowLeft className="size-4" aria-hidden="true" />}
+          label={t("insights_finding_back")}
+          onClick={onBack}
+        />
+      ) : null}
+      <EmptyState
+        icon={<MessagesSquare />}
+        title={t("insights_empty_title")}
+        description={t(filters.source ? "insights_empty_hint_source" : "insights_empty_hint")}
+        className="w-full"
+      >
+        {filters.compare && previous > 0 ? (
+          <p className="text-ax-text-secondary text-sm">
+            {t("insights_empty_previous", { count: previous })}
+          </p>
+        ) : null}
+      </EmptyState>
+    </div>
+  );
+}
+
+/**
  * The insights of an assistant or group chat, one view in both places it is
  * shown: the chat page's Insikter tab and the administration's page for an
  * assistant or group chat. It fills the height it is given and scrolls its
@@ -71,7 +116,8 @@ let suggestionCounter = 0;
  * themselves behind "Utforska konversationer", the users' ratings
  * ("Återkoppling från användarna") and, for an assistant, the question
  * history with each answer's rating. Each section loads, keeps its figures
- * while the filters change and fails on its own.
+ * while the filters change and fails on its own. A period without
+ * conversations shows one empty state in their place, under the filters.
  *
  * A finding with examples opens in place of the overview (`finding`, kept
  * where the mount keeps the filters), with the filters above it; its way back
@@ -137,26 +183,19 @@ export function AssistantInsights({
     ...insightSummaryQueryOptions(partner, filters),
     placeholderData: keepPreviousData
   });
-  const activity = useQuery({
-    ...insightActivityQueryOptions(partner, filters),
-    placeholderData: keepPreviousData
-  });
-  const findings = useQuery({
-    ...insightFindingsQueryOptions(partner, filters),
-    placeholderData: keepPreviousData
-  });
+  // A period without conversations shows one empty state in place of the
+  // sections (the summary on screen decides, so it does not flash between two
+  // periods with conversations), and the sections' requests wait.
+  const empty = summary.data?.period.conversations.total === 0;
+  const section = { placeholderData: keepPreviousData, enabled: !empty };
+  const activity = useQuery({ ...insightActivityQueryOptions(partner, filters), ...section });
+  const findings = useQuery({ ...insightFindingsQueryOptions(partner, filters), ...section });
   const topQuestions = useQuery({
     ...insightTopQuestionsQueryOptions(partner, filters),
-    placeholderData: keepPreviousData
+    ...section
   });
-  const knowledge = useQuery({
-    ...insightKnowledgeQueryOptions(partner, filters),
-    placeholderData: keepPreviousData
-  });
-  const tools = useQuery({
-    ...insightToolsQueryOptions(partner, filters),
-    placeholderData: keepPreviousData
-  });
+  const knowledge = useQuery({ ...insightKnowledgeQueryOptions(partner, filters), ...section });
+  const tools = useQuery({ ...insightToolsQueryOptions(partner, filters), ...section });
   const change = (next: Partial<InsightFilters>) => onFiltersChange({ ...filters, ...next });
   const editor = insightEditorLinks(partner.type, editorHref);
   const targetKind = partner.type === "group-chat" ? "group_chat" : "assistant";
@@ -263,108 +302,132 @@ export function AssistantInsights({
         <div ref={main} inert={covered} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <div className={column}>
             {header}
-            <section
-              aria-label={t("insights_filters_label")}
-              className="flex flex-wrap items-end gap-3"
-            >
-              <div className="min-w-0 flex-1 basis-56 sm:max-w-80">
-                <InsightsRangePicker
-                  value={range}
-                  onChange={(next) => change({ range: next })}
-                  compact
-                />
-              </div>
-              <div className="max-w-full min-w-0">
-                <SegmentedControl
-                  label={t("insights_source_label")}
-                  value={filters.source ?? "all"}
-                  onChange={(value) => change({ source: parseInsightSource(value) })}
-                >
-                  <SegmentedControlItem value="all" label={t("insights_source_all")} />
-                  <SegmentedControlItem value="user" label={t("insights_source_filter_user")} />
-                  <SegmentedControlItem value="widget" label={t("insights_source_widget")} />
-                  <SegmentedControlItem value="api_key" label={t("insights_source_api_key")} />
-                </SegmentedControl>
-              </div>
-              <Switch
-                label={t("insights_compare_previous")}
-                value={filters.compare}
-                onChange={(compare) => change({ compare })}
-              />
-              <Button
-                ref={trigger}
-                label={t("insights_ask_analysis")}
-                variant="primary"
-                icon={<MessageSquareText className="size-4" aria-hidden="true" />}
-                onClick={(event) => askAnalysis(event.currentTarget)}
-              />
-            </section>
-            <div hidden={finding !== null} className="flex flex-col gap-6">
-              <InsightsOverview
-                summary={summary}
-                activity={activity}
-                filters={filters}
-                findings={
-                  <InsightFindings
-                    findings={findings}
-                    targetKind={targetKind}
-                    editor={editor}
-                    onOpen={showFinding}
-                    onReadComments={readComments}
+            {/*
+              The filters wrap among themselves; "Fråga analysen" keeps the
+              top right, at the content's end, whatever the filters do and
+              whether the panel is open. It sits level with the period's
+              field, under the field's label (Astryx's label line and gap).
+              Where the bar is too narrow for both it takes a row of its own
+              under the filters, full width as a phone's primary actions are.
+            */}
+            <section aria-label={t("insights_filters_label")} className="@container">
+              <div className="flex flex-col gap-3 @min-[26rem]:flex-row @min-[26rem]:items-start">
+                <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
+                  <div className="min-w-0 flex-1 basis-56 sm:max-w-80">
+                    <InsightsRangePicker
+                      value={range}
+                      onChange={(next) => change({ range: next })}
+                      compact
+                    />
+                  </div>
+                  <div className="max-w-full min-w-0">
+                    <SegmentedControl
+                      label={t("insights_source_label")}
+                      value={filters.source ?? "all"}
+                      onChange={(value) => change({ source: parseInsightSource(value) })}
+                    >
+                      <SegmentedControlItem value="all" label={t("insights_source_all")} />
+                      <SegmentedControlItem value="user" label={t("insights_source_filter_user")} />
+                      <SegmentedControlItem value="widget" label={t("insights_source_widget")} />
+                      <SegmentedControlItem value="api_key" label={t("insights_source_api_key")} />
+                    </SegmentedControl>
+                  </div>
+                  <Switch
+                    label={t("insights_compare_previous")}
+                    value={filters.compare}
+                    onChange={(compare) => change({ compare })}
                   />
-                }
-                details={
-                  <>
-                    <div className="flex flex-wrap items-start gap-5">
-                      <TopQuestionsCard
-                        questions={topQuestions}
-                        onOpenConversation={openConversation}
-                        className="flex-[999_1_560px]"
-                      />
-                      <KnowledgeUseCard
-                        knowledge={knowledge}
-                        hasKnowledge={summary.data ? summary.data.period.knowledge !== null : null}
-                        className="flex-[1_1_340px]"
-                      />
-                    </div>
-                    <ToolUseCard tools={tools} />
-                  </>
-                }
-                onExplore={() => setExplore({ sessionId: null })}
-              />
-              <FeedbackInbox
-                partner={partner}
+                </div>
+                <div className="@min-[26rem]:shrink-0 @min-[26rem]:pt-[calc(var(--text-label-size)*var(--text-label-leading)+var(--spacing-1))]">
+                  <Button
+                    ref={trigger}
+                    label={t("insights_ask_analysis")}
+                    variant="primary"
+                    icon={<MessageSquareText className="size-4" aria-hidden="true" />}
+                    className="w-full @min-[26rem]:w-auto"
+                    onClick={(event) => askAnalysis(event.currentTarget)}
+                  />
+                </div>
+              </div>
+            </section>
+            {empty ? (
+              <NoConversations
                 filters={filters}
-                filter={feedbackFilter}
-                onFilterChange={setFeedbackFilter}
-                counts={summary.data ? feedbackCounts(summary.data.period) : null}
-                headingRef={inboxHeading}
-                onOpenConversation={openConversation}
+                previous={summary.data?.previous?.conversations.total ?? 0}
+                onBack={finding ? () => showFinding(null) : null}
               />
-              {partner.type === "assistant" && (
-                <QuestionHistory
-                  assistantId={partner.id}
-                  range={range}
-                  source={filters.source}
-                  onOpenConversation={openConversation}
-                />
-              )}
-            </div>
-            {finding ? (
-              <FindingView
-                key={finding}
-                partner={partner}
-                filters={filters}
-                kind={finding}
-                summary={summary}
-                editor={editor}
-                targetKind={targetKind}
-                headingRef={findingHeading}
-                onBack={() => showFinding(null)}
-                onOpenConversation={openConversation}
-                onAskAnalysis={askAnalysis}
-              />
-            ) : null}
+            ) : (
+              <>
+                <div hidden={finding !== null} className="flex flex-col gap-6">
+                  <InsightsOverview
+                    summary={summary}
+                    activity={activity}
+                    filters={filters}
+                    findings={
+                      <InsightFindings
+                        findings={findings}
+                        targetKind={targetKind}
+                        editor={editor}
+                        onOpen={showFinding}
+                        onReadComments={readComments}
+                      />
+                    }
+                    details={
+                      <>
+                        <div className="flex flex-wrap items-start gap-5">
+                          <TopQuestionsCard
+                            questions={topQuestions}
+                            onOpenConversation={openConversation}
+                            className="flex-[999_1_560px]"
+                          />
+                          <KnowledgeUseCard
+                            knowledge={knowledge}
+                            hasKnowledge={
+                              summary.data ? summary.data.period.knowledge !== null : null
+                            }
+                            className="flex-[1_1_340px]"
+                          />
+                        </div>
+                        <ToolUseCard tools={tools} />
+                      </>
+                    }
+                    onExplore={() => setExplore({ sessionId: null })}
+                  />
+                  <FeedbackInbox
+                    partner={partner}
+                    filters={filters}
+                    filter={feedbackFilter}
+                    onFilterChange={setFeedbackFilter}
+                    counts={summary.data ? feedbackCounts(summary.data.period) : null}
+                    headingRef={inboxHeading}
+                    onOpenConversation={openConversation}
+                  />
+                  {partner.type === "assistant" && (
+                    <QuestionHistory
+                      assistantId={partner.id}
+                      range={range}
+                      source={filters.source}
+                      onOpenConversation={openConversation}
+                    />
+                  )}
+                </div>
+                {finding ? (
+                  <FindingView
+                    key={finding}
+                    partner={partner}
+                    filters={filters}
+                    kind={finding}
+                    summary={summary}
+                    editor={editor}
+                    targetKind={targetKind}
+                    headingRef={findingHeading}
+                    onBack={() => showFinding(null)}
+                    onOpenConversation={openConversation}
+                    onAskAnalysis={askAnalysis}
+                  />
+                ) : null}
+              </>
+            )}
           </div>
         </div>
         {open && beside && (

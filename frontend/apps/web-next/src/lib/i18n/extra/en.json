@@ -4744,5 +4744,9 @@
   "insights_targets_personal": "Personal assistants",
   "insights_targets_personal_summary": "combined",
   "insights_targets_personal_count": "{count, plural, one {# assistant} other {# assistants}} in personal spaces",
-  "insights_targets_personal_no_ratings": "Not shown for personal assistants"
+  "insights_targets_personal_no_ratings": "Not shown for personal assistants",
+  "insights_empty_title": "No conversations in the period",
+  "insights_empty_hint": "Choose a longer period.",
+  "insights_empty_hint_source": "Choose a longer period or another source.",
+  "insights_empty_previous": "Previous period: {count, plural, one {# conversation} other {# conversations}}"
 }
