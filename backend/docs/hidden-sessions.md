@@ -47,4 +47,16 @@ reached through its own `flow_authoring_chats` row.
 - Per-user token usage does not include helper runs or insights
   conversations. The tenant-wide usage per model does, as model use.
 - Retention and cascade behave like any other session: deleting the analysed
-  assistant or group chat removes its insights conversations.
+  assistant or group chat removes its insights conversations. Retention never
+  applies the hidden-session rule; an emptied session goes with its link row.
+- An insights conversation is a copy of what its tools read: each tool
+  registers the questions whose text it returns as sources
+  (`eneo.data_retention.derivations`). Once one of them is removed, every read
+  of the analysis answers 410 `derived_source_removed`, its history list
+  leaves it out, and the derived copies task removes it.
+- Conversation history removes an analysis of an assistant on that
+  assistant's period, since its questions carry the assistant. An analysis of
+  a group chat has no answering assistant on its questions, so no period
+  selects them: it goes with a source it read, with the group chat, or when
+  the operator deletes it. Its name follows the group chat's shortest member
+  period like any group chat conversation.

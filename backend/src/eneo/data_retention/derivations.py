@@ -25,7 +25,10 @@ from eneo.database.tables.sessions_table import Sessions
 # Each feature that stores copies, as "module:function" of the function that
 # returns copied content. A test proves that each one calls
 # register_derivations; a new producer adds itself here.
-KNOWN_COPY_PRODUCERS: tuple[str, ...] = ()
+KNOWN_COPY_PRODUCERS: tuple[str, ...] = (
+    # The insights tools: every page of another conversation's text.
+    "eneo.internal_mcp.insights:_release_page",
+)
 
 
 class DerivationRegistrationError(RuntimeError):

@@ -1,8 +1,9 @@
 """Insights repository against a real database.
 
 Window on question time, follow-up detection, calendar buckets in the
-operator's zone, exact-text grouping, the hidden-session rule, and the
-question ids each text-carrying row names as its sources.
+operator's zone, exact-text grouping, the hidden-session rule, copies of
+removed content left out, and the question ids each text-carrying row names
+as its sources.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import sqlalchemy as sa
 
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import normalize_question_text
+from eneo.data_retention.derivations import register_derivations
 from eneo.database.tables.mcp_tool_references_table import McpToolReference
 from eneo.database.tables.questions_table import Questions
 
@@ -348,3 +350,40 @@ async def test_gap_signals(db_container, admin_user, seed_insights):
     ]
     assert len(rephrasing[0].question_ids) == 3
     assert len(set(rephrasing[0].question_ids)) == 3
+
+
+async def test_a_copy_of_removed_content_is_no_conversation_of_the_target(
+    db_container, admin_user, seed_insights
+):
+    """A conversation that copies a removed question is unreadable, so the
+    tools neither read nor count it; one whose sources exist reads as before.
+    Mutants: a list, count, gap or transcript read skips the copy check, or
+    the check leaves out every copy."""
+    async with db_container() as container:
+        seed = await seed_insights(container, admin_user)
+    # s4 copies a question that no longer exists; s2 one that does.
+    await register_derivations(
+        copy_session_id=seed["s4"], source_question_ids=[uuid4()]
+    )
+    await register_derivations(
+        copy_session_id=seed["s2"], source_question_ids=[seed["s1_q1"]]
+    )
+
+    async with db_container() as container:
+        repo = container.insights_repo()
+        rows, total = await repo.list_questions(
+            _scope(seed), _window(), include_followups=True, offset=0, limit=50
+        )
+        summary = await repo.count_usage(_scope(seed), _window(), "day")
+        _, unanswered_total = await repo.find_unanswered(
+            _scope(seed), _window(), offset=0, limit=10
+        )
+        removed = await repo.get_transcript(_scope(seed), seed["s4"])
+        kept = await repo.get_transcript(_scope(seed), seed["s2"])
+
+    assert seed["s4"] not in {row.session_id for row in rows}
+    assert seed["s2"] in {row.session_id for row in rows}
+    assert total == summary.questions == 7
+    assert unanswered_total == 0
+    assert removed is None
+    assert kept is not None and kept.turns[0].question_id == seed["s2_q1"]

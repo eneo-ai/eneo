@@ -2,15 +2,16 @@
 
 Covers scope resolution from the token, window validation, the self-capped
 page formatting each tool emits and the questions each page names as its
-sources, the tools themselves against a fake repository, and the
+sources, the tools themselves against a fake repository (each text tool
+registers exactly what it prints before the text leaves it), and the
 ephemeral-server builder.
 """
 
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import UUID, uuid4
 
 import pytest
@@ -28,11 +29,13 @@ from eneo.analysis.insights_repo import (
     UsageBucket,
     UsageSummary,
 )
+from eneo.data_retention.derivations import DerivationRegistrationError
 from eneo.internal_mcp import insights
 from eneo.internal_mcp.insights import (
     CONVERSATION_NOT_FOUND_MESSAGE,
     INSIGHTS_SERVER_NAME,
     MAX_WINDOW_DAYS,
+    SOURCES_NOT_RECORDED_MESSAGE,
     _bucket_count,
     _list_questions_text,
     _parse_window,
@@ -296,26 +299,40 @@ class TestFormatting:
 def _patch_tool_context(
     monkeypatch: pytest.MonkeyPatch, *, repo: Any, has_knowledge: bool = True
 ) -> tuple[InsightScope, list[list[UUID]]]:
-    """Fake the tool context and record what each call names as its sources."""
+    """Fake the tool context and record the sources each call registers.
+
+    The fake registration also checks that it is made for the conversation
+    the tools answer in, and only after the tool's own transaction closed.
+    """
     scope = InsightScope(kind="assistant", target_id=uuid4(), tenant_id=uuid4())
+    session_id = uuid4()
     registered: list[list[UUID]] = []
+    open_contexts: list[int] = []
 
     @asynccontextmanager
     async def fake_context(_ctx: Any):
-        yield SimpleNamespace(
-            container=SimpleNamespace(insights_repo=lambda: repo),
-            user=SimpleNamespace(),
-            scope=scope,
-            target_label="assistant 'Bygg'",
-            session_id=uuid4(),
-            has_knowledge=has_knowledge,
-        )
+        open_contexts.append(1)
+        try:
+            yield SimpleNamespace(
+                container=SimpleNamespace(insights_repo=lambda: repo),
+                user=SimpleNamespace(),
+                scope=scope,
+                target_label="assistant 'Bygg'",
+                session_id=session_id,
+                has_knowledge=has_knowledge,
+            )
+        finally:
+            open_contexts.pop()
 
-    async def record_sources(_tool: Any, question_ids: Sequence[UUID]) -> None:
-        registered.append(list(question_ids))
+    async def register(
+        *, copy_session_id: UUID, source_question_ids: Sequence[UUID]
+    ) -> None:
+        assert copy_session_id == session_id
+        assert open_contexts == [], "registered inside the tool's transaction"
+        registered.append(list(source_question_ids))
 
     monkeypatch.setattr(insights, "insight_tool_context", fake_context)
-    monkeypatch.setattr(insights, "_register_sources", record_sources)
+    monkeypatch.setattr(insights, "register_derivations", register)
     return scope, registered
 
 
@@ -782,3 +799,198 @@ class TestSearchConversationAndGapTools:
 
         assert "(none)" in text
         assert registered == [[]]
+
+
+AT = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
+
+
+class _PrintCase(NamedTuple):
+    """A text tool over a fake repository whose rows each carry a marker."""
+
+    repo: Any
+    # Each marker and the questions whose text carries it.
+    sources: list[tuple[str, list[UUID]]]
+    call: Callable[[], Awaitable[str]]
+    # Small enough that the page shows only part of what was read.
+    page_cap: int
+
+
+def _markers(count: int, start: int = 0) -> list[tuple[str, list[UUID]]]:
+    # The trailing x keeps one marker from being a prefix of another.
+    return [(f"mark{start + index}x", [uuid4()]) for index in range(count)]
+
+
+def _list_case() -> _PrintCase:
+    sources = _markers(3)
+    rows = [_question(f"{m} question", question_id=ids[0]) for m, ids in sources]
+
+    async def list_rows(scope: Any, window: Any, **_: Any):
+        return rows, len(rows)
+
+    return _PrintCase(
+        SimpleNamespace(list_questions=list_rows),
+        sources,
+        lambda: list_questions(ctx=CTX, start=START, end=END),
+        page_cap=1,
+    )
+
+
+def _top_case() -> _PrintCase:
+    sources = [(f"mark{index}x", [uuid4(), uuid4()]) for index in range(3)]
+    rows = [TopQuestionRow(f"{m} question", 2, 2, [uuid4()], ids) for m, ids in sources]
+
+    async def top(scope: Any, window: Any, **_: Any):
+        return rows, 6
+
+    return _PrintCase(
+        SimpleNamespace(top_questions=top),
+        sources,
+        lambda: top_questions(ctx=CTX, start=START, end=END),
+        page_cap=1,
+    )
+
+
+def _search_case() -> _PrintCase:
+    sources = _markers(3)
+    hits = [
+        SearchHit(ids[0], AT, uuid4(), f"{m} question", "an answer", False, True)
+        for m, ids in sources
+    ]
+
+    async def search(scope: Any, window: Any, **_: Any):
+        return hits, len(hits)
+
+    return _PrintCase(
+        SimpleNamespace(search_questions=search),
+        sources,
+        lambda: search_questions(
+            ctx=CTX, query="question", start=START, end=END, include_answers=True
+        ),
+        page_cap=1,
+    )
+
+
+def _transcript_case() -> _PrintCase:
+    sources = _markers(3)
+    transcript = Transcript(
+        uuid4(),
+        AT,
+        [_turn(f"{m} question", "an answer", question_id=ids[0]) for m, ids in sources],
+    )
+
+    async def get_transcript(scope: Any, wanted: Any):
+        return transcript
+
+    full = _transcript_text(transcript, offset=0, timezone="UTC", page_cap=100_000)
+    # A page that starts and ends inside the second turn's text.
+    offset = full.text.index("mark1x")
+    return _PrintCase(
+        SimpleNamespace(get_transcript=get_transcript),
+        sources,
+        lambda: read_conversation(
+            ctx=CTX, session_id=str(transcript.session_id), offset=offset
+        ),
+        page_cap=len("mark1x"),
+    )
+
+
+def _gap_case(signal: Any) -> Callable[[], _PrintCase]:
+    def build() -> _PrintCase:
+        unanswered = _markers(3)
+        no_knowledge = _markers(3, start=3)
+        rephrasing = [(f"mark{6 + index}x", [uuid4(), uuid4()]) for index in range(3)]
+
+        async def find_unanswered(scope: Any, window: Any, **_: Any):
+            rows = [
+                UnansweredRow(ids[0], AT, uuid4(), f"{m} question", "vet inte")
+                for m, ids in unanswered
+            ]
+            return rows, len(rows)
+
+        async def find_no_knowledge(scope: Any, window: Any, **_: Any):
+            rows = [
+                NoKnowledgeRow(ids[0], AT, uuid4(), f"{m} question", "no hits", None)
+                for m, ids in no_knowledge
+            ]
+            return rows, len(rows), None
+
+        async def find_rephrasing(scope: Any, window: Any, **_: Any):
+            rows = [
+                RephrasingRow(uuid4(), AT, [f"{m} first", f"{m} again"], 1, ids)
+                for m, ids in rephrasing
+            ]
+            return rows, len(rows)
+
+        by_signal = {
+            "unanswered": unanswered,
+            "no_knowledge": no_knowledge,
+            "rephrasing": rephrasing,
+        }
+        names = list(by_signal) if signal == "all" else [signal]
+        return _PrintCase(
+            SimpleNamespace(
+                find_unanswered=find_unanswered,
+                find_no_knowledge=find_no_knowledge,
+                find_rephrasing=find_rephrasing,
+            ),
+            [source for name in names for source in by_signal[name]],
+            lambda: find_gaps(ctx=CTX, start=START, end=END, signal=signal),
+            page_cap=1,
+        )
+
+    return build
+
+
+_PRINT_CASES = {
+    "list_questions": _list_case,
+    "top_questions": _top_case,
+    "search_questions": _search_case,
+    "read_conversation": _transcript_case,
+    "find_gaps unanswered": _gap_case("unanswered"),
+    "find_gaps no_knowledge": _gap_case("no_knowledge"),
+    "find_gaps rephrasing": _gap_case("rephrasing"),
+    "find_gaps all": _gap_case("all"),
+}
+
+
+def _printed(case: _PrintCase, text: str) -> list[UUID]:
+    return [qid for marker, ids in case.sources if marker in text for qid in ids]
+
+
+@pytest.mark.parametrize("build", _PRINT_CASES.values(), ids=_PRINT_CASES.keys())
+async def test_each_text_tool_registers_exactly_the_questions_it_prints(
+    build: Callable[[], _PrintCase], monkeypatch: pytest.MonkeyPatch
+):
+    """Mutants: a tool registers what it read rather than what its page
+    shows, registers nothing, or registers for another conversation."""
+    case = build()
+    _, registered = _patch_tool_context(monkeypatch, repo=case.repo)
+    monkeypatch.setattr(insights, "default_page_cap", lambda: case.page_cap)
+
+    text = await case.call()
+
+    printed = _printed(case, text)
+    read = [qid for _, ids in case.sources for qid in ids]
+    assert printed and len(printed) < len(read), "the page should show a part"
+    assert registered == [printed]
+
+
+@pytest.mark.parametrize("build", _PRINT_CASES.values(), ids=_PRINT_CASES.keys())
+async def test_a_tool_returns_none_of_its_page_when_its_sources_are_not_recorded(
+    build: Callable[[], _PrintCase], monkeypatch: pytest.MonkeyPatch
+):
+    """Mutant: the text leaves the tool before, or without, its sources
+    being recorded."""
+    case = build()
+    _patch_tool_context(monkeypatch, repo=case.repo)
+    monkeypatch.setattr(insights, "default_page_cap", lambda: case.page_cap)
+
+    async def refuse(**_: Any) -> None:
+        raise DerivationRegistrationError("The copy session does not exist.")
+
+    monkeypatch.setattr(insights, "register_derivations", refuse)
+
+    text = await case.call()
+
+    assert text == SOURCES_NOT_RECORDED_MESSAGE
+    assert _printed(case, text) == []

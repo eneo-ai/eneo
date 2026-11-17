@@ -65,6 +65,8 @@ def test_scoped_questions_filters_tenant_target_window_and_hidden_sessions():
     assert "sessions.assistant_id = :assistant_id_1" in sql
     assert "questions.created_at >=" in sql and "questions.created_at <" in sql
     assert "help_assistant_runs" in sql and "insight_conversations" in sql
+    # A copy of removed content is left out in the same statement.
+    assert "content_derivations" in sql
     # Never an inner join on users: api-key and widget sessions would vanish.
     assert "JOIN users" not in sql
 

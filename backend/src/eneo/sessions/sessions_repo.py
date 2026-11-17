@@ -711,19 +711,21 @@ class SessionRepository:
         turns, history and tool results. Restricted to sessions that carry an
         ``insight_conversations`` row and tenant-scoped via
         :meth:`_filter_by_tenant`; the caller authorizes against that row's
-        actor and the target's insight access. No other code path may call
-        this method.
+        actor and the target's insight access. A copy whose source was
+        removed is still excluded. No other code path may call this method.
         """
-        query = self._filter_by_tenant(
-            sa.select(Sessions).where(
-                Sessions.id == id,
-                sa.exists(
-                    sa.select(InsightConversations.id).where(
-                        InsightConversations.session_id == Sessions.id
-                    )
+        query = self._exclude_unreadable_copies(
+            self._filter_by_tenant(
+                sa.select(Sessions).where(
+                    Sessions.id == id,
+                    sa.exists(
+                        sa.select(InsightConversations.id).where(
+                            InsightConversations.session_id == Sessions.id
+                        )
+                    ),
                 ),
-            ),
-            tenant_id,
+                tenant_id,
+            )
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)

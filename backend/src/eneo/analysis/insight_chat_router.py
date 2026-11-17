@@ -172,6 +172,7 @@ async def start_insight_conversation(
     description=(
         "The caller's own insights conversations about an assistant or group "
         "chat, newest first. Each is named by the question it started with. "
+        "One is no longer listed once a conversation it read was removed. "
         "Pass a page's next_cursor back as cursor for the next page."
     ),
     responses=responses.get_responses([400, 403, 404]),
@@ -209,8 +210,11 @@ async def list_insight_conversations(
 @router.get(
     "/{session_id}/",
     response_model=SessionPublic,
-    description="One of the caller's insights conversations with all its turns.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "One of the caller's insights conversations with all its turns. 410 "
+        "(derived_source_removed) once a conversation it read was removed."
+    ),
+    responses=responses.get_responses([403, 404, 410]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -234,7 +238,7 @@ async def get_insight_conversation(
         "Read one tool call's result from an insights conversation; the "
         "stream and the saved conversation carry its status only."
     ),
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([403, 404, 410]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -265,7 +269,7 @@ async def get_insight_tool_call_result(
         "A follow-up question in one of the caller's insights conversations. "
         f"{_STREAM_DESCRIPTION}"
     ),
-    responses=responses.streaming_response(response_codes=[400, 403, 404]),
+    responses=responses.streaming_response(response_codes=[400, 403, 404, 410]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

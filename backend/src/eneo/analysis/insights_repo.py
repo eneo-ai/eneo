@@ -13,7 +13,10 @@ would drop them (see ``SessionRepository._filter_by_tenant``).
 
 Every row that carries question or answer text also carries the ids of the
 questions that text comes from, so a tool can name the sources of what it
-returns.
+returns. A conversation that is a copy of removed content is no conversation
+of the target here: every read leaves it out in the statement that reads the
+text (``copy_session_valid``), and a read that takes several statements asks
+``readable_sessions`` after the last one.
 """
 
 from __future__ import annotations
@@ -30,6 +33,7 @@ from sqlalchemy.orm import aliased
 
 from eneo.analysis.gap_patterns import NOT_KNOWING_REGEX
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
+from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.mcp_tool_references_table import McpToolReference
 from eneo.database.tables.questions_table import InfoBlobReferences, Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -265,6 +269,7 @@ class InsightsRepository:
             .where(Questions.question.isnot(None))
             .where(Questions.created_at >= window.start)
             .where(Questions.created_at < window.end)
+            .where(copy_session_valid(Sessions.id.expression))
         )
         if scope.kind == "assistant":
             stmt = stmt.where(Sessions.assistant_id == scope.target_id)
@@ -480,9 +485,10 @@ class InsightsRepository:
         self, scope: InsightScope, session_id: UUID
     ) -> Transcript | None:
         """Every turn of one conversation, or ``None`` when the session is
-        missing, hidden or outside the scope (indistinguishable on purpose)."""
+        missing, hidden, a copy of removed content or outside the scope
+        (indistinguishable on purpose)."""
         stmt = sa.select(Sessions.id, Sessions.created_at).where(
-            Sessions.id == session_id
+            Sessions.id == session_id, copy_session_valid(Sessions.id.expression)
         )
         if scope.kind == "assistant":
             stmt = stmt.where(Sessions.assistant_id == scope.target_id)
@@ -512,6 +518,9 @@ class InsightsRepository:
             .order_by(Questions.created_at.asc(), Questions.id.asc())
         )
         rows = (await self.session.execute(turns_stmt)).all()
+        # The turns came after the session row's check: ask again, last.
+        if not await readable_sessions(self.session, [session_id]):
+            return None
         turns = [
             TranscriptTurn(
                 question_id=row.id,

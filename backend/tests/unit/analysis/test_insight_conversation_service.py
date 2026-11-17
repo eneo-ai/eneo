@@ -3,8 +3,9 @@
 Covers model resolution, timezone validation, the completion call's
 contract (insights server attached and scoped to the target and the
 conversation, no extended logging, tool approval off, always streamed),
-persistence of tool calls, the partial save of a stopped turn, and the
-operator-only access to saved conversations.
+persistence of tool calls, the partial save of a stopped turn, the
+operator-only access to saved conversations, and the refusal of an analysis
+whose source was removed.
 """
 
 from datetime import date, datetime, timezone
@@ -36,6 +37,7 @@ from eneo.analysis.insight_exceptions import (
     InvalidTimezoneError,
 )
 from eneo.assistants.assistant import Assistant
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -309,6 +311,11 @@ class _Harness:
         self.placeholders: list[dict[str, Any]] = []
         self.list_kwargs: dict[str, Any] = {}
         self.stored_tool_call: ToolCallInfo | None = None
+        # What the session read returns, and whether a miss is a copy whose
+        # source was removed.
+        self.loaded: Any = self.session
+        self.removed_copy = False
+        self.removal_checks: list[Any] = []
 
         async def assert_insight_access(**kwargs: Any):
             self.access_checks.append(kwargs)
@@ -350,6 +357,7 @@ class _Harness:
             auth_service=SimpleNamespace(create_scoped_mcp_token=create_token),
             session_repo=SimpleNamespace(
                 get_for_insight_conversation=self._get_session,
+                is_removed_copy=self._is_removed_copy,
                 delete=self._delete_session,
             ),
             insight_conversation_repo=SimpleNamespace(
@@ -361,7 +369,11 @@ class _Harness:
         return self.link
 
     async def _get_session(self, session_id: Any, tenant_id: Any):
-        return self.session
+        return self.loaded
+
+    async def _is_removed_copy(self, session_id: Any):
+        self.removal_checks.append(session_id)
+        return self.removed_copy
 
     async def _delete_session(self, session_id: Any):
         self.deleted.append(session_id)
@@ -802,3 +814,49 @@ class TestConversationManagement:
             is harness.stored_tool_call
         )
         assert len(harness.access_checks) == 2
+
+
+class TestRemovedSource:
+    """An analysis whose source was removed reads as nothing anywhere."""
+
+    async def test_every_read_and_a_follow_up_refuse_it_after_the_access_check(
+        self,
+    ):
+        """Mutants: a read or the follow-up answers 404 instead of the typed
+        refusal, or a follow-up writes its question before refusing."""
+        harness = _Harness()
+        harness.with_link(own=True)
+        harness.loaded = None
+        harness.removed_copy = True
+
+        with pytest.raises(DerivedSourceRemovedError):
+            await harness.service.get_conversation(harness.session.id)
+        with pytest.raises(DerivedSourceRemovedError):
+            await harness.service.get_tool_call_result(harness.session.id, "call-1")
+        with pytest.raises(DerivedSourceRemovedError):
+            await harness.service.continue_turn(
+                session_id=harness.session.id, question="q", selected_range=None
+            )
+
+        assert len(harness.access_checks) == 3
+        assert harness.placeholders == []
+        assert harness.completion_kwargs == {}
+
+    async def test_a_missing_session_stays_not_found(self):
+        harness = _Harness()
+        harness.with_link(own=True)
+        harness.loaded = None
+
+        with pytest.raises(NotFoundException):
+            await harness.service.get_conversation(harness.session.id)
+
+    async def test_another_operator_learns_nothing_about_the_removal(self):
+        """Mutant: the removal is checked before the caller's ownership."""
+        harness = _Harness()
+        harness.with_link(own=False)
+        harness.loaded = None
+        harness.removed_copy = True
+
+        with pytest.raises(UnauthorizedException):
+            await harness.service.get_conversation(harness.session.id)
+        assert harness.removal_checks == []

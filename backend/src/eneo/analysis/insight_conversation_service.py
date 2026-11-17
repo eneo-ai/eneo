@@ -19,6 +19,12 @@ as the chat's version 3 UI Message Stream. The ``insight_conversations``
 link row is written in the same transaction as the session and its first
 question, which keeps the session out of every normal listing from its
 first commit.
+
+An analysis holds text the tools copied from other conversations, and the
+tools record those as its sources. Once one of them is removed, every read
+here refuses the analysis with ``DerivedSourceRemovedError`` (after the
+caller's ownership and access were checked), the history list leaves it
+out, and the derived copies task removes it.
 """
 
 from __future__ import annotations
@@ -49,6 +55,7 @@ from eneo.analysis.insight_exceptions import (
 )
 from eneo.analysis.insight_scope import InsightTargetKind
 from eneo.assistants.assistant import Assistant
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.internal_mcp.insights import build_insights_mcp_server, target_label
 from eneo.main.exceptions import (
     BadRequestException,
@@ -373,7 +380,11 @@ class InsightConversationService:
         limit: int,
         cursor: str | None,
     ) -> InsightConversationPage:
-        """The operator's own conversations about the target, newest first."""
+        """The operator's own conversations about the target, newest first.
+
+        An analysis whose source was removed is left out, as the conversation
+        list leaves out such copies; opening it answers the refusal.
+        """
         if (assistant_id is None) == (group_chat_id is None):
             raise BadRequestException(
                 "Provide exactly one of assistant_id or group_chat_id"
@@ -434,10 +445,14 @@ class InsightConversationService:
         return link
 
     async def _load_session(self, session_id: UUID) -> SessionInDB:
+        """The conversation with every turn, for a caller already authorized:
+        the refusal of an analysis whose source was removed says it exists."""
         session = await self.session_repo.get_for_insight_conversation(
             session_id, self.user.tenant_id
         )
         if session is None:
+            if await self.session_repo.is_removed_copy(session_id):
+                raise DerivedSourceRemovedError()
             raise NotFoundException("Insights conversation not found.")
         return session
 

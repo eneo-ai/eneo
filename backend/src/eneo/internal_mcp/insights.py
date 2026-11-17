@@ -17,16 +17,18 @@ operator's yesterday. Every tool self-caps its output with
 :func:`default_page_cap` and continues via ``offset``.
 
 Every tool that returns text from the analysed conversations knows which
-questions that text comes from (:class:`ToolPage`) and hands them to
-:func:`_register_sources` before the text leaves the tool. The results are
-plain text, never structured content, so a call's result reaches the
-operator's browser only through the tool-result endpoint.
+questions that text comes from (:class:`ToolPage`) and returns it through
+:func:`_release_page`, which records the insights conversation as a copy of
+those questions first (:mod:`eneo.data_retention.derivations`): the analysis
+is then removed with any of them. The results are plain text, never
+structured content, so a call's result reaches the operator's browser only
+through the tool-result endpoint.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import Any, Literal, NamedTuple
@@ -47,6 +49,10 @@ from eneo.analysis.insights_repo import (
     Transcript,
     UnansweredRow,
     UsageSummary,
+)
+from eneo.data_retention.derivations import (
+    DerivationRegistrationError,
+    register_derivations,
 )
 from eneo.internal_mcp.constants import INSIGHTS_SERVER_NAME
 from eneo.internal_mcp.foundation import (
@@ -79,6 +85,12 @@ CONVERSATION_NOT_FOUND_MESSAGE = (
     "No conversation with that session id among this target's conversations. "
     "Use the session ids that list_questions, top_questions or "
     "search_questions return."
+)
+# Returned instead of a page whose sources could not be recorded: none of
+# the page's text may leave the tool then.
+SOURCES_NOT_RECORDED_MESSAGE = (
+    "This result could not be returned: the questions it quotes could not be "
+    "recorded as sources of this analysis. Try the call again."
 )
 # Question text shown per line; long messages are cut so one page still
 # lists many questions. read_conversation shows full text.
@@ -187,23 +199,32 @@ def _target_has_knowledge(target: Any) -> bool:
     return any(member.assistant.has_knowledge() for member in target.assistants)
 
 
-async def _register_sources(
-    tool: InsightToolContext, question_ids: Sequence[UUID]
-) -> None:
-    """Where a tool names the questions whose text it is about to return.
+async def _release_page(copy_session_id: UUID, page: ToolPage) -> str:
+    """The page's text, once the insights conversation is recorded as a copy
+    of every question the page prints.
 
-    Called by every tool that returns text from the analysed conversations,
-    inside the tool's transaction and before the text leaves the tool:
-    the registration of the insights conversation (``tool.session_id``) as a
-    copy of these questions belongs here, so the analysis is removed with
-    them. Retention's source registration is not on this branch yet; until
-    it is, the sources are only logged.
+    Every tool that returns text from the analysed conversations returns it
+    through here, so the analysis is removed with any of those questions.
+    Tools call it after their own transaction closed: the registration
+    commits in a transaction of its own, and one call never holds two pooled
+    connections at once. The conversation's session was committed with its
+    first question before the token naming it was minted. When the
+    registration cannot be confirmed, none of the page's text is returned.
     """
-    logger.debug(
-        "[Insights] sources session=%s questions=%d",
-        tool.session_id,
-        len(set(question_ids)),
-    )
+    try:
+        await register_derivations(
+            copy_session_id=copy_session_id,
+            source_question_ids=page.question_ids,
+        )
+    except DerivationRegistrationError:
+        logger.warning(
+            "[Insights] page withheld, sources not recorded session=%s questions=%d",
+            copy_session_id,
+            len(set(page.question_ids)),
+            exc_info=True,
+        )
+        return SOURCES_NOT_RECORDED_MESSAGE
+    return page.text
 
 
 # --------------------------------------------------------------------------- #
@@ -571,6 +592,9 @@ async def usage_summary(
     follow-ups are those that were not the first in their conversation;
     distinct users exclude API-key and widget traffic, which is counted
     separately. Periods with no activity are omitted from the breakdown.
+
+    It returns counts only, never the text of a question or answer, so it
+    adds no source conversations to this analysis.
     """
     try:
         window = _parse_window(start, end, timezone)
@@ -648,14 +672,13 @@ async def list_questions(
             label=tool.target_label,
             page_cap=default_page_cap(),
         )
-        await _register_sources(tool, page.question_ids)
     logger.debug(
         "[Insights] list_questions offset=%d rows=%d total=%d",
         offset,
         len(rows),
         total,
     )
-    return page.text
+    return await _release_page(tool.session_id, page)
 
 
 @mcp.tool(title="Top questions", annotations=_READS, structured_output=False)
@@ -699,11 +722,10 @@ async def top_questions(
             label=tool.target_label,
             page_cap=default_page_cap(),
         )
-        await _register_sources(tool, page.question_ids)
     logger.debug(
         "[Insights] top_questions n=%d groups=%d total=%d", n, len(rows), total
     )
-    return page.text
+    return await _release_page(tool.session_id, page)
 
 
 @mcp.tool(title="Search questions", annotations=_READS, structured_output=False)
@@ -757,14 +779,13 @@ async def search_questions(
             label=tool.target_label,
             page_cap=default_page_cap(),
         )
-        await _register_sources(tool, page.question_ids)
     logger.debug(
         "[Insights] search_questions offset=%d hits=%d total=%d",
         offset,
         len(hits),
         total,
     )
-    return page.text
+    return await _release_page(tool.session_id, page)
 
 
 @mcp.tool(title="Read conversation", annotations=_READS, structured_output=False)
@@ -804,13 +825,12 @@ async def read_conversation(
         page = _transcript_text(
             transcript, offset=offset, timezone=timezone, page_cap=default_page_cap()
         )
-        await _register_sources(tool, page.question_ids)
     logger.debug(
         "[Insights] read_conversation turns=%d offset=%d",
         len(transcript.turns),
         offset,
     )
-    return page.text
+    return await _release_page(tool.session_id, page)
 
 
 @mcp.tool(title="Find gaps", annotations=_READS, structured_output=False)
@@ -926,13 +946,13 @@ async def find_gaps(
             )
             sections.append(text)
             printed.extend(question_id for ids in sources[:kept] for question_id in ids)
-        await _register_sources(tool, printed)
     logger.debug("[Insights] find_gaps signal=%s offset=%d", signal, offset)
     footer = (
         "These are heuristic candidates: verify important ones with "
         "read_conversation and present counts as indicative."
     )
-    return "\n\n".join(sections) + f"\n\n{footer}"
+    page = ToolPage("\n\n".join(sections) + f"\n\n{footer}", printed)
+    return await _release_page(tool.session_id, page)
 
 
 # --------------------------------------------------------------------------- #

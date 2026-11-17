@@ -2,17 +2,21 @@
 
 The completion call is stubbed; everything around it (access checks, model
 resolution, the attached insights server, the link row, tool-call
-persistence, the audit row and the hidden-session rule) runs for real.
+persistence, the audit row, the hidden-session rule, and the removal of an
+analysis with a conversation it read) runs for real.
 """
 
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -21,9 +25,18 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.data_retention.application.derived_copy_retention_task import (
+    DERIVED_COPIES_TASK,
+)
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.retention_tables import ContentDerivations
+from eneo.database.tables.sessions_table import Sessions
+from eneo.internal_mcp.insights import read_conversation
+from tests.integration.data_retention.retention_support import (
+    run_registered_retention,
+)
 
 PATH = "/api/v1/analysis/conversation-insights/chat/"
 AUDIT_ENQUEUE = "eneo.audit.application.audit_service.job_manager.enqueue"
@@ -466,3 +479,95 @@ async def test_list_pages_with_the_cursor_it_gives(
         headers=headers,
     )
     assert refused.status_code == 400, refused.text
+
+
+def _loopback_ctx(token: str) -> SimpleNamespace:
+    """The slice of a FastMCP ``Context`` the loopback tools read."""
+    request = SimpleNamespace(headers={"authorization": f"Bearer {token}"})
+    return SimpleNamespace(request_context=SimpleNamespace(request=request))
+
+
+async def _rows(session: AsyncSession, column: Any, session_id: UUID) -> int:
+    return (
+        await session.scalar(sa.select(sa.func.count()).where(column == session_id))
+        or 0
+    )
+
+
+async def test_an_analysis_goes_with_a_conversation_its_tools_read(
+    db_container,
+    admin_user,
+    client,
+    patch_auth_service_jwt,
+    seed_insights,
+    stub_completion,
+    retention_session: AsyncSession,
+):
+    """A tool returns a question's text into the analysis; once that question
+    is removed every read of the analysis is refused, its history leaves it
+    out, and the derived copies task removes it with its link row. Mutants:
+    a tool returns text without registering its source; a read, the tool
+    result or a follow-up skips the copy check; the list still shows it; the
+    task leaves the session, its link row or its edge behind."""
+    seed, headers = await _seed_and_token(db_container, admin_user, seed_insights)
+    started = await client.post(
+        PATH,
+        json={"assistant_id": str(seed["bygg"]), "question": "Vad undrar folk?"},
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    session_id = UUID(_session_id(_events(started.text)))
+    async with db_container() as container:
+        token = container.auth_service().create_scoped_mcp_token(
+            admin_user,
+            insight_target=("assistant", seed["bygg"]),
+            session_id=session_id,
+        )
+
+    text = await read_conversation(_loopback_ctx(token), session_id=str(seed["s3"]))
+
+    assert "User: Öppettider?" in text
+    edges = await retention_session.scalars(
+        sa.select(ContentDerivations.source_question_id).where(
+            ContentDerivations.copy_session_id == session_id
+        )
+    )
+    assert list(edges) == [seed["s3_q1"]]
+    analysis = f"{PATH}{session_id}/"
+    assert (await client.get(analysis, headers=headers)).status_code == 200
+
+    removed = await client.delete(
+        f"/api/v1/conversations/{seed['s3']}/", headers=headers
+    )
+    assert removed.status_code in (200, 204), removed.text
+
+    for refused in (
+        await client.get(analysis, headers=headers),
+        await client.get(f"{analysis}tool-calls/call-1/result/", headers=headers),
+        await client.post(analysis, json={"question": "Och sen?"}, headers=headers),
+    ):
+        assert refused.status_code == 410, refused.text
+        assert refused.json()["code"] == "derived_source_removed"
+    listed = await client.get(
+        PATH, params={"assistant_id": str(seed["bygg"])}, headers=headers
+    )
+    assert listed.status_code == 200, listed.text
+    assert [item["id"] for item in listed.json()["items"]] == [
+        str(seed["insight_session"])
+    ]
+    assert listed.json()["total_count"] == 1
+
+    report = await run_registered_retention(
+        retention_session, task_name=DERIVED_COPIES_TASK
+    )
+
+    assert report.counts["copies.sessions_deleted"] == 1
+    assert await retention_session.get(Sessions, session_id) is None
+    assert await _rows(retention_session, Questions.session_id, session_id) == 0
+    assert (
+        await _rows(retention_session, InsightConversations.session_id, session_id) == 0
+    )
+    assert (
+        await _rows(retention_session, ContentDerivations.copy_session_id, session_id)
+        == 0
+    )

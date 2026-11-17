@@ -16,6 +16,7 @@ import sqlalchemy as sa
 from pydantic import BaseModel, ConfigDict
 
 from eneo.analysis.insight_scope import InsightTargetKind
+from eneo.data_retention.derivations import copy_session_valid
 from eneo.database.database import AsyncSession
 from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.sessions_table import Sessions
@@ -128,7 +129,8 @@ class InsightConversationRepository:
 
         Keyset-paged on the link row's ``(created_at, session_id)``, which is
         unique, so a page boundary between two conversations started in the
-        same instant loses neither. The cursor is opaque to the client.
+        same instant loses neither. The cursor is opaque to the client. An
+        analysis whose source was removed is neither listed nor counted.
         """
         if (assistant_id is None) == (group_chat_id is None):
             raise ValueError(
@@ -146,6 +148,7 @@ class InsightConversationRepository:
             .where(
                 InsightConversations.tenant_id == tenant_id,
                 InsightConversations.actor_user_id == actor_user_id,
+                copy_session_valid(Sessions.id.expression),
             )
         )
         if assistant_id is not None:
