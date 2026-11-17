@@ -1202,12 +1202,16 @@ async def get_conversation_insight_finding_cases(
     "/targets/",
     response_model=InsightTargetPage,
     description=(
-        "Every assistant people see and every group chat of the tenant with its "
-        "usage in the period: conversations by source and questions, the "
-        "previous period of equal length when compare is set, and answer "
-        "ratings where insights are on (usage only where they are off). A "
-        "conversation counts when it has a question in the period. totals sum "
-        "the usage of every target that matches the filters, not only the page."
+        "Every assistant people see and every group chat of the tenant outside "
+        "personal spaces, with its usage in the period: conversations by source "
+        "and questions, the previous period of equal length when compare is "
+        "set, and answer ratings where insights are on (usage only where they "
+        "are off). A conversation counts when it has a question in the period. "
+        "Targets in personal spaces are never rows: personal gives their number "
+        "and usage together, without ratings, the same on every page and "
+        "whatever q and activity say. totals is everything the organisation "
+        "used: every listed target that matches the filters, not only the page, "
+        "plus the personal usage."
     ),
     responses=responses.get_responses([400, 403]),
 )

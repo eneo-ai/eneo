@@ -36,6 +36,12 @@ assistant, plus ratings and a hidden assistant:
   * s3 conversation voted good (2026-09-06 09:00)
   * a hidden assistant with no conversations
 
+``seed_personal`` adds two users' personal spaces to ``seed_sources``:
+  * Anna's space: "Annas assistent", asked once 2026-09-07 08:00, and
+        "Annas utkast", never used
+  * Bo's space: "Bos assistent", one conversation asked 2026-09-05 09:00 (the
+        period before) and twice 2026-09-06 09:00
+
 ``seed_quality`` adds knowledge and tool calls to ``seed_sources``; the
 assistant answers in tool mode:
   * collections "Bygglov" and "Taxor", both attached to the assistant, and the
@@ -76,7 +82,8 @@ from eneo.database.tables.questions_table import (
     Questions,
 )
 from eneo.database.tables.sessions_table import Sessions
-from eneo.database.tables.spaces_table import SpacesCompletionModels
+from eneo.database.tables.spaces_table import Spaces, SpacesCompletionModels
+from eneo.database.tables.users_table import Users
 from eneo.database.tables.widgets_table import Widgets
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.widgets.domain.widget import generate_public_id
@@ -543,6 +550,69 @@ async def _seed_sources(container, admin_user) -> dict[str, UUID]:
     }
 
 
+async def _seed_personal(container, admin_user) -> dict[str, UUID]:
+    """``_seed_sources`` plus two users' personal spaces, described in the
+    module docstring."""
+    seed = await _seed_sources(container, admin_user)
+    session = container.session()
+    tenant_id = seed["tenant_id"]
+    personal: dict[str, UUID] = {}
+    for person, assistants in (
+        ("anna", {"Annas assistent": [utc(2026, 9, 7, 8, 0)], "Annas utkast": []}),
+        (
+            "bo",
+            {
+                "Bos assistent": [
+                    utc(2026, 9, 5, 9, 0),
+                    utc(2026, 9, 6, 9, 0),
+                    utc(2026, 9, 6, 9, 5),
+                ]
+            },
+        ),
+    ):
+        user_id = await session.scalar(
+            sa.insert(Users)
+            .values(
+                email=f"{person}-{uuid4().hex[:8]}@example.com",
+                username=f"{person}-{uuid4().hex[:8]}",
+                tenant_id=tenant_id,
+                state="active",
+            )
+            .returning(Users.id)
+        )
+        space_id = uuid4()
+        await session.execute(
+            sa.insert(Spaces).values(
+                id=space_id, name=person, tenant_id=tenant_id, user_id=user_id
+            )
+        )
+        for name, times in assistants.items():
+            assistant = await _insert_assistant(
+                session,
+                owner_user_id=user_id,
+                space_id=space_id,
+                name=name,
+                insight_enabled=True,
+            )
+            personal[name] = assistant
+            if not times:
+                continue
+            session_id = await _insert_session(
+                session, name=name, user_id=user_id, assistant_id=assistant
+            )
+            for at in times:
+                await _insert_question(
+                    session,
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    assistant_id=assistant,
+                    text="En privat fråga",
+                    at=at,
+                )
+    await session.flush()
+    return {**seed, **{f"personal:{name}": id_ for name, id_ in personal.items()}}
+
+
 def _call(server: str, tool: str, **values) -> dict[str, object]:
     return {
         "server_name": server,
@@ -693,6 +763,12 @@ async def _seed_quality(container, admin_user) -> dict[str, UUID]:
 def seed_insights():
     """``await seed_insights(container, admin_user)`` inside a db_container."""
     return _seed_insights
+
+
+@pytest.fixture
+def seed_personal():
+    """``await seed_personal(container, admin_user)`` inside a db_container."""
+    return _seed_personal
 
 
 @pytest.fixture

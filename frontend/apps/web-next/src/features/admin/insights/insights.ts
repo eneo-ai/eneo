@@ -14,6 +14,7 @@ export type AssistantInsightQuestionPage =
   Schema<"CursorPaginatedResponse_AssistantInsightQuestion_">;
 export type InsightTarget = Schema<"InsightTarget">;
 export type InsightTargetPage = Schema<"InsightTargetPage">;
+export type InsightPersonalUsage = Schema<"InsightPersonalUsage">;
 
 export type InsightsRange = { start: string; end: string };
 export type AssistantInsightFilters = InsightsRange & {
@@ -124,9 +125,9 @@ export const INSIGHT_TARGETS_PAGE_SIZE = 25;
 export const INSIGHT_TARGETS_SEARCH_MAX = 200;
 
 /**
- * `GET /analysis/targets/`: every assistant and group chat with its usage in
- * the period (whole local days, the end exclusive), a page at a time from
- * `offset`.
+ * `GET /analysis/targets/`: every assistant and group chat outside personal
+ * spaces with its usage in the period (whole local days, the end exclusive),
+ * a page at a time from `offset`, and the personal spaces' usage together.
  */
 export function fetchInsightTargets({
   api,

@@ -26,6 +26,7 @@ from eneo.analysis.insights_repo import (
     KnowledgeSetup,
     KnowledgeUse,
     PeriodFigures,
+    PersonalUsage,
     RephrasingRow,
     SourceCounts,
     TargetRow,
@@ -159,14 +160,16 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
 
     def row(insight_enabled: bool) -> TargetRow:
         return TargetRow(
-            uuid4(), "assistant", "a", uuid4(), "s", False, insight_enabled,
+            uuid4(), "assistant", "a", uuid4(), "s", insight_enabled,
             usage, usage, 2, 1,
         )  # fmt: skip
 
+    personal = PersonalUsage(3, TargetUsage(SourceCounts(2, 2, 0, 0), 5), usage)
     repo.list_targets.return_value = (
         [row(True), row(False)],
         2,
         TargetTotals(usage, TargetUsage(SourceCounts(1, 1, 0, 0), 1)),
+        personal,
     )
 
     page = await service.list_targets(
@@ -186,6 +189,22 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
     assert disabled.ratings is None
     assert disabled.conversations.widget == 2 and enabled.previous is None
     assert page.totals.conversations.widget == 2 and page.totals.previous is None
+    assert page.personal is not None
+    assert (page.personal.assistants, page.personal.questions) == (3, 5)
+    assert page.personal.previous is None
+
+    repo.list_targets.return_value = ([], 0, TargetTotals(usage, usage), None)
+    without = await service.list_targets(
+        window=window,
+        compare=True,
+        query=None,
+        unused_only=False,
+        sort="name",
+        descending=False,
+        offset=0,
+        limit=10,
+    )
+    assert without.personal is None and without.totals.previous is not None
 
 
 async def test_findings_carry_examples_only_for_what_passes_the_thresholds():

@@ -96,6 +96,7 @@ __all__ = [
     "MissReason",
     "NoKnowledgeRow",
     "PeriodFigures",
+    "PersonalUsage",
     "QuestionGroupRow",
     "QuestionRow",
     "RatingKind",
@@ -342,8 +343,18 @@ class TargetUsage(NamedTuple):
 
 
 class TargetTotals(NamedTuple):
-    """Usage of every target a target list matched, not only its page."""
+    """Usage of every target a target list matched, not only its page, and
+    of the personal-space targets."""
 
+    usage: TargetUsage
+    previous: TargetUsage
+
+
+class PersonalUsage(NamedTuple):
+    """The personal-space targets together: how many there are and their
+    usage. Never per person or per target."""
+
+    targets: int
     usage: TargetUsage
     previous: TargetUsage
 
@@ -354,7 +365,6 @@ class TargetRow(NamedTuple):
     name: str
     space_id: UUID
     space_name: str
-    personal_space: bool
     insight_enabled: bool
     usage: TargetUsage
     previous: TargetUsage
@@ -430,6 +440,30 @@ def _source_counts(row: sa.Row[Any], prefix: str) -> SourceCounts:
         user=int(getattr(row, f"{prefix}_user") or 0),
         api_key=int(getattr(row, f"{prefix}_api_key") or 0),
         widget=int(getattr(row, f"{prefix}_widget") or 0),
+    )
+
+
+# Per-target figures that are ratings, not usage.
+_RATING_FIGURES = frozenset({"positive", "negative"})
+
+
+def _target_usage(row: sa.Row[Any], prefix: str) -> TargetUsage:
+    """The usage read back from ``<prefix>conversations``, its per-source
+    columns and ``<prefix>questions``."""
+    return TargetUsage(
+        conversations=_source_counts(row, f"{prefix}conversations"),
+        questions=int(getattr(row, f"{prefix}questions")),
+    )
+
+
+def _add_usage(usage: TargetUsage, other: TargetUsage | None) -> TargetUsage:
+    if other is None:
+        return usage
+    return TargetUsage(
+        conversations=SourceCounts(
+            *(a + b for a, b in zip(usage.conversations, other.conversations))
+        ),
+        questions=usage.questions + other.questions,
     )
 
 
@@ -1879,11 +1913,17 @@ class InsightsRepository:
         descending: bool,
         offset: int,
         limit: int,
-    ) -> tuple[list[TargetRow], int, TargetTotals]:
-        """Every assistant people see and every group chat of the tenant,
-        with its usage in the window (and the previous window), in one
-        statement. Returns ``(page, total, totals)``: the totals sum the usage
-        of every target that matches, not only the page's.
+    ) -> tuple[list[TargetRow], int, TargetTotals, PersonalUsage | None]:
+        """Every assistant people see and every group chat of the tenant
+        outside personal spaces, with its usage in the window (and the
+        previous window), in one statement. Returns ``(page, total, totals,
+        personal)``.
+
+        The targets in personal spaces are never listed: ``personal`` is
+        their number and usage together, the same whatever the filters and
+        the page, and None when the tenant has none. ``totals`` sums the
+        usage of every listed target that matches, not only the page's, and
+        the personal usage.
 
         The tenant's questions in both windows are read once and grouped per
         conversation, then per target; only the conversation rows are checked
@@ -1977,24 +2017,30 @@ class InsightsRepository:
         ).subquery("targets")
         t = targets.c
         figures = [column for column in per_target.c if column.name != "target_id"]
+        usage = (
+            sa.select(
+                t.id,
+                t.kind,
+                t.name,
+                t.space_id,
+                t.space_name,
+                t.personal_space,
+                t.insight_enabled,
+                *(sa.func.coalesce(column, 0).label(column.name) for column in figures),
+            )
+            .outerjoin(per_target, per_target.c.target_id == t.id)
+            .cte("usage")
+        )
+        u = usage.c
         listing = sa.select(
-            t.id,
-            t.kind,
-            t.name,
-            t.space_id,
-            t.space_name,
-            t.personal_space,
-            t.insight_enabled,
-            *(sa.func.coalesce(column, 0).label(column.name) for column in figures),
-        ).outerjoin(per_target, per_target.c.target_id == t.id)
+            *(column for column in u if column.name != "personal_space")
+        ).where(sa.not_(u.personal_space))
         if query:
             listing = listing.where(
-                t.name.ilike(f"%{_escape_like(query)}%", escape="\\")
+                u.name.ilike(f"%{_escape_like(query)}%", escape="\\")
             )
         if unused_only:
-            listing = listing.where(
-                sa.func.coalesce(per_target.c.conversations, 0) == 0
-            )
+            listing = listing.where(u.conversations == 0)
         listed = listing.cte("listing")
         lc = listed.c
         sort_key = {
@@ -2013,33 +2059,61 @@ class InsightsRepository:
             .limit(limit)
             .lateral("page")
         )
+        # Usage only: summed figures carry no ratings.
+        usage_names = [c.name for c in figures if c.name not in _RATING_FIGURES]
+
+        def sums(rows: sa.CTE, prefix: str) -> list[sa.Label[Any]]:
+            columns: list[sa.ColumnElement[int]] = [
+                rows.c[name] for name in usage_names
+            ]
+            return [
+                sa.func.coalesce(sa.func.sum(column), 0).label(prefix + name)
+                for name, column in zip(usage_names, columns)
+            ]
+
         # The usage of every matching target, summed before the page is cut.
-        summed_columns: list[sa.ColumnElement[int]] = [lc[c.name] for c in figures]
-        totals = sa.select(
-            sa.func.count().label("total"),
-            *(
-                sa.func.coalesce(sa.func.sum(column), 0).label(f"all_{column.name}")
-                for column in summed_columns
-            ),
-        ).select_from(listed)
-        totals_sq = totals.subquery("totals")
+        totals = (
+            sa.select(sa.func.count().label("total"), *sums(listed, "all_"))
+            .select_from(listed)
+            .subquery("totals")
+        )
+        # Every personal target together, whatever the filters and the page.
+        personal = (
+            sa.select(
+                sa.func.count().label("personal_targets"), *sums(usage, "personal_")
+            )
+            .where(u.personal_space)
+            .subquery("personal")
+        )
         # One row even for an empty page, so the totals always come back.
         stmt = (
-            sa.select(totals_sq, page).select_from(totals_sq).outerjoin(page, sa.true())
+            sa.select(totals, personal, page)
+            .select_from(totals)
+            .join(personal, sa.true())
+            .outerjoin(page, sa.true())
         )
         rows = (await self.session.execute(stmt)).all()
         if not rows:
             none = TargetUsage(SourceCounts(0, 0, 0, 0), 0)
-            return [], 0, TargetTotals(none, none)
+            return [], 0, TargetTotals(none, none), None
         first = rows[0]
-        summed = TargetTotals(
-            usage=TargetUsage(
-                conversations=_source_counts(first, "all_conversations"),
-                questions=int(first.all_questions),
+        personal_usage = (
+            PersonalUsage(
+                targets=int(first.personal_targets),
+                usage=_target_usage(first, "personal_"),
+                previous=_target_usage(first, "personal_previous_"),
+            )
+            if first.personal_targets
+            else None
+        )
+        organisation = TargetTotals(
+            usage=_add_usage(
+                _target_usage(first, "all_"),
+                personal_usage.usage if personal_usage is not None else None,
             ),
-            previous=TargetUsage(
-                conversations=_source_counts(first, "all_previous_conversations"),
-                questions=int(first.all_previous_questions),
+            previous=_add_usage(
+                _target_usage(first, "all_previous_"),
+                personal_usage.previous if personal_usage is not None else None,
             ),
         )
         return (
@@ -2050,7 +2124,6 @@ class InsightsRepository:
                     name=row.name,
                     space_id=row.space_id,
                     space_name=row.space_name,
-                    personal_space=bool(row.personal_space),
                     insight_enabled=bool(row.insight_enabled),
                     usage=TargetUsage(
                         conversations=_source_counts(row, "conversations"),
@@ -2067,5 +2140,6 @@ class InsightsRepository:
                 if row.id is not None
             ],
             int(first.total),
-            summed,
+            organisation,
+            personal_usage,
         )

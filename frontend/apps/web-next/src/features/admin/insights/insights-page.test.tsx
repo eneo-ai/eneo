@@ -19,7 +19,6 @@ const target = (id: string, name: string, overrides: Record<string, unknown> = {
   name,
   space_id: `space-${id}`,
   space_name: "Bygg och miljö",
-  personal_space: false,
   insight_enabled: true,
   conversations: counts(0, 0, 0),
   questions: 0,
@@ -27,6 +26,9 @@ const target = (id: string, name: string, overrides: Record<string, unknown> = {
   ratings: { positive: 0, negative: 0 },
   ...overrides
 });
+
+/** Every personal space's assistants together: the same whatever the filters. */
+const PERSONAL = { assistants: 3, conversations: counts(40, 0, 2), questions: 90 };
 
 /** Three targets of note, then enough unused assistants for a second page. */
 const TARGETS = [
@@ -96,13 +98,22 @@ vi.mock("@/lib/api/browser", () => ({
               (!query.q || item.name.toLowerCase().includes(String(query.q))) &&
               (query.activity !== "unused" || item.conversations.total === 0)
           );
+          const compared = String(query.compare) === "true";
+          // The listed targets that match, plus the personal spaces, which no filter narrows.
           const sum = (source: "total" | "user" | "widget" | "api_key") =>
-            matching.reduce((total, item) => total + item.conversations[source], 0);
+            matching.reduce(
+              (total, item) => total + item.conversations[source],
+              PERSONAL.conversations[source]
+            );
           return ok({
             items: matching.slice(offset, offset + Number(query.limit)),
             total_count: matching.length,
             limit: Number(query.limit),
             offset,
+            personal: {
+              ...PERSONAL,
+              previous: compared ? { conversations: counts(30, 0, 0), questions: 60 } : null
+            },
             totals: {
               conversations: {
                 total: sum("total"),
@@ -110,11 +121,11 @@ vi.mock("@/lib/api/browser", () => ({
                 widget: sum("widget"),
                 api_key: sum("api_key")
               },
-              questions: matching.reduce((total, item) => total + item.questions, 0),
-              previous:
-                String(query.compare) === "true"
-                  ? { conversations: counts(1000, 400, 100), questions: 3000 }
-                  : null
+              questions: matching.reduce(
+                (total, item) => total + item.questions,
+                PERSONAL.questions
+              ),
+              previous: compared ? { conversations: counts(1000, 400, 100), questions: 3000 } : null
             }
           });
         }
@@ -308,14 +319,60 @@ describe("InsightsPage", () => {
   it("compares each target's conversations when Jämför is on", async () => {
     renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
     await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
-    // Every listed target's conversations, by source, in words that count conversations.
-    expect(
-      screen.getByText(
-        "Konversationer i perioden: 1 995, varav 1 384 från användare, 537 via widget och 74 via API"
-      )
-    ).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Jämför" }));
     await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ compare: true }));
-    expect(await screen.findByText(/^\+33\s%/)).toBeTruthy();
+    // The organisation's conversations against 1 500, and the personal spaces' against 30.
+    expect(await screen.findByText(/^\+36\s%/)).toBeTruthy();
+    const table = screen.getByRole("table", { name: "Assistenter och gruppchattar" });
+    expect(within(within(table).getAllByRole("row")[1]!).getByText(/^\+40\s%/)).toBeTruthy();
+  });
+
+  it("shows the personal spaces as one first row and the organisation's total, only unfiltered", async () => {
+    renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
+    const table = await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
+    // Conversations by source in words that count conversations: listed targets and personal spaces.
+    const totals =
+      "Konversationer i perioden: 2 037, varav 1 424 från användare, 537 via widget och 76 via API";
+    expect(screen.getByText(totals)).toBeTruthy();
+    const firstRow = () => within(table).getAllByRole("row")[1]!;
+    const cells = () =>
+      within(firstRow())
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent);
+    // Told apart as a summary for assistive technology, and never a link to someone's assistant.
+    expect(cells()).toEqual([
+      "Personliga assistenter sammanlagt3 assistenter i personliga utrymmen",
+      "42",
+      "",
+      "90",
+      "Visas inte för personliga assistenter"
+    ]);
+    expect(
+      within(firstRow()).getByRole("img", { name: /^95\s%\sanvändare, 5\s%\sAPI$/ })
+    ).toBeTruthy();
+    expect(within(firstRow()).queryByRole("link")).toBeNull();
+    // It stays first whatever the sort, and is not counted among the listed targets.
+    fireEvent.click(within(table).getByRole("button", { name: "Namn" }));
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ sort: "name" }));
+    expect(cells()[0]).toMatch(/^Personliga assistenter/);
+    expect(screen.getByText("Visar 25 av 27")).toBeTruthy();
+
+    // A search or "Oanvända" lists some targets: no personal row, no organisation total.
+    const search = screen.getByRole("textbox", { name: "Sök assistent eller gruppchatt" });
+    fireEvent.change(search, { target: { value: "bygg" } });
+    expect(screen.queryByText(/^Konversationer i perioden/)).toBeNull();
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ q: "bygg" }));
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(2));
+    expect(within(table).queryByText("Personliga assistenter")).toBeNull();
+    expect(screen.queryByText(/^Konversationer i perioden/)).toBeNull();
+
+    fireEvent.change(search, { target: { value: "" } });
+    expect(await screen.findByText(totals)).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Oanvända" }));
+    expect(screen.queryByText(/^Konversationer i perioden/)).toBeNull();
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ activity: "unused" }));
+    expect(await screen.findByText("Visar 24 av 24")).toBeTruthy();
+    expect(screen.queryByText("Personliga assistenter")).toBeNull();
+    expect(screen.queryByText(/^Konversationer i perioden/)).toBeNull();
   });
 });

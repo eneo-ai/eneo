@@ -29,12 +29,19 @@ import {
   fetchInsightTargets,
   INSIGHT_TARGETS_SEARCH_MAX,
   nextTargetOffset,
+  type InsightPersonalUsage,
   type InsightTarget,
   type InsightTargetPage,
   type InsightTargetSort
 } from "./insights";
 
-type TargetRow = InsightTarget & { key: string };
+/**
+ * A row of the table: a listed target, or the personal spaces' assistants
+ * together (`personal`), first and never a link.
+ */
+type TargetRow =
+  | { key: string; kind: "target"; target: InsightTarget }
+  | { key: "personal"; kind: "personal"; usage: InsightPersonalUsage };
 type SortKey = InsightTargetSort["by"];
 
 /** A source's share of a target's conversations: "58 % användare". */
@@ -92,10 +99,11 @@ function SourceBar({ counts }: { counts: SourceCounts }) {
 }
 
 /**
- * The conversations of every target in the list (not only the page), split by
- * source in the words the insights view uses, with their change when compared:
- * "Konversationer i perioden: 9 412, varav 6 120 från användare, 2 870 via
- * widget och 422 via API".
+ * What the organisation used in the period, split by source in the words the
+ * insights view uses, with its change when compared: "Konversationer i
+ * perioden: 9 412, varav 6 120 från användare, 2 870 via widget och 422 via
+ * API". Only for the unfiltered list: a search or "Oanvända" narrows the
+ * listed targets but not the personal spaces' part of the totals.
  */
 function TargetTotals({
   totals,
@@ -137,16 +145,13 @@ function RatingsCell({ target }: { target: InsightTarget }) {
     return (
       <span className="text-ax-text-secondary flex flex-col items-end gap-0.5 text-sm">
         {t("insights_off_title")}
-        {/* A personal assistant's editor is its owner's: there is nowhere to send an admin. */}
-        {target.personal_space ? null : (
-          <Link
-            href={settingHref(target)}
-            hasUnderline
-            className="inline-flex items-center pointer-coarse:min-h-11"
-          >
-            {t("insights_targets_open_setting")}
-          </Link>
-        )}
+        <Link
+          href={settingHref(target)}
+          hasUnderline
+          className="inline-flex items-center pointer-coarse:min-h-11"
+        >
+          {t("insights_targets_open_setting")}
+        </Link>
       </span>
     );
   }
@@ -161,10 +166,17 @@ function RatingsCell({ target }: { target: InsightTarget }) {
 
 /**
  * "Assistenter och gruppchattar": every assistant and group chat of the
- * organisation with its use in the period, sorted, searched and filtered on
- * the server and loaded a page at a time. The name opens the target's
- * insights; a target with insights off shows its use only, with the way to
- * the setting. With `compare`, conversations carry their change.
+ * organisation outside personal spaces with its use in the period, sorted,
+ * searched and filtered on the server and loaded a page at a time. The name
+ * opens the target's insights; a target with insights off shows its use
+ * only, with the way to the setting. With `compare`, conversations carry
+ * their change.
+ *
+ * The personal spaces' assistants are one row, "Personliga assistenter",
+ * with their use together and nothing that names a person: first whatever
+ * the sort, not a link, and only in the unfiltered list (no search,
+ * "Alla"), as is the organisation's total above the table. "Visar x av y"
+ * counts the listed targets.
  */
 export function InsightTargets({ range, compare }: { range: InsightRange; compare: boolean }) {
   const t = useTranslations();
@@ -183,8 +195,8 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
     queryKey: ["admin-insights-targets", range, compare, sort, search, unusedOnly],
     initialPageParam: 0,
     getNextPageParam: nextTargetOffset,
-    queryFn: ({ pageParam, signal }) =>
-      fetchInsightTargets({
+    queryFn: async ({ pageParam, signal }) => ({
+      ...(await fetchInsightTargets({
         api: browserApi,
         range,
         compare,
@@ -193,17 +205,29 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
         unusedOnly,
         offset: pageParam,
         signal
-      }),
+      })),
+      // What the page was read with: a placeholder from a filtered list is not the organisation's.
+      filtered: search !== "" || unusedOnly
+    }),
     // A new sort or search keeps the table (and the focus in it) until the new rows are in.
     placeholderData: keepPreviousData
   });
   const pages = targets.data?.pages;
-  const rows: TargetRow[] = flattenPages(pages).map((target) => ({
-    ...target,
-    key: `${target.kind}:${target.id}`
+  const listed: TargetRow[] = flattenPages(pages).map((target) => ({
+    key: `${target.kind}:${target.id}`,
+    kind: "target",
+    target
   }));
-  const total = pages?.[0]?.total_count ?? rows.length;
-  const shown = t("insights_shown_of_total", { shown: rows.length, total });
+  const total = pages?.[0]?.total_count ?? listed.length;
+  const shown = t("insights_shown_of_total", { shown: listed.length, total });
+  // The organisation as a whole: the controls and the rows on screen both unfiltered.
+  const organisation =
+    searchInput.trim() === "" && !unusedOnly && pages?.[0]?.filtered === false ? pages[0] : null;
+  const personal: TargetRow | null = organisation?.personal
+    ? { key: "personal", kind: "personal", usage: organisation.personal }
+    : null;
+  const rows = personal ? [personal, ...listed] : listed;
+  const hasPersonalRow = personal !== null;
   const settled = targets.isSuccess && !targets.isFetching && !targets.isPlaceholderData;
 
   // Announce the result of a new search, filter or sort once it is in (WCAG 4.1.3); not the first load.
@@ -225,9 +249,11 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
     if (page === null || pageCount <= page) return;
     focusPage.current = null;
     const first = pages?.slice(0, page).reduce((count, loaded) => count + loaded.items.length, 0);
-    const row = tableRef.current?.querySelectorAll("tbody tr")[first ?? 0];
+    // The personal spaces' row, when shown, comes before the listed targets.
+    const before = hasPersonalRow ? 1 : 0;
+    const row = tableRef.current?.querySelectorAll("tbody tr")[(first ?? 0) + before];
     (row?.querySelector<HTMLElement>("a[href]") ?? headingRef.current)?.focus();
-  }, [pageCount, pages]);
+  }, [pageCount, pages, hasPersonalRow]);
 
   const sortPlugin = useTableSortable<TargetRow, SortKey>({
     // A server-sorted list always has one sort: a click on the active column
@@ -251,8 +277,21 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
       header: t("name"),
       width: proportional(1, { minWidth: 220 }),
       sortable: true,
-      renderCell: (target) => {
-        const where = target.personal_space ? t("personal_assistant") : target.space_name;
+      renderCell: (row) => {
+        if (row.kind === "personal") {
+          return (
+            <span className="flex min-w-0 flex-col items-start gap-0.5">
+              <span className="font-medium break-words">
+                {t("insights_targets_personal")}
+                <span className="sr-only"> {t("insights_targets_personal_summary")}</span>
+              </span>
+              <span className="text-ax-text-secondary text-xs">
+                {t("insights_targets_personal_count", { count: row.usage.assistants })}
+              </span>
+            </span>
+          );
+        }
+        const { target } = row;
         return (
           <span className="flex min-w-0 flex-col items-start gap-0.5">
             {target.ratings === null ? (
@@ -267,8 +306,8 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
             )}
             <span className="text-ax-text-secondary text-xs">
               {target.kind === "group_chat"
-                ? t("insights_targets_group_chat_in", { space: where })
-                : where}
+                ? t("insights_targets_group_chat_in", { space: target.space_name })
+                : target.space_name}
             </span>
           </span>
         );
@@ -280,24 +319,29 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
       width: pixel(168),
       align: "end",
       sortable: true,
-      renderCell: (target) => (
-        <span className="flex flex-col items-end">
-          <span className="tabular-nums">{format.number(target.conversations.total)}</span>
-          {compare ? (
-            <PeriodChange
-              change={countChange(target.conversations.total, target.previous?.conversations.total)}
-              unit="percent"
-              compact
-            />
-          ) : null}
-        </span>
-      )
+      renderCell: (row) => {
+        const usage = row.kind === "personal" ? row.usage : row.target;
+        return (
+          <span className="flex flex-col items-end">
+            <span className="tabular-nums">{format.number(usage.conversations.total)}</span>
+            {compare ? (
+              <PeriodChange
+                change={countChange(usage.conversations.total, usage.previous?.conversations.total)}
+                unit="percent"
+                compact
+              />
+            ) : null}
+          </span>
+        );
+      }
     },
     {
       key: "sources",
       header: t("insights_targets_sources"),
       width: pixel(144),
-      renderCell: (target) => <SourceBar counts={target.conversations} />
+      renderCell: (row) => (
+        <SourceBar counts={(row.kind === "personal" ? row.usage : row.target).conversations} />
+      )
     },
     {
       key: "questions",
@@ -305,8 +349,10 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
       width: pixel(104),
       align: "end",
       sortable: true,
-      renderCell: (target) => (
-        <span className="tabular-nums">{format.number(target.questions)}</span>
+      renderCell: (row) => (
+        <span className="tabular-nums">
+          {format.number((row.kind === "personal" ? row.usage : row.target).questions)}
+        </span>
       )
     },
     {
@@ -314,7 +360,15 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
       header: t("feedback_good_answers"),
       width: pixel(176),
       align: "end",
-      renderCell: (target) => <RatingsCell target={target} />
+      renderCell: (row) =>
+        row.kind === "personal" ? (
+          // Ratings of personal assistants are their owners' own.
+          <span className="text-ax-text-secondary text-sm">
+            {t("insights_targets_personal_no_ratings")}
+          </span>
+        ) : (
+          <RatingsCell target={row.target} />
+        )
     }
   ];
 
@@ -356,7 +410,7 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
             </div>
           </div>
         </div>
-        {pages?.[0] ? <TargetTotals totals={pages[0].totals} compare={compare} /> : null}
+        {organisation ? <TargetTotals totals={organisation.totals} compare={compare} /> : null}
         <QueryStateBoundary query={targets} rows={5} height={56}>
           {() =>
             rows.length === 0 ? (

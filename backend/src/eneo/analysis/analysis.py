@@ -319,14 +319,13 @@ class InsightTargetUsage(BaseModel):
 
 
 class InsightTarget(BaseModel):
+    """An assistant or group chat outside personal spaces."""
+
     id: UUID
     kind: InsightTargetKind
     name: str
     space_id: UUID
     space_name: str
-    personal_space: bool = Field(
-        description="The target lives in a user's personal space."
-    )
     insight_enabled: bool
     conversations: SourceCounts = Field(
         description="Conversations with at least one question in the period."
@@ -344,7 +343,9 @@ class InsightTarget(BaseModel):
 
 
 class InsightTargetTotals(BaseModel):
-    """The usage of every target that matches the filters, not only the page."""
+    """Everything the organisation used in the period: every listed target
+    that matches the filters, not only the page, plus the personal-space
+    usage (``personal``), which no filter narrows."""
 
     conversations: SourceCounts = Field(
         description="Conversations with at least one question in the period."
@@ -355,12 +356,41 @@ class InsightTargetTotals(BaseModel):
     )
 
 
+class InsightPersonalUsage(BaseModel):
+    """The assistants and group chats in personal spaces, together: one
+    figure, never per person or per assistant, and no ratings."""
+
+    assistants: int = Field(
+        description=(
+            "Assistants and group chats in personal spaces, used or not; hidden "
+            "assistants are left out."
+        )
+    )
+    conversations: SourceCounts = Field(
+        description="Conversations with at least one question in the period."
+    )
+    questions: int
+    previous: Optional[InsightTargetUsage] = Field(
+        description="The same in the previous period of equal length, when compare was asked for."
+    )
+
+
 class InsightTargetPage(BaseModel):
-    items: list[InsightTarget]
-    total_count: int = Field(description="Targets matching the filters.")
+    items: list[InsightTarget] = Field(
+        description="The page of targets outside personal spaces."
+    )
+    total_count: int = Field(
+        description="Targets outside personal spaces that match the filters."
+    )
     limit: int
     offset: int
     totals: InsightTargetTotals
+    personal: Optional[InsightPersonalUsage] = Field(
+        description=(
+            "Every personal-space target together, the same on every page and "
+            "whatever the filters; null when the tenant has none."
+        )
+    )
 
 
 _PERIOD_START = "Start of the period, inclusive."

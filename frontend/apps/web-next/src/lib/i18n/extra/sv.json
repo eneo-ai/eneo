@@ -4740,5 +4740,9 @@
   "insights_knowledge_limit": "Citeringar av ett dokument försvinner när dokumentet tas bort, så en källa kan se mindre använd ut än den var.",
   "insights_tools_calls": "{count, number} anrop",
   "insights_tools_failed": "{count, number} misslyckades",
-  "insights_tools_denied": "{count, number} nekades"
+  "insights_tools_denied": "{count, number} nekades",
+  "insights_targets_personal": "Personliga assistenter",
+  "insights_targets_personal_summary": "sammanlagt",
+  "insights_targets_personal_count": "{count, plural, one {# assistent} other {# assistenter}} i personliga utrymmen",
+  "insights_targets_personal_no_ratings": "Visas inte för personliga assistenter"
 }

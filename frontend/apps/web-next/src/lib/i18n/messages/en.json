@@ -10782,5 +10782,9 @@
   "insights_knowledge_limit": "A document's citations go when the document is removed, so a source can look less used than it was.",
   "insights_tools_calls": "{count, plural, one {# call} other {# calls}}",
   "insights_tools_failed": "{count, number} failed",
-  "insights_tools_denied": "{count, number} denied"
+  "insights_tools_denied": "{count, number} denied",
+  "insights_targets_personal": "Personal assistants",
+  "insights_targets_personal_summary": "combined",
+  "insights_targets_personal_count": "{count, plural, one {# assistant} other {# assistants}} in personal spaces",
+  "insights_targets_personal_no_ratings": "Not shown for personal assistants"
 }

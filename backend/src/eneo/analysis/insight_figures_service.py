@@ -29,6 +29,7 @@ from eneo.analysis.analysis import (
     InsightKnowledgeSource,
     InsightKnowledgeUse,
     InsightPeriodSummary,
+    InsightPersonalUsage,
     InsightQuestionGroup,
     InsightRating,
     InsightSummary,
@@ -691,7 +692,7 @@ class InsightFiguresService:
         offset: int,
         limit: int,
     ) -> InsightTargetPage:
-        rows, total, totals = await self.repo.list_targets(
+        rows, total, totals, personal = await self.repo.list_targets(
             tenant_id=self.user.tenant_id,
             window=window,
             previous=previous_window(window) if compare else None,
@@ -710,7 +711,6 @@ class InsightFiguresService:
                     name=row.name,
                     space_id=row.space_id,
                     space_name=row.space_name,
-                    personal_space=row.personal_space,
                     insight_enabled=row.insight_enabled,
                     conversations=_counts(row.usage.conversations),
                     questions=row.usage.questions,
@@ -734,5 +734,15 @@ class InsightFiguresService:
                 conversations=_counts(totals.usage.conversations),
                 questions=totals.usage.questions,
                 previous=_usage(totals.previous) if compare else None,
+            ),
+            personal=(
+                InsightPersonalUsage(
+                    assistants=personal.targets,
+                    conversations=_counts(personal.usage.conversations),
+                    questions=personal.usage.questions,
+                    previous=_usage(personal.previous) if compare else None,
+                )
+                if personal is not None
+                else None
             ),
         )

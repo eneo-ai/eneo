@@ -304,36 +304,48 @@ async def test_feedback_inbox_pages_answer_and_conversation_ratings(
 
 
 async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
-    db_container, admin_user, client, patch_auth_service_jwt, seed_sources
+    db_container, admin_user, client, patch_auth_service_jwt, seed_personal
 ):
-    seed, headers = await _seeded(db_container, admin_user, seed_sources)
+    """Personal-space assistants come back as one combined figure, never as
+    rows: not under a search for their name, not among the unused ones and
+    not on a later page."""
+    seed, headers = await _seeded(db_container, admin_user, seed_personal)
+    personal_ids = {
+        str(value) for key, value in seed.items() if key.startswith("personal:")
+    }
+    personal = {
+        "assistants": 3,
+        "conversations": _sources(2, 2, 0, 0),
+        "questions": 3,
+        "previous": {"conversations": _sources(1, 1, 0, 0), "questions": 1},
+    }
 
     async def targets(**params):
         response = await client.get(
             "/api/v1/analysis/targets/", params={**_PERIOD, **params}, headers=headers
         )
         assert response.status_code == 200, response.text
-        return response.json()
+        body = response.json()
+        assert not personal_ids & {item["id"] for item in body["items"]}
+        return body
 
     listed = await targets(compare=True)
     items = {item["id"]: item for item in listed["items"]}
     bygg = items[str(seed["bygg"])]
     assert listed["items"][0]["id"] == str(seed["bygg"])
-    assert (bygg["kind"], bygg["insight_enabled"], bygg["personal_space"]) == (
-        "assistant",
-        True,
-        False,
-    )
+    assert (bygg["kind"], bygg["insight_enabled"]) == ("assistant", True)
+    assert "personal_space" not in bygg
     # Hidden sessions (the helper run and the analysis) stay out.
     assert bygg["conversations"] == _sources(8, 5, 1, 2)
     assert bygg["questions"] == 12
     assert bygg["previous"] == {"conversations": _sources(1, 0, 0, 1), "questions": 1}
     assert bygg["ratings"] == {"positive": 1, "negative": 2}
-    # Every matching target together, not only the page.
+    assert listed["personal"] == personal
+    # Everything the organisation used: the listed targets and the personal.
     assert listed["totals"] == {
-        "conversations": _sources(10, 7, 1, 2),
-        "questions": 14,
-        "previous": {"conversations": _sources(1, 0, 0, 1), "questions": 1},
+        "conversations": _sources(12, 9, 1, 2),
+        "questions": 17,
+        "previous": {"conversations": _sources(2, 1, 0, 1), "questions": 2},
     }
 
     other = items[str(seed["other"])]
@@ -345,25 +357,36 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     assert group_chat["conversations"] == _sources(1, 1, 0, 0)
     assert str(seed["hidden_assistant"]) not in items
 
+    without_previous = {**personal, "previous": None}
     found = await targets(q="gc-ins")
     assert found["total_count"] == 1
     assert found["items"][0]["id"] == str(seed["group_chat"])
     assert found["items"][0]["previous"] is None
+    assert found["personal"] == without_previous
     assert found["totals"] == {
-        "conversations": _sources(1, 1, 0, 0),
-        "questions": 1,
+        "conversations": _sources(3, 3, 0, 0),
+        "questions": 4,
         "previous": None,
     }
+    # A personal assistant's name finds nothing.
+    by_personal_name = await targets(q="assistent")
+    assert by_personal_name["total_count"] == 0
+    assert by_personal_name["personal"] == without_previous
 
     used = {str(seed[key]) for key in ("bygg", "other", "group_chat")}
     unused = await targets(activity="unused")
     assert not used & {item["id"] for item in unused["items"]}
+    # "Annas utkast" is unused too, and still no row.
     assert unused["total_count"] == listed["total_count"] - 3
+    assert unused["personal"] == without_previous
 
     by_name = await targets(sort="name", order="asc", limit=200)
     order = [item["id"] for item in by_name["items"] if item["id"] in used]
     assert order == [str(seed["bygg"]), str(seed["group_chat"]), str(seed["other"])]
 
+    later = await targets(limit=1, offset=1, compare=True)
+    assert len(later["items"]) == 1
+    assert (later["personal"], later["totals"]) == (personal, listed["totals"])
     beyond = await targets(offset=1000, compare=True)
     assert beyond["items"] == []
     assert beyond["total_count"] == listed["total_count"]

@@ -3257,7 +3257,7 @@ export interface paths {
     };
     /**
      * Get Insight Targets
-     * @description Every assistant people see and every group chat of the tenant with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. totals sum the usage of every target that matches the filters, not only the page.
+     * @description Every assistant people see and every group chat of the tenant outside personal spaces, with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. Targets in personal spaces are never rows: personal gives their number and usage together, without ratings, the same on every page and whatever q and activity say. totals is everything the organisation used: every listed target that matches the filters, not only the page, plus the personal usage.
      */
     get: operations["get_insight_targets_api_v1_analysis_targets__get"];
     put?: never;
@@ -32408,6 +32408,24 @@ export interface components {
       users: number;
     };
     /**
+     * InsightPersonalUsage
+     * @description The assistants and group chats in personal spaces, together: one
+     *     figure, never per person or per assistant, and no ratings.
+     */
+    InsightPersonalUsage: {
+      /**
+       * Assistants
+       * @description Assistants and group chats in personal spaces, used or not; hidden assistants are left out.
+       */
+      assistants: number;
+      /** @description Conversations with at least one question in the period. */
+      conversations: components["schemas"]["SourceCounts"];
+      /** @description The same in the previous period of equal length, when compare was asked for. */
+      previous: components["schemas"]["InsightTargetUsage"] | null;
+      /** Questions */
+      questions: number;
+    };
+    /**
      * InsightQuestionGroup
      * @description One group of questions with the same text after normalisation
      *     (whitespace, letter case and trailing ?!. ignored).
@@ -32520,7 +32538,10 @@ export interface components {
       /** Timezone */
       timezone: string;
     };
-    /** InsightTarget */
+    /**
+     * InsightTarget
+     * @description An assistant or group chat outside personal spaces.
+     */
     InsightTarget: {
       /** @description Conversations with at least one question in the period. */
       conversations: components["schemas"]["SourceCounts"];
@@ -32538,11 +32559,6 @@ export interface components {
       kind: "assistant" | "group_chat";
       /** Name */
       name: string;
-      /**
-       * Personal Space
-       * @description The target lives in a user's personal space.
-       */
-      personal_space: boolean;
       /** @description Usage in the previous period of equal length, when compare was asked for. */
       previous: components["schemas"]["InsightTargetUsage"] | null;
       /** Questions */
@@ -32559,22 +32575,29 @@ export interface components {
     };
     /** InsightTargetPage */
     InsightTargetPage: {
-      /** Items */
+      /**
+       * Items
+       * @description The page of targets outside personal spaces.
+       */
       items: components["schemas"]["InsightTarget"][];
       /** Limit */
       limit: number;
       /** Offset */
       offset: number;
+      /** @description Every personal-space target together, the same on every page and whatever the filters; null when the tenant has none. */
+      personal: components["schemas"]["InsightPersonalUsage"] | null;
       /**
        * Total Count
-       * @description Targets matching the filters.
+       * @description Targets outside personal spaces that match the filters.
        */
       total_count: number;
       totals: components["schemas"]["InsightTargetTotals"];
     };
     /**
      * InsightTargetTotals
-     * @description The usage of every target that matches the filters, not only the page.
+     * @description Everything the organisation used in the period: every listed target
+     *     that matches the filters, not only the page, plus the personal-space
+     *     usage (``personal``), which no filter narrows.
      */
     InsightTargetTotals: {
       /** @description Conversations with at least one question in the period. */
