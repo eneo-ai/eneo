@@ -21,6 +21,18 @@ The interactive documentation and the specification are served at the **root** o
 
 The reference `docker-compose.yml` routes only `/api`, `/scim`, `/docs`, `/openapi.json`, and `/version` to the backend, so `/redoc` is available in local development only. `GET /version` returns `{"version": "..."}` and the OpenAPI document carries the same version string, so the spec you download always matches the running backend.
 
+Swagger UI at `/docs` uses a pinned JavaScript and CSS distribution packaged
+with the backend; it does not load a viewer or validator from a CDN. Open
+**Authorize**, enter your API key in **APIKeyAuth**, and use **Try it out** on
+an endpoint to send a request to this instance. Paste the key itself, without
+an `X-API-Key:` prefix. The endpoint's usual permissions and key restrictions
+still apply.
+
+Authorization is kept in memory and is cleared when the page reloads. Requests
+from this viewer omit browser session cookies. For session-only operations,
+explicitly authorize with the session-token scheme instead; being signed in
+to the Eneo web app alone does not authorize the viewer.
+
 <Callout type="info">
   Paths are exact. Most routers use a trailing slash (`/api/v1/users/me/`,
   `/api/v1/conversations/`), while the API key endpoints do not
