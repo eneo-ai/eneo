@@ -39,6 +39,9 @@ def test_relative_date_rules_and_tool_routing_are_spelled_out():
     assert "usage_summary for anything about volume" in prompt
     assert "top_questions for the most common" in prompt
     assert "list_questions to read what people actually asked" in prompt
+    assert "list_ratings for how people rated answers" in prompt
+    assert "knowledge_use for which knowledge sources" in prompt
+    assert "tool_use for which tools and capabilities" in prompt
     assert "(session <uuid>)" in prompt
     assert "Always call at least one tool before answering" in prompt
 

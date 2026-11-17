@@ -1,12 +1,18 @@
 from datetime import date as LocalDate
 from datetime import datetime
 from enum import Enum
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional, Union
 from uuid import UUID
 
 from pydantic import AliasPath, BaseModel, Field
 
-from eneo.analysis.insight_scope import InsightTargetKind
+from eneo.analysis.insight_scope import (
+    FindingCaseKind,
+    FindingKind,
+    InsightTargetKind,
+    KnowledgeSourceKind,
+    MissReason,
+)
 from eneo.questions.question import MessageFeedback
 from eneo.sessions.session_source import SessionSource
 
@@ -186,6 +192,9 @@ class AnswerRatingCounts(MessageFeedbackCounts):
     """Ratings of single answers in the period."""
 
     with_comment: int = Field(description="Answer ratings that carry a comment.")
+    negative_with_comment: int = Field(
+        description="Answers rated bad (-1) whose rating carries a comment."
+    )
 
 
 class ConversationRatingCounts(BaseModel):
@@ -194,6 +203,12 @@ class ConversationRatingCounts(BaseModel):
 
     positive: int = Field(description="Conversations rated good (1).")
     negative: int = Field(description="Conversations rated bad (-1).")
+    with_comment: int = Field(
+        description="Rated conversations whose rating carries a comment."
+    )
+    negative_with_comment: int = Field(
+        description="Conversations rated bad (-1) whose rating carries a comment."
+    )
 
 
 class InsightPeriodSummary(BaseModel):
@@ -328,8 +343,278 @@ class InsightTarget(BaseModel):
     )
 
 
+class InsightTargetTotals(BaseModel):
+    """The usage of every target that matches the filters, not only the page."""
+
+    conversations: SourceCounts = Field(
+        description="Conversations with at least one question in the period."
+    )
+    questions: int
+    previous: Optional[InsightTargetUsage] = Field(
+        description="The same in the previous period of equal length, when compare was asked for."
+    )
+
+
 class InsightTargetPage(BaseModel):
     items: list[InsightTarget]
     total_count: int = Field(description="Targets matching the filters.")
     limit: int
     offset: int
+    totals: InsightTargetTotals
+
+
+_PERIOD_START = "Start of the period, inclusive."
+_PERIOD_END = "End of the period, exclusive."
+_RATING_DESCRIPTION = "The answer's rating (1 good, -1 bad); null when unrated."
+
+
+class InsightKnowledgeSource(BaseModel):
+    kind: KnowledgeSourceKind
+    id: UUID
+    name: str = Field(
+        description="The source's name; a website without a name shows its address."
+    )
+    attached: bool = Field(
+        description=(
+            "Attached to the assistant (for a group chat: to one of its member "
+            "assistants) now."
+        )
+    )
+    answers: int = Field(
+        description="Answers of the period that cited at least one passage from it."
+    )
+
+
+class InsightKnowledgeUse(BaseModel):
+    """Which knowledge the period's answers cited. Counts only."""
+
+    timezone: str
+    source: Optional[SessionSource] = Field(
+        description="The source the figures were limited to; null for all sources."
+    )
+    start: datetime = Field(description=_PERIOD_START)
+    end: datetime = Field(description=_PERIOD_END)
+    answers: int = Field(description="Answers (questions) in the period.")
+    citing_answers: int = Field(
+        description=(
+            "Answers that cited at least one passage of a source that still "
+            "exists: the base for each source's share."
+        )
+    )
+    sources: list[InsightKnowledgeSource] = Field(
+        description=(
+            "Every source an answer cited, most cited first, including sources "
+            "no longer attached."
+        )
+    )
+    unused: list[InsightKnowledgeSource] = Field(
+        description="Attached sources no answer of the period cited, by name."
+    )
+
+
+class InsightQuestionGroup(BaseModel):
+    """One group of questions with the same text after normalisation
+    (whitespace, letter case and trailing ?!. ignored)."""
+
+    question: str = Field(description="One of the group's questions, as asked.")
+    occurrences: int
+    share: float = Field(
+        description="occurrences divided by total_questions, from 0 to 1."
+    )
+    conversations: int = Field(
+        description="Conversations the group's questions are in."
+    )
+    unanswered: int = Field(
+        description=(
+            "Indicative: answers whose text says they cannot answer, found by "
+            "phrase matching."
+        )
+    )
+    ratings: MessageFeedbackCounts = Field(description="Ratings of the answers.")
+    knowledge: Optional[KnowledgeUse] = Field(
+        description=(
+            "Indicative, as the summary counts it. Null when the target has no "
+            "knowledge attached."
+        )
+    )
+    sample_session_id: UUID = Field(description="One conversation with the question.")
+
+
+class InsightTopQuestions(BaseModel):
+    timezone: str
+    source: Optional[SessionSource]
+    start: datetime = Field(description=_PERIOD_START)
+    end: datetime = Field(description=_PERIOD_END)
+    include_followups: bool
+    total_questions: int = Field(
+        description=(
+            "Questions the shares are relative to: every question of the period, "
+            "or only the opening ones without include_followups."
+        )
+    )
+    groups: list[InsightQuestionGroup] = Field(
+        description="The commonest groups, commonest first."
+    )
+
+
+class InsightToolUse(BaseModel):
+    """Calls of one capability or of one server's tool in the period."""
+
+    kind: Literal["capability", "tool"] = Field(
+        description=(
+            "'capability': every call serving purpose, whichever server backed "
+            "it. 'tool': the calls of one server's tool."
+        )
+    )
+    purpose: Optional[str] = Field(
+        description="The capability, such as 'web_search' or 'image_generation'."
+    )
+    server_name: Optional[str] = Field(description="The server, for a tool.")
+    tool_name: Optional[str] = Field(description="The tool, for a tool.")
+    title: Optional[str] = Field(
+        description="The tool's stored display title, when it has one."
+    )
+    calls: int
+    failed: int = Field(description="Calls whose result status is failed.")
+    denied: int = Field(
+        description="Calls not approved, by the person or by the approval timeout."
+    )
+
+
+class InsightToolUsage(BaseModel):
+    """Tool calls of the period's answers, most called first. Calls of
+    Eneo's own knowledge server (counted by the knowledge figures) and Skill
+    activations are left out."""
+
+    timezone: str
+    source: Optional[SessionSource]
+    start: datetime = Field(description=_PERIOD_START)
+    end: datetime = Field(description=_PERIOD_END)
+    tools: list[InsightToolUse]
+
+
+class InsightFindingExample(BaseModel):
+    """One question behind a finding. For rephrasing, a conversation and its
+    first question in the period; for negative_ratings, the rated question."""
+
+    question: str
+    question_id: Optional[UUID] = Field(
+        description="Null for a rating of a whole conversation."
+    )
+    session_id: UUID
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
+    comment: Optional[str] = Field(
+        description="The rating's comment, for negative_ratings; null otherwise."
+    )
+
+
+class InsightFinding(BaseModel):
+    """Something to look at, worded by its signal, with the counts that make
+    it a finding. knowledge_missed, unanswered and rephrasing are indicative:
+    they come from stored scores, phrase matching and text similarity."""
+
+    kind: FindingKind = Field(
+        description=(
+            "knowledge_missed: answers that searched the knowledge without a "
+            "usable hit (affected of the answers that searched). unanswered: "
+            "answers that say they cannot answer (of all answers). rephrasing: "
+            "conversations where the person seems to ask again (of all "
+            "conversations). knowledge_unused: attached sources no answer cited "
+            "(of the attached sources). negative_ratings: bad ratings with a "
+            "comment (of all ratings, answers and conversations). "
+            "tool_failures: failed calls of one tool (of its calls)."
+        )
+    )
+    affected: int
+    base: int = Field(description="What affected is a share of.")
+    examples: list[InsightFindingExample] = Field(
+        description=(
+            "Up to three: the first cases the findings/{kind}/ route lists "
+            "for knowledge_missed, unanswered and rephrasing, the newest bad "
+            "ratings with a comment for negative_ratings, none for "
+            "knowledge_unused and tool_failures."
+        )
+    )
+    sources: Optional[list[InsightKnowledgeSource]] = Field(
+        description="knowledge_unused: the sources nobody cited; null otherwise."
+    )
+    tool: Optional[InsightToolUse] = Field(
+        description="tool_failures: the tool that fails; null otherwise."
+    )
+
+
+class InsightFindings(BaseModel):
+    timezone: str
+    source: Optional[SessionSource] = Field(
+        description="The source the findings were limited to; null for all sources."
+    )
+    start: datetime = Field(description=_PERIOD_START)
+    end: datetime = Field(description=_PERIOD_END)
+    findings: list[InsightFinding] = Field(
+        description="Most affected first; empty when nothing passes the thresholds."
+    )
+
+
+class KnowledgeMissCase(BaseModel):
+    kind: Literal["knowledge_missed"]
+    question_id: UUID
+    question: str
+    session_id: UUID
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
+    created_at: datetime
+    reason: MissReason = Field(
+        description=(
+            "no_results: the knowledge search reported no results. uncited: the "
+            "answer cited no passage. weak_score: its best passage scored under "
+            "the fixed floor."
+        )
+    )
+    best_score: Optional[float] = Field(
+        description="The best score among the cited passages; null when none."
+    )
+    rating: Optional[Literal[-1, 1]] = Field(description=_RATING_DESCRIPTION)
+
+
+class UnansweredCase(BaseModel):
+    kind: Literal["unanswered"]
+    question_id: UUID
+    question: str
+    session_id: UUID
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
+    created_at: datetime
+    phrase: str = Field(description="The phrase in the answer that matched.")
+    rating: Optional[Literal[-1, 1]] = Field(description=_RATING_DESCRIPTION)
+
+
+class RephrasingCase(BaseModel):
+    kind: Literal["rephrasing"]
+    session_id: UUID
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
+    started_at: datetime = Field(
+        description="When the conversation's first question in the period was asked."
+    )
+    questions: list[str] = Field(description="The questions in the period, in order.")
+    question_ids: list[UUID] = Field(description="The same questions' ids.")
+    similar_pairs: int = Field(
+        description="Consecutive questions with textually similar wording."
+    )
+
+
+InsightFindingCase = Annotated[
+    Union[KnowledgeMissCase, UnansweredCase, RephrasingCase],
+    Field(discriminator="kind"),
+]
+
+
+class InsightFindingCasePage(BaseModel):
+    kind: FindingCaseKind
+    timezone: str
+    source: Optional[SessionSource]
+    start: datetime = Field(description=_PERIOD_START)
+    end: datetime = Field(description=_PERIOD_END)
+    items: list[InsightFindingCase]
+    total_count: int = Field(description="Cases of the finding in the period.")
+    limit: int
+    next_cursor: Optional[str] = Field(
+        description="Pass back as cursor for the next page; null on the last page."
+    )

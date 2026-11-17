@@ -173,3 +173,46 @@ def test_the_knowledge_server_name_is_the_internal_servers():
     from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
 
     assert KNOWLEDGE_SERVER == KNOWLEDGE_SERVER_NAME
+
+
+async def test_knowledge_question_and_tool_reads_keep_the_hidden_and_copy_rules():
+    recorder = _Recorder()
+    repo = InsightsRepository(session=cast(Any, recorder))
+    scope = InsightScope(kind="group_chat", target_id=uuid4(), tenant_id=uuid4())
+    knowledge = KnowledgeSetup(True, frozenset({uuid4()}))
+
+    await repo.knowledge_citations(scope, _window(), source="widget")
+    await repo.question_groups(
+        scope,
+        _window(),
+        source=None,
+        knowledge=knowledge,
+        n=5,
+        include_followups=False,
+    )
+    await repo.tool_use(scope, _window(), source=None)
+    await repo.find_no_knowledge(
+        scope, _window(), offset=0, limit=3, absolute=knowledge
+    )
+
+    compiled = [
+        str(statement.compile(dialect=postgresql.dialect()))
+        for statement in recorder.statements
+    ]
+    reads = [sql for sql in compiled if "FROM questions" in sql]
+    # Citations, question groups, tool calls, and the misses' total and page;
+    # the attached sources are read from the assistants alone.
+    assert len(reads) == 5 and len(compiled) == 6
+    for sql in reads:
+        assert "JOIN users" not in sql
+        assert "help_assistant_runs" in sql and "insight_conversations" in sql
+        assert "content_derivations" in sql
+
+
+def test_the_skill_activation_tool_name_is_the_runtimes():
+    from eneo.analysis.insights_repo import SKILL_ACTIVATION_TOOL
+    from eneo.completion_models.domain.skill_activation import (
+        SKILL_ACTIVATION_TOOL_NAME,
+    )
+
+    assert SKILL_ACTIVATION_TOOL == SKILL_ACTIVATION_TOOL_NAME

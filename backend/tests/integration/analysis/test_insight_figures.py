@@ -1,8 +1,10 @@
 """The insights figures over a mix of sources: a period's summary, activity
-per local day, the ratings inbox and the tenant's target list.
+per local day, the ratings inbox, the tenant's target list, knowledge use,
+the commonest questions, tool use and the findings.
 
-The seed is ``seed_sources`` (see the conftest). The period is 2026-09-06 and
-2026-09-07 UTC; times below are UTC unless said otherwise.
+The seed is ``seed_sources``, or ``seed_quality`` for knowledge and tool calls
+(see the conftest). The period is 2026-09-06 and 2026-09-07 UTC; times below
+are UTC unless said otherwise.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 
+from eneo.analysis.insight_findings import FINDING_THRESHOLDS, FindingThreshold
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import KnowledgeUse
 from eneo.database.tables.assistant_table import Assistants, AssistantsGroups
@@ -63,8 +66,18 @@ async def test_summary_counts_a_period_and_the_one_before(
     # s4 and widget_1 say they cannot answer.
     assert period["unanswered"] == 2
     assert period["knowledge"] is None
-    assert period["answer_ratings"] == {"positive": 1, "negative": 2, "with_comment": 1}
-    assert period["conversation_ratings"] == {"positive": 2, "negative": 1}
+    assert period["answer_ratings"] == {
+        "positive": 1,
+        "negative": 2,
+        "with_comment": 1,
+        "negative_with_comment": 1,
+    }
+    assert period["conversation_ratings"] == {
+        "positive": 2,
+        "negative": 1,
+        "with_comment": 1,
+        "negative_with_comment": 1,
+    }
 
     previous = body["previous"]
     assert datetime.fromisoformat(previous["start"]) == utc(2026, 9, 4)
@@ -79,7 +92,12 @@ async def test_summary_counts_a_period_and_the_one_before(
     assert widgets["period"]["conversations"] == _sources(2, 0, 0, 2)
     assert widgets["period"]["users"] == widgets["period"]["returning_users"] == 0
     assert widgets["period"]["unanswered"] == 1
-    assert widgets["period"]["conversation_ratings"] == {"positive": 1, "negative": 1}
+    assert widgets["period"]["conversation_ratings"] == {
+        "positive": 1,
+        "negative": 1,
+        "with_comment": 1,
+        "negative_with_comment": 1,
+    }
 
     # Returning means more than one local day: on 2026-09-07 UTC the user's
     # last question is already the 8th in Stockholm.
@@ -311,6 +329,12 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     assert bygg["questions"] == 12
     assert bygg["previous"] == {"conversations": _sources(1, 0, 0, 1), "questions": 1}
     assert bygg["ratings"] == {"positive": 1, "negative": 2}
+    # Every matching target together, not only the page.
+    assert listed["totals"] == {
+        "conversations": _sources(10, 7, 1, 2),
+        "questions": 14,
+        "previous": {"conversations": _sources(1, 0, 0, 1), "questions": 1},
+    }
 
     other = items[str(seed["other"])]
     # Insights off: usage only.
@@ -325,6 +349,11 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     assert found["total_count"] == 1
     assert found["items"][0]["id"] == str(seed["group_chat"])
     assert found["items"][0]["previous"] is None
+    assert found["totals"] == {
+        "conversations": _sources(1, 1, 0, 0),
+        "questions": 1,
+        "previous": None,
+    }
 
     used = {str(seed[key]) for key in ("bygg", "other", "group_chat")}
     unused = await targets(activity="unused")
@@ -335,6 +364,230 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     order = [item["id"] for item in by_name["items"] if item["id"] in used]
     assert order == [str(seed["bygg"]), str(seed["group_chat"]), str(seed["other"])]
 
-    beyond = await targets(offset=1000)
+    beyond = await targets(offset=1000, compare=True)
     assert beyond["items"] == []
     assert beyond["total_count"] == listed["total_count"]
+    assert beyond["totals"] == listed["totals"]
+
+
+async def _quality(db_container, admin_user, seed_quality):
+    async with db_container() as container:
+        seed = await seed_quality(container, admin_user)
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    return seed, {"Authorization": f"Bearer {token}"}
+
+
+async def test_knowledge_use_counts_cited_sources_across_refreshes(
+    db_container, admin_user, client, patch_auth_service_jwt, seed_quality
+):
+    seed, headers = await _quality(db_container, admin_user, seed_quality)
+
+    async def knowledge(**params):
+        response = await client.get(
+            "/api/v1/analysis/conversation-insights/knowledge/",
+            params={**_PERIOD, **params},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    used = await knowledge(assistant_id=str(seed["bygg"]))
+    # s1_q1 cites the superseded version, s2_q1 the active one: both count for
+    # the collection. s3_q1's passage belongs to a removed document.
+    assert (used["answers"], used["citing_answers"]) == (12, 2)
+    assert [(s["kind"], s["id"], s["name"], s["answers"]) for s in used["sources"]] == [
+        ("collection", str(seed["bygglov"]), "Bygglov", 2)
+    ]
+    assert used["sources"][0]["attached"] is True
+    assert [(s["id"], s["answers"]) for s in used["unused"]] == [
+        (str(seed["taxor"]), 0)
+    ]
+
+    widgets = await knowledge(assistant_id=str(seed["bygg"]), source="widget")
+    assert (widgets["answers"], widgets["citing_answers"], widgets["sources"]) == (
+        2,
+        0,
+        [],
+    )
+    # A group chat has its members' knowledge.
+    group_chat = await knowledge(group_chat_id=str(seed["group_chat"]))
+    assert group_chat["sources"] == []
+    assert {s["name"] for s in group_chat["unused"]} == {"Bygglov", "Taxor"}
+
+
+async def test_top_questions_carry_how_their_answers_fared(
+    db_container, admin_user, client, patch_auth_service_jwt, seed_quality
+):
+    seed, headers = await _quality(db_container, admin_user, seed_quality)
+
+    response = await client.get(
+        "/api/v1/analysis/conversation-insights/questions/top/",
+        params={"assistant_id": str(seed["bygg"]), **_PERIOD, "limit": 3},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    # Opening questions only by default.
+    assert (body["total_questions"], body["include_followups"]) == (8, False)
+    bygglov, declaration, swimming = body["groups"]
+    assert bygglov["occurrences"] == 2 and bygglov["conversations"] == 2
+    assert bygglov["share"] == 0.25
+    assert bygglov["sample_session_id"] in {str(seed["s1"]), str(seed["s2"])}
+    assert bygglov["ratings"] == {"positive": 1, "negative": 0}
+    assert bygglov["knowledge"] == {"searched": 2, "missed": 0}
+    assert (declaration["question"], declaration["unanswered"]) == (
+        "Kan ni hjälpa mig med deklarationen?",
+        1,
+    )
+    # In tool mode an answer that never searched is no miss.
+    assert declaration["knowledge"] == {"searched": 0, "missed": 0}
+    assert (swimming["question"], swimming["unanswered"]) == (
+        "När öppnar simhallen?",
+        1,
+    )
+
+    followups = await client.get(
+        "/api/v1/analysis/conversation-insights/questions/top/",
+        params={
+            "assistant_id": str(seed["bygg"]),
+            **_PERIOD,
+            "include_followups": True,
+            "limit": 50,
+        },
+        headers=headers,
+    )
+    groups = {g["question"]: g for g in followups.json()["groups"]}
+    assert followups.json()["total_questions"] == 12
+    assert groups["Vad kostar det?"]["knowledge"] == {"searched": 1, "missed": 1}
+    assert groups["Vad kostar det?"]["ratings"] == {"positive": 0, "negative": 1}
+
+
+async def test_tool_use_by_capability_and_tool_with_failed_and_denied_calls(
+    db_container, admin_user, client, patch_auth_service_jwt, seed_quality
+):
+    seed, headers = await _quality(db_container, admin_user, seed_quality)
+
+    async def tools(**params):
+        response = await client.get(
+            "/api/v1/analysis/conversation-insights/tools/",
+            params={"assistant_id": str(seed["bygg"]), **_PERIOD, **params},
+            headers=headers,
+        )
+        assert response.status_code == 200, response.text
+        return response.json()["tools"]
+
+    # The knowledge searches and the Skill activation are left out.
+    assert await tools() == [
+        {
+            "kind": "tool",
+            "purpose": None,
+            "server_name": "Grounding",
+            "tool_name": "get_chat_grounding",
+            "title": "Grundning",
+            "calls": 2,
+            "failed": 1,
+            "denied": 1,
+        },
+        {
+            "kind": "capability",
+            "purpose": "web_search",
+            "server_name": None,
+            "tool_name": None,
+            "title": None,
+            "calls": 1,
+            "failed": 0,
+            "denied": 0,
+        },
+    ]
+    widgets = await tools(source="widget")
+    assert [(t["tool_name"], t["calls"], t["denied"]) for t in widgets] == [
+        ("get_chat_grounding", 1, 1)
+    ]
+    assert await tools(source="api_key") == []
+
+
+async def test_findings_pass_their_thresholds_and_list_their_cases(
+    db_container,
+    admin_user,
+    client,
+    patch_auth_service_jwt,
+    seed_quality,
+    monkeypatch,
+):
+    """The seed is small, so some thresholds are lowered; unanswered keeps
+    its own and its two cases stay below it."""
+    seed, headers = await _quality(db_container, admin_user, seed_quality)
+    for kind, threshold in (
+        ("knowledge_missed", FindingThreshold(2, 0.25)),
+        ("negative_ratings", FindingThreshold(2, 0.2)),
+        ("knowledge_unused", FindingThreshold(10, 0.0)),
+    ):
+        monkeypatch.setitem(FINDING_THRESHOLDS, kind, threshold)
+    url = "/api/v1/analysis/conversation-insights/findings/"
+    params = {"assistant_id": str(seed["bygg"]), **_PERIOD}
+
+    response = await client.get(url, params=params, headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert datetime.fromisoformat(body["start"]) == utc(2026, 9, 6)
+    assert body["source"] is None
+    findings = body["findings"]
+    assert [(f["kind"], f["affected"], f["base"]) for f in findings] == [
+        ("knowledge_missed", 2, 4),
+        ("negative_ratings", 2, 6),
+        ("knowledge_unused", 1, 2),
+    ]
+    missed, ratings, unused = findings
+    assert [e["question"] for e in missed["examples"]] == [
+        "Vad kostar det?",
+        "Öppettider?",
+    ]
+    assert [(e["comment"], e["question_id"]) for e in ratings["examples"]] == [
+        ("Fel svar", None),
+        ("Saknar avgiften", str(seed["s1_q2"])),
+    ]
+    assert [s["name"] for s in unused["sources"]] == ["Taxor"]
+    assert unused["examples"] == [] and unused["tool"] is None
+
+    async def cases(kind: str, **extra):
+        response = await client.get(
+            f"{url}{kind}/", params={**params, **extra}, headers=headers
+        )
+        assert response.status_code == 200, response.text
+        return response.json()
+
+    first = await cases("knowledge_missed", limit=1)
+    assert first["total_count"] == 2 and first["next_cursor"] is not None
+    assert first["items"] == [
+        {
+            "kind": "knowledge_missed",
+            "question_id": str(seed["s1_q2"]),
+            "question": "Vad kostar det?",
+            "session_id": str(seed["s1"]),
+            "source": "user",
+            "created_at": first["items"][0]["created_at"],
+            "reason": "no_results",
+            "best_score": None,
+            "rating": -1,
+        }
+    ]
+    second = await cases("knowledge_missed", limit=1, cursor=first["next_cursor"])
+    assert [(i["question"], i["reason"], i["best_score"]) for i in second["items"]] == [
+        ("Öppettider?", "weak_score", 0.1)
+    ]
+    assert second["next_cursor"] is None
+
+    unanswered = await cases("unanswered")
+    assert [(i["source"], i["phrase"].lower()) for i in unanswered["items"]] == [
+        ("user", "kan tyvärr inte hjälpa"),
+        ("widget", "hittar tyvärr ingen"),
+    ]
+    rephrasing = await cases("rephrasing")
+    assert [(i["session_id"], len(i["questions"])) for i in rephrasing["items"]] == [
+        (str(seed["s5"]), 3)
+    ]
+
+    unknown = await client.get(f"{url}tool_failures/", params=params, headers=headers)
+    assert unknown.status_code == 422

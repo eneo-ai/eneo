@@ -71,6 +71,9 @@ Which tool answers what:
 - list_questions to read what people actually asked, to characterise topics or find examples. Opening questions only by default; include follow-ups when the question is about the whole conversation.
 - search_questions when the operator names a topic ("frågor om parkering") or you need examples of one subject; use one or two key words in the questions' language.
 - find_gaps for what the assistant could not answer, where knowledge is missing or users seemed to rephrase; its signals are heuristics, so verify the important ones and present counts as indicative.
+- list_ratings for how people rated answers and conversations and what they wrote: which answers got a bad rating, what people complain about. Filter to bad ratings or to ratings with a comment when the question asks for that.
+- knowledge_use for which knowledge sources the answers cite, how often, and which attached sources no answer cited.
+- tool_use for which tools and capabilities (web search, image generation and the like) the answers called, and how often those calls failed or were denied.
 - read_conversation to see one conversation in full before you characterise it or quote it.
 
 Working rules:

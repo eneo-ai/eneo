@@ -18,10 +18,14 @@ import pytest
 
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import (
+    KnowledgeCitations,
+    KnowledgeSourceRow,
     NoKnowledgeRow,
     QuestionRow,
+    RatingRow,
     RephrasingRow,
     SearchHit,
+    ToolUseRow,
     TopQuestionRow,
     Transcript,
     TranscriptTurn,
@@ -45,11 +49,14 @@ from eneo.internal_mcp.insights import (
     _usage_summary_text,
     build_insights_mcp_server,
     find_gaps,
+    knowledge_use,
     list_questions,
+    list_ratings,
     mcp,
     read_conversation,
     search_questions,
     target_label,
+    tool_use,
     top_questions,
     usage_summary,
 )
@@ -498,6 +505,9 @@ class TestBuildInsightsMcpServer:
             "search_questions",
             "read_conversation",
             "find_gaps",
+            "list_ratings",
+            "knowledge_use",
+            "tool_use",
         } == {t.name for t in server.tools}
         for entity, live in zip(server.tools, live_tools):
             assert entity.description is not None and live.description is not None
@@ -725,13 +735,18 @@ class TestSearchConversationAndGapTools:
         session_id = uuid4()
         at = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
         unanswered_row = UnansweredRow(
-            uuid4(), at, session_id, "Vad kostar det?", "hittar tyvärr inte"
+            uuid4(), at, session_id, "Vad kostar det?", "hittar tyvärr inte", "user", -1
         )
         no_knowledge_row = NoKnowledgeRow(
-            uuid4(), at, session_id, "Q", "answer cited no knowledge", None
+            uuid4(), at, session_id, "Q", "uncited", None, "widget", None
         )
         rephrasing_row = RephrasingRow(
-            session_id, at, ["a?", "a igen?", "a???"], 2, [uuid4(), uuid4(), uuid4()]
+            session_id,
+            at,
+            ["a?", "a igen?", "a???"],
+            2,
+            [uuid4(), uuid4(), uuid4()],
+            "user",
         )
 
         async def unanswered(scope: Any, window: Any, *, offset: int, limit: int):
@@ -755,6 +770,7 @@ class TestSearchConversationAndGapTools:
         assert "Unanswered (1 turns admit not knowing)" in text
         assert 'admits: "hittar tyvärr inte"' in text
         assert "No knowledge used (1 turns; window median best score 0.70)" in text
+        assert "| answer cited no knowledge" in text
         assert "Rephrasing (1 conversations)" in text
         assert '"a?" -> "a igen?" -> "a???"' in text
         assert "heuristic candidates" in text
@@ -799,6 +815,128 @@ class TestSearchConversationAndGapTools:
 
         assert "(none)" in text
         assert registered == [[]]
+
+
+def _rating_row(question: str, quoted: UUID, **overrides: Any) -> RatingRow:
+    fields: dict[str, Any] = dict(
+        kind="answer",
+        value=-1,
+        comment="Saknar avgiften",
+        question=question,
+        question_id=quoted,
+        session_id=uuid4(),
+        source="user",
+        rated_at=datetime(2026, 9, 7, 10, 6, tzinfo=timezone.utc),
+        key=quoted,
+        quoted_question_id=quoted,
+    )
+    fields.update(overrides)
+    return RatingRow(**fields)
+
+
+class TestRatingsKnowledgeAndToolUse:
+    async def test_list_ratings_filters_pages_and_registers_the_quoted_questions(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        calls: list[dict[str, Any]] = []
+        answer = _rating_row("Vad kostar det?", uuid4())
+        first_question = uuid4()
+        vote = _rating_row(
+            "När öppnar simhallen?",
+            first_question,
+            kind="conversation",
+            question_id=None,
+            key=uuid4(),
+            comment=None,
+        )
+
+        async def ratings(scope: Any, window: Any, **kwargs: Any):
+            calls.append(kwargs)
+            return [answer, vote], 2, False
+
+        _, registered = _patch_tool_context(
+            monkeypatch, repo=SimpleNamespace(list_ratings=ratings)
+        )
+
+        text = await list_ratings(
+            ctx=CTX,
+            start=START,
+            end=END,
+            rating="bad",
+            comments_only=True,
+            offset=-3,
+            limit=9999,
+            timezone=STOCKHOLM,
+        )
+
+        assert calls == [
+            dict(
+                source=None,
+                value=-1,
+                has_comment=True,
+                limit=insights.LIST_LIMIT_CEILING,
+                after=None,
+                offset=0,
+            )
+        ]
+        assert "Ratings 1-2 of 2 (bad ratings, with a comment)" in text
+        assert (
+            "12:06 | session_id="
+            f'{answer.session_id} | answer rated bad | Q: Vad kostar det? | comment: "Saknar avgiften"'
+            in text
+        )
+        assert (
+            "conversation rated bad | first Q: När öppnar simhallen? | no comment"
+            in text
+        )
+        # A conversation rating quotes the conversation's first question.
+        assert registered == [[answer.question_id, first_question]]
+
+    async def test_knowledge_and_tool_use_return_counts_and_register_nothing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        bygglov = KnowledgeSourceRow("collection", uuid4(), "Bygglov", 6, True)
+        old_site = KnowledgeSourceRow("website", uuid4(), "gamla.se", 2, False)
+        unused = KnowledgeSourceRow(
+            "integration_knowledge", uuid4(), "Intranät", 0, True
+        )
+
+        async def citations(scope: Any, window: Any, *, source: Any):
+            return KnowledgeCitations(20, 8, [bygglov, old_site], [unused])
+
+        async def tools(scope: Any, window: Any, *, source: Any):
+            return [
+                ToolUseRow("web_search", None, None, None, 40, 2, 0),
+                ToolUseRow(None, "Grounding", "get_chat_grounding", "Grund", 10, 6, 1),
+            ]
+
+        _, registered = _patch_tool_context(
+            monkeypatch,
+            repo=SimpleNamespace(knowledge_citations=citations, tool_use=tools),
+        )
+
+        knowledge = await knowledge_use(ctx=CTX, start=START, end=END)
+        used = await tool_use(ctx=CTX, start=START, end=END)
+        past = await tool_use(ctx=CTX, start=START, end=END, offset=5)
+
+        assert "20 answers, of which 8 (40.0%) cited a passage" in knowledge
+        assert (
+            "cited | collection 'Bygglov' | 6 answers (75.0% of citing answers)"
+            in knowledge
+        )
+        assert (
+            "website 'gamla.se' | 2 answers (25.0% of citing answers) | no longer attached"
+            in knowledge
+        )
+        assert "never cited | integration knowledge 'Intranät' | attached" in knowledge
+        assert "capability web_search | 40 calls | 2 failed (5.0%) | 0 denied" in used
+        assert (
+            "server 'Grounding' tool 'get_chat_grounding' (\"Grund\") | 10 calls | "
+            "6 failed (60.0%) | 1 denied" in used
+        )
+        assert "past the end (2 tools)" in past
+        # Counts and configured names carry no conversation text.
+        assert registered == []
 
 
 AT = datetime(2026, 9, 7, 10, 0, tzinfo=timezone.utc)
@@ -894,6 +1032,26 @@ def _transcript_case() -> _PrintCase:
     )
 
 
+def _ratings_case() -> _PrintCase:
+    sources = _markers(3)
+    rows = [
+        _rating_row(f"{m} question", ids[0], comment=f"{m} comment")
+        for m, ids in sources
+    ]
+    # A conversation rating quotes its conversation's first question.
+    rows[1] = rows[1]._replace(kind="conversation", question_id=None)
+
+    async def ratings(scope: Any, window: Any, **_: Any):
+        return rows, len(rows), False
+
+    return _PrintCase(
+        SimpleNamespace(list_ratings=ratings),
+        sources,
+        lambda: list_ratings(ctx=CTX, start=START, end=END),
+        page_cap=1,
+    )
+
+
 def _gap_case(signal: Any) -> Callable[[], _PrintCase]:
     def build() -> _PrintCase:
         unanswered = _markers(3)
@@ -902,21 +1060,25 @@ def _gap_case(signal: Any) -> Callable[[], _PrintCase]:
 
         async def find_unanswered(scope: Any, window: Any, **_: Any):
             rows = [
-                UnansweredRow(ids[0], AT, uuid4(), f"{m} question", "vet inte")
+                UnansweredRow(
+                    ids[0], AT, uuid4(), f"{m} question", "vet inte", "user", None
+                )
                 for m, ids in unanswered
             ]
             return rows, len(rows)
 
         async def find_no_knowledge(scope: Any, window: Any, **_: Any):
             rows = [
-                NoKnowledgeRow(ids[0], AT, uuid4(), f"{m} question", "no hits", None)
+                NoKnowledgeRow(
+                    ids[0], AT, uuid4(), f"{m} question", "no_results", None, "user", 1
+                )
                 for m, ids in no_knowledge
             ]
             return rows, len(rows), None
 
         async def find_rephrasing(scope: Any, window: Any, **_: Any):
             rows = [
-                RephrasingRow(uuid4(), AT, [f"{m} first", f"{m} again"], 1, ids)
+                RephrasingRow(uuid4(), AT, [f"{m} first", f"{m} again"], 1, ids, "user")
                 for m, ids in rephrasing
             ]
             return rows, len(rows)
@@ -946,6 +1108,7 @@ _PRINT_CASES = {
     "top_questions": _top_case,
     "search_questions": _search_case,
     "read_conversation": _transcript_case,
+    "list_ratings": _ratings_case,
     "find_gaps unanswered": _gap_case("unanswered"),
     "find_gaps no_knowledge": _gap_case("no_knowledge"),
     "find_gaps rephrasing": _gap_case("rephrasing"),

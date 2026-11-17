@@ -22,8 +22,9 @@ The rule lives in one place, `eneo.sessions.hidden_sessions`:
 - `QuestionRepository.get_by_service` and `get_by_tenant` (exports);
 - the per-user token usage analyzer;
 - the insights tools' own reads and the insights figures (summary, activity,
-  ratings inbox, target list) in `InsightsRepository`, so one analysis never
-  reads or counts another.
+  ratings inbox, target list, knowledge use, common questions, tool use and
+  the findings with their cases) in `InsightsRepository`, so one analysis
+  never reads or counts another.
 
 Adding a new kind of hidden session means adding one `NOT EXISTS` to
 `hidden_session_clause` and nothing else. The owner service loads its own

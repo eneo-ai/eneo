@@ -35,6 +35,19 @@ assistant, plus ratings and a hidden assistant:
         "Saknar avgiften" (10:06), api_q1 bad (09:01)
   * s3 conversation voted good (2026-09-06 09:00)
   * a hidden assistant with no conversations
+
+``seed_quality`` adds knowledge and tool calls to ``seed_sources``; the
+assistant answers in tool mode:
+  * collections "Bygglov" and "Taxor", both attached to the assistant, and the
+    group chat gets the assistant as its member
+  * Bygglov's one document in two versions: v1 superseded by a refresh, v2
+    active
+  * s1_q1 cites v1 (injected, score 0.8); s2_q1 searched and cites v2 through
+    the knowledge tool (score 0.7); s1_q2's knowledge search found nothing;
+    s3_q1 cites a passage of a removed document (score 0.1); Taxor is never
+    cited
+  * tool calls: s1_q1 a web search; s4_q1 a failed Grounding call; widget_1_q1
+    a denied Grounding call; s5's first question a Skill activation
 """
 
 from __future__ import annotations
@@ -49,9 +62,19 @@ from eneo.analysis.insight_conversation_repo import InsightConversationRepositor
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
-from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.group_chats_table import GroupChatsTable
-from eneo.database.tables.questions_table import QuestionFeedback, Questions
+from eneo.database.tables.assistant_table import Assistants, AssistantsGroups
+from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.group_chats_table import (
+    GroupChatsAssistantsMapping,
+    GroupChatsTable,
+)
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.mcp_tool_references_table import McpToolReference
+from eneo.database.tables.questions_table import (
+    InfoBlobReferences,
+    QuestionFeedback,
+    Questions,
+)
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.database.tables.widgets_table import Widgets
@@ -520,10 +543,162 @@ async def _seed_sources(container, admin_user) -> dict[str, UUID]:
     }
 
 
+def _call(server: str, tool: str, **values) -> dict[str, object]:
+    return {
+        "server_name": server,
+        "tool_name": tool,
+        "approved": True,
+        "result_status": "succeeded",
+        **values,
+    }
+
+
+async def _seed_quality(container, admin_user) -> dict[str, UUID]:
+    """``_seed_sources`` plus knowledge and tool calls, described in the
+    module docstring."""
+    seed = await _seed_sources(container, admin_user)
+    session = container.session()
+    tenant_id, bygg = seed["tenant_id"], seed["bygg"]
+    await session.execute(
+        sa.update(Assistants).where(Assistants.id == bygg).values(knowledge_mode="tool")
+    )
+    await session.execute(
+        sa.insert(GroupChatsAssistantsMapping).values(
+            group_chat_id=seed["group_chat"], assistant_id=bygg
+        )
+    )
+    collections: dict[str, UUID] = {}
+    for name in ("Bygglov", "Taxor"):
+        collections[name] = uuid4()
+        await session.execute(
+            sa.insert(CollectionsTable).values(
+                id=collections[name],
+                name=name,
+                size=0,
+                user_id=admin_user.id,
+                tenant_id=tenant_id,
+            )
+        )
+        await session.execute(
+            sa.insert(AssistantsGroups).values(
+                assistant_id=bygg, group_id=collections[name]
+            )
+        )
+    document = uuid4()
+    versions = {"v1": uuid4(), "v2": uuid4()}
+    for version, state in (("v1", "superseded"), ("v2", "active")):
+        await session.execute(
+            sa.insert(InfoBlobs).values(
+                id=versions[version],
+                text=f"Bygglov {version}",
+                title="Ansök om bygglov",
+                size=1,
+                source_id=document,
+                version_state=state,
+                user_id=admin_user.id,
+                tenant_id=tenant_id,
+                group_id=collections["Bygglov"],
+            )
+        )
+    await session.execute(
+        sa.insert(InfoBlobReferences).values(
+            question_id=seed["s1_q1"],
+            info_blob_id=versions["v1"],
+            similarity_score=0.8,
+            order=0,
+        )
+    )
+    await session.execute(
+        sa.insert(McpToolReference),
+        [
+            dict(
+                question_id=seed["s2_q1"],
+                uri=f"eneo://info-blob/{versions['v2']}#chunk-0",
+                meta={"score": 0.7},
+                order=0,
+            ),
+            dict(
+                question_id=seed["s3_q1"],
+                uri=f"eneo://info-blob/{uuid4()}#chunk-0",
+                meta={"score": 0.1},
+                order=0,
+            ),
+        ],
+    )
+    s5_q1 = await session.scalar(
+        sa.select(Questions.id)
+        .where(Questions.session_id == seed["s5"])
+        .order_by(Questions.created_at)
+        .limit(1)
+    )
+    grounding = _call("Grounding", "get_chat_grounding", title="Grundning")
+    for question_id, calls in (
+        (
+            seed["s1_q1"],
+            [_call("Webbsök", "search", purpose="web_search", title="Sök på webben")],
+        ),
+        (
+            seed["s2_q1"],
+            [
+                _call(
+                    "knowledge", "search_knowledge", result="1 result(s) for 'bygglov'"
+                )
+            ],
+        ),
+        (
+            seed["s1_q2"],
+            [
+                _call(
+                    "knowledge",
+                    "search_knowledge",
+                    is_internal=True,
+                    result="No results for 'avgift'.",
+                )
+            ],
+        ),
+        (seed["s4_q1"], [{**grounding, "result_status": "failed"}]),
+        (
+            seed["widget_1_q1"],
+            [{**grounding, "approved": False, "result_status": "denied"}],
+        ),
+        (
+            s5_q1,
+            [
+                _call(
+                    "skills",
+                    "faktagranskning",
+                    mcp_tool_name="eneo_activate_skill",
+                    is_internal=True,
+                    result_status="completed",
+                )
+            ],
+        ),
+    ):
+        await session.execute(
+            sa.update(Questions)
+            .where(Questions.id == question_id)
+            .values(tool_calls=calls)
+        )
+    await session.flush()
+    return {
+        **seed,
+        "bygglov": collections["Bygglov"],
+        "taxor": collections["Taxor"],
+        "blob_v1": versions["v1"],
+        "blob_v2": versions["v2"],
+    }
+
+
 @pytest.fixture
 def seed_insights():
     """``await seed_insights(container, admin_user)`` inside a db_container."""
     return _seed_insights
+
+
+@pytest.fixture
+def seed_quality():
+    """``await seed_quality(container, admin_user)`` inside a db_container."""
+    return _seed_quality
 
 
 @pytest.fixture

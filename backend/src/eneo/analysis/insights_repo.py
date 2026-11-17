@@ -39,7 +39,13 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql.selectable import LateralFromClause
 
 from eneo.analysis.gap_patterns import NOT_KNOWING_REGEX
-from eneo.analysis.insight_scope import InsightScope, InsightTargetKind, InsightWindow
+from eneo.analysis.insight_scope import (
+    InsightScope,
+    InsightTargetKind,
+    InsightWindow,
+    KnowledgeSourceKind,
+    MissReason,
+)
 from eneo.assistants.api.assistant_models import KnowledgeMode
 from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.assistant_table import (
@@ -48,10 +54,13 @@ from eneo.database.tables.assistant_table import (
     AssistantsGroups,
     AssistantsWebsites,
 )
+from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
     GroupChatsTable,
 )
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.mcp_tool_references_table import McpToolReference
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
@@ -60,6 +69,7 @@ from eneo.database.tables.questions_table import (
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.websites_table import Websites
 from eneo.sessions.hidden_sessions import exclude_hidden_sessions, hidden_session_clause
 from eneo.sessions.session_source import (
     SESSION_SOURCES,
@@ -78,10 +88,15 @@ __all__ = [
     "InsightScope",
     "InsightWindow",
     "InsightsRepository",
+    "KnowledgeCitations",
     "KnowledgeSetup",
+    "KnowledgeSourceKind",
+    "KnowledgeSourceRow",
     "KnowledgeUse",
+    "MissReason",
     "NoKnowledgeRow",
     "PeriodFigures",
+    "QuestionGroupRow",
     "QuestionRow",
     "RatingKind",
     "RatingRow",
@@ -90,7 +105,9 @@ __all__ = [
     "SourceCounts",
     "TargetRow",
     "TargetSort",
+    "TargetTotals",
     "TargetUsage",
+    "ToolUseRow",
     "TopQuestionRow",
     "Transcript",
     "TranscriptTurn",
@@ -170,6 +187,9 @@ class UnansweredRow(NamedTuple):
     session_id: UUID
     question: str
     evidence: str
+    source: SessionSource
+    # The answer's rating (1 or -1), None when unrated.
+    rating: int | None
 
 
 class NoKnowledgeRow(NamedTuple):
@@ -177,8 +197,11 @@ class NoKnowledgeRow(NamedTuple):
     created_at: datetime
     session_id: UUID
     question: str
-    reason: str
+    reason: MissReason
     best_score: float | None
+    source: SessionSource
+    # The answer's rating (1 or -1), None when unrated.
+    rating: int | None
 
 
 class RephrasingRow(NamedTuple):
@@ -188,6 +211,7 @@ class RephrasingRow(NamedTuple):
     similar_pairs: int
     # The questions above, in the same order.
     question_ids: list[UUID]
+    source: SessionSource
 
 
 class SourceCounts(NamedTuple):
@@ -228,8 +252,62 @@ class PeriodFigures(NamedTuple):
     answers_positive: int
     answers_negative: int
     answers_with_comment: int
+    answers_negative_with_comment: int
     conversations_positive: int
     conversations_negative: int
+    conversations_with_comment: int
+    conversations_negative_with_comment: int
+
+
+class QuestionGroupRow(NamedTuple):
+    """One exact-text question group and how its answers fared: one of its
+    questions as display text, otherwise counts."""
+
+    display_text: str
+    occurrences: int
+    conversations: int
+    sample_session_id: UUID
+    unanswered: int
+    answers_positive: int
+    answers_negative: int
+    knowledge: KnowledgeUse | None
+
+
+class KnowledgeSourceRow(NamedTuple):
+    """A collection, website or integration knowledge and the answers of the
+    period that cited a passage from it."""
+
+    kind: KnowledgeSourceKind
+    id: UUID
+    name: str
+    answers: int
+    # Attached to the target's answering assistants now.
+    attached: bool
+
+
+class KnowledgeCitations(NamedTuple):
+    """Counts and source names only: no conversation text."""
+
+    answers: int
+    # Answers that cited a passage of a source that still exists.
+    citing_answers: int
+    # Every cited source, most cited first.
+    cited: list[KnowledgeSourceRow]
+    # Attached sources no answer of the period cited, by name.
+    unused: list[KnowledgeSourceRow]
+
+
+class ToolUseRow(NamedTuple):
+    """Calls of one capability (``purpose`` set) or of one server's tool.
+    Counts and configured names only."""
+
+    purpose: str | None
+    server_name: str | None
+    tool_name: str | None
+    title: str | None
+    calls: int
+    failed: int
+    denied: int
 
 
 class ActivityDay(NamedTuple):
@@ -253,11 +331,21 @@ class RatingRow(NamedTuple):
     rated_at: datetime
     # Unique across both kinds: the question id, or the session id.
     key: UUID
+    # The question whose text ``question`` is: the rated answer's question,
+    # or a conversation rating's first question.
+    quoted_question_id: UUID
 
 
 class TargetUsage(NamedTuple):
     conversations: SourceCounts
     questions: int
+
+
+class TargetTotals(NamedTuple):
+    """Usage of every target a target list matched, not only its page."""
+
+    usage: TargetUsage
+    previous: TargetUsage
 
 
 class TargetRow(NamedTuple):
@@ -290,6 +378,17 @@ LONG_CONVERSATION_QUESTIONS = 5
 # and its tool that searches: the others list or read sources.
 KNOWLEDGE_SERVER = "knowledge"
 KNOWLEDGE_SEARCH_TOOL = "search_knowledge"
+# A Skill's activation is recorded as a call of this tool
+# (``eneo.completion_models.domain.skill_activation``); it is a step of the
+# answer, not a tool anyone attached.
+SKILL_ACTIVATION_TOOL = "eneo_activate_skill"
+# A passage the knowledge tool returned names its info blob in its URI,
+# optionally followed by ``#chunk-<n>``.
+INFO_BLOB_URI_PREFIX = "eneo://info-blob/"
+_INFO_BLOB_URI = (
+    "^eneo://info-blob/"
+    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 
 _TRAILING_PUNCTUATION = r"[?!.]+$"
@@ -334,6 +433,11 @@ def _source_counts(row: sa.Row[Any], prefix: str) -> SourceCounts:
     )
 
 
+def _has_text(column: Any) -> sa.ColumnElement[bool]:
+    """A comment counts when it holds more than whitespace."""
+    return sa.func.coalesce(sa.func.btrim(column), "") != ""
+
+
 def _escape_like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -371,35 +475,6 @@ class InsightsRepository:
         )
 
     @staticmethod
-    def _knowledge_passages() -> sa.Subquery:
-        """Knowledge passages per question, with the best score among them.
-
-        Knowledge reaches a turn two ways and both count as evidence:
-        injected passages are rows in ``info_blob_references``; passages the
-        model fetched through the knowledge tool are ``mcp_tool_references``
-        with an ``eneo://info-blob/`` URI and their score in ``meta``.
-        """
-        passages = sa.union_all(
-            sa.select(
-                InfoBlobReferences.question_id.label("question_id"),
-                InfoBlobReferences.similarity_score.label("score"),
-            ),
-            sa.select(
-                McpToolReference.question_id.label("question_id"),
-                InsightsRepository._tool_passage_score().label("score"),
-            ).where(InsightsRepository._is_knowledge_passage()),
-        ).subquery("passages")
-        return (
-            sa.select(
-                passages.c.question_id,
-                sa.func.count().label("cited_passages"),
-                sa.func.max(passages.c.score).label("best_score"),
-            )
-            .group_by(passages.c.question_id)
-            .subquery("cited")
-        )
-
-    @staticmethod
     def _in_scope(
         scope: InsightScope,
         window: InsightWindow,
@@ -429,7 +504,7 @@ class InsightsRepository:
 
     @staticmethod
     def _is_knowledge_passage() -> sa.ColumnElement[bool]:
-        return McpToolReference.uri.like("eneo://info-blob/%")
+        return McpToolReference.uri.like(f"{INFO_BLOB_URI_PREFIX}%")
 
     @staticmethod
     def _tool_passage_score() -> sa.ColumnElement[float | None]:
@@ -440,22 +515,54 @@ class InsightsRepository:
         )
 
     @staticmethod
-    def _answer_passages() -> LateralFromClause:
-        """The knowledge passages one answer cited and the best score among
-        them, injected or fetched through the knowledge tool. Correlated to
-        ``questions``: two index probes per answer, never a scan of every
-        citation."""
-        passages = sa.union_all(
-            sa.select(InfoBlobReferences.similarity_score.label("score"))
+    def _tool_passage_blob() -> sa.ColumnElement[UUID | None]:
+        """The info blob a knowledge tool passage comes from, read from its
+        URI; None for a URI that names no blob."""
+        uri = McpToolReference.uri
+        return sa.case(
+            (
+                uri.op("~")(_INFO_BLOB_URI),
+                sa.cast(
+                    sa.func.substr(uri, len(INFO_BLOB_URI_PREFIX) + 1, 36), sa.Uuid()
+                ),
+            )
+        )
+
+    @staticmethod
+    def _cited_passages() -> sa.CompoundSelect[Any]:
+        """The knowledge passages one answer cited, one row each with its info
+        blob and score.
+
+        Knowledge reaches a turn two ways and both count as evidence:
+        injected passages are rows in ``info_blob_references``; passages the
+        model fetched through the knowledge tool are ``mcp_tool_references``
+        with an ``eneo://info-blob/`` URI and their score in ``meta``.
+        Correlated to ``questions``: two index probes per answer, never a scan
+        of every citation.
+        """
+        return sa.union_all(
+            sa.select(
+                InfoBlobReferences.info_blob_id.label("info_blob_id"),
+                InfoBlobReferences.similarity_score.label("score"),
+            )
             .where(InfoBlobReferences.question_id == Questions.id)
             .correlate(Questions),
-            sa.select(InsightsRepository._tool_passage_score().label("score"))
+            sa.select(
+                InsightsRepository._tool_passage_blob().label("info_blob_id"),
+                InsightsRepository._tool_passage_score().label("score"),
+            )
             .where(
                 McpToolReference.question_id == Questions.id,
                 InsightsRepository._is_knowledge_passage(),
             )
             .correlate(Questions),
-        ).subquery("passages")
+        )
+
+    @staticmethod
+    def _answer_passages() -> LateralFromClause:
+        """How many knowledge passages one answer cited (:meth:`_cited_passages`)
+        and the best score among them."""
+        passages = InsightsRepository._cited_passages().subquery("passages")
         return (
             sa.select(
                 sa.func.count().label("passages"),
@@ -466,7 +573,7 @@ class InsightsRepository:
         )
 
     @staticmethod
-    def _knowledge_calls(tool_calls: Any) -> sa.TableValuedAlias:
+    def _turn_calls(tool_calls: Any) -> sa.TableValuedAlias:
         """The turn's tool calls, one row each. Turns without tool calls hold
         SQL NULL or a JSON ``null``; only an array can be unnested."""
         return sa.func.jsonb_array_elements(
@@ -479,7 +586,7 @@ class InsightsRepository:
     @staticmethod
     def _knowledge_no_results(tool_calls: Any) -> sa.ColumnElement[bool]:
         """The knowledge tool answered the turn with no results."""
-        call = InsightsRepository._knowledge_calls(tool_calls)
+        call = InsightsRepository._turn_calls(tool_calls)
         return sa.exists(
             sa.select(sa.literal(1))
             .select_from(call)
@@ -492,7 +599,7 @@ class InsightsRepository:
     @staticmethod
     def _knowledge_searched_by_tool(tool_calls: Any) -> sa.ColumnElement[bool]:
         """The turn called the knowledge tool's search."""
-        call = InsightsRepository._knowledge_calls(tool_calls)
+        call = InsightsRepository._turn_calls(tool_calls)
         return sa.exists(
             sa.select(sa.literal(1))
             .select_from(call)
@@ -534,6 +641,91 @@ class InsightsRepository:
             .select_from(Questions)
             .join(Sessions, Questions.session_id == Sessions.id)
             .where(*self._in_scope(scope, window, source))
+        )
+
+    def _with_answer_rating(self, base: sa.Select[Any]) -> sa.Select[Any]:
+        """``base`` (a statement over ``questions``) with each answer's rating
+        as ``rating``, None when unrated."""
+        return base.add_columns(QuestionFeedback.value.label("rating")).outerjoin(
+            QuestionFeedback, QuestionFeedback.question_id == Questions.id
+        )
+
+    def _with_knowledge_signals(self, base: sa.Select[Any]) -> sa.Select[Any]:
+        """``base`` (a statement over ``questions``) with what an answer's
+        knowledge verdict (:meth:`_knowledge_verdict`) reads: the passages it
+        cited and their best score, whether the knowledge search reported no
+        results or ran at all, and the answering assistant."""
+        cited = self._answer_passages()
+        return base.add_columns(
+            cited.c.passages,
+            cited.c.best_score,
+            self._knowledge_no_results(Questions.tool_calls).label("no_results"),
+            self._knowledge_searched_by_tool(Questions.tool_calls).label(
+                "tool_searched"
+            ),
+            Questions.assistant_id.label("answering_assistant_id"),
+        ).join(cited, sa.true())
+
+    @staticmethod
+    def _knowledge_verdict(
+        columns: Any, knowledge: KnowledgeSetup
+    ) -> tuple[sa.ColumnElement[bool], sa.ColumnElement[bool]]:
+        """Whether an answer searched the knowledge and whether it missed, by
+        absolute signals only, over the columns
+        :meth:`_with_knowledge_signals` adds.
+
+        An answer searched when it cited a passage, called the knowledge
+        search, or was given by an assistant that retrieves on every turn; it
+        missed when it searched and the search reported no results, nothing
+        was cited, or the best score is under :data:`KNOWLEDGE_SCORE_FLOOR`.
+        """
+        injects = (
+            columns.answering_assistant_id.in_(sorted(knowledge.inject_assistant_ids))
+            if knowledge.inject_assistant_ids
+            else sa.false()
+        )
+        searched = sa.or_(columns.passages > 0, columns.tool_searched, injects)
+        missed = sa.and_(
+            searched,
+            sa.or_(
+                columns.no_results,
+                columns.passages == 0,
+                InsightsRepository._weak_score(columns.best_score),
+            ),
+        )
+        return searched, missed
+
+    @staticmethod
+    def _weak_score(best_score: Any) -> sa.ColumnElement[bool]:
+        return sa.and_(best_score.is_not(None), best_score < KNOWLEDGE_SCORE_FLOOR)
+
+    @staticmethod
+    def _question_groups(
+        scoped: sa.Subquery, *, include_followups: bool, sample_sessions: int
+    ) -> sa.Select[Any]:
+        """Exact-text groups of ``scoped``'s questions after normalisation,
+        commonest first: the grouping every common-questions read shares.
+
+        Columns: ``occurrences``, ``conversations``, ``display_text`` (one of
+        the group's questions), ``sample_session_ids`` and ``total``, the
+        number of questions the shares are relative to.
+        """
+        normalized = normalized_question_expr(scoped.c.question).label("normalized")
+        stmt = sa.select(
+            normalized,
+            # "occurrences", not "count": Row exposes tuple.count as a method.
+            sa.func.count().label("occurrences"),
+            sa.func.count(sa.distinct(scoped.c.session_id)).label("conversations"),
+            sa.func.min(scoped.c.question).label("display_text"),
+            sa.func.array_agg(
+                sa.distinct(scoped.c.session_id), type_=sa.ARRAY(sa.UUID())
+            )[1:sample_sessions].label("sample_session_ids"),
+            sa.func.sum(sa.func.count()).over().label("total"),
+        )
+        if not include_followups:
+            stmt = stmt.where(~scoped.c.is_followup)
+        return stmt.group_by(normalized).order_by(
+            sa.desc("occurrences"), sa.asc("display_text")
         )
 
     async def count_usage(
@@ -645,26 +837,17 @@ class InsightsRepository:
         where ``total`` is the number of questions the shares are relative to.
         """
         scoped = self._scoped_questions(scope, window).subquery("scoped")
-        normalized = normalized_question_expr(scoped.c.question).label("normalized")
-        stmt = sa.select(
-            normalized,
-            # "occurrences", not "count": Row exposes tuple.count as a method.
-            sa.func.count().label("occurrences"),
-            sa.func.count(sa.distinct(scoped.c.session_id)).label("conversations"),
-            sa.func.min(scoped.c.question).label("display_text"),
-            sa.func.array_agg(
-                sa.distinct(scoped.c.session_id), type_=sa.ARRAY(sa.UUID())
-            )[1:sample_sessions].label("sample_session_ids"),
-            sa.func.array_agg(scoped.c.id, type_=sa.ARRAY(sa.UUID())).label(
-                "question_ids"
-            ),
-            sa.func.sum(sa.func.count()).over().label("total"),
-        )
-        if not include_followups:
-            stmt = stmt.where(~scoped.c.is_followup)
         stmt = (
-            stmt.group_by(normalized)
-            .order_by(sa.desc("occurrences"), sa.asc("display_text"))
+            self._question_groups(
+                scoped,
+                include_followups=include_followups,
+                sample_sessions=sample_sessions,
+            )
+            .add_columns(
+                sa.func.array_agg(scoped.c.id, type_=sa.ARRAY(sa.UUID())).label(
+                    "question_ids"
+                )
+            )
             .limit(n)
         )
         rows = (await self.session.execute(stmt)).all()
@@ -677,6 +860,73 @@ class InsightsRepository:
                     conversations=int(row.conversations),
                     sample_session_ids=list(row.sample_session_ids or []),
                     question_ids=list(row.question_ids or []),
+                )
+                for row in rows
+            ],
+            total,
+        )
+
+    async def question_groups(
+        self,
+        scope: InsightScope,
+        window: InsightWindow,
+        *,
+        source: SessionSource | None,
+        knowledge: KnowledgeSetup,
+        n: int,
+        include_followups: bool,
+    ) -> tuple[list[QuestionGroupRow], int]:
+        """The commonest question groups (as :meth:`top_questions` groups
+        them) with how their answers fared: answers that say they cannot
+        answer, answer ratings, and knowledge searched and missed as the
+        summary judges them (None without knowledge). Returns ``(rows,
+        total)`` where ``total`` is the number of questions the shares are
+        relative to."""
+        base = self._with_answer_rating(self._scoped_questions(scope, window, source))
+        if knowledge.has_knowledge:
+            base = self._with_knowledge_signals(base)
+        scoped = base.subquery("scoped")
+        s = scoped.c
+        columns: list[sa.ColumnElement[Any]] = [
+            sa.func.count()
+            .filter(s.answer.op("~*")(NOT_KNOWING_REGEX))
+            .label("unanswered"),
+            sa.func.count().filter(s.rating == 1).label("answers_positive"),
+            sa.func.count().filter(s.rating == -1).label("answers_negative"),
+        ]
+        if knowledge.has_knowledge:
+            searched, missed = self._knowledge_verdict(s, knowledge)
+            columns += [
+                sa.func.count().filter(searched).label("knowledge_searched"),
+                sa.func.count().filter(missed).label("knowledge_missed"),
+            ]
+        stmt = (
+            self._question_groups(
+                scoped, include_followups=include_followups, sample_sessions=1
+            )
+            .add_columns(*columns)
+            .limit(n)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        total = int(rows[0].total) if rows else 0
+        return (
+            [
+                QuestionGroupRow(
+                    display_text=row.display_text,
+                    occurrences=int(row.occurrences),
+                    conversations=int(row.conversations),
+                    sample_session_id=row.sample_session_ids[0],
+                    unanswered=int(row.unanswered),
+                    answers_positive=int(row.answers_positive),
+                    answers_negative=int(row.answers_negative),
+                    knowledge=(
+                        KnowledgeUse(
+                            searched=int(row.knowledge_searched),
+                            missed=int(row.knowledge_missed),
+                        )
+                        if knowledge.has_knowledge
+                        else None
+                    ),
                 )
                 for row in rows
             ],
@@ -753,7 +1003,7 @@ class InsightsRepository:
         if header is None:
             return None
 
-        cited = self._knowledge_passages()
+        cited = self._answer_passages()
         turns_stmt = (
             sa.select(
                 Questions.id,
@@ -761,10 +1011,11 @@ class InsightsRepository:
                 Questions.question,
                 Questions.answer,
                 Questions.tool_calls,
-                sa.func.coalesce(cited.c.cited_passages, 0).label("cited_passages"),
+                cited.c.passages.label("cited_passages"),
                 cited.c.best_score,
             )
-            .outerjoin(cited, cited.c.question_id == Questions.id)
+            .select_from(Questions)
+            .join(cited, sa.true())
             .where(
                 Questions.session_id == session_id,
                 Questions.tenant_id == scope.tenant_id,
@@ -800,9 +1051,13 @@ class InsightsRepository:
         *,
         offset: int,
         limit: int,
+        source: SessionSource | None = None,
     ) -> tuple[list[UnansweredRow], int]:
-        """Turns whose answer admits not knowing, with the matched phrase."""
-        scoped = self._scoped_questions(scope, window).subquery("scoped")
+        """Turns whose answer admits not knowing, with the matched phrase,
+        newest first."""
+        scoped = self._with_answer_rating(
+            self._scoped_questions(scope, window, source)
+        ).subquery("scoped")
         base = sa.select(
             scoped.c.id,
             scoped.c.created_at,
@@ -813,6 +1068,8 @@ class InsightsRepository:
             sa.func.substring(scoped.c.answer, f"({NOT_KNOWING_REGEX})").label(
                 "evidence"
             ),
+            scoped.c.source,
+            scoped.c.rating,
         ).where(scoped.c.answer.op("~*")(NOT_KNOWING_REGEX))
         total = await self.session.scalar(
             sa.select(sa.func.count()).select_from(base.subquery())
@@ -832,6 +1089,8 @@ class InsightsRepository:
                     session_id=row.session_id,
                     question=row.question,
                     evidence=row.evidence or "",
+                    source=cast(SessionSource, row.source),
+                    rating=row.rating,
                 )
                 for row in rows
             ],
@@ -845,8 +1104,10 @@ class InsightsRepository:
         *,
         offset: int,
         limit: int,
+        source: SessionSource | None = None,
+        absolute: KnowledgeSetup | None = None,
     ) -> tuple[list[NoKnowledgeRow], int, float | None]:
-        """Turns answered without a usable knowledge hit.
+        """Turns answered without a usable knowledge hit, newest first.
 
         Three signals, weakest last: the knowledge tool reported no results;
         the answer cited no knowledge at all; or its best citation score is in
@@ -854,57 +1115,57 @@ class InsightsRepository:
         per embedding model) or below :data:`KNOWLEDGE_SCORE_FLOOR`. Passages
         count whether they were injected or fetched through the knowledge
         tool. Returns ``(rows, total, window median score)``.
+
+        With ``absolute`` the rows are exactly the answers the summary counts
+        as missed with that knowledge setup: absolute signals only, among the
+        answers that searched (:meth:`_knowledge_verdict`), and no median.
         """
-        scoped = self._scoped_questions(scope, window).subquery("scoped")
-        cited = self._knowledge_passages()
-        no_results = self._knowledge_no_results(scoped.c.tool_calls)
-        scored = (
-            sa.select(
-                scoped.c.id,
-                scoped.c.created_at,
-                scoped.c.session_id,
-                scoped.c.question,
-                cited.c.best_score,
-                no_results.label("no_results"),
-                cited.c.question_id.is_(None).label("uncited"),
+        base = self._with_answer_rating(self._scoped_questions(scope, window, source))
+        scored = self._with_knowledge_signals(base).subquery("scored")
+        s = scored.c
+        uncited = s.passages == 0
+        median: float | None = None
+        if absolute is None:
+            quartile, median = (
+                await self.session.execute(
+                    sa.select(
+                        sa.func.percentile_cont(0.25).within_group(s.best_score),
+                        sa.func.percentile_cont(0.5).within_group(s.best_score),
+                    ).where(s.best_score.isnot(None))
+                )
+            ).one()
+            weak = sa.and_(
+                s.best_score.isnot(None),
+                sa.or_(
+                    s.best_score < KNOWLEDGE_SCORE_FLOOR,
+                    s.best_score <= quartile if quartile is not None else sa.false(),
+                ),
             )
-            .outerjoin(cited, cited.c.question_id == scoped.c.id)
-            .subquery("scored")
-        )
-        quartile, median = (
-            await self.session.execute(
-                sa.select(
-                    sa.func.percentile_cont(0.25).within_group(scored.c.best_score),
-                    sa.func.percentile_cont(0.5).within_group(scored.c.best_score),
-                ).where(scored.c.best_score.isnot(None))
-            )
-        ).one()
-        weak = sa.and_(
-            scored.c.best_score.isnot(None),
-            sa.or_(
-                scored.c.best_score < KNOWLEDGE_SCORE_FLOOR,
-                scored.c.best_score <= quartile if quartile is not None else sa.false(),
-            ),
-        )
+            flagged = sa.or_(s.no_results, uncited, weak)
+        else:
+            weak = self._weak_score(s.best_score)
+            _, flagged = self._knowledge_verdict(s, absolute)
         reason = sa.case(
-            (scored.c.no_results, sa.literal("knowledge search returned no results")),
-            (scored.c.uncited, sa.literal("answer cited no knowledge")),
-            (weak, sa.literal("weak best citation score")),
+            (s.no_results, sa.literal("no_results")),
+            (uncited, sa.literal("uncited")),
+            (weak, sa.literal("weak_score")),
         ).label("reason")
         base = sa.select(
-            scored.c.id,
-            scored.c.created_at,
-            scored.c.session_id,
-            scored.c.question,
-            scored.c.best_score,
+            s.id,
+            s.created_at,
+            s.session_id,
+            s.question,
+            s.best_score,
             reason,
-        ).where(sa.or_(scored.c.no_results, scored.c.uncited, weak))
+            s.source,
+            s.rating,
+        ).where(flagged)
         total = await self.session.scalar(
             sa.select(sa.func.count()).select_from(base.subquery())
         )
         rows = (
             await self.session.execute(
-                base.order_by(scored.c.created_at.desc(), scored.c.id.desc())
+                base.order_by(s.created_at.desc(), s.id.desc())
                 .offset(offset)
                 .limit(limit)
             )
@@ -916,10 +1177,12 @@ class InsightsRepository:
                     created_at=row.created_at,
                     session_id=row.session_id,
                     question=row.question,
-                    reason=row.reason,
+                    reason=cast(MissReason, row.reason),
                     best_score=float(row.best_score)
                     if row.best_score is not None
                     else None,
+                    source=cast(SessionSource, row.source),
+                    rating=row.rating,
                 )
                 for row in rows
             ],
@@ -934,11 +1197,12 @@ class InsightsRepository:
         *,
         offset: int,
         limit: int,
+        source: SessionSource | None = None,
     ) -> tuple[list[RephrasingRow], int]:
         """Conversations where the user seems to have asked the same thing
         again: at least three questions with a textually similar consecutive
         pair first, then long conversations without one."""
-        scoped = self._scoped_questions(scope, window).subquery("scoped")
+        scoped = self._scoped_questions(scope, window, source).subquery("scoped")
         previous = (
             sa.func.lag(scoped.c.question)
             .over(
@@ -952,6 +1216,7 @@ class InsightsRepository:
             scoped.c.question,
             scoped.c.created_at,
             scoped.c.id,
+            scoped.c.source,
             previous,
         ).subquery("ordered")
         similar_pair = sa.case(
@@ -969,6 +1234,8 @@ class InsightsRepository:
         per_session = (
             sa.select(
                 ordered.c.session_id,
+                # One source per conversation.
+                sa.func.min(ordered.c.source).label("source"),
                 sa.func.min(ordered.c.created_at).label("started_at"),
                 sa.func.count().label("question_count"),
                 sa.func.sum(similar_pair).label("similar_pairs"),
@@ -1016,6 +1283,7 @@ class InsightsRepository:
                     questions=list(row.questions or []),
                     similar_pairs=int(row.similar_pairs or 0),
                     question_ids=list(row.question_ids or []),
+                    source=cast(SessionSource, row.source),
                 )
                 for row in rows
             ],
@@ -1033,25 +1301,11 @@ class InsightsRepository:
                 AssistantIntegrationKnowledge.assistant_id == Assistants.id
             ),
         )
-        stmt = (
-            sa.select(
-                Assistants.id,
-                Assistants.knowledge_mode,
-                has_knowledge.label("has_knowledge"),
-            )
-            .join(Spaces, Spaces.id == Assistants.space_id)
-            .where(Spaces.tenant_id == scope.tenant_id)
-        )
-        if scope.kind == "assistant":
-            stmt = stmt.where(Assistants.id == scope.target_id)
-        else:
-            stmt = stmt.where(
-                Assistants.id.in_(
-                    sa.select(GroupChatsAssistantsMapping.assistant_id).where(
-                        GroupChatsAssistantsMapping.group_chat_id == scope.target_id
-                    )
-                )
-            )
+        stmt = sa.select(
+            Assistants.id,
+            Assistants.knowledge_mode,
+            has_knowledge.label("has_knowledge"),
+        ).where(Assistants.id.in_(self._answering_assistants(scope)))
         rows = (await self.session.execute(stmt)).all()
         return KnowledgeSetup(
             has_knowledge=any(row.has_knowledge for row in rows),
@@ -1074,33 +1328,22 @@ class InsightsRepository:
         """The figures of one period in one statement.
 
         Conversations are those with a question in the window. Knowledge uses
-        absolute signals only: an answer searched when it cited a passage,
-        called the knowledge search, or was given by an assistant that
-        retrieves on every turn; it missed when the search reported no
-        results, nothing was cited, or the best score is under
-        :data:`KNOWLEDGE_SCORE_FLOOR`. Without knowledge the figure is None.
+        absolute signals only (:meth:`_knowledge_verdict`). Without knowledge
+        the figure is None.
         """
         base = (
             self._scoped_questions(scope, window, source)
             .add_columns(
                 self._is_only_question_expr().label("only_question"),
                 Sessions.feedback_value.label("conversation_rating"),
+                Sessions.feedback_text.label("conversation_comment"),
                 QuestionFeedback.value.label("answer_rating"),
                 QuestionFeedback.text.label("answer_comment"),
             )
             .outerjoin(QuestionFeedback, QuestionFeedback.question_id == Questions.id)
         )
         if knowledge.has_knowledge:
-            cited = self._answer_passages()
-            base = base.add_columns(
-                cited.c.passages,
-                cited.c.best_score,
-                self._knowledge_no_results(Questions.tool_calls).label("no_results"),
-                self._knowledge_searched_by_tool(Questions.tool_calls).label(
-                    "tool_searched"
-                ),
-                Questions.assistant_id.label("answering_assistant_id"),
-            ).join(cited, sa.true())
+            base = self._with_knowledge_signals(base)
         scoped = base.cte("scoped")
         s = scoped.c
 
@@ -1116,7 +1359,9 @@ class InsightsRepository:
             )
             .scalar_subquery()
         )
-        has_comment = sa.func.coalesce(sa.func.btrim(s.answer_comment), "") != ""
+        has_comment = _has_text(s.answer_comment)
+        conversation_has_comment = _has_text(s.conversation_comment)
+        conversation_count = sa.func.count(sa.distinct(s.session_id))
         columns: list[sa.ColumnElement[Any]] = [
             *_split_by_source(
                 "questions", lambda where: sa.func.count().filter(where), s.source
@@ -1140,24 +1385,24 @@ class InsightsRepository:
             sa.func.count()
             .filter(s.answer_rating.is_not(None), has_comment)
             .label("answers_with_comment"),
-            sa.func.count(sa.distinct(s.session_id))
-            .filter(s.conversation_rating == 1)
-            .label("conversations_positive"),
-            sa.func.count(sa.distinct(s.session_id))
-            .filter(s.conversation_rating == -1)
-            .label("conversations_negative"),
+            sa.func.count()
+            .filter(s.answer_rating == -1, has_comment)
+            .label("answers_negative_with_comment"),
+            conversation_count.filter(s.conversation_rating == 1).label(
+                "conversations_positive"
+            ),
+            conversation_count.filter(s.conversation_rating == -1).label(
+                "conversations_negative"
+            ),
+            conversation_count.filter(
+                s.conversation_rating.is_not(None), conversation_has_comment
+            ).label("conversations_with_comment"),
+            conversation_count.filter(
+                s.conversation_rating == -1, conversation_has_comment
+            ).label("conversations_negative_with_comment"),
         ]
         if knowledge.has_knowledge:
-            injects = (
-                s.answering_assistant_id.in_(sorted(knowledge.inject_assistant_ids))
-                if knowledge.inject_assistant_ids
-                else sa.false()
-            )
-            searched = sa.or_(s.passages > 0, s.tool_searched, injects)
-            weak = sa.and_(
-                s.best_score.is_not(None), s.best_score < KNOWLEDGE_SCORE_FLOOR
-            )
-            missed = sa.and_(searched, sa.or_(s.no_results, s.passages == 0, weak))
+            searched, missed = self._knowledge_verdict(s, knowledge)
             columns += [
                 sa.func.count().filter(searched).label("knowledge_searched"),
                 sa.func.count().filter(missed).label("knowledge_missed"),
@@ -1183,8 +1428,13 @@ class InsightsRepository:
             answers_positive=int(row.answers_positive),
             answers_negative=int(row.answers_negative),
             answers_with_comment=int(row.answers_with_comment),
+            answers_negative_with_comment=int(row.answers_negative_with_comment),
             conversations_positive=int(row.conversations_positive),
             conversations_negative=int(row.conversations_negative),
+            conversations_with_comment=int(row.conversations_with_comment),
+            conversations_negative_with_comment=int(
+                row.conversations_negative_with_comment
+            ),
         )
 
     async def count_activity(
@@ -1230,6 +1480,274 @@ class InsightsRepository:
             for row in rows
         ]
 
+    def _answering_assistants(self, scope: InsightScope) -> sa.Select[Any]:
+        """The ids of the assistants that answer for the target now: the
+        assistant, or a group chat's members, in the scope's tenant."""
+        stmt = (
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(Spaces.tenant_id == scope.tenant_id)
+            # Never correlated to an enclosing read of assistants.
+            .correlate(None)
+        )
+        if scope.kind == "assistant":
+            return stmt.where(Assistants.id == scope.target_id)
+        return stmt.where(
+            Assistants.id.in_(
+                sa.select(GroupChatsAssistantsMapping.assistant_id).where(
+                    GroupChatsAssistantsMapping.group_chat_id == scope.target_id
+                )
+            )
+        )
+
+    async def knowledge_citations(
+        self,
+        scope: InsightScope,
+        window: InsightWindow,
+        *,
+        source: SessionSource | None,
+    ) -> KnowledgeCitations:
+        """Per knowledge source, the answers of the window that cited at least
+        one passage from it, injected or fetched through the knowledge tool,
+        and the attached sources no answer cited.
+
+        A source is the collection, website or integration knowledge a cited
+        passage's info blob belongs to. A refreshed document keeps its earlier
+        versions (superseded, with their source), so its citations stay
+        counted; a citation goes with its document when the document itself
+        is removed, and then no longer counts.
+        """
+        passages = self._cited_passages().lateral("passages")
+        kind = sa.case(
+            (InfoBlobs.group_id.is_not(None), sa.literal("collection")),
+            (InfoBlobs.website_id.is_not(None), sa.literal("website")),
+            (
+                InfoBlobs.integration_knowledge_id.is_not(None),
+                sa.literal("integration_knowledge"),
+            ),
+        )
+        source_id = sa.func.coalesce(
+            InfoBlobs.group_id, InfoBlobs.website_id, InfoBlobs.integration_knowledge_id
+        )
+        cited = (
+            sa.select(
+                Questions.id.label("question_id"),
+                kind.label("kind"),
+                source_id.label("source_id"),
+            )
+            .select_from(Questions)
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .outerjoin(passages, sa.true())
+            .outerjoin(
+                InfoBlobs,
+                sa.and_(
+                    InfoBlobs.id == passages.c.info_blob_id,
+                    InfoBlobs.tenant_id == scope.tenant_id,
+                ),
+            )
+            .where(*self._in_scope(scope, window, source))
+            .subquery("cited")
+        )
+        c = cited.c
+        # One row per cited source, and one for the whole window.
+        counts = (
+            sa.select(
+                sa.func.grouping(c.kind, c.source_id).label("grouping"),
+                c.kind,
+                c.source_id,
+                sa.func.count(sa.distinct(c.question_id)).label("answers"),
+                sa.func.count(sa.distinct(c.question_id))
+                .filter(c.source_id.is_not(None))
+                .label("citing_answers"),
+            )
+            .group_by(
+                sa.func.grouping_sets(sa.tuple_(c.kind, c.source_id), sa.tuple_())
+            )
+            .subquery("counts")
+        )
+        rows = (
+            await self.session.execute(
+                self._with_source_names(counts).where(
+                    sa.or_(counts.c.grouping != 0, counts.c.source_id.is_not(None))
+                )
+            )
+        ).all()
+        attached = await self._attached_knowledge(scope)
+        attached_ids = {row.id for row in attached}
+        totals = next((row for row in rows if row.grouping != 0), None)
+        cited_rows = sorted(
+            (
+                KnowledgeSourceRow(
+                    kind=cast(KnowledgeSourceKind, row.kind),
+                    id=row.source_id,
+                    name=row.name or "",
+                    answers=int(row.answers),
+                    attached=row.source_id in attached_ids,
+                )
+                for row in rows
+                if row.grouping == 0
+            ),
+            key=lambda row: (-row.answers, row.name.lower(), str(row.id)),
+        )
+        cited_ids = {row.id for row in cited_rows}
+        return KnowledgeCitations(
+            answers=int(totals.answers) if totals is not None else 0,
+            citing_answers=int(totals.citing_answers) if totals is not None else 0,
+            cited=cited_rows,
+            unused=[row for row in attached if row.id not in cited_ids],
+        )
+
+    @staticmethod
+    def _with_source_names(sources: sa.Subquery) -> sa.Select[Any]:
+        """Every column of ``sources`` (a ``kind`` and a ``source_id`` among
+        them) and the source's display name as ``name``; a website without a
+        name shows its address."""
+        kind, source_id = sources.c.kind, sources.c.source_id
+        return (
+            sa.select(
+                sources,
+                sa.func.coalesce(
+                    CollectionsTable.name,
+                    Websites.name,
+                    Websites.url,
+                    IntegrationKnowledge.name,
+                    IntegrationKnowledge.original_name,
+                ).label("name"),
+            )
+            .select_from(sources)
+            .outerjoin(
+                CollectionsTable,
+                sa.and_(kind == "collection", CollectionsTable.id == source_id),
+            )
+            .outerjoin(Websites, sa.and_(kind == "website", Websites.id == source_id))
+            .outerjoin(
+                IntegrationKnowledge,
+                sa.and_(
+                    kind == "integration_knowledge",
+                    IntegrationKnowledge.id == source_id,
+                ),
+            )
+        )
+
+    async def _attached_knowledge(
+        self, scope: InsightScope
+    ) -> list[KnowledgeSourceRow]:
+        """The knowledge sources attached to the target's answering
+        assistants now, by name; a group chat's are its members' together."""
+        assistants = self._answering_assistants(scope)
+        attached = sa.union(
+            sa.select(
+                sa.literal("collection").label("kind"),
+                AssistantsGroups.group_id.label("source_id"),
+            ).where(AssistantsGroups.assistant_id.in_(assistants)),
+            sa.select(
+                sa.literal("website").label("kind"),
+                AssistantsWebsites.website_id.label("source_id"),
+            ).where(AssistantsWebsites.assistant_id.in_(assistants)),
+            sa.select(
+                sa.literal("integration_knowledge").label("kind"),
+                AssistantIntegrationKnowledge.integration_knowledge_id.label(
+                    "source_id"
+                ),
+            ).where(AssistantIntegrationKnowledge.assistant_id.in_(assistants)),
+        ).subquery("attached")
+        rows = (await self.session.execute(self._with_source_names(attached))).all()
+        return sorted(
+            (
+                KnowledgeSourceRow(
+                    kind=cast(KnowledgeSourceKind, row.kind),
+                    id=row.source_id,
+                    name=row.name or "",
+                    answers=0,
+                    attached=True,
+                )
+                for row in rows
+            ),
+            key=lambda row: (row.name.lower(), str(row.id)),
+        )
+
+    async def tool_use(
+        self,
+        scope: InsightScope,
+        window: InsightWindow,
+        *,
+        source: SessionSource | None,
+    ) -> list[ToolUseRow]:
+        """Tool calls of the window's answers, most called first.
+
+        A capability's calls (web search, image generation and the other
+        purposes) are one row whichever server backed them; other calls are
+        one row per server and tool, with the stored display title. A call
+        failed when its result status says so, and was denied when it was not
+        approved (by the person or by the approval timeout). Calls of Eneo's
+        own knowledge server are left out (the knowledge figures cover them),
+        and so are Skill activations, which are steps of the answer.
+        """
+        call = self._turn_calls(Questions.tool_calls)
+        value = call.c.value
+
+        def field(name: str) -> sa.ColumnElement[Any]:
+            return value.op("->>")(name)
+
+        purpose = field("purpose")
+        knowledge_server = sa.and_(
+            field("server_name") == KNOWLEDGE_SERVER,
+            # Rows from before is_internal existed fall back to the name.
+            sa.func.coalesce(field("is_internal"), "true") != "false",
+        )
+        calls = (
+            sa.select(
+                purpose.label("purpose"),
+                sa.case((purpose.is_(None), field("server_name"))).label("server_name"),
+                sa.case((purpose.is_(None), field("tool_name"))).label("tool_name"),
+                field("title").label("title"),
+                (field("result_status") == "failed").label("failed"),
+                (field("approved") == "false").label("denied"),
+            )
+            .select_from(Questions)
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .join(call, sa.true())
+            .where(
+                *self._in_scope(scope, window, source),
+                sa.not_(knowledge_server),
+                sa.func.coalesce(field("mcp_tool_name"), "") != SKILL_ACTIVATION_TOOL,
+            )
+            .subquery("calls")
+        )
+        c = calls.c
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    c.purpose,
+                    c.server_name,
+                    c.tool_name,
+                    sa.func.max(c.title).label("title"),
+                    sa.func.count().label("calls"),
+                    sa.func.count().filter(c.failed).label("failed"),
+                    sa.func.count().filter(c.denied).label("denied"),
+                )
+                .group_by(c.purpose, c.server_name, c.tool_name)
+                .order_by(
+                    sa.desc("calls"),
+                    c.purpose.asc().nulls_last(),
+                    c.server_name.asc(),
+                    c.tool_name.asc(),
+                )
+            )
+        ).all()
+        return [
+            ToolUseRow(
+                purpose=row.purpose,
+                server_name=row.server_name,
+                tool_name=row.tool_name,
+                title=row.title if row.purpose is None else None,
+                calls=int(row.calls),
+                failed=int(row.failed),
+                denied=int(row.denied),
+            )
+            for row in rows
+        ]
+
     async def list_ratings(
         self,
         scope: InsightScope,
@@ -1240,6 +1758,7 @@ class InsightsRepository:
         has_comment: bool | None,
         limit: int,
         after: tuple[datetime, UUID] | None,
+        offset: int = 0,
     ) -> tuple[list[RatingRow], int, bool]:
         """Answer and conversation ratings, newest rating first. Returns
         ``(page, total, has_more)``.
@@ -1247,7 +1766,7 @@ class InsightsRepository:
         An answer rating belongs to the window of its question; a
         conversation rating to every window the conversation had a question
         in, as the figures count it. ``after`` is the ``(rated_at, key)`` of
-        the previous page's last row.
+        the previous page's last row; ``offset`` skips rows after it.
         """
         in_scope = self._in_scope(scope, window, source)
         answers = (
@@ -1261,6 +1780,7 @@ class InsightsRepository:
                 session_source().label("source"),
                 QuestionFeedback.updated_at.label("rated_at"),
                 Questions.id.label("key"),
+                Questions.id.label("quoted_question_id"),
             )
             .select_from(Questions)
             .join(Sessions, Questions.session_id == Sessions.id)
@@ -1275,26 +1795,33 @@ class InsightsRepository:
             .correlate(None)
         )
         first_question = (
-            sa.select(Questions.question)
+            sa.select(Questions.id, Questions.question)
             .where(Questions.session_id == Sessions.id)
             .order_by(Questions.created_at.asc(), Questions.id.asc())
             .limit(1)
             .correlate(Sessions)
-            .scalar_subquery()
+            .lateral("first_question")
         )
-        conversations = sa.select(
-            sa.literal("conversation", sa.String).label("kind"),
-            Sessions.feedback_value.label("value"),
-            Sessions.feedback_text.label("comment"),
-            first_question.label("question"),
-            sa.cast(sa.null(), sa.Uuid()).label("question_id"),
-            Sessions.id.label("session_id"),
-            session_source().label("source"),
-            # The stored feedback time: a widget vote without a comment keeps
-            # the time of the comment before it, or of the conversation's start.
-            Sessions.feedback_set_at.label("rated_at"),
-            Sessions.id.label("key"),
-        ).where(Sessions.feedback_value.is_not(None), Sessions.id.in_(active))
+        conversations = (
+            sa.select(
+                sa.literal("conversation", sa.String).label("kind"),
+                Sessions.feedback_value.label("value"),
+                Sessions.feedback_text.label("comment"),
+                first_question.c.question.label("question"),
+                sa.cast(sa.null(), sa.Uuid()).label("question_id"),
+                Sessions.id.label("session_id"),
+                session_source().label("source"),
+                # The stored feedback time: a widget vote without a comment
+                # keeps the time of the comment before it, or of the
+                # conversation's start.
+                Sessions.feedback_set_at.label("rated_at"),
+                Sessions.id.label("key"),
+                first_question.c.id.label("quoted_question_id"),
+            )
+            .select_from(Sessions)
+            .join(first_question, sa.true())
+            .where(Sessions.feedback_value.is_not(None), Sessions.id.in_(active))
+        )
         ratings = sa.union_all(answers, conversations).subquery("ratings")
         r = ratings.c
 
@@ -1302,7 +1829,7 @@ class InsightsRepository:
         if value is not None:
             filters.append(r.value == value)
         if has_comment is not None:
-            commented = sa.func.coalesce(sa.func.btrim(r.comment), "") != ""
+            commented = _has_text(r.comment)
             filters.append(commented if has_comment else sa.not_(commented))
 
         total = await self.session.scalar(
@@ -1314,7 +1841,11 @@ class InsightsRepository:
                 sa.tuple_(r.rated_at, r.key)
                 < sa.tuple_(sa.literal(after[0]), sa.literal(after[1], sa.Uuid()))
             )
-        page = page.order_by(r.rated_at.desc(), r.key.desc()).limit(limit + 1)
+        page = (
+            page.order_by(r.rated_at.desc(), r.key.desc())
+            .offset(offset)
+            .limit(limit + 1)
+        )
         rows = (await self.session.execute(page)).all()
         return (
             [
@@ -1328,6 +1859,7 @@ class InsightsRepository:
                     source=cast(SessionSource, row.source),
                     rated_at=row.rated_at,
                     key=row.key,
+                    quoted_question_id=row.quoted_question_id,
                 )
                 for row in rows[:limit]
             ],
@@ -1347,10 +1879,11 @@ class InsightsRepository:
         descending: bool,
         offset: int,
         limit: int,
-    ) -> tuple[list[TargetRow], int]:
+    ) -> tuple[list[TargetRow], int, TargetTotals]:
         """Every assistant people see and every group chat of the tenant,
         with its usage in the window (and the previous window), in one
-        statement. Returns ``(page, total)``.
+        statement. Returns ``(page, total, totals)``: the totals sum the usage
+        of every target that matches, not only the page's.
 
         The tenant's questions in both windows are read once and grouped per
         conversation, then per target; only the conversation rows are checked
@@ -1480,16 +2013,35 @@ class InsightsRepository:
             .limit(limit)
             .lateral("page")
         )
-        totals = sa.select(sa.func.count().label("total")).select_from(listed)
+        # The usage of every matching target, summed before the page is cut.
+        summed_columns: list[sa.ColumnElement[int]] = [lc[c.name] for c in figures]
+        totals = sa.select(
+            sa.func.count().label("total"),
+            *(
+                sa.func.coalesce(sa.func.sum(column), 0).label(f"all_{column.name}")
+                for column in summed_columns
+            ),
+        ).select_from(listed)
         totals_sq = totals.subquery("totals")
-        # One row even for an empty page, so the total always comes back.
+        # One row even for an empty page, so the totals always come back.
         stmt = (
-            sa.select(totals_sq.c.total, page)
-            .select_from(totals_sq)
-            .outerjoin(page, sa.true())
+            sa.select(totals_sq, page).select_from(totals_sq).outerjoin(page, sa.true())
         )
         rows = (await self.session.execute(stmt)).all()
-        total = int(rows[0].total) if rows else 0
+        if not rows:
+            none = TargetUsage(SourceCounts(0, 0, 0, 0), 0)
+            return [], 0, TargetTotals(none, none)
+        first = rows[0]
+        summed = TargetTotals(
+            usage=TargetUsage(
+                conversations=_source_counts(first, "all_conversations"),
+                questions=int(first.all_questions),
+            ),
+            previous=TargetUsage(
+                conversations=_source_counts(first, "all_previous_conversations"),
+                questions=int(first.all_previous_questions),
+            ),
+        )
         return (
             [
                 TargetRow(
@@ -1514,5 +2066,6 @@ class InsightsRepository:
                 for row in rows
                 if row.id is not None
             ],
-            total,
+            int(first.total),
+            summed,
         )

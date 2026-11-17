@@ -67,10 +67,15 @@ GET /api/v1/analysis/conversation-insights/chat/
 GET /api/v1/analysis/conversation-insights/chat/{session_id}/
 GET /api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/
 GET /api/v1/analysis/conversation-insights/feedback/
+GET /api/v1/analysis/conversation-insights/findings/
+GET /api/v1/analysis/conversation-insights/findings/{kind}/
 GET /api/v1/analysis/conversation-insights/jobs/{job_id}/
+GET /api/v1/analysis/conversation-insights/knowledge/
+GET /api/v1/analysis/conversation-insights/questions/top/
 GET /api/v1/analysis/conversation-insights/sessions/
 GET /api/v1/analysis/conversation-insights/sessions/{session_id}/
 GET /api/v1/analysis/conversation-insights/summary/
+GET /api/v1/analysis/conversation-insights/tools/
 GET /api/v1/analysis/counts/
 GET /api/v1/analysis/metadata-statistics/
 GET /api/v1/analysis/metadata-statistics/aggregated/

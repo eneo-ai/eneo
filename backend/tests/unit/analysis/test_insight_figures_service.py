@@ -14,23 +14,37 @@ from eneo.analysis.insight_exceptions import InvalidTimezoneError
 from eneo.analysis.insight_figures_service import (
     InsightFiguresService,
     decode_cursor,
+    decode_offset_cursor,
     encode_cursor,
+    encode_offset_cursor,
     previous_window,
     resolve_window,
 )
 from eneo.analysis.insight_scope import InsightWindow
 from eneo.analysis.insights_repo import (
+    KnowledgeCitations,
     KnowledgeSetup,
+    KnowledgeUse,
     PeriodFigures,
+    RephrasingRow,
     SourceCounts,
     TargetRow,
+    TargetTotals,
     TargetUsage,
+    UnansweredRow,
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
 from eneo.roles.permissions import Permission
 
 NOW = datetime(2026, 11, 17, 12, tzinfo=timezone.utc)
 NONE = SourceCounts(0, 0, 0, 0)
+
+
+def _figures(**overrides: Any) -> PeriodFigures:
+    fields: dict[str, Any] = {name: 0 for name in PeriodFigures._fields}
+    fields.update(conversations=NONE, questions=NONE, knowledge=None)
+    fields.update(overrides)
+    return PeriodFigures(**fields)
 
 
 def _service(*, permissions: list[Permission] | None = None):
@@ -75,6 +89,11 @@ def test_a_cursor_reads_back_and_garbage_is_refused():
     for garbage in ("no-separator", "not-a-time|" + str(key), f"{NOW.isoformat()}|x"):
         with pytest.raises(BadRequestException):
             decode_cursor(garbage)
+    assert decode_offset_cursor(encode_offset_cursor(50)) == 50
+    assert decode_offset_cursor(None) == 0
+    for garbage in ("50", "o-1", "ox", NOW.isoformat()):
+        with pytest.raises(BadRequestException):
+            decode_offset_cursor(garbage)
 
 
 async def test_the_summary_asks_access_first_and_compares_with_the_period_before():
@@ -82,9 +101,7 @@ async def test_the_summary_asks_access_first_and_compares_with_the_period_before
     assistant_id = uuid4()
     window = InsightWindow(NOW - timedelta(days=7), NOW, "UTC")
     repo.knowledge_setup.return_value = KnowledgeSetup(False, frozenset())
-    repo.summarize.return_value = PeriodFigures(
-        NONE, NONE, 0, 0, 0, 0, 0, None, 0, 0, 0, 0, 0
-    )
+    repo.summarize.return_value = _figures()
 
     summary = await service.get_summary(
         assistant_id=assistant_id,
@@ -146,7 +163,11 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
             usage, usage, 2, 1,
         )  # fmt: skip
 
-    repo.list_targets.return_value = ([row(True), row(False)], 2)
+    repo.list_targets.return_value = (
+        [row(True), row(False)],
+        2,
+        TargetTotals(usage, TargetUsage(SourceCounts(1, 1, 0, 0), 1)),
+    )
 
     page = await service.list_targets(
         window=window,
@@ -164,3 +185,93 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
     assert enabled.ratings is not None and enabled.ratings.negative == 1
     assert disabled.ratings is None
     assert disabled.conversations.widget == 2 and enabled.previous is None
+    assert page.totals.conversations.widget == 2 and page.totals.previous is None
+
+
+async def test_findings_carry_examples_only_for_what_passes_the_thresholds():
+    service, access, repo = _service()
+    window = InsightWindow(NOW - timedelta(days=7), NOW, "UTC")
+    session_id, first_question = uuid4(), uuid4()
+    repo.knowledge_setup.return_value = KnowledgeSetup(True, frozenset())
+    # 12 of 40 answers cannot answer; knowledge missed 3 of 30 (below 10 cases).
+    repo.summarize.return_value = _figures(
+        conversations=SourceCounts(40, 40, 0, 0),
+        questions=SourceCounts(40, 40, 0, 0),
+        unanswered=12,
+        knowledge=KnowledgeUse(searched=30, missed=3),
+    )
+    repo.find_rephrasing.return_value = (
+        [
+            RephrasingRow(
+                session_id,
+                NOW,
+                ["a?", "a igen?"],
+                1,
+                [first_question, uuid4()],
+                "widget",
+            )
+        ],
+        1,
+    )
+    repo.knowledge_citations.return_value = KnowledgeCitations(40, 30, [], [])
+    repo.tool_use.return_value = []
+    repo.find_unanswered.return_value = (
+        [
+            UnansweredRow(
+                uuid4(), NOW, session_id, "Vad kostar det?", "vet inte", "user", None
+            )
+        ],
+        12,
+    )
+
+    findings = await service.get_findings(
+        assistant_id=uuid4(), group_chat_id=None, window=window, source="user"
+    )
+
+    access.assert_insight_access.assert_awaited_once()
+    assert [(f.kind, f.affected, f.base) for f in findings.findings] == [
+        ("unanswered", 12, 40)
+    ]
+    assert [e.question for e in findings.findings[0].examples] == ["Vad kostar det?"]
+    assert repo.find_unanswered.await_args.kwargs["source"] == "user"
+    repo.find_no_knowledge.assert_not_awaited()
+    repo.list_ratings.assert_not_awaited()
+
+
+async def test_finding_cases_page_with_an_offset_cursor_and_need_knowledge():
+    service, _, repo = _service()
+    window = InsightWindow(NOW - timedelta(days=7), NOW, "UTC")
+    repo.knowledge_setup.return_value = KnowledgeSetup(False, frozenset())
+
+    no_knowledge = await service.list_finding_cases(
+        "knowledge_missed",
+        assistant_id=uuid4(),
+        group_chat_id=None,
+        window=window,
+        source=None,
+        limit=10,
+        cursor=None,
+    )
+
+    assert (no_knowledge.items, no_knowledge.total_count) == ([], 0)
+    repo.find_no_knowledge.assert_not_awaited()
+
+    row = UnansweredRow(uuid4(), NOW, uuid4(), "Q", "vet inte", "api_key", -1)
+    repo.find_unanswered.return_value = ([row, row], 5)
+    page = await service.list_finding_cases(
+        "unanswered",
+        assistant_id=uuid4(),
+        group_chat_id=None,
+        window=window,
+        source=None,
+        limit=2,
+        cursor=encode_offset_cursor(2),
+    )
+
+    assert repo.find_unanswered.await_args.kwargs["offset"] == 2
+    assert page.next_cursor == encode_offset_cursor(4)
+    assert (page.items[0].kind, page.items[0].phrase, page.items[0].rating) == (
+        "unanswered",
+        "vet inte",
+        -1,
+    )

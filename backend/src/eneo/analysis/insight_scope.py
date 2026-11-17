@@ -7,6 +7,20 @@ from typing import Literal, NamedTuple
 from uuid import UUID
 
 InsightTargetKind = Literal["assistant", "group_chat"]
+KnowledgeSourceKind = Literal["collection", "website", "integration_knowledge"]
+# Why an answer counts as a knowledge miss: the knowledge search reported no
+# results, the answer cited no passage, or its best passage scored weakly.
+MissReason = Literal["no_results", "uncited", "weak_score"]
+FindingKind = Literal[
+    "knowledge_missed",
+    "unanswered",
+    "rephrasing",
+    "knowledge_unused",
+    "negative_ratings",
+    "tool_failures",
+]
+# The findings whose cases can be listed one by one.
+FindingCaseKind = Literal["knowledge_missed", "unanswered", "rephrasing"]
 
 
 class InsightScope(NamedTuple):

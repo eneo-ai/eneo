@@ -306,8 +306,8 @@ async def test_knowledge_tool_passages_count_as_evidence(
 
     assert median == 0.42
     reasons = {row.question: row.reason for row in no_knowledge}
-    assert reasons["Hur ansöker jag om bygglov?"] == "answer cited no knowledge"
-    assert reasons.get("Vad kostar det?") != "answer cited no knowledge"
+    assert reasons["Hur ansöker jag om bygglov?"] == "uncited"
+    assert reasons.get("Vad kostar det?") != "uncited"
 
 
 async def test_gap_signals_accept_a_json_null_tool_call_list(
@@ -352,7 +352,7 @@ async def test_gap_signals(db_container, admin_user, seed_insights):
     # No seeded turn cites knowledge, so every turn is flagged as uncited and
     # there is no median score to report.
     assert no_knowledge_total == 8 and median is None
-    assert {row.reason for row in no_knowledge} == {"answer cited no knowledge"}
+    assert {row.reason for row in no_knowledge} == {"uncited"}
 
     assert rephrasing_total == 1
     assert rephrasing[0].session_id == seed["s5"]

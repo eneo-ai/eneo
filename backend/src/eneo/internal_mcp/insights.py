@@ -16,13 +16,14 @@ that fixes calendar boundaries and displayed times, so "yesterday" means the
 operator's yesterday. Every tool self-caps its output with
 :func:`default_page_cap` and continues via ``offset``.
 
-Every tool that returns text from the analysed conversations knows which
-questions that text comes from (:class:`ToolPage`) and returns it through
-:func:`_release_page`, which records the insights conversation as a copy of
-those questions first (:mod:`eneo.data_retention.derivations`): the analysis
-is then removed with any of them. The results are plain text, never
-structured content, so a call's result reaches the operator's browser only
-through the tool-result endpoint.
+Every tool that returns text from the analysed conversations (questions,
+answers, rating comments) knows which questions that text comes from
+(:class:`ToolPage`) and returns it through :func:`_release_page`, which
+records the insights conversation as a copy of those questions first
+(:mod:`eneo.data_retention.derivations`): the analysis is then removed with
+any of them. Tools that return counts and configured names only register
+nothing. The results are plain text, never structured content, so a call's
+result reaches the operator's browser only through the tool-result endpoint.
 """
 
 from __future__ import annotations
@@ -38,13 +39,22 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import ToolAnnotations
 
-from eneo.analysis.insight_scope import InsightScope, InsightTargetKind, InsightWindow
+from eneo.analysis.insight_scope import (
+    InsightScope,
+    InsightTargetKind,
+    InsightWindow,
+    MissReason,
+)
 from eneo.analysis.insights_repo import (
     Granularity,
+    KnowledgeCitations,
+    KnowledgeSourceRow,
     NoKnowledgeRow,
     QuestionRow,
+    RatingRow,
     RephrasingRow,
     SearchHit,
+    ToolUseRow,
     TopQuestionRow,
     Transcript,
     UnansweredRow,
@@ -95,6 +105,16 @@ SOURCES_NOT_RECORDED_MESSAGE = (
 # Question text shown per line; long messages are cut so one page still
 # lists many questions. read_conversation shows full text.
 QUESTION_PREVIEW_CHARS = 300
+_MISS_REASONS: dict[MissReason, str] = {
+    "no_results": "knowledge search returned no results",
+    "uncited": "answer cited no knowledge",
+    "weak_score": "weak best citation score",
+}
+_SOURCE_NOUNS = {
+    "collection": "collection",
+    "website": "website",
+    "integration_knowledge": "integration knowledge",
+}
 
 # Every tool only reads; none is ever asked about before it runs.
 _READS = ToolAnnotations(readOnlyHint=True)
@@ -546,7 +566,7 @@ def _no_knowledge_lines(rows: list[NoKnowledgeRow], timezone: str) -> list[str]:
         lines.append(
             f"{_local(row.created_at, timezone).strftime('%Y-%m-%d %H:%M')} | "
             f"session_id={row.session_id} | Q: {_preview(row.question)} | "
-            f"{row.reason}{score}"
+            f"{_MISS_REASONS[row.reason]}{score}"
         )
     return lines
 
@@ -561,6 +581,145 @@ def _rephrasing_lines(rows: list[RephrasingRow], timezone: str) -> list[str]:
             f"{row.similar_pairs} similar consecutive pairs | {sequence}"
         )
     return lines
+
+
+def _ratings_text(
+    rows: list[RatingRow],
+    *,
+    total: int,
+    offset: int,
+    filter_note: str,
+    window: InsightWindow,
+    label: str,
+    page_cap: int,
+) -> ToolPage:
+    """One page of ratings with their comments. Each line quotes one
+    question: the rated answer's, or a conversation rating's first."""
+    if total == 0:
+        return ToolPage(
+            f"No ratings ({filter_note}) for {label} in {_format_window(window)}.", []
+        )
+    if not rows:
+        return ToolPage(f"Offset {offset} is past the end ({total} ratings).", [])
+    lines = []
+    for row in rows:
+        verdict = "good" if row.value == 1 else "bad"
+        rated = (
+            f"answer rated {verdict} | Q: "
+            if row.kind == "answer"
+            else f"conversation rated {verdict} | first Q: "
+        )
+        comment = (
+            f' | comment: "{_preview(row.comment)}"'
+            if row.comment and row.comment.strip()
+            else " | no comment"
+        )
+        lines.append(
+            f"{_local(row.rated_at, window.timezone).strftime('%Y-%m-%d %H:%M')} | "
+            f"session_id={row.session_id} | {rated}{_preview(row.question)}{comment}"
+        )
+    text, kept = _paged(
+        lines,
+        header=(
+            f"Ratings {offset + 1}-{offset + len(rows)} of {total} ({filter_note}) "
+            f"for {label}, newest rating first (local time {window.timezone}):"
+        ),
+        offset=offset,
+        total=total,
+        tool_name="list_ratings",
+        page_cap=page_cap,
+    )
+    return ToolPage(text, [row.quoted_question_id for row in rows[:kept]])
+
+
+def _share(part: int, whole: int) -> str:
+    return f"{100 * part / whole:.1f}%" if whole else "n/a"
+
+
+def _source_label(source: KnowledgeSourceRow) -> str:
+    return f"{_SOURCE_NOUNS[source.kind]} '{source.name}'"
+
+
+def _knowledge_use_text(
+    citations: KnowledgeCitations,
+    *,
+    offset: int,
+    window: InsightWindow,
+    label: str,
+    page_cap: int,
+) -> str:
+    """Counts and source names only, so the text names no question."""
+    if not citations.cited and not citations.unused:
+        return (
+            f"No knowledge sources are attached to {label}, and no answer cited "
+            f"any in {_format_window(window)}."
+        )
+    lines = [
+        f"cited | {_source_label(source)} | {source.answers} answers "
+        f"({_share(source.answers, citations.citing_answers)} of citing answers)"
+        + ("" if source.attached else " | no longer attached")
+        for source in citations.cited
+    ] + [
+        f"never cited | {_source_label(source)} | attached"
+        for source in citations.unused
+    ]
+    header = (
+        f"Knowledge use for {label}, {_format_window(window)}: {citations.answers} "
+        f"answers, of which {citations.citing_answers} "
+        f"({_share(citations.citing_answers, citations.answers)}) cited a passage "
+        "from a knowledge source. Sources, most cited first, then attached "
+        "sources no answer cited:"
+    )
+    if offset >= len(lines):
+        return f"Offset {offset} is past the end ({len(lines)} sources)."
+    text, _ = _paged(
+        lines[offset:],
+        header=header,
+        offset=offset,
+        total=len(lines),
+        tool_name="knowledge_use",
+        page_cap=page_cap,
+    )
+    return text
+
+
+def _tool_label(row: ToolUseRow) -> str:
+    if row.purpose is not None:
+        return f"capability {row.purpose}"
+    title = f' ("{row.title}")' if row.title else ""
+    return f"server '{row.server_name}' tool '{row.tool_name}'{title}"
+
+
+def _tool_use_text(
+    rows: list[ToolUseRow],
+    *,
+    offset: int,
+    window: InsightWindow,
+    label: str,
+    page_cap: int,
+) -> str:
+    """Counts and configured names only, so the text names no question."""
+    if not rows:
+        return f"No tool calls for {label} in {_format_window(window)}."
+    if offset >= len(rows):
+        return f"Offset {offset} is past the end ({len(rows)} tools)."
+    lines = [
+        f"{_tool_label(row)} | {row.calls} calls | {row.failed} failed "
+        f"({_share(row.failed, row.calls)}) | {row.denied} denied"
+        for row in rows[offset:]
+    ]
+    text, _ = _paged(
+        lines,
+        header=(
+            f"Tool use for {label}, {_format_window(window)}, most called first "
+            "(Eneo's own knowledge tools and Skill activations are left out):"
+        ),
+        offset=offset,
+        total=len(rows),
+        tool_name="tool_use",
+        page_cap=page_cap,
+    )
+    return text
 
 
 # --------------------------------------------------------------------------- #
@@ -953,6 +1112,169 @@ async def find_gaps(
     )
     page = ToolPage("\n\n".join(sections) + f"\n\n{footer}", printed)
     return await _release_page(tool.session_id, page)
+
+
+@mcp.tool(title="List ratings", annotations=_READS, structured_output=False)
+async def list_ratings(
+    ctx: Context,
+    start: str,
+    end: str,
+    rating: Literal["bad", "good", "all"] = "all",
+    comments_only: bool = False,
+    offset: int = 0,
+    limit: int = 50,
+    timezone: str = "UTC",
+) -> str:
+    """Ratings people gave the target's answers and whole conversations in a
+    window, with their comments, newest rating first.
+
+    Use this for "which answers got a bad rating", "what do people complain
+    about", "what did people write in their feedback" or "are people happy
+    with the answers". For counts alone, the number of lines and the total
+    in the header are enough; there is no separate count tool.
+
+    rating picks bad, good or all ratings; comments_only=true keeps only
+    ratings that carry a comment. An answer rating belongs to the window of
+    its question; a conversation rating (website widget votes land there)
+    counts in every window the conversation had a question in, and its line
+    shows the conversation's first question. Ratings never say who gave them.
+
+    start and end are ISO-8601 datetimes with a UTC offset (end exclusive);
+    timezone is the IANA zone for the displayed times. Output is one page;
+    when a continuation notice appears, call again with the given offset.
+    Cite examples as (session <uuid>).
+    """
+    try:
+        window = _parse_window(start, end, timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    limit = max(1, min(limit, LIST_LIMIT_CEILING))
+    value = {"bad": -1, "good": 1, "all": None}[rating]
+    filter_note = f"{rating} ratings" + (", with a comment" if comments_only else "")
+    async with insight_tool_context(ctx) as tool:
+        rows, total, _ = await tool.container.insights_repo().list_ratings(
+            tool.scope,
+            window,
+            source=None,
+            value=value,
+            has_comment=True if comments_only else None,
+            limit=limit,
+            after=None,
+            offset=offset,
+        )
+        page = _ratings_text(
+            rows,
+            total=total,
+            offset=offset,
+            filter_note=filter_note,
+            window=window,
+            label=tool.target_label,
+            page_cap=default_page_cap(),
+        )
+    logger.debug(
+        "[Insights] list_ratings offset=%d rows=%d total=%d", offset, len(rows), total
+    )
+    return await _release_page(tool.session_id, page)
+
+
+@mcp.tool(title="Knowledge use", annotations=_READS, structured_output=False)
+async def knowledge_use(
+    ctx: Context,
+    start: str,
+    end: str,
+    offset: int = 0,
+    timezone: str = "UTC",
+) -> str:
+    """Which knowledge sources the target's answers cited in a window, and
+    which attached sources no answer cited.
+
+    Use this for "which knowledge is used", "is the website/collection used
+    at all", "which sources could we remove" or "where do the answers come
+    from". For answers that searched the knowledge without a usable hit, use
+    find_gaps with signal no_knowledge instead.
+
+    Per collection, website or integration knowledge it counts the answers
+    that cited at least one passage from it, injected or fetched through the
+    knowledge tool, and its share of the answers that cited anything; a
+    group chat's attached sources are its member assistants' together. A
+    refreshed document keeps counting; a removed document's citations are
+    gone with it, so a source can be undercounted after documents were
+    removed. Present the counts as indicative.
+
+    start and end are ISO-8601 datetimes with a UTC offset (end exclusive);
+    timezone is the IANA zone for the window shown. When a continuation
+    notice appears, call again with the given offset.
+
+    It returns counts and source names only, never the text of a question or
+    answer, so it adds no source conversations to this analysis.
+    """
+    try:
+        window = _parse_window(start, end, timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    async with insight_tool_context(ctx) as tool:
+        citations = await tool.container.insights_repo().knowledge_citations(
+            tool.scope, window, source=None
+        )
+        label = tool.target_label
+    logger.debug(
+        "[Insights] knowledge_use cited=%d unused=%d",
+        len(citations.cited),
+        len(citations.unused),
+    )
+    # Counts and source names only: no text from the conversations.
+    return _knowledge_use_text(
+        citations,
+        offset=offset,
+        window=window,
+        label=label,
+        page_cap=default_page_cap(),
+    )
+
+
+@mcp.tool(title="Tool use", annotations=_READS, structured_output=False)
+async def tool_use(
+    ctx: Context,
+    start: str,
+    end: str,
+    offset: int = 0,
+    timezone: str = "UTC",
+) -> str:
+    """How often the target's answers called each tool or capability in a
+    window, and how often those calls failed or were denied.
+
+    Use this for "which tools are used", "does the web search work", "which
+    tool fails" or "do people refuse tool calls". A capability (web search,
+    image generation and the like) is one line whichever server backs it;
+    other tools are one line per server and tool. A call failed when the
+    tool reported an error; it was denied when the person (or the approval
+    timeout) did not approve it. Eneo's own knowledge tools are left out
+    (use knowledge_use) and so are Skill activations.
+
+    start and end are ISO-8601 datetimes with a UTC offset (end exclusive);
+    timezone is the IANA zone for the window shown. When a continuation
+    notice appears, call again with the given offset.
+
+    It returns counts and tool names only, never the text of a question or
+    answer, so it adds no source conversations to this analysis.
+    """
+    try:
+        window = _parse_window(start, end, timezone)
+    except ValueError as exc:
+        return str(exc)
+    offset = max(0, offset)
+    async with insight_tool_context(ctx) as tool:
+        rows = await tool.container.insights_repo().tool_use(
+            tool.scope, window, source=None
+        )
+        label = tool.target_label
+    logger.debug("[Insights] tool_use tools=%d", len(rows))
+    # Counts and tool names only: no text from the conversations.
+    return _tool_use_text(
+        rows, offset=offset, window=window, label=label, page_cap=default_page_cap()
+    )
 
 
 # --------------------------------------------------------------------------- #
