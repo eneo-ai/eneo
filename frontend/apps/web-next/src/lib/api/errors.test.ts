@@ -222,7 +222,9 @@ describe("getErrorMessage", () => {
     ["provider_error", "eneo_error_9010"],
     ["stream_error", "chat_answer_failed_internal"],
     ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
-    ["user_quota_exceeded", "job_failure_user_quota_exceeded"]
+    ["user_quota_exceeded", "job_failure_user_quota_exceeded"],
+    ["insights_model_unavailable", "insights_chat_model_unavailable"],
+    ["invalid_timezone", "insights_chat_invalid_timezone"]
   ])("describes %s before its less specific numeric code", (reason, key) => {
     const error = apiErrorFromResponse(errorResponse(503), {
       message: "Refused",

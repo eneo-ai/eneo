@@ -506,6 +506,7 @@ turn each:
 | `file-part`              | `finish`  | Generated image with a signed url (token pinned to `fixture-token`). |
 | `generated-document`     | `finish`  | A bundled call's Markdown `file` part, `tool_call_id` set.           |
 | `tool-input-streaming`   | `finish`  | View-bearing bundled call: start → two deltas → input → output.      |
+| `insights-tool-call`     | `finish`  | Insights server call: start → input → output; cites a `session`.     |
 | `sources`                | `finish`  | Pre-retrieved and in-stream citations, deduplicated.                 |
 | `cancelled-mid-stream`   | truncated | The prefix a cancelled client saw: no `finish`, no `[DONE]`.         |
 | `backend-error`          | `error`   | Partial text, `data-error` + `error`, then the trailing close.       |

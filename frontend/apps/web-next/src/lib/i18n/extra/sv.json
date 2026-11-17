@@ -4574,6 +4574,7 @@
   "insights_chat_cited_conversation": "konversation {id}",
   "insights_chat_conversation_ref": "Konversation {id}",
   "insights_chat_model_unavailable": "Det finns ingen modell i utrymmet som kan använda verktyg och uppfyller utrymmets säkerhetsklassning. Lägg till en sådan modell för att använda analysen.",
+  "insights_chat_invalid_timezone": "Eneo känner inte igen webbläsarens tidszon, så analysen kan inte avgöra vilka dagar du menar. Kontrollera tidszonen på din enhet och försök igen.",
   "derived_source_removed": "Det här har tagits bort, eftersom innehåll det byggde på har tagits bort.",
   "tool_insights_usage_summary": "Sammanställer användningen",
   "tool_insights_usage_summary_done": "Sammanställde användningen",

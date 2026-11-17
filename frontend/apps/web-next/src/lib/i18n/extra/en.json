@@ -4574,6 +4574,7 @@
   "insights_chat_cited_conversation": "conversation {id}",
   "insights_chat_conversation_ref": "Conversation {id}",
   "insights_chat_model_unavailable": "No model in this space can use tools and meets the space's security classification. Add one to use the analysis.",
+  "insights_chat_invalid_timezone": "Eneo doesn't recognise your browser's time zone, so the analysis can't tell which days you mean. Check the time zone on your device and try again.",
   "derived_source_removed": "This was removed because content it was based on has been removed.",
   "tool_insights_usage_summary": "Summarizing the usage",
   "tool_insights_usage_summary_done": "Summarized the usage",

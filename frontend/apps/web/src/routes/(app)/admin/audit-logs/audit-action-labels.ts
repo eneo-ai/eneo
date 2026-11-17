@@ -565,6 +565,14 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_authoring_conversation_started,
     description: m.audit_action_flow_authoring_conversation_started_description
   },
+  insight_conversation_started: {
+    name: m.audit_action_insight_conversation_started,
+    description: m.audit_action_insight_conversation_started_description
+  },
+  insight_conversation_deleted: {
+    name: m.audit_action_insight_conversation_deleted,
+    description: m.audit_action_insight_conversation_deleted_description
+  },
   flow_deleted: {
     name: m.audit_action_flow_deleted,
     description: m.audit_action_flow_deleted_description

@@ -309,7 +309,8 @@ const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
   ["stream_error", "chat_answer_failed_internal"],
   // A copy (an insights analysis) whose sources were removed is refused (410).
   [DERIVED_SOURCE_REMOVED, "derived_source_removed"],
-  ["insights_model_unavailable", "insights_chat_model_unavailable"]
+  ["insights_model_unavailable", "insights_chat_model_unavailable"],
+  ["invalid_timezone", "insights_chat_invalid_timezone"]
 ]);
 
 export function getErrorMessageForReason(

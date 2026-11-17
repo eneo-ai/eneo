@@ -2,12 +2,9 @@
  * The insights chat's endpoints, under `/api/v1/analysis/conversation-insights/chat`.
  *
  * This module is the one seam between the insights chat and its backend.
- * The generated schema (src/lib/api/schema.d.ts) has none of these paths
- * yet, so the requests are written by hand here, typed with the schema's
- * own models where they exist (SessionPublic, SessionMetadataPublic,
- * ToolCallResultPublic). Once the backend lands and `bun run gen:api` adds
- * the paths, switch the requests to `browserApi` and drop the hand-written
- * request types; nothing outside this module needs to change.
+ * The list, an analysis, its deletion and a tool call's result are typed
+ * requests through `browserApi`; a refusal throws the `EneoApiError` every
+ * other request does (`unwrap`).
  *
  * A turn streams the same version 3 UI Message Stream as the chat API
  * (src/lib/chat/CONTRACT.md); the transport here only changes where a turn
@@ -17,11 +14,11 @@
  * (`isDerivedSourceRemoved`).
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
-import { API_BASE, apiFetch } from "@/lib/api/base";
-import { apiErrorFromResponse } from "@/lib/api/errors";
+import { API_BASE } from "@/lib/api/base";
+import { browserApi } from "@/lib/api/browser";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination } from "@/lib/api/pagination";
-import type { IsoDate } from "@/lib/calendar-date";
 import { createChatTransport } from "@/lib/chat/transport";
 import type { ChatPartner } from "@/lib/chat/types";
 import type { ConversationApi } from "@/features/chat/chat-view";
@@ -33,32 +30,18 @@ const CHAT_PATH = `${API_BASE}/api/v1/analysis/conversation-insights/chat`;
 export type InsightTarget = Pick<ChatPartner, "id"> & { type: "assistant" | "group-chat" };
 
 /** The period picker's range: local calendar dates, both ends included. */
-export type InsightSelectedRange = { start: IsoDate; end: IsoDate };
+export type InsightSelectedRange = Schema<"InsightSelectedRange">;
 
 /** `POST /`: starts an analysis of one target's conversations. */
-type InsightChatStartRequest = {
-  assistant_id?: string;
-  group_chat_id?: string;
-  question: string;
-  /** The browser's IANA time zone: "yesterday" is the operator's yesterday. */
-  timezone: string;
-  stream: true;
-  selected_range?: InsightSelectedRange;
-};
-
+type InsightChatStartRequest = Schema<"InsightChatStartRequest">;
 /** `POST /{session_id}/`: a follow-up question in an analysis. */
-type InsightChatContinueRequest = {
-  question: string;
-  stream: true;
-  selected_range?: InsightSelectedRange;
-};
+type InsightChatContinueRequest = Schema<"InsightChatContinueRequest">;
 
 /** A listed analysis: its name is the question it started with. */
 export type InsightConversationSummary = Schema<"SessionMetadataPublic">;
 export type InsightConversationPage = Schema<"CursorPaginatedResponse_SessionMetadataPublic_">;
 /** An analysis with every turn, as `mapSessionMessages` reads it. */
 export type InsightConversation = Schema<"SessionPublic">;
-type ToolCallResult = Schema<"ToolCallResultPublic">;
 
 /** How many analyses a page of the list holds (the endpoint allows 1 to 100). */
 const PAGE_SIZE = 20;
@@ -74,35 +57,18 @@ function targetQuery(target: InsightTarget): { assistant_id?: string; group_chat
   return target.type === "group-chat" ? { group_chat_id: target.id } : { assistant_id: target.id };
 }
 
-async function readBody(response: Response): Promise<unknown> {
-  if (response.status === 204) return undefined;
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) return response.json();
-  const text = await response.text();
-  return text.length > 0 ? text : undefined;
-}
-
-/** One request; a refusal throws the EneoApiError every other request produces. */
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(url, init);
-  const body = await readBody(response);
-  if (!response.ok) throw apiErrorFromResponse(response, body);
-  return body as T;
-}
-
 /** `GET /`: the caller's own analyses of the target, newest first, a page at a time. */
 export function insightConversationsQueryOptions(target: InsightTarget) {
   return infiniteQueryOptions({
     ...cursorPagination,
     queryKey: insightChatKeys.list(target),
-    queryFn: ({ pageParam, signal }) => {
-      const params = new URLSearchParams({
-        ...targetQuery(target),
-        limit: String(PAGE_SIZE)
-      });
-      if (pageParam) params.set("cursor", pageParam);
-      return request<InsightConversationPage>(`${CHAT_PATH}/?${params}`, { signal });
-    }
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/chat/", {
+          params: { query: { ...targetQuery(target), limit: PAGE_SIZE, cursor: pageParam } },
+          signal
+        })
+      )
   });
 }
 
@@ -118,23 +84,33 @@ export function insightConversationQueryOptions(sessionId: string) {
     gcTime: 0,
     retry: false,
     queryFn: ({ signal }) =>
-      request<InsightConversation>(`${CHAT_PATH}/${encodeURIComponent(sessionId)}/`, { signal })
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/chat/{session_id}/", {
+          params: { path: { session_id: sessionId } },
+          signal
+        })
+      )
   });
 }
 
 /** `DELETE /{session_id}/`: answers 204. */
 export async function deleteInsightConversation(sessionId: string): Promise<void> {
-  await request<undefined>(`${CHAT_PATH}/${encodeURIComponent(sessionId)}/`, {
-    method: "DELETE"
-  });
+  await unwrap(
+    browserApi.DELETE("/api/v1/analysis/conversation-insights/chat/{session_id}/", {
+      params: { path: { session_id: sessionId } }
+    })
+  );
 }
 
 /** `GET /{session_id}/tool-calls/{tool_call_id}/result/`: a call's result text, read when its row opens. */
 export const insightToolResults: ToolResultSource = {
   scope: "conversation-insights-chat",
   read: async (sessionId, toolCallId) => {
-    const response = await request<ToolCallResult>(
-      `${CHAT_PATH}/${encodeURIComponent(sessionId)}/tool-calls/${encodeURIComponent(toolCallId)}/result/`
+    const response = await unwrap(
+      browserApi.GET(
+        "/api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/",
+        { params: { path: { session_id: sessionId, tool_call_id: toolCallId } } }
+      )
     );
     return response.result ?? null;
   }

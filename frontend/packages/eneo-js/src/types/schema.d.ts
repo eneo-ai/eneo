@@ -2865,6 +2865,78 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/analysis/conversation-insights/chat/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Insight Conversations
+     * @description The caller's own insights conversations about an assistant or group chat, newest first. Each is named by the question it started with. One is no longer listed once a conversation it read was removed. Pass a page's next_cursor back as cursor for the next page.
+     */
+    get: operations["list_insight_conversations_api_v1_analysis_conversation_insights_chat__get"];
+    put?: never;
+    /**
+     * Start Insight Conversation
+     * @description Start an insights analysis conversation about an assistant or group chat. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
+     */
+    post: operations["start_insight_conversation_api_v1_analysis_conversation_insights_chat__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/conversation-insights/chat/{session_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Conversation
+     * @description One of the caller's insights conversations with all its turns. 410 (derived_source_removed) once a conversation it read was removed.
+     */
+    get: operations["get_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___get"];
+    put?: never;
+    /**
+     * Continue Insight Conversation
+     * @description A follow-up question in one of the caller's insights conversations. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
+     */
+    post: operations["continue_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___post"];
+    /**
+     * Delete Insight Conversation
+     * @description Delete one of the caller's insights conversations.
+     */
+    delete: operations["delete_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___delete"];
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Tool Call Result
+     * @description Read one tool call's result from an insights conversation; the stream and the saved conversation carry its status only.
+     */
+    get: operations["get_insight_tool_call_result_api_v1_analysis_conversation_insights_chat__session_id__tool_calls__tool_call_id__result__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/analysis/conversation-insights/jobs/{job_id}/": {
     parameters: {
       query?: never;
@@ -3791,7 +3863,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 232 actions with their enabled status for the modal UI.
+     * @description Retrieve all 234 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -12913,6 +12985,8 @@ export interface components {
       | "skill_deleted"
       | "session_started"
       | "session_ended"
+      | "insight_conversation_started"
+      | "insight_conversation_deleted"
       | "tool_approval_submitted"
       | "file_uploaded"
       | "file_deleted"
@@ -15216,7 +15290,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 93,
+     *           "action_count": 95,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -31707,6 +31781,63 @@ export interface components {
      */
     InputFieldType:
       "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
+    /**
+     * InsightChatContinueRequest
+     * @description A follow-up question in an existing insights conversation.
+     */
+    InsightChatContinueRequest: {
+      /** Question */
+      question: string;
+      selected_range?: components["schemas"]["InsightSelectedRange"] | null;
+      /**
+       * Stream
+       * @description Always true: every answer is streamed as the version 3 UI Message Stream of the chat API.
+       * @default true
+       * @constant
+       */
+      stream?: true;
+    };
+    /**
+     * InsightChatStartRequest
+     * @description Start a new insights conversation about one assistant or group chat.
+     */
+    InsightChatStartRequest: {
+      /** Assistant Id */
+      assistant_id?: string | null;
+      /** Group Chat Id */
+      group_chat_id?: string | null;
+      /** Question */
+      question: string;
+      selected_range?: components["schemas"]["InsightSelectedRange"] | null;
+      /**
+       * Stream
+       * @description Always true: every answer is streamed as the version 3 UI Message Stream of the chat API.
+       * @default true
+       * @constant
+       */
+      stream?: true;
+      /**
+       * Timezone
+       * @default UTC
+       */
+      timezone?: string;
+    };
+    /**
+     * InsightSelectedRange
+     * @description The Insights tab's period picker, as inclusive local calendar dates.
+     */
+    InsightSelectedRange: {
+      /**
+       * End
+       * Format: date
+       */
+      end: string;
+      /**
+       * Start
+       * Format: date
+       */
+      start: string;
+    };
     /** Integration */
     Integration: {
       /** Description */
@@ -54070,6 +54201,365 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_insight_conversations_api_v1_analysis_conversation_insights_chat__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+        limit?: number;
+        /** @description The next_cursor of the previous page, as given. */
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_SessionMetadataPublic_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  start_insight_conversation_api_v1_analysis_conversation_insights_chat__post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InsightChatStartRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+          "text/event-stream": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SessionPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  continue_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___post: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["InsightChatContinueRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": unknown;
+          "text/event-stream": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  delete_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___delete: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_insight_tool_call_result_api_v1_analysis_conversation_insights_chat__session_id__tool_calls__tool_call_id__result__get: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        session_id: string;
+        tool_call_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["ToolCallResultPublic"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Gone */
+      410: {
         headers: {
           [name: string]: unknown;
         };

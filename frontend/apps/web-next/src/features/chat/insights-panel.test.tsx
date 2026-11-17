@@ -32,100 +32,121 @@ const spies = vi.hoisted(() => ({
   answer: ""
 }));
 
+/** The options of a typed request, as far as these fakes read them. */
+type TypedRequestInit = {
+  params?: { query?: Record<string, unknown>; path?: Record<string, string> };
+};
+
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: vi.fn(
-      async (
-        path: string,
-        init?: {
-          params?: { query?: Record<string, unknown>; path?: Record<string, string> };
-        }
-      ) => {
-        if (path === "/api/v1/analysis/conversation-insights/sessions/") {
-          return {
-            data: {
-              items: [{ id: "s-1", name: "Direktupphandling" }],
-              total_count: 1,
-              next_cursor: null
-            },
-            response: new Response()
-          };
-        }
-        if (path === "/api/v1/analysis/conversation-insights/sessions/{session_id}/") {
-          spies.previewed.push(init?.params?.path?.session_id ?? "");
-          return {
-            data: {
-              id: init?.params?.path?.session_id,
-              name: "Parkering",
-              messages: [{ id: "m-1", question: "Var parkerar jag?", answer: "Vid entrén." }]
-            },
-            response: new Response()
-          };
-        }
-        spies.statsQueries.push(init?.params?.query ?? {});
+    GET: vi.fn(async (path: string, init?: TypedRequestInit) => {
+      if (path.startsWith(CHAT)) return typedInsightsChat("GET", path, init);
+      if (path === "/api/v1/analysis/conversation-insights/sessions/") {
         return {
           data: {
-            total_conversations: 12,
-            total_questions: 30,
-            feedback: { positive: 7, negative: 2 }
+            items: [{ id: "s-1", name: "Direktupphandling" }],
+            total_count: 1,
+            next_cursor: null
           },
           response: new Response()
         };
       }
-    ),
+      if (path === "/api/v1/analysis/conversation-insights/sessions/{session_id}/") {
+        spies.previewed.push(init?.params?.path?.session_id ?? "");
+        return {
+          data: {
+            id: init?.params?.path?.session_id,
+            name: "Parkering",
+            messages: [{ id: "m-1", question: "Var parkerar jag?", answer: "Vid entrén." }]
+          },
+          response: new Response()
+        };
+      }
+      spies.statsQueries.push(init?.params?.query ?? {});
+      return {
+        data: {
+          total_conversations: 12,
+          total_questions: 30,
+          feedback: { positive: 7, negative: 2 }
+        },
+        response: new Response()
+      };
+    }),
     POST: vi.fn(async () => ({ data: {}, response: new Response() })),
-    PUT: vi.fn(async () => ({ data: {}, response: new Response() }))
+    PUT: vi.fn(async () => ({ data: {}, response: new Response() })),
+    DELETE: vi.fn(async (path: string, init?: TypedRequestInit) =>
+      typedInsightsChat("DELETE", path, init)
+    )
   }
 }));
 
-/** The insights chat's endpoints, as the backend is to serve them. */
-vi.mock("@/lib/api/base", async (importOriginal) => {
+/**
+ * The insights chat's endpoints, as the backend serves them. Every request is
+ * logged by its URL: the turns come through the chat transport, the rest
+ * through the typed client.
+ */
+async function insightsChat(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const gone = () =>
     Response.json(
       { message: "Gone", code: "derived_source_removed" },
       { status: 410, headers: { "x-trace-id": "trace-1" } }
     );
-  return {
-    ...(await importOriginal<typeof import("@/lib/api/base")>()),
-    apiFetch: vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-      const url = new URL(String(input), "http://localhost");
-      const method = init?.method ?? "GET";
-      const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
-      spies.requests.push({ method, url: `${url.pathname}${url.search}`, body });
-      const [, session, ...rest] = url.pathname.slice(CHAT.length).split("/");
-      if (session && spies.removed.has(session)) return gone();
-      if (method === "POST") return sseResponse(spies.answer);
-      if (method === "DELETE") return new Response(null, { status: 204 });
-      if (!session) {
-        const later = spies.nextPage ?? [];
-        const total = spies.analyses.length + later.length;
-        return url.searchParams.has("cursor")
-          ? Response.json({ items: later, total_count: total })
-          : Response.json({
-              items: spies.analyses,
-              total_count: total,
-              next_cursor: spies.nextPage ? "2026-09-01T00:00:00Z" : null
-            });
+  const url = new URL(String(input), "http://localhost");
+  const method = init?.method ?? "GET";
+  const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
+  spies.requests.push({ method, url: `${url.pathname}${url.search}`, body });
+  const [, session, ...rest] = url.pathname.slice(CHAT.length).split("/");
+  if (session && spies.removed.has(session)) return gone();
+  if (method === "POST") return sseResponse(spies.answer);
+  if (method === "DELETE") return new Response(null, { status: 204 });
+  if (!session) {
+    const later = spies.nextPage ?? [];
+    const total = spies.analyses.length + later.length;
+    return url.searchParams.has("cursor")
+      ? Response.json({ items: later, total_count: total })
+      : Response.json({
+          items: spies.analyses,
+          total_count: total,
+          next_cursor: spies.nextPage ? "2026-09-01T00:00:00Z" : null
+        });
+  }
+  if (rest[0] === "tool-calls") {
+    return Response.json({ tool_call_id: rest[1], result: "Frågor 1-2 av 2 om parkering" });
+  }
+  return Response.json({
+    id: session,
+    name: "Vad frågar folk om?",
+    messages: [
+      {
+        id: "m-1",
+        question: "Vad frågar folk om?",
+        answer: "Mest om parkering.",
+        created_at: "2026-10-01T10:00:00Z",
+        updated_at: "2026-10-01T10:00:05Z"
       }
-      if (rest[0] === "tool-calls") {
-        return Response.json({ tool_call_id: rest[1], result: "Frågor 1-2 av 2 om parkering" });
-      }
-      return Response.json({
-        id: session,
-        name: "Vad frågar folk om?",
-        messages: [
-          {
-            id: "m-1",
-            question: "Vad frågar folk om?",
-            answer: "Mest om parkering.",
-            created_at: "2026-10-01T10:00:00Z",
-            updated_at: "2026-10-01T10:00:05Z"
-          }
-        ]
-      });
-    })
-  };
-});
+    ]
+  });
+}
+
+/** A typed request to the insights chat, answered as the typed client answers it. */
+async function typedInsightsChat(method: string, path: string, init?: TypedRequestInit) {
+  const filled = path.replace(/\{(\w+)\}/g, (_, name: string) =>
+    encodeURIComponent(init?.params?.path?.[name] ?? "")
+  );
+  const query = new URLSearchParams();
+  for (const [name, value] of Object.entries(init?.params?.query ?? {})) {
+    if (value !== undefined && value !== null) query.set(name, String(value));
+  }
+  const search = query.toString();
+  const response = await insightsChat(search ? `${filled}?${search}` : filled, { method });
+  const body: unknown = response.status === 204 ? undefined : await response.json();
+  return response.ok ? { data: body, response } : { error: body, response };
+}
+
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: vi.fn(insightsChat)
+}));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
   useAnnounce: () => spies.announce
