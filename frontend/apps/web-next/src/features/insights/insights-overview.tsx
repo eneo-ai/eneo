@@ -6,6 +6,7 @@ import { useFormatter, useTranslations } from "use-intl";
 import { lazy, Suspense, useId, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { cn } from "@/lib/utils";
 import {
   activityDays,
   answeredShare,
@@ -58,8 +59,19 @@ function SummaryTiles({ summary, compare }: { summary: InsightSummary; compare: 
   const { answer_ratings: answers, conversation_ratings: conversations } = period;
 
   return (
-    <section aria-label={t("insights_tiles_label")}>
-      <dl className="grid grid-cols-[repeat(auto-fit,minmax(min(100%,13rem),1fr))] gap-3">
+    // Columns by the overview's own width (it narrows beside the analysis),
+    // never leaving one tile alone on a row: four across where each keeps
+    // room for its lines, else two by two; three across; one per row on a
+    // phone. The tiles of a row share its height.
+    <section aria-label={t("insights_tiles_label")} className="@container">
+      <dl
+        className={cn(
+          "grid grid-cols-1 gap-3",
+          period.knowledge
+            ? "@min-[26rem]:grid-cols-2 @min-[48rem]:grid-cols-4"
+            : "@min-[36rem]:grid-cols-3"
+        )}
+      >
         <Tile
           label={t("insights_tile_conversations")}
           value={{ text: format.number(period.conversations.total) }}
