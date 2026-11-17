@@ -1,13 +1,12 @@
 """Integration tests for SessionRepository tenant filtering.
 
-Service-key sessions persist with user_id=NULL — the principal is carried on
-api_key_id instead. The repo's tenant-scoping path therefore cannot rely on
-an INNER JOIN against Users; it LEFT JOINs both principal tables and matches
-against whichever tenant_id is present.
+A session has exactly one principal: a user, a service API key or a widget
+visitor. Only a user session has a users row, so the repo's tenant-scoping
+path cannot rely on an INNER JOIN against Users; it LEFT JOINs every
+principal table and matches against whichever tenant_id is present.
 
-These tests pin that contract: tenant-scoped queries must return sessions for
-both user principals and service-key principals in the queried tenant, and
-must exclude principals from any other tenant.
+These tests pin that contract: tenant-scoped queries return the sessions of
+every principal in the queried tenant and none from any other tenant.
 """
 
 from __future__ import annotations
@@ -23,6 +22,9 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.widgets_table import Widgets
+from eneo.widgets.domain.widget import generate_public_id
 from init_db import add_tenant_user
 
 
@@ -92,12 +94,39 @@ async def _insert_service_key(
     return key_id
 
 
+async def _insert_widget(
+    session: sa.ext.asyncio.AsyncSession, *, tenant_id: UUID
+) -> UUID:
+    widget_id = uuid4()
+    space_id = await session.scalar(
+        sa.select(Spaces.id).where(Spaces.tenant_id == tenant_id).limit(1)
+    )
+    if space_id is None:
+        space_id = uuid4()
+        await session.execute(
+            sa.insert(Spaces).values(id=space_id, name="Org", tenant_id=tenant_id)
+        )
+    await session.execute(
+        sa.insert(Widgets).values(
+            id=widget_id,
+            public_id=generate_public_id(),
+            tenant_id=tenant_id,
+            space_id=space_id,
+            target_type="assistant",
+            target_id=uuid4(),
+            name="Webbchatt",
+        )
+    )
+    return widget_id
+
+
 async def _insert_session(
     session: sa.ext.asyncio.AsyncSession,
     *,
     name: str,
     user_id: UUID | None = None,
     api_key_id: UUID | None = None,
+    widget_id: UUID | None = None,
     assistant_id: UUID | None = None,
 ) -> UUID:
     session_id = uuid4()
@@ -107,6 +136,8 @@ async def _insert_session(
             name=name,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=uuid4() if widget_id is not None else None,
             assistant_id=assistant_id,
         )
     )
@@ -131,17 +162,12 @@ async def _insert_assistant(
     return assistant_id
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
-async def test_get_by_tenant_includes_service_key_sessions(
+async def test_get_by_tenant_includes_every_principal_of_the_tenant_only(
     db_container, admin_user, second_tenant_user
 ):
-    """get_by_tenant must include sessions where user_id IS NULL.
-
-    Regression for the INNER JOIN bug: an inner join on Users excluded every
-    service-key session from tenant-scoped reporting. The LEFT-JOIN fix
-    matches on api_keys_v2.tenant_id when sessions.user_id is NULL.
-    """
+    """get_by_tenant includes sessions where user_id IS NULL: service-key
+    sessions match on api_keys_v2.tenant_id, widget sessions on
+    widgets.tenant_id. Mutant: an inner join on Users drops both."""
     tenant_a = admin_user.tenant_id
     tenant_b = second_tenant_user.tenant_id
 
@@ -155,33 +181,28 @@ async def test_get_by_tenant_includes_service_key_sessions(
         key_b = await _insert_service_key(
             db, tenant_id=tenant_b, creator_user_id=second_tenant_user.id
         )
+        widget_a = await _insert_widget(db, tenant_id=tenant_a)
+        widget_b = await _insert_widget(db, tenant_id=tenant_b)
 
-        s_user_a = await _insert_session(
-            db, name="user-a-session", user_id=admin_user.id
-        )
-        s_svc_a = await _insert_session(db, name="svc-a-session", api_key_id=key_a)
-        s_user_b = await _insert_session(
-            db, name="user-b-session", user_id=second_tenant_user.id
-        )
-        s_svc_b = await _insert_session(db, name="svc-b-session", api_key_id=key_b)
+        in_a = {
+            await _insert_session(db, name="user-a", user_id=admin_user.id),
+            await _insert_session(db, name="svc-a", api_key_id=key_a),
+            await _insert_session(db, name="widget-a", widget_id=widget_a),
+        }
+        in_b = {
+            await _insert_session(db, name="user-b", user_id=second_tenant_user.id),
+            await _insert_session(db, name="svc-b", api_key_id=key_b),
+            await _insert_session(db, name="widget-b", widget_id=widget_b),
+        }
         await db.flush()
 
         result = await repo.get_by_tenant(tenant_id=tenant_a)
         ids = {s.id for s in result}
 
-        assert s_user_a in ids, "user session in queried tenant must be returned"
-        assert s_svc_a in ids, (
-            "service-key session in queried tenant must be returned "
-            "(this is the bug the fix targets)"
-        )
-        assert s_user_b not in ids, "user session in another tenant must be excluded"
-        assert s_svc_b not in ids, (
-            "service-key session in another tenant must be excluded"
-        )
+        assert in_a <= ids
+        assert not in_b & ids
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def test_get_metadata_by_assistant_includes_service_key_sessions(
     db_container, admin_user
 ):

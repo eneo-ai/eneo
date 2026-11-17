@@ -16,6 +16,7 @@ from eneo.questions.question import (
     ToolCallInfo,
     UseTools,
 )
+from eneo.sessions.session_source import SessionSource
 
 if TYPE_CHECKING:
     from eneo.assistants.api.assistant_models import AssistantSparse
@@ -72,6 +73,26 @@ class SessionMetadataPublic(SessionUpdateRequest, DateTimeModelMixin):
 class SessionPublic(SessionMetadataPublic):
     messages: list[Message]
     feedback: Optional[SessionFeedback] = None
+
+
+_SOURCE_DESCRIPTION = (
+    "Who the conversation is with: 'user' (a signed-in user), 'api_key' (a "
+    "service API key) or 'widget' (a visitor of a website widget). Only a "
+    "user conversation is a person's."
+)
+
+
+class SourcedSessionMetadata(SessionMetadataPublic):
+    """A conversation in a listing that spans every source, such as the
+    insights explore list."""
+
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
+
+
+class SourcedSessionPublic(SessionPublic):
+    """A conversation read through insights, tagged with its source."""
+
+    source: SessionSource = Field(description=_SOURCE_DESCRIPTION)
 
 
 class SessionId(SessionUpdateRequest, DateTimeModelMixin):

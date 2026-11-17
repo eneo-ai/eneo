@@ -20,6 +20,21 @@ Question times, all UTC:
   * insight-conversation session (hidden): 2026-09-07 12:00
   * other assistant: 2026-09-07 13:00
   * group chat: 2026-09-07 14:00
+
+``seed_sources`` adds conversations of the other sources to the same
+assistant, plus ratings and a hidden assistant:
+  * api (service API key): "Status för ärende 123?" 2026-09-07 09:00,
+        follow-up "Och ärende 124?" 09:10
+  * widget_1 (website visitor): "När öppnar simhallen?" 2026-09-07 11:30,
+        answered with an admission of not knowing; the visitor voted the
+        conversation bad with the comment "Fel svar" (2026-09-07 12:00)
+  * widget_2: "Var kan jag parkera?" 2026-09-06 12:00, conversation voted
+        good without a comment (2026-09-06 13:00)
+  * widget_old: "Har ni wifi?" 2026-09-05 08:00 (the period before)
+  * answer ratings: s1_q1 good (2026-09-07 10:01), s1_q2 bad with the comment
+        "Saknar avgiften" (10:06), api_q1 bad (09:01)
+  * s3 conversation voted good (2026-09-06 09:00)
+  * a hidden assistant with no conversations
 """
 
 from __future__ import annotations
@@ -31,13 +46,17 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.analysis.insight_conversation_repo import InsightConversationRepository
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.database.tables.ai_models_table import CompletionModels
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
-from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.questions_table import QuestionFeedback, Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import SpacesCompletionModels
+from eneo.database.tables.widgets_table import Widgets
 from eneo.help_assistants.domain.helper_kind import HelperKind
+from eneo.widgets.domain.widget import generate_public_id
 
 
 def utc(*args: int) -> datetime:
@@ -110,6 +129,7 @@ async def _insert_question(
     assistant_id: UUID | None,
     text: str,
     at: datetime,
+    answer: str | None = None,
 ) -> UUID:
     question_id = uuid4()
     await session.execute(
@@ -119,7 +139,7 @@ async def _insert_question(
             session_id=session_id,
             assistant_id=assistant_id,
             question=text,
-            answer=f"answer to {text}",
+            answer=answer if answer is not None else f"answer to {text}",
             num_tokens_question=1,
             num_tokens_answer=1,
             created_at=at,
@@ -327,7 +347,186 @@ async def _seed_insights(container, admin_user) -> dict[str, UUID]:
     }
 
 
+async def _insert_service_key(session, *, tenant_id: UUID, creator_user_id: UUID):
+    principal = await ApiKeysV2Repository(session).create_service_principal(
+        tenant_id=tenant_id,
+        display_name="Insights test service",
+        description=None,
+        scope_type="tenant",
+        scope_id=None,
+        created_by_user_id=creator_user_id,
+    )
+    key_id = uuid4()
+    suffix = uuid4().hex[:8]
+    await session.execute(
+        sa.insert(ApiKeysV2).values(
+            id=key_id,
+            tenant_id=tenant_id,
+            ownership="service",
+            scope_type="tenant",
+            permission="read",
+            key_type="sk_",
+            key_hash=f"hash-{suffix}-{uuid4().hex}",
+            hash_version="argon2id-v1",
+            key_prefix=f"sk_{suffix}",
+            key_suffix=suffix[-4:],
+            name=f"svc-{suffix}",
+            state="active",
+            created_by_user_id=creator_user_id,
+            service_principal_id=principal.id,
+        )
+    )
+    return key_id
+
+
+async def _seed_sources(container, admin_user) -> dict[str, UUID]:
+    """``_seed_insights`` plus the other sources, described in the module
+    docstring."""
+    seed = await _seed_insights(container, admin_user)
+    session = container.session()
+    tenant_id, bygg = seed["tenant_id"], seed["bygg"]
+
+    key_id = await _insert_service_key(
+        session, tenant_id=tenant_id, creator_user_id=admin_user.id
+    )
+    widget_id = uuid4()
+    await session.execute(
+        sa.insert(Widgets).values(
+            id=widget_id,
+            public_id=generate_public_id(),
+            tenant_id=tenant_id,
+            space_id=seed["space_id"],
+            target_type="assistant",
+            target_id=bygg,
+            name="Webbchatt",
+        )
+    )
+    hidden = await _insert_assistant(
+        session,
+        owner_user_id=admin_user.id,
+        space_id=seed["space_id"],
+        name="hidden-helper",
+        hidden=True,
+    )
+
+    def widget_session(name: str, **values) -> sa.Insert:
+        return sa.insert(Sessions).values(
+            name=name,
+            widget_id=widget_id,
+            visitor_id=uuid4(),
+            assistant_id=bygg,
+            **values,
+        )
+
+    api = uuid4()
+    await session.execute(
+        sa.insert(Sessions).values(
+            id=api, name="api", api_key_id=key_id, assistant_id=bygg
+        )
+    )
+    widget_1, widget_2, widget_old = uuid4(), uuid4(), uuid4()
+    await session.execute(
+        widget_session(
+            "widget-1",
+            id=widget_1,
+            feedback_value=-1,
+            feedback_text="Fel svar",
+            feedback_set_at=utc(2026, 9, 7, 12, 0),
+        )
+    )
+    await session.execute(
+        widget_session(
+            "widget-2",
+            id=widget_2,
+            feedback_value=1,
+            feedback_set_at=utc(2026, 9, 6, 13, 0),
+        )
+    )
+    await session.execute(widget_session("widget-old", id=widget_old))
+    await session.execute(
+        sa.update(Sessions)
+        .where(Sessions.id == seed["s3"])
+        .values(feedback_value=1, feedback_set_at=utc(2026, 9, 6, 9, 0))
+    )
+
+    q = dict(tenant_id=tenant_id, assistant_id=bygg)
+    api_q1 = await _insert_question(
+        session,
+        session_id=api,
+        text="Status för ärende 123?",
+        at=utc(2026, 9, 7, 9, 0),
+        **q,
+    )
+    await _insert_question(
+        session, session_id=api, text="Och ärende 124?", at=utc(2026, 9, 7, 9, 10), **q
+    )
+    widget_1_q1 = await _insert_question(
+        session,
+        session_id=widget_1,
+        text="När öppnar simhallen?",
+        at=utc(2026, 9, 7, 11, 30),
+        answer="Jag hittar tyvärr ingen information om simhallen.",
+        **q,
+    )
+    await _insert_question(
+        session,
+        session_id=widget_2,
+        text="Var kan jag parkera?",
+        at=utc(2026, 9, 6, 12, 0),
+        **q,
+    )
+    await _insert_question(
+        session,
+        session_id=widget_old,
+        text="Har ni wifi?",
+        at=utc(2026, 9, 5, 8, 0),
+        **q,
+    )
+
+    for question_id, value, text, at, principal in (
+        (seed["s1_q1"], 1, None, utc(2026, 9, 7, 10, 1), {"user_id": admin_user.id}),
+        (
+            seed["s1_q2"],
+            -1,
+            "Saknar avgiften",
+            utc(2026, 9, 7, 10, 6),
+            {"user_id": admin_user.id},
+        ),
+        (api_q1, -1, None, utc(2026, 9, 7, 9, 1), {"api_key_id": key_id}),
+    ):
+        await session.execute(
+            sa.insert(QuestionFeedback).values(
+                question_id=question_id,
+                value=value,
+                text=text,
+                created_at=at,
+                updated_at=at,
+                **principal,
+            )
+        )
+    await session.flush()
+
+    return {
+        **seed,
+        "api_key": key_id,
+        "widget": widget_id,
+        "hidden_assistant": hidden,
+        "api": api,
+        "api_q1": api_q1,
+        "widget_1": widget_1,
+        "widget_1_q1": widget_1_q1,
+        "widget_2": widget_2,
+        "widget_old": widget_old,
+    }
+
+
 @pytest.fixture
 def seed_insights():
     """``await seed_insights(container, admin_user)`` inside a db_container."""
     return _seed_insights
+
+
+@pytest.fixture
+def seed_sources():
+    """``await seed_sources(container, admin_user)`` inside a db_container."""
+    return _seed_sources

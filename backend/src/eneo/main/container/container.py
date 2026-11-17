@@ -20,6 +20,7 @@ from eneo.analysis.analysis_repo import AnalysisRepository
 from eneo.analysis.analysis_service import AnalysisService
 from eneo.analysis.insight_conversation_repo import InsightConversationRepository
 from eneo.analysis.insight_conversation_service import InsightConversationService
+from eneo.analysis.insight_figures_service import InsightFiguresService
 from eneo.analysis.insights_repo import InsightsRepository
 from eneo.apps import (
     AppAssembler,
@@ -2121,6 +2122,12 @@ class Container(containers.DeclarativeContainer):
         session_service=session_service,
         group_chat_service=group_chat_service,
         completion_service=completion_service,
+    )
+    insight_figures_service = providers.Factory(
+        InsightFiguresService,
+        user=user,
+        analysis_service=analysis_service,
+        insights_repo=insights_repo,
     )
     insight_conversation_service = providers.Factory(
         InsightConversationService,

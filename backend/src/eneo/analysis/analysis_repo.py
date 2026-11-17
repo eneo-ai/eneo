@@ -1,3 +1,13 @@
+"""Reads behind the insights and analytics endpoints.
+
+Conversation figures count every source (:mod:`eneo.sessions.session_source`):
+user, API-key and widget conversations alike, so tenant scope never joins
+``users`` for a session or question read. Question reads filter
+``Questions.tenant_id``; session reads go through the conversation's
+assistant or group chat and its space. Reads about people keep their user
+join: the owners of assistants and the active user count.
+"""
+
 from datetime import datetime
 from typing import Any, NamedTuple
 from uuid import UUID
@@ -21,6 +31,13 @@ from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.sessions.session import SessionInDB
+from eneo.sessions.session_source import (
+    SessionSource,
+    has_source,
+    session_in_tenant,
+    session_source,
+    target_in_tenant,
+)
 from eneo.sessions.sessions_repo import session_turn_options
 
 
@@ -115,6 +132,7 @@ class AssistantInsightQuestionRow(NamedTuple):
     session_id: UUID
     feedback_value: int | None
     feedback_text: str | None
+    source: SessionSource
 
 
 # Content and its lists (not the aggregate counts) also leave out copies whose
@@ -164,7 +182,10 @@ class AnalysisRepository:
         if tenant_id is not None:
             if table == Questions:
                 stmt = stmt.where(Questions.tenant_id == tenant_id)
+            elif table == Sessions:
+                stmt = stmt.where(session_in_tenant(tenant_id))
             else:
+                # Assistants and group chats: through their owner.
                 stmt = stmt.join(Users).where(Users.tenant_id == tenant_id)
 
         # Hide help-assistant runs from session/question totals (PRD §4).
@@ -201,17 +222,15 @@ class AnalysisRepository:
         session_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Sessions)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id),
+            .where(session_in_tenant(tenant_id)),
             Sessions.id,
         ).scalar_subquery()
         question_count = _exclude_helper_run_sessions(
             sa.select(sa.func.count())
             .select_from(Questions)
-            .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id),
-            Sessions.id,
+            .where(Questions.tenant_id == tenant_id)
+            .where(Questions.session_id.is_not(None)),
+            Questions.session_id,
         ).scalar_subquery()
         result = await self.session.execute(
             sa.select(assistant_count, session_count, question_count)
@@ -231,15 +250,12 @@ class AnalysisRepository:
 
         stmt = (
             sa.select(Sessions)
-            .join(
-                Assistants,
-                Sessions.assistant_id == Assistants.id,
+            .where(Sessions.assistant_id == assistant_id)
+            .where(
+                target_in_tenant(
+                    assistant_id=assistant_id, group_chat_id=None, tenant_id=tenant_id
+                )
             )
-            .where(Assistants.id == assistant_id)
-        )
-
-        stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
-            Users.tenant_id == tenant_id
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         stmt = _exclude_unreadable_copies(stmt, Sessions.id)
@@ -267,10 +283,14 @@ class AnalysisRepository:
         if tenant_id is None:
             raise ValueError("tenant_id is required for insights session queries")
 
-        stmt = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
-
-        stmt = stmt.join(Users, Sessions.user_id == Users.id).where(
-            Users.tenant_id == tenant_id
+        stmt = (
+            sa.select(Sessions)
+            .where(Sessions.group_chat_id == group_chat_id)
+            .where(
+                target_in_tenant(
+                    assistant_id=None, group_chat_id=group_chat_id, tenant_id=tenant_id
+                )
+            )
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
         stmt = _exclude_unreadable_copies(stmt, Sessions.id)
@@ -360,8 +380,7 @@ class AnalysisRepository:
                 question_rank,
             )
             .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
             .where(Questions.question.isnot(None))
@@ -412,6 +431,7 @@ class AnalysisRepository:
         query: str | None = None,
         cursor_created_at: datetime | None = None,
         cursor_id: UUID | None = None,
+        source: SessionSource | None = None,
     ) -> tuple[list[AssistantInsightQuestionRow], int, bool]:
         question_rank = (
             sa.func.row_number()
@@ -430,12 +450,12 @@ class AnalysisRepository:
                 Questions.session_id.label("session_id"),
                 QuestionFeedback.value.label("feedback_value"),
                 QuestionFeedback.text.label("feedback_text"),
+                session_source().label("source"),
                 question_rank,
             )
             .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
             .outerjoin(QuestionFeedback, QuestionFeedback.question_id == Questions.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
             .where(Sessions.assistant_id == assistant_id)
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
@@ -443,6 +463,10 @@ class AnalysisRepository:
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
         base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
+        if source is not None:
+            # Before the follow-up rank: a conversation has one source, so the
+            # rank within it is the same either way.
+            base_stmt = base_stmt.where(has_source(source))
         if query:
             normalized_query = query.strip()
             if normalized_query:
@@ -458,6 +482,7 @@ class AnalysisRepository:
             ranked_questions.c.session_id,
             ranked_questions.c.feedback_value,
             ranked_questions.c.feedback_text,
+            ranked_questions.c.source,
         )
         if not include_followups:
             filtered_stmt = filtered_stmt.where(ranked_questions.c.question_rank == 1)
@@ -497,6 +522,7 @@ class AnalysisRepository:
                 session_id=row.session_id,
                 feedback_value=row.feedback_value,
                 feedback_text=row.feedback_text,
+                source=row.source,
             )
             for row in rows[:limit]
             if row.question
@@ -514,6 +540,7 @@ class AnalysisRepository:
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         include_followups: bool = True,
+        source: SessionSource | None = None,
     ) -> MessageFeedbackCounts:
         """Count the good and bad answer ratings in a partner's conversations.
 
@@ -532,10 +559,11 @@ class AnalysisRepository:
             .select_from(QuestionFeedback)
             .join(Questions, Questions.id == QuestionFeedback.question_id)
             .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        if source is not None:
+            stmt = stmt.where(has_source(source))
 
         if assistant_id is not None:
             stmt = stmt.where(Sessions.assistant_id == assistant_id)
@@ -559,69 +587,77 @@ class AnalysisRepository:
         row = (await self.session.execute(stmt)).one()
         return MessageFeedbackCounts(positive=row.positive, negative=row.negative)
 
+    async def _conversation_counts(
+        self,
+        *,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+        from_date: datetime | None,
+        to_date: datetime | None,
+        tenant_id: UUID | None,
+        source: SessionSource | None,
+    ) -> tuple[int, int]:
+        """Conversations started in the window, and their questions, of one
+        assistant or group chat, from every source unless ``source`` names
+        one."""
+        target = (
+            Sessions.assistant_id == assistant_id
+            if assistant_id is not None
+            else Sessions.group_chat_id == group_chat_id
+        )
+        session_count_stmt = _exclude_helper_run_sessions(
+            sa.select(sa.func.count(Sessions.id)).where(target), Sessions.id
+        )
+        question_count_stmt = _exclude_helper_run_sessions(
+            sa.select(sa.func.count(Questions.id))
+            .join(Sessions, Questions.session_id == Sessions.id)
+            .where(target),
+            Sessions.id,
+        )
+        if tenant_id is not None:
+            session_count_stmt = session_count_stmt.where(
+                target_in_tenant(
+                    assistant_id=assistant_id,
+                    group_chat_id=group_chat_id,
+                    tenant_id=tenant_id,
+                )
+            )
+            question_count_stmt = question_count_stmt.where(
+                Questions.tenant_id == tenant_id
+            )
+        window: list[sa.ColumnElement[bool]] = []
+        if from_date is not None:
+            window.append(Sessions.created_at >= from_date)
+        if to_date is not None:
+            window.append(Sessions.created_at <= to_date)
+        if source is not None:
+            window.append(has_source(source))
+
+        session_count = await self.session.scalar(session_count_stmt.where(*window))
+        question_count = await self.session.scalar(question_count_stmt.where(*window))
+        return session_count or 0, question_count or 0
+
     async def get_assistant_conversation_counts(
         self,
         assistant_id: UUID,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         tenant_id: UUID | None = None,
+        source: SessionSource | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for an assistant efficiently.
 
         Returns a tuple of (session_count, question_count) using optimized COUNT queries
         instead of fetching full session data.
         """
-        # Count sessions
-        session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
-            Sessions.assistant_id == assistant_id
+        return await self._conversation_counts(
+            assistant_id=assistant_id,
+            group_chat_id=None,
+            from_date=from_date,
+            to_date=to_date,
+            tenant_id=tenant_id,
+            source=source,
         )
-        session_count_stmt = _exclude_helper_run_sessions(
-            session_count_stmt, Sessions.id
-        )
-
-        if tenant_id is not None:
-            session_count_stmt = session_count_stmt.join(
-                Users, Sessions.user_id == Users.id
-            ).where(Users.tenant_id == tenant_id)
-
-        if from_date is not None:
-            session_count_stmt = session_count_stmt.where(
-                Sessions.created_at >= from_date
-            )
-        if to_date is not None:
-            session_count_stmt = session_count_stmt.where(
-                Sessions.created_at <= to_date
-            )
-
-        session_count = await self.session.scalar(session_count_stmt) or 0
-
-        # Count questions for sessions matching the criteria
-        question_count_stmt = (
-            sa.select(sa.func.count(Questions.id))
-            .join(Sessions, Questions.session_id == Sessions.id)
-            .where(Sessions.assistant_id == assistant_id)
-        )
-        question_count_stmt = _exclude_helper_run_sessions(
-            question_count_stmt, Sessions.id
-        )
-
-        if tenant_id is not None:
-            question_count_stmt = question_count_stmt.join(
-                Users, Sessions.user_id == Users.id
-            ).where(Users.tenant_id == tenant_id)
-
-        if from_date is not None:
-            question_count_stmt = question_count_stmt.where(
-                Sessions.created_at >= from_date
-            )
-        if to_date is not None:
-            question_count_stmt = question_count_stmt.where(
-                Sessions.created_at <= to_date
-            )
-
-        question_count = await self.session.scalar(question_count_stmt) or 0
-
-        return session_count, question_count
 
     async def count_assistant_questions_since(
         self,
@@ -634,8 +670,7 @@ class AnalysisRepository:
         stmt = (
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
             .where(Sessions.assistant_id == assistant_id)
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)
@@ -690,8 +725,7 @@ class AnalysisRepository:
                 Sessions.assistant_id,
                 Sessions.group_chat_id,
             )
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(session_in_tenant(tenant_id))
             .order_by(Sessions.created_at)
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
@@ -789,8 +823,7 @@ class AnalysisRepository:
         bucket = _hour_bucket(Sessions.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(session_in_tenant(tenant_id))
             .group_by(bucket)
             .order_by(bucket)
         )
@@ -839,63 +872,21 @@ class AnalysisRepository:
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         tenant_id: UUID | None = None,
+        source: SessionSource | None = None,
     ) -> tuple[int, int]:
         """Get conversation and question counts for a group chat efficiently.
 
         Returns a tuple of (session_count, question_count) using optimized COUNT queries
         instead of fetching full session data.
         """
-        # Count sessions
-        session_count_stmt = sa.select(sa.func.count(Sessions.id)).where(
-            Sessions.group_chat_id == group_chat_id
+        return await self._conversation_counts(
+            assistant_id=None,
+            group_chat_id=group_chat_id,
+            from_date=from_date,
+            to_date=to_date,
+            tenant_id=tenant_id,
+            source=source,
         )
-        session_count_stmt = _exclude_helper_run_sessions(
-            session_count_stmt, Sessions.id
-        )
-
-        if tenant_id is not None:
-            session_count_stmt = session_count_stmt.join(
-                Users, Sessions.user_id == Users.id
-            ).where(Users.tenant_id == tenant_id)
-
-        if from_date is not None:
-            session_count_stmt = session_count_stmt.where(
-                Sessions.created_at >= from_date
-            )
-        if to_date is not None:
-            session_count_stmt = session_count_stmt.where(
-                Sessions.created_at <= to_date
-            )
-
-        session_count = await self.session.scalar(session_count_stmt) or 0
-
-        # Count questions for sessions matching the criteria
-        question_count_stmt = (
-            sa.select(sa.func.count(Questions.id))
-            .join(Sessions, Questions.session_id == Sessions.id)
-            .where(Sessions.group_chat_id == group_chat_id)
-        )
-        question_count_stmt = _exclude_helper_run_sessions(
-            question_count_stmt, Sessions.id
-        )
-
-        if tenant_id is not None:
-            question_count_stmt = question_count_stmt.join(
-                Users, Sessions.user_id == Users.id
-            ).where(Users.tenant_id == tenant_id)
-
-        if from_date is not None:
-            question_count_stmt = question_count_stmt.where(
-                Sessions.created_at >= from_date
-            )
-        if to_date is not None:
-            question_count_stmt = question_count_stmt.where(
-                Sessions.created_at <= to_date
-            )
-
-        question_count = await self.session.scalar(question_count_stmt) or 0
-
-        return session_count, question_count
 
     async def count_group_chat_questions_since(
         self,
@@ -908,8 +899,7 @@ class AnalysisRepository:
         stmt = (
             sa.select(sa.func.count(Questions.id))
             .join(Sessions, Questions.session_id == Sessions.id)
-            .join(Users, Sessions.user_id == Users.id)
-            .where(Users.tenant_id == tenant_id)
+            .where(Questions.tenant_id == tenant_id)
             .where(Sessions.group_chat_id == group_chat_id)
             .where(Sessions.created_at >= from_date)
             .where(Sessions.created_at <= to_date)

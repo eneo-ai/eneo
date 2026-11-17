@@ -21,8 +21,9 @@ The rule lives in one place, `eneo.sessions.hidden_sessions`:
   read and count behind the insights and analytics endpoints);
 - `QuestionRepository.get_by_service` and `get_by_tenant` (exports);
 - the per-user token usage analyzer;
-- the insights tools' own reads (`InsightsRepository`), so one analysis never
-  reads another.
+- the insights tools' own reads and the insights figures (summary, activity,
+  ratings inbox, target list) in `InsightsRepository`, so one analysis never
+  reads or counts another.
 
 Adding a new kind of hidden session means adding one `NOT EXISTS` to
 `hidden_session_clause` and nothing else. The owner service loads its own
@@ -38,6 +39,17 @@ the chat partner list and the assistant counts leave hidden assistants out.
 Their conversations are not hidden sessions: they stay in the session and
 question figures, which measure model use, and a flow authoring chat is
 reached through its own `flow_authoring_chats` row.
+
+## Sources are another rule
+
+A conversation's principal is its source (`eneo.sessions.session_source`): a
+user, a service API key or a widget visitor. API-key and widget conversations
+are not hidden: the insights and analytics figures and the insights explore
+list count and list them, each tagged with its source. They have no `users`
+row, so these reads scope their tenant through `questions.tenant_id` or the
+conversation's assistant or group chat, never through `users`. Per-user views
+(a user's own conversation list, the active user count, per-user token usage)
+filter on `sessions.user_id` and so never show them.
 
 ## Consequences
 

@@ -3,14 +3,17 @@
 
 from datetime import datetime, timezone
 from typing import Any, cast
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 import pytest
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import (
     InsightsRepository,
+    KnowledgeSetup,
     normalize_question_text,
     normalized_question_expr,
 )
@@ -95,3 +98,78 @@ def test_followup_flag_is_a_correlated_exists_on_the_same_session():
 
     assert "EXISTS" in sql
     assert "session_id = questions.session_id" in sql
+
+
+def test_scoped_questions_narrow_to_one_source_when_asked():
+    scope = InsightScope(kind="assistant", target_id=uuid4(), tenant_id=uuid4())
+
+    narrowed = str(_repo()._scoped_questions(scope, _window(), "widget").compile())
+    everything = str(_repo()._scoped_questions(scope, _window()).compile())
+
+    assert "sessions.widget_id IS NOT NULL" in narrowed
+    assert "sessions.widget_id IS NOT NULL" not in everything
+
+
+class _Recorder:
+    """Records each statement and answers with neutral rows."""
+
+    def __init__(self) -> None:
+        self.statements: list[Any] = []
+
+    async def execute(self, statement: Any) -> Any:
+        self.statements.append(statement)
+        result = MagicMock()
+        result.all.return_value = []
+        return result
+
+    async def scalar(self, statement: Any) -> int:
+        self.statements.append(statement)
+        return 0
+
+
+async def test_figure_reads_never_join_users_and_keep_the_hidden_and_copy_rules():
+    recorder = _Recorder()
+    repo = InsightsRepository(session=cast(Any, recorder))
+    scope = InsightScope(kind="assistant", target_id=uuid4(), tenant_id=uuid4())
+
+    await repo.summarize(
+        scope,
+        _window(),
+        source=None,
+        knowledge=KnowledgeSetup(True, frozenset({uuid4()})),
+    )
+    await repo.count_activity(scope, _window(), source="user")
+    await repo.list_ratings(
+        scope,
+        _window(),
+        source=None,
+        value=-1,
+        has_comment=True,
+        limit=10,
+        after=None,
+    )
+    await repo.list_targets(
+        tenant_id=scope.tenant_id,
+        window=_window(),
+        previous=None,
+        query="bygg",
+        unused_only=True,
+        sort="questions",
+        descending=True,
+        offset=0,
+        limit=10,
+    )
+
+    assert len(recorder.statements) == 5
+    for statement in recorder.statements:
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        assert "JOIN users" not in sql
+        assert "help_assistant_runs" in sql and "insight_conversations" in sql
+        assert "content_derivations" in sql
+
+
+def test_the_knowledge_server_name_is_the_internal_servers():
+    from eneo.analysis.insights_repo import KNOWLEDGE_SERVER
+    from eneo.internal_mcp.constants import KNOWLEDGE_SERVER_NAME
+
+    assert KNOWLEDGE_SERVER == KNOWLEDGE_SERVER_NAME

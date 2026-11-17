@@ -66,6 +66,20 @@ async def test_count_usage_totals_and_local_day_buckets(
     ]
 
 
+async def test_count_usage_counts_every_source_and_only_users_as_users(
+    db_container, admin_user, seed_sources
+):
+    async with db_container() as container:
+        seed = await seed_sources(container, admin_user)
+        summary = await container.insights_repo().count_usage(
+            _scope(seed), _window(), "day"
+        )
+
+    assert (summary.conversations, summary.questions) == (8, 12)
+    assert (summary.api_key_conversations, summary.widget_conversations) == (1, 2)
+    assert summary.users == 1
+
+
 async def test_list_questions_is_newest_first_and_hides_hidden_sessions(
     db_container, admin_user, seed_insights
 ):
