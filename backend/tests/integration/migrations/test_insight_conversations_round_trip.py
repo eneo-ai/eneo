@@ -13,7 +13,7 @@ from alembic.config import Config
 pytestmark = pytest.mark.migration_isolation
 
 _REVISION = "202611111400"
-_PREVIOUS_REVISION = "202611101200"
+_PREVIOUS_REVISION = "202611111000"
 _TABLE = "insight_conversations"
 
 

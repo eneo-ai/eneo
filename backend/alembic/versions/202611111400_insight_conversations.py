@@ -16,7 +16,7 @@ on ``session_id`` is backed by an index that also serves the hidden-session
 analyses of one target, newest first.
 
 Revision ID: 202611111400
-Revises: 202611101200
+Revises: 202611111000
 """
 
 from collections.abc import Sequence
@@ -26,7 +26,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "202611111400"
-down_revision: str | None = "202611101200"
+down_revision: str | None = "202611111000"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
