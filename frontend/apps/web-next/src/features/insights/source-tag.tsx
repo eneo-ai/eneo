@@ -1,7 +1,7 @@
 import { Token } from "@astryxdesign/core/Token";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
-import type { InsightSource } from "./insight-figures";
+import { sourceParts, type InsightSource, type SourceCounts } from "./insight-figures";
 
 /**
  * Each source's name, and its colour as a tag, in the activity chart and in a
@@ -45,6 +45,27 @@ export function SourceTag({ source }: { source: InsightSource }) {
   const t = useTranslations();
   const style = SOURCE_STYLE[source];
   return <Token label={t(style.label)} size="sm" color={style.token} />;
+}
+
+/** One source's part of a count of conversations: "3 från användare", "2 via widget". */
+const SPLIT_KEY = {
+  user: "insights_split_user",
+  widget: "insights_split_widget",
+  api_key: "insights_split_api_key"
+} as const satisfies Record<InsightSource, string>;
+
+/**
+ * Conversations split by source, in words that count conversations, not
+ * people: "3 från användare, 2 via widget och 1 via API". Sources without any
+ * are left out; null when there are none at all.
+ */
+export function useSourceSplit(): (counts: SourceCounts) => string | null {
+  const t = useTranslations();
+  const format = useFormatter();
+  return (counts) => {
+    const parts = sourceParts(counts).map(({ source, count }) => t(SPLIT_KEY[source], { count }));
+    return parts.length > 0 ? format.list(parts, { type: "conjunction" }) : null;
+  };
 }
 
 /** Names each source's colour in a chart or a source bar, in the page's order. */

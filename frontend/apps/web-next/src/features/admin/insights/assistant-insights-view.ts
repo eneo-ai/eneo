@@ -1,5 +1,10 @@
 import { calendarDate, type IsoDate } from "@/lib/calendar-date";
-import { parseInsightSource, type InsightFilters } from "@/features/insights/insight-figures";
+import {
+  parseInsightSource,
+  parseOpenableFinding,
+  type InsightFilters,
+  type OpenableFindingKind
+} from "@/features/insights/insight-figures";
 import {
   DEFAULT_INSIGHT_DAYS,
   insightRangeOfDays,
@@ -46,25 +51,38 @@ export function insightViewSearch(filters: InsightFilters, current = ""): string
   return `?${params.toString()}`;
 }
 
+/** The finding open in place of the overview (`finding`); anything unknown is none. */
+export function readInsightFindingSearch(params: SearchReader): OpenableFindingKind | null {
+  return parseOpenableFinding(params.get("finding"));
+}
+
+/** The address's query with the finding in it (none: left out); other parameters stay. */
+export function insightFindingSearch(finding: OpenableFindingKind | null, current = ""): string {
+  const params = new URLSearchParams(current);
+  if (finding) params.set("finding", finding);
+  else params.delete("finding");
+  return `?${params.toString()}`;
+}
+
 /** Router search values are flat strings (or repeated strings), just like URLSearchParams. */
 export function validateInsightViewSearch(
   search: Record<string, unknown>,
   fallback = insightRangeOfDays(DEFAULT_INSIGHT_DAYS)
-): { from: string; to: string; source?: string; compare?: string } {
-  const filters = readInsightViewSearch(
-    {
-      get: (key) => {
-        const value = search[key];
-        const first = Array.isArray(value) ? value[0] : value;
-        return typeof first === "string" ? first : null;
-      }
-    },
-    fallback
-  );
+): { from: string; to: string; source?: string; compare?: string; finding?: string } {
+  const reader: SearchReader = {
+    get: (key) => {
+      const value = search[key];
+      const first = Array.isArray(value) ? value[0] : value;
+      return typeof first === "string" ? first : null;
+    }
+  };
+  const filters = readInsightViewSearch(reader, fallback);
+  const finding = readInsightFindingSearch(reader);
   return {
     from: filters.range.start,
     to: filters.range.end,
     ...(filters.source ? { source: filters.source } : {}),
-    ...(filters.compare ? { compare: "1" } : {})
+    ...(filters.compare ? { compare: "1" } : {}),
+    ...(finding ? { finding } : {})
   };
 }

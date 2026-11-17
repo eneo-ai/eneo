@@ -96,11 +96,26 @@ vi.mock("@/lib/api/browser", () => ({
               (!query.q || item.name.toLowerCase().includes(String(query.q))) &&
               (query.activity !== "unused" || item.conversations.total === 0)
           );
+          const sum = (source: "total" | "user" | "widget" | "api_key") =>
+            matching.reduce((total, item) => total + item.conversations[source], 0);
           return ok({
             items: matching.slice(offset, offset + Number(query.limit)),
             total_count: matching.length,
             limit: Number(query.limit),
-            offset
+            offset,
+            totals: {
+              conversations: {
+                total: sum("total"),
+                user: sum("user"),
+                widget: sum("widget"),
+                api_key: sum("api_key")
+              },
+              questions: matching.reduce((total, item) => total + item.questions, 0),
+              previous:
+                String(query.compare) === "true"
+                  ? { conversations: counts(1000, 400, 100), questions: 3000 }
+                  : null
+            }
           });
         }
         default:
@@ -293,7 +308,14 @@ describe("InsightsPage", () => {
   it("compares each target's conversations when Jämför is on", async () => {
     renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
     await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
+    // Every listed target's conversations, by source, in words that count conversations.
+    expect(
+      screen.getByText(
+        "Konversationer i perioden: 1 995, varav 1 384 från användare, 537 via widget och 74 via API"
+      )
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("switch", { name: "Jämför" }));
     await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ compare: true }));
+    expect(await screen.findByText(/^\+33\s%/)).toBeTruthy();
   });
 });

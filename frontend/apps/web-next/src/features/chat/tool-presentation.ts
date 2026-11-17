@@ -141,7 +141,10 @@ const INSIGHT_TOOLS = new Set([
   "top_questions",
   "search_questions",
   "read_conversation",
-  "find_gaps"
+  "find_gaps",
+  "list_ratings",
+  "knowledge_use",
+  "tool_use"
 ]);
 
 /**

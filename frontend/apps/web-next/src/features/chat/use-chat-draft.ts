@@ -62,6 +62,16 @@ function write(owner: string, scope: string, value: string) {
 }
 
 /**
+ * `draft` with `text` on a line of its own at its end; unchanged when that is
+ * already its last line, so the same text offered twice is there once.
+ */
+export function withLine(draft: string, text: string): string {
+  const last = draft.trimEnd().split("\n").at(-1)?.trim();
+  if (last === text.trim()) return draft;
+  return draft.trim() ? `${draft}\n${text}` : text;
+}
+
+/**
  * The text typed in the composer, kept for the tab's life (sessionStorage:
  * gone with the tab and never shared, so a question typed on a shared screen
  * does not outlive it) and for the account that typed it (`owner`: the next

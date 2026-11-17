@@ -35,8 +35,20 @@ const PERIOD = {
   returning_users: 1,
   unanswered: 2,
   knowledge: null,
-  answer_ratings: { positive: 7, negative: 2, with_comment: 0 },
-  conversation_ratings: { positive: 0, negative: 0 }
+  answer_ratings: { positive: 7, negative: 2, with_comment: 0, negative_with_comment: 0 },
+  conversation_ratings: { positive: 0, negative: 0, with_comment: 0, negative_with_comment: 0 }
+};
+
+/** The answers that say they cannot answer, as the finding lists them. */
+const UNANSWERED = {
+  kind: "unanswered",
+  question_id: "q2",
+  question: "Hur lång är avtalstiden?",
+  session_id: "session-2",
+  source: "api_key",
+  created_at: "2026-09-21T09:30:00Z",
+  phrase: "har ingen information om",
+  rating: null
 };
 
 const QUESTIONS = [
@@ -95,6 +107,33 @@ vi.mock("@/lib/api/browser", () => ({
             data: { timezone: "UTC", source: null, start: "", end: "", days: [] },
             response: new Response("{}")
           };
+        const scope = { timezone: "UTC", source: null, start: "", end: "" };
+        if (path === "/api/v1/analysis/conversation-insights/findings/")
+          return { data: { ...scope, findings: [] }, response: new Response("{}") };
+        if (path === "/api/v1/analysis/conversation-insights/findings/{kind}/")
+          return {
+            data: {
+              ...scope,
+              kind: "unanswered",
+              items: [UNANSWERED],
+              total_count: 1,
+              limit: 20,
+              next_cursor: null
+            },
+            response: new Response("{}")
+          };
+        if (path === "/api/v1/analysis/conversation-insights/questions/top/")
+          return {
+            data: { ...scope, include_followups: true, total_questions: 0, groups: [] },
+            response: new Response("{}")
+          };
+        if (path === "/api/v1/analysis/conversation-insights/knowledge/")
+          return {
+            data: { ...scope, answers: 0, citing_answers: 0, sources: [], unused: [] },
+            response: new Response("{}")
+          };
+        if (path === "/api/v1/analysis/conversation-insights/tools/")
+          return { data: { ...scope, tools: [] }, response: new Response("{}") };
         if (path === "/api/v1/analysis/conversation-insights/feedback/")
           return {
             data: { items: [], total_count: 0, next_cursor: null },
@@ -158,7 +197,7 @@ afterEach(() => {
 
 function renderPage(
   route?: string,
-  assistant: { insight_enabled?: boolean; permissions?: string[] } = {}
+  assistant: { insight_enabled?: boolean; permissions?: string[]; space_id?: string } = {}
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["assistants", "assistant-1"], {
@@ -332,6 +371,32 @@ describe("AssistantInsightsPage", () => {
     await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Laddade 1/1 frågor"));
     const table = screen.getByRole("table", { name: "Frågehistorik" });
     expect(within(table).queryByText("Vilka regler gäller för direktupphandling?")).toBeNull();
+  });
+
+  it("opens the finding in the URL in place of the overview, with the editor for an editor", async () => {
+    renderPage(
+      "/admin/insights/assistant/assistant-1?from=2026-09-10&to=2026-09-30&finding=unanswered",
+      { permissions: ["read", "edit", "insight_view"], space_id: "space-1" }
+    );
+    expect(
+      await screen.findByRole("heading", {
+        name: "Assistenten säger ofta att den inte kan svara",
+        level: 2
+      })
+    ).toBeTruthy();
+    const table = await screen.findByRole("table", { name: "Exempel" });
+    expect(within(table).getByText("”har ingen information om”")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Redigera assistenten" }).getAttribute("href")).toBe(
+      "/spaces/space-1/assistants/assistant-1/edit?section=instructions#instructions"
+    );
+    // The way back drops the finding from the address and keeps the filters.
+    fireEvent.click(screen.getByRole("button", { name: "Tillbaka till insikterna" }));
+    await waitFor(() => {
+      const search = new URLSearchParams(window.location.search);
+      expect(search.has("finding")).toBe(false);
+      expect(search.get("from")).toBe("2026-09-10");
+    });
+    expect(await screen.findByRole("region", { name: "Nyckeltal" })).toBeTruthy();
   });
 
   it("reads the filters from the URL as full local days and keeps new ones there", async () => {

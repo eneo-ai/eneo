@@ -22,6 +22,27 @@ export type InsightSummary = Schema<"InsightSummary">;
 export type InsightPeriodSummary = Schema<"InsightPeriodSummary">;
 export type InsightActivity = Schema<"InsightActivity">;
 export type InsightRating = Schema<"InsightRating">;
+export type InsightFinding = Schema<"InsightFinding">;
+export type InsightFindingKind = InsightFinding["kind"];
+export type InsightFindingCases = Schema<"InsightFindingCasePage">;
+export type InsightFindingCase = InsightFindingCases["items"][number];
+export type InsightQuestionGroup = Schema<"InsightQuestionGroup">;
+export type InsightKnowledgeSource = Schema<"InsightKnowledgeSource">;
+export type InsightToolUse = Schema<"InsightToolUse">;
+
+/** The findings with cases to list: each opens a view of its own with examples. */
+export type OpenableFindingKind = InsightFindingCases["kind"];
+
+export const OPENABLE_FINDINGS = [
+  "knowledge_missed",
+  "unanswered",
+  "rephrasing"
+] as const satisfies readonly OpenableFindingKind[];
+
+/** A finding that opens a view of its own; anything else (an unknown address value) is none. */
+export function parseOpenableFinding(value: string | null | undefined): OpenableFindingKind | null {
+  return OPENABLE_FINDINGS.find((kind) => kind === value) ?? null;
+}
 
 /**
  * What the insights view shows: the period, one source or all of them (null),
@@ -79,6 +100,91 @@ export function ratedAnswerShare(period: InsightPeriodSummary): number | null {
 export function knowledgeHitShare(period: InsightPeriodSummary): number | null {
   if (!period.knowledge) return null;
   const missed = share(period.knowledge.missed, period.knowledge.searched);
+  return missed === null ? null : 1 - missed;
+}
+
+/**
+ * The feedback inbox's filters as the summary counts them: every rating of
+ * answers and whole conversations, the bad ones with a comment, the good ones.
+ * The inbox's list counts the same ratings in the same period and source.
+ */
+export function feedbackCounts(period: InsightPeriodSummary): {
+  all: number;
+  bad_commented: number;
+  good: number;
+} {
+  const { answer_ratings: answers, conversation_ratings: conversations } = period;
+  return {
+    all: answers.positive + answers.negative + conversations.positive + conversations.negative,
+    bad_commented: answers.negative_with_comment + conversations.negative_with_comment,
+    good: answers.positive + conversations.positive
+  };
+}
+
+/**
+ * What a finding is a share of, and how many cases it has, as the server
+ * counts them: answers that searched the knowledge and those without a usable
+ * hit; all answers and those that say they cannot answer; all conversations
+ * and those with similar questions in a row (`cases`, the cases' total: the
+ * summary does not count them). Null without the figures it needs.
+ */
+export function findingEvidence(
+  kind: OpenableFindingKind,
+  period: InsightPeriodSummary,
+  cases: number | null
+): { affected: number; base: number } | null {
+  switch (kind) {
+    case "knowledge_missed":
+      return period.knowledge
+        ? { affected: period.knowledge.missed, base: period.knowledge.searched }
+        : null;
+    case "unanswered":
+      return { affected: period.unanswered, base: period.questions.total };
+    case "rephrasing":
+      return cases === null ? null : { affected: cases, base: period.conversations.total };
+  }
+}
+
+/** Why an answer that searched the knowledge found nothing usable. */
+export type KnowledgeMissReason = Extract<
+  InsightFindingCase,
+  { kind: "knowledge_missed" }
+>["reason"];
+
+/**
+ * The knowledge misses by reason, in a fixed order, leaving out reasons
+ * without any. Only from every case: null while more pages are to load.
+ */
+export function knowledgeMissReasons(
+  cases: readonly InsightFindingCase[],
+  complete: boolean
+): { reason: KnowledgeMissReason; count: number }[] | null {
+  if (!complete) return null;
+  const order: KnowledgeMissReason[] = ["no_results", "uncited", "weak_score"];
+  const counts = new Map<KnowledgeMissReason, number>();
+  for (const item of cases) {
+    if (item.kind === "knowledge_missed") {
+      counts.set(item.reason, (counts.get(item.reason) ?? 0) + 1);
+    }
+  }
+  return order
+    .map((reason) => ({ reason, count: counts.get(reason) ?? 0 }))
+    .filter(({ count }) => count > 0);
+}
+
+/** A common question's answers that did not say they cannot answer. Indicative. */
+export function groupAnsweredShare(group: InsightQuestionGroup): number | null {
+  const unanswered = share(group.unanswered, group.occurrences);
+  return unanswered === null ? null : 1 - unanswered;
+}
+
+/**
+ * A common question's answers that searched the knowledge and found something
+ * usable. Indicative; null when none of them searched or without knowledge.
+ */
+export function groupKnowledgeHitShare(group: InsightQuestionGroup): number | null {
+  if (!group.knowledge) return null;
+  const missed = share(group.knowledge.missed, group.knowledge.searched);
   return missed === null ? null : 1 - missed;
 }
 

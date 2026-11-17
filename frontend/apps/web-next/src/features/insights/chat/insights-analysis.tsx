@@ -3,7 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
@@ -11,7 +11,8 @@ import { isDerivedSourceRemoved } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { ChatView, type ActivityState } from "@/features/chat/chat-view";
+import { ChatView, type ActivityState, type ComposerDraftHandle } from "@/features/chat/chat-view";
+import { withLine } from "@/features/chat/use-chat-draft";
 import { PanelFrame } from "@/features/chat/side-panel/panel-frame";
 import type { InsightRange } from "../insights-range";
 import { insightCitationReferences } from "./insight-citations";
@@ -23,6 +24,9 @@ import {
   type InsightTarget
 } from "./insights-chat-api";
 import { InsightsHistory } from "./insights-history";
+
+/** A question offered to the analysis (a finding's); `id` is new for every offer. */
+export type AnalysisSuggestion = { id: number; text: string };
 
 /** The analysis on screen. */
 type Analysis =
@@ -109,6 +113,14 @@ function RemovedAnalysis({ onStartNew }: { onStartNew: () => void }) {
  * removed with them: opening or continuing it says so and offers a new one.
  * Nothing is sent without the person pressing send.
  *
+ * A question offered by the page (`suggestion`, a finding's) goes into the
+ * composer of an analysis not yet started with nothing typed. Anywhere else
+ * (an analysis under way, a question typed, an earlier analysis opening) it
+ * would replace something, so the panel offers it instead, to put in the
+ * composer with a click; it goes when the page takes it back. A draft that
+ * already ends with the question is left as it is, and the same suggestion
+ * received again is taken once.
+ *
  * It stays mounted while the panel is closed (`hidden`), so the open
  * analysis, a typed question and an answer still streaming are there again
  * when it opens.
@@ -117,12 +129,15 @@ export function InsightsAnalysis({
   partner,
   range,
   hidden,
+  suggestion = null,
   onClose
 }: {
   partner: Pick<ChatPartner, "id"> & { type: InsightTarget["type"] };
   range: InsightRange;
   /** The panel is closed or its page is not on screen: nothing is laid over the page for it. */
   hidden: boolean;
+  /** A question to offer, until the page takes it back. */
+  suggestion?: AnalysisSuggestion | null;
   onClose: () => void;
 }) {
   const t = useTranslations();
@@ -135,7 +150,11 @@ export function InsightsAnalysis({
   const [analysis, setAnalysis] = useState<Analysis>(() => newAnalysis());
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const leaveConfirmation = useRef<LeaveConfirmationHandle>(null);
+  const draft = useRef<ComposerDraftHandle>(null);
   const body = useRef<HTMLDivElement>(null);
+  const suggestionId = useId();
+  /** The suggestion offered as a button: it would have replaced something. */
+  const [offered, setOffered] = useState<AnalysisSuggestion | null>(null);
   const target: InsightTarget = useMemo(
     () => ({ type: partner.type, id: partner.id }),
     [partner.type, partner.id]
@@ -162,6 +181,34 @@ export function InsightsAnalysis({
     // What was focused (the question field, the history's row) went with it.
     rescue(() => body.current?.querySelector<HTMLElement>("button") ?? null);
   }, [removed, queryClient, target, rescue]);
+
+  // A new suggestion goes into an empty composer of an analysis not yet
+  // started; anywhere else the panel offers it, unless the draft already ends
+  // with it. Each suggestion is taken once, however often its effect runs
+  // (twice on mount under StrictMode, before the draft has re-rendered).
+  const receivedSuggestion = useRef<number | null>(null);
+  const receiveSuggestion = useEffectEvent((next: AnalysisSuggestion) => {
+    if (receivedSuggestion.current === next.id) return;
+    receivedSuggestion.current = next.id;
+    const handle = draft.current;
+    const typed = handle?.text() ?? "";
+    const fresh = analysis.kind === "conversation" && !analysis.started;
+    if (typed.trim() !== "" && withLine(typed, next.text) === typed) {
+      setOffered(null);
+    } else if (fresh && handle && typed.trim() === "") {
+      handle.fill(next.text);
+      setOffered(null);
+    } else {
+      setOffered(next);
+    }
+  });
+  useEffect(() => {
+    if (suggestion) receiveSuggestion(suggestion);
+  }, [suggestion]);
+  const shownSuggestion =
+    offered && suggestion && offered.id === suggestion.id && analysis.kind === "conversation"
+      ? offered
+      : null;
 
   /** Starts a fresh analysis; `focusComposer` when it replaces one that went away. */
   function startNew(focusComposer = false) {
@@ -230,6 +277,7 @@ export function InsightsAnalysis({
         initialMessages={analysis.messages}
         focusComposerIfLost={analysis.focusComposer}
         leaveConfirmationRef={leaveConfirmation}
+        draftRef={draft}
         activity={activity}
         onActivityChange={setActivity}
         // The answer's activity is laid out in the panel's room, and never
@@ -294,6 +342,23 @@ export function InsightsAnalysis({
       onClose={onClose}
       closeLabel={t("insights_analysis_close")}
     >
+      {shownSuggestion ? (
+        <div className="border-ax-border flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
+          <p id={suggestionId} className="min-w-0 flex-1 basis-48 text-sm break-words">
+            {t("insights_chat_suggestion", { question: shownSuggestion.text })}
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            label={t("insights_chat_suggestion_use")}
+            aria-describedby={suggestionId}
+            onClick={() => {
+              draft.current?.offer(shownSuggestion.text);
+              setOffered(null);
+            }}
+          />
+        </div>
+      ) : null}
       <div
         ref={body}
         tabIndex={-1}

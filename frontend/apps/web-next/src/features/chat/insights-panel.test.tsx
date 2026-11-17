@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { loadFixtures, sseResponse, toSseBody } from "@/lib/chat/contract-fixtures";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -34,15 +35,62 @@ const PERIOD = {
   returning_users: 2,
   unanswered: 3,
   knowledge: { searched: 20, missed: 5 },
-  answer_ratings: { positive: 7, negative: 2, with_comment: 1 },
-  conversation_ratings: { positive: 1, negative: 1 }
+  answer_ratings: { positive: 7, negative: 2, with_comment: 1, negative_with_comment: 1 },
+  conversation_ratings: { positive: 1, negative: 1, with_comment: 0, negative_with_comment: 0 }
 };
 const PREVIOUS = {
   ...PERIOD,
   conversations: counts(6, 3, 1),
   unanswered: 6,
-  answer_ratings: { positive: 7, negative: 3, with_comment: 0 }
+  answer_ratings: { positive: 7, negative: 3, with_comment: 0, negative_with_comment: 0 }
 };
+
+/** A knowledge miss behind the "Många frågor får inget stöd i kunskapen" finding. */
+const miss = (id: string, reason: string, rating: number | null) => ({
+  kind: "knowledge_missed",
+  question_id: id,
+  question: `Vad kostar ${id}?`,
+  session_id: `s-${id}`,
+  source: "widget",
+  created_at: "2026-10-01T10:00:00Z",
+  reason,
+  best_score: reason === "weak_score" ? 0.2 : null,
+  rating
+});
+
+/** What the period's figures point at. */
+const FINDINGS = [
+  { kind: "knowledge_missed", affected: 5, base: 20, examples: [], sources: null, tool: null },
+  {
+    kind: "knowledge_unused",
+    affected: 2,
+    base: 3,
+    examples: [],
+    sources: [
+      { kind: "collection", id: "k-1", name: "Taxa 2023", attached: true, answers: 0 },
+      { kind: "website", id: "k-2", name: "Äldre riktlinjer", attached: true, answers: 0 }
+    ],
+    tool: null
+  },
+  { kind: "negative_ratings", affected: 1, base: 11, examples: [], sources: null, tool: null },
+  {
+    kind: "tool_failures",
+    affected: 6,
+    base: 10,
+    examples: [],
+    sources: null,
+    tool: {
+      kind: "capability",
+      purpose: "web_search",
+      server_name: null,
+      tool_name: null,
+      title: null,
+      calls: 10,
+      failed: 6,
+      denied: 0
+    }
+  }
+];
 
 /** The period's ratings, newest first. */
 const RATINGS = [
@@ -83,7 +131,12 @@ const spies = vi.hoisted(() => ({
   removed: new Set<string>(),
   /** What a question streams back (an SSE body). */
   answer: "",
-  toastError: vi.fn()
+  toastError: vi.fn(),
+  /** The period's findings, a finding's cases (two pages), its knowledge use and tools. */
+  findings: [] as unknown[],
+  cases: [] as unknown[],
+  knowledge: { sources: [] as unknown[], unused: [] as unknown[] },
+  tools: [] as unknown[]
 }));
 
 /** The options of a typed request, as far as these fakes read them. */
@@ -133,6 +186,57 @@ vi.mock("@/lib/api/browser", () => ({
           data: { items, total_count: items.length, next_cursor: null },
           response: new Response()
         };
+      }
+      const period = { timezone: query.timezone, source: query.source ?? null, start: "", end: "" };
+      if (path === "/api/v1/analysis/conversation-insights/findings/") {
+        return { data: { ...period, findings: spies.findings }, response: new Response() };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/findings/{kind}/") {
+        // Two cases a page: the cursor is the offset of the next one.
+        const offset = Number(query.cursor ?? 0);
+        const next = offset + 2 < spies.cases.length ? String(offset + 2) : null;
+        return {
+          data: {
+            ...period,
+            kind: init?.params?.path?.kind,
+            items: spies.cases.slice(offset, offset + 2),
+            total_count: spies.cases.length,
+            limit: query.limit,
+            next_cursor: next
+          },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/questions/top/") {
+        return {
+          data: {
+            ...period,
+            include_followups: true,
+            total_questions: 30,
+            groups: [
+              {
+                question: "Var parkerar jag?",
+                occurrences: 12,
+                share: 0.4,
+                conversations: 10,
+                unanswered: 3,
+                ratings: { positive: 2, negative: 1 },
+                knowledge: { searched: 0, missed: 0 },
+                sample_session_id: "s-1"
+              }
+            ]
+          },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/knowledge/") {
+        return {
+          data: { ...period, answers: 30, citing_answers: 20, ...spies.knowledge },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/tools/") {
+        return { data: { ...period, tools: spies.tools }, response: new Response() };
       }
       if (path === "/api/v1/analysis/assistants/{assistant_id}/questions/") {
         return {
@@ -288,6 +392,10 @@ afterEach(() => {
   spies.nextPage = null;
   spies.removed.clear();
   spies.toastError.mockReset();
+  spies.findings = [];
+  spies.cases = [];
+  spies.knowledge = { sources: [], unused: [] };
+  spies.tools = [];
 });
 
 const partner: ChatPartner & { type: "assistant" } = {
@@ -315,13 +423,26 @@ function layOutRow(width: number) {
   if (row) act(() => reportResize(row, { width, height: 700 }));
 }
 
+/** The assistant's editor, for a user who may edit it. */
+const EDITOR = "/spaces/space-1/assistants/assistant-1/edit";
+
 /** Renders the tab with room for the analysis beside the overview (`width`). */
-function renderPanel({ width = 1200 }: { width?: number } = {}) {
-  const view = renderInApp(
+function renderPanel({
+  width = 1200,
+  editHref,
+  strict = false
+}: {
+  width?: number;
+  editHref?: string;
+  /** Under StrictMode, as the app runs in development: effects run twice on mount. */
+  strict?: boolean;
+} = {}) {
+  const tab = (
     <div className="flex h-[700px] flex-col">
-      <InsightsPanel partner={partner} />
+      <InsightsPanel partner={partner} editHref={editHref} />
     </div>
   );
+  const view = renderInApp(strict ? <StrictMode>{tab}</StrictMode> : tab);
   layOutRow(width);
   return view;
 }
@@ -382,7 +503,10 @@ describe("InsightsPanel", () => {
     renderPanel();
     const tiles = await screen.findByRole("region", { name: "Nyckeltal" });
     const tile = (label: string) => within(tiles).getByText(label).closest("div")!.textContent;
-    expect(tile("Konversationer")).toMatch(/^Konversationer12\s*7 användare, 4 widget, 1 API$/);
+    // Conversations per source, never people: widget and API traffic is no one's.
+    expect(tile("Konversationer")).toMatch(
+      /^Konversationer12\s*7 från användare, 4 via widget och 1 via API$/
+    );
     expect(tile("Besvarade frågor")).toMatch(
       /Indikativt.*90\s%3 av 30 svar säger att de inte kan svara/
     );
@@ -477,13 +601,16 @@ describe("InsightsPanel", () => {
     );
     expect(within(inbox).getByText("Visar 2 av 2")).toBeTruthy();
 
-    fireEvent.click(within(inbox).getByRole("radio", { name: "Dåliga med kommentar" }));
+    // Each filter says how many ratings it holds, as the summary counts them.
+    expect(within(inbox).getByRole("radio", { name: "Alla (11)" })).toBeTruthy();
+    expect(within(inbox).getByRole("radio", { name: "Bra (8)" })).toBeTruthy();
+    fireEvent.click(within(inbox).getByRole("radio", { name: "Dåliga med kommentar (1)" }));
     await waitFor(() =>
       expect(queriesOf("feedback").at(-1)).toMatchObject({ value: -1, has_comment: true })
     );
     await waitFor(() => expect(within(inbox).getAllByRole("listitem")).toHaveLength(1));
     await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Visar 1 av 1"));
-    fireEvent.click(within(inbox).getByRole("radio", { name: "Bra" }));
+    fireEvent.click(within(inbox).getByRole("radio", { name: "Bra (8)" }));
     await waitFor(() => expect(queriesOf("feedback").at(-1)).toMatchObject({ value: 1 }));
     expect(queriesOf("feedback").at(-1)).not.toHaveProperty("has_comment");
 
@@ -819,5 +946,277 @@ describe("InsightsPanel", () => {
     });
     // Before, it said "at most 0 files".
     expect(spies.toastError).not.toHaveBeenCalled();
+  });
+
+  it("lists what to improve, worded by signal, with the actions that fit each", async () => {
+    spies.findings = FINDINGS;
+    renderPanel({ editHref: EDITOR });
+    const card = await screen.findByRole("region", { name: "Det här kan du förbättra" });
+    const items = await within(card).findAllByRole("listitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringMatching(
+        /^Många frågor får inget stöd i kunskapen5 av 20 svar som sökte i kunskapen fick ingen användbar träff\.Visa frågornaÖppna kunskapen$/
+      ),
+      expect.stringMatching(
+        /^2 kunskapskällor används aldrigTaxa 2023 och Äldre riktlinjer har inte citerats i något svar under perioden\.Öppna kunskapen$/
+      ),
+      expect.stringMatching(
+        /^Dåliga betyg med kommentar1 av 11 betyg är dåligt och har en kommentar\.Läs kommentarerna$/
+      ),
+      expect.stringMatching(
+        /^Webbsökning misslyckas ofta6 av 10 anrop misslyckades\.Redigera assistenten$/
+      )
+    ]);
+    // The knowledge and the editor open on their sections, for a user who may edit.
+    expect(
+      within(items[0]!).getByRole("link", { name: "Öppna kunskapen" }).getAttribute("href")
+    ).toBe(`${EDITOR}?section=knowledge#knowledge`);
+    expect(
+      within(items[3]!).getByRole("link", { name: "Redigera assistenten" }).getAttribute("href")
+    ).toBe(`${EDITOR}?section=capabilities#capabilities`);
+  });
+
+  it("says calmly that there is nothing to improve, and leaves the editor out for a viewer", async () => {
+    renderPanel();
+    const card = await screen.findByRole("region", { name: "Det här kan du förbättra" });
+    expect(
+      await within(card).findByText("Inga tydliga mönster att åtgärda i perioden.")
+    ).toBeTruthy();
+    spies.findings = FINDINGS;
+    cleanup();
+    renderPanel();
+    await screen.findByRole("button", { name: "Visa frågorna" });
+    expect(screen.queryByRole("link", { name: "Öppna kunskapen" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Redigera assistenten" })).toBeNull();
+  });
+
+  it("opens a finding in place of the overview, pages its examples and goes back", async () => {
+    spies.findings = FINDINGS;
+    spies.cases = [
+      miss("q-1", "no_results", -1),
+      miss("q-2", "weak_score", null),
+      miss("q-3", "uncited", 1)
+    ];
+    renderPanel({ editHref: EDITOR });
+    fireEvent.click(await screen.findByRole("button", { name: "Visa frågorna" }));
+
+    // The finding's title takes the focus; the overview is out of the way, the filters stay.
+    const heading = await screen.findByRole("heading", {
+      name: "Många frågor får inget stöd i kunskapen",
+      level: 2
+    });
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(screen.queryByRole("region", { name: "Nyckeltal" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "Widget" })).toBeTruthy();
+    expect(screen.getByText(/, alla källor$/)).toBeTruthy();
+    const evidence = screen.getByRole("region", { name: "Underlag" });
+    expect(evidence.textContent).toMatch(
+      /Svar som sökte i kunskapen20.*Utan användbar träff.*5.*Andel.*25\s%/
+    );
+    expect(
+      spies.queries["/api/v1/analysis/conversation-insights/findings/{kind}/"]?.[0]
+    ).toMatchObject({ assistant_id: "assistant-1", limit: 20 });
+
+    // Two cases a page: "Visa fler" asks for the next one and focuses its first row.
+    const table = await screen.findByRole("table", { name: "Exempel" });
+    const cells = (row: HTMLElement) =>
+      within(row)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent);
+    expect(within(table).getAllByRole("row").slice(1).map(cells)).toEqual([
+      ["Vad kostar q-1?", "Widget", "Ingen", "Dåligt", "Läs"],
+      ["Vad kostar q-2?", "Widget", "Svag", "Inget betyg", "Läs"]
+    ]);
+    expect(screen.getByText("Visar 2 av 3")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Visa fler" }));
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(4));
+    expect(
+      spies.queries["/api/v1/analysis/conversation-insights/findings/{kind}/"]?.at(-1)
+    ).toMatchObject({ cursor: "2" });
+    // Every case is in: the misses are split by reason.
+    expect(evidence.textContent).toMatch(/1 utan resultat, 1 utan citat och 1 med svag träff/);
+
+    // "Läs" opens the case's conversation read-only.
+    const read = within(table).getAllByRole("button", { name: "Läs konversationen" });
+    await waitFor(() => expect(document.activeElement).toBe(read[2]));
+    fireEvent.click(read[0]!);
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    await waitFor(() => expect(spies.previewed).toEqual(["s-q-1"]));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name: "Utforska konversationer" })).toBeNull()
+    );
+
+    // Next steps: the knowledge, for a user who may edit.
+    const next = screen.getByRole("region", { name: "Nästa steg" });
+    expect(within(next).getByRole("link", { name: "Öppna kunskapen" }).getAttribute("href")).toBe(
+      `${EDITOR}?section=knowledge#knowledge`
+    );
+
+    // The way back shows the overview and returns focus to the finding's button.
+    fireEvent.click(screen.getByRole("button", { name: "Tillbaka till insikterna" }));
+    expect(await screen.findByRole("region", { name: "Nyckeltal" })).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Visa frågorna" }))
+    );
+  });
+
+  it("puts the finding's question in the analysis' composer without sending it", async () => {
+    spies.findings = FINDINGS;
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Visa frågorna" }));
+    await screen.findByRole("heading", { name: "Många frågor får inget stöd i kunskapen" });
+    fireEvent.click(askButton());
+
+    const field = await screen.findByRole("textbox", { name: "Fråga om användningen" });
+    await waitFor(() =>
+      expect((field as HTMLTextAreaElement).value).toBe(
+        "Vad frågar användarna om som kunskapen inte täcker?"
+      )
+    );
+    expect(questions()).toEqual([]);
+  });
+
+  it("puts the finding's question in the composer once under StrictMode, however often it is asked", async () => {
+    const missed = "Vad frågar användarna om som kunskapen inte täcker?";
+    const unanswered = "Vilka frågor kan assistenten inte svara på, och varför?";
+    spies.findings = [
+      ...FINDINGS,
+      { kind: "unanswered", affected: 4, base: 30, examples: [], sources: null, tool: null }
+    ];
+    renderPanel({ strict: true });
+    const value = () =>
+      (screen.getByRole("textbox", { name: "Fråga om användningen" }) as HTMLTextAreaElement).value;
+    fireEvent.click(await screen.findByRole("button", { name: "Visa frågorna" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen om det här" }));
+    await waitFor(() => expect(value()).toBe(missed));
+
+    // Closed and opened again from the same finding: the question is there once, nothing offered.
+    fireEvent.click(screen.getByRole("button", { name: "Stäng analysen" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fråga analysen om det här" }));
+    await screen.findByRole("complementary", { name: "Insiktsanalys" });
+    expect(value()).toBe(missed);
+    expect(screen.queryByRole("button", { name: "Använd förslaget" })).toBeNull();
+
+    // The finding left and opened again: its question already ends the draft.
+    fireEvent.click(screen.getByRole("button", { name: "Tillbaka till insikterna" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Visa frågorna" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen om det här" }));
+    expect(value()).toBe(missed);
+    expect(screen.queryByRole("button", { name: "Använd förslaget" })).toBeNull();
+
+    // Another finding's question does not replace the draft: it is offered, and added once.
+    fireEvent.click(screen.getByRole("button", { name: "Tillbaka till insikterna" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Visa svaren" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen om det här" }));
+    const use = await screen.findByRole("button", { name: "Använd förslaget" });
+    expect(value()).toBe(missed);
+    fireEvent.click(use);
+    await waitFor(() => expect(value()).toBe(`${missed}\n${unanswered}`));
+    expect(questions()).toEqual([]);
+  });
+
+  it("offers the finding's question beside a typed one instead of replacing it", async () => {
+    spies.findings = FINDINGS;
+    renderPanel();
+    const panel = openAnalysis();
+    const field = await within(panel).findByRole("textbox", { name: "Fråga om användningen" });
+    fireEvent.change(field, { target: { value: "Min egen fråga" } });
+
+    fireEvent.click(await screen.findByRole("button", { name: "Visa frågorna" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen om det här" }));
+    expect((field as HTMLTextAreaElement).value).toBe("Min egen fråga");
+    expect(
+      await within(panel).findByText(
+        "Förslag: ”Vad frågar användarna om som kunskapen inte täcker?”"
+      )
+    ).toBeTruthy();
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Använd förslaget" }));
+    await waitFor(() =>
+      expect((field as HTMLTextAreaElement).value).toBe(
+        "Min egen fråga\nVad frågar användarna om som kunskapen inte täcker?"
+      )
+    );
+    expect(within(panel).queryByRole("button", { name: "Använd förslaget" })).toBeNull();
+    expect(questions()).toEqual([]);
+  });
+
+  it("shows the bad ratings' comments in the feedback inbox", async () => {
+    spies.findings = FINDINGS;
+    renderPanel();
+    fireEvent.click(await screen.findByRole("button", { name: "Läs kommentarerna" }));
+    const inbox = screen.getByRole("region", { name: "Återkoppling från användarna" });
+    expect(document.activeElement).toBe(
+      within(inbox).getByRole("heading", { name: "Återkoppling från användarna" })
+    );
+    expect(
+      within(inbox).getByRole("radio", { name: "Dåliga med kommentar (1)", checked: true })
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(queriesOf("feedback").at(-1)).toMatchObject({ value: -1, has_comment: true })
+    );
+  });
+
+  it("shows the commonest questions, the knowledge in use and the tools", async () => {
+    spies.knowledge = {
+      sources: [
+        { kind: "collection", id: "k-1", name: "Bygglovsguiden", attached: true, answers: 14 },
+        { kind: "website", id: "k-2", name: "sundsvall.se", attached: false, answers: 7 }
+      ],
+      unused: [{ kind: "collection", id: "k-3", name: "Taxa 2023", attached: true, answers: 0 }]
+    };
+    spies.tools = [
+      {
+        kind: "tool",
+        purpose: null,
+        server_name: "Ärendesystemet",
+        tool_name: "find_case",
+        title: "Hitta ärende",
+        calls: 9,
+        failed: 2,
+        denied: 1
+      }
+    ];
+    renderPanel();
+    const common = await screen.findByRole("table", { name: "Vanligaste frågorna" });
+    const [row] = within(common).getAllByRole("row").slice(1);
+    // Answered 75 %, ratings in words, and no knowledge share without a search.
+    expect(
+      within(row!)
+        .getAllByRole("cell")
+        .map((cell) => cell.textContent)
+    ).toEqual([
+      "Var parkerar jag?",
+      "12",
+      "75\u00a0%",
+      "2 bra, 1 dålig",
+      "–Ingen sökning i kunskapen"
+    ]);
+    fireEvent.click(within(row!).getByRole("button", { name: "Var parkerar jag?" }));
+    await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    await waitFor(() => expect(spies.previewed).toEqual(["s-1"]));
+
+    const knowledge = screen.getByRole("region", { name: "Kunskapen som används" });
+    expect(within(knowledge).getAllByRole("listitem")[1]!.textContent).toMatch(
+      /^sundsvall\.seWebbplatsinte längre kopplad7 svar$/
+    );
+    expect(
+      within(knowledge).getByRole("list", { name: "Citeras aldrig under perioden" }).textContent
+    ).toBe("Taxa 2023Samling");
+    const tools = screen.getByRole("region", { name: "Verktyg" });
+    expect(within(tools).getByRole("listitem").textContent).toBe(
+      "Hitta ärendeÄrendesystemet · 2 misslyckades · 1 nekades9 anrop"
+    );
+  });
+
+  it("leaves out the knowledge and tools of a target without any", async () => {
+    renderPanel();
+    await screen.findByRole("table", { name: "Vanligaste frågorna" });
+    await waitFor(() => expect(queriesOf("knowledge").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Kunskapen som används" })).toBeNull()
+    );
+    expect(screen.queryByRole("region", { name: "Verktyg" })).toBeNull();
   });
 });

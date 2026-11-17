@@ -3,9 +3,15 @@ import {
   activityDays,
   answeredShare,
   countChange,
+  feedbackCounts,
+  findingEvidence,
   goodAnswerShare,
+  groupAnsweredShare,
+  groupKnowledgeHitShare,
   knowledgeHitShare,
+  knowledgeMissReasons,
   parseInsightSource,
+  parseOpenableFinding,
   questionsPerConversation,
   ratedAnswerShare,
   returningUserShare,
@@ -35,8 +41,8 @@ function period(overrides: Partial<InsightPeriodSummary> = {}): InsightPeriodSum
     returning_users: 123,
     unanswered: 265,
     knowledge: { searched: 2900, missed: 464 },
-    answer_ratings: { positive: 165, negative: 47, with_comment: 19 },
-    conversation_ratings: { positive: 0, negative: 0 },
+    answer_ratings: { positive: 165, negative: 47, with_comment: 19, negative_with_comment: 12 },
+    conversation_ratings: { positive: 4, negative: 6, with_comment: 3, negative_with_comment: 2 },
     ...overrides
   };
 }
@@ -62,7 +68,7 @@ describe("insight figures", () => {
       users: 0,
       unanswered: 0,
       knowledge: { searched: 0, missed: 0 },
-      answer_ratings: { positive: 0, negative: 0, with_comment: 0 }
+      answer_ratings: { positive: 0, negative: 0, with_comment: 0, negative_with_comment: 0 }
     });
     expect(answeredShare(empty)).toBeNull();
     expect(goodAnswerShare(empty)).toBeNull();
@@ -90,6 +96,67 @@ describe("insight figures", () => {
     expect(shareChange(0.84, 0.84)).toEqual({ kind: "same" });
     expect(shareChange(0.5, null)).toEqual({ kind: "none" });
     expect(shareChange(null, 0.5)).toEqual({ kind: "none" });
+  });
+
+  it("counts the feedback inbox's filters from answer and conversation ratings", () => {
+    expect(feedbackCounts(period())).toEqual({
+      all: 165 + 47 + 4 + 6,
+      bad_commented: 14,
+      good: 169
+    });
+  });
+
+  it("takes a finding's cases and base from the figures the server flags it by", () => {
+    const figures = period();
+    expect(findingEvidence("knowledge_missed", figures, 999)).toEqual({
+      affected: 464,
+      base: 2900
+    });
+    expect(findingEvidence("knowledge_missed", period({ knowledge: null }), 3)).toBeNull();
+    expect(findingEvidence("unanswered", figures, null)).toEqual({ affected: 265, base: 2946 });
+    // Rephrasing is counted by its cases; until they are in there is no figure.
+    expect(findingEvidence("rephrasing", figures, 74)).toEqual({ affected: 74, base: 1284 });
+    expect(findingEvidence("rephrasing", figures, null)).toBeNull();
+    expect(parseOpenableFinding("rephrasing")).toBe("rephrasing");
+    expect(parseOpenableFinding("tool_failures")).toBeNull();
+  });
+
+  it("splits knowledge misses by reason only once every case is loaded", () => {
+    const miss = (reason: "no_results" | "uncited" | "weak_score", id: string) => ({
+      kind: "knowledge_missed" as const,
+      reason,
+      question_id: id,
+      question: "Vad kostar bygglov?",
+      session_id: "s",
+      source: "user" as const,
+      created_at: "2026-10-01T10:00:00Z",
+      best_score: null,
+      rating: null
+    });
+    const cases = [miss("weak_score", "1"), miss("no_results", "2"), miss("no_results", "3")];
+    expect(knowledgeMissReasons(cases, true)).toEqual([
+      { reason: "no_results", count: 2 },
+      { reason: "weak_score", count: 1 }
+    ]);
+    expect(knowledgeMissReasons(cases, false)).toBeNull();
+  });
+
+  it("derives a common question's answered and knowledge shares", () => {
+    const group = {
+      question: "Behöver jag bygglov för altan?",
+      occurrences: 40,
+      share: 0.1,
+      conversations: 38,
+      unanswered: 10,
+      ratings: { positive: 3, negative: 1 },
+      knowledge: { searched: 20, missed: 5 },
+      sample_session_id: "s"
+    };
+    expect(groupAnsweredShare(group)).toBeCloseTo(0.75);
+    expect(groupKnowledgeHitShare(group)).toBeCloseTo(0.75);
+    // Nothing searched, or no knowledge at all: no share.
+    expect(groupKnowledgeHitShare({ ...group, knowledge: { searched: 0, missed: 0 } })).toBeNull();
+    expect(groupKnowledgeHitShare({ ...group, knowledge: null })).toBeNull();
   });
 
   it("lists the sources with conversations and reads a source from an address", () => {

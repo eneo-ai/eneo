@@ -97,7 +97,7 @@ import { StartState, type StartHeadingLevel } from "./start-state";
 import { ToolResultsContext, conversationToolResults, type ToolResultSource } from "./tool-results";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
-import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
+import { chatDraftOwner, useChatDraft, withLine } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -214,6 +214,24 @@ function previewFilesKey(files: readonly PreviewFile[]): string {
 export type ChatDebugHandle = { openDebug: (trigger: HTMLElement | null) => boolean };
 
 /**
+ * What a page may do with the composer's unsent text (the insights analysis
+ * offers a question about a finding): read it and put text in it. Both
+ * writes are decided on the draft as it is when they land, so doing one
+ * twice does it once. Nothing either does sends a question.
+ */
+export type ComposerDraftHandle = {
+  /** The text in the composer, not yet sent. */
+  text: () => string;
+  /** Puts `text` in the composer when it is empty; a draft is never replaced. */
+  fill: (text: string) => void;
+  /**
+   * Puts `text` in the composer after what is typed there, on a line of its
+   * own (`withLine`), and focuses the field.
+   */
+  offer: (text: string) => void;
+};
+
+/**
  * A conversation on other endpoints than the chat API (the insights chat):
  * its turns go through its own transport (`createChatTransport` with the
  * endpoints' request) and its tool calls' results are read from its own
@@ -301,6 +319,8 @@ type ChatViewProps = {
    * conversation, offering a new one.
    */
   onGone?: () => void;
+  /** The composer's unsent text, for a page that offers a question to send. */
+  draftRef?: Ref<ComposerDraftHandle>;
 };
 
 /**
@@ -347,7 +367,8 @@ function ConversationView({
   api,
   start,
   lead,
-  onGone
+  onGone,
+  draftRef
 }: ChatViewProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -810,6 +831,19 @@ function ConversationView({
   // A question that has left the composer keeps the view in the conversation while
   // it waits, for its uploads and then a partner save, until `sendMessage` adds it.
   const started = messages.length > 0 || pendingQuestion !== null || queuedQuestion !== null;
+  useImperativeHandle(
+    draftRef,
+    () => ({
+      text: () => input,
+      fill: (text) => setInput((current) => (current.trim() ? current : text)),
+      offer: (text) => {
+        setInput((current) => withLine(current, text));
+        const field = started ? dockInputRef : startDocked ? startDockInputRef : startInputRef;
+        field.current?.focus();
+      }
+    }),
+    [input, started, startDocked, setInput]
+  );
 
   // A tool waiting for a decision in the latest answer: on a phone the
   // decision takes the composer's place (decision 26); wider, the card in

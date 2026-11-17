@@ -24,12 +24,13 @@ import {
 } from "@/features/insights/insight-figures";
 import type { InsightRange } from "@/features/insights/insights-range";
 import { PeriodChange } from "@/features/insights/period-change";
-import { SOURCE_STYLE, SourceLegend } from "@/features/insights/source-tag";
+import { SOURCE_STYLE, SourceLegend, useSourceSplit } from "@/features/insights/source-tag";
 import {
   fetchInsightTargets,
   INSIGHT_TARGETS_SEARCH_MAX,
   nextTargetOffset,
   type InsightTarget,
+  type InsightTargetPage,
   type InsightTargetSort
 } from "./insights";
 
@@ -87,6 +88,44 @@ function SourceBar({ counts }: { counts: SourceCounts }) {
         />
       ))}
     </div>
+  );
+}
+
+/**
+ * The conversations of every target in the list (not only the page), split by
+ * source in the words the insights view uses, with their change when compared:
+ * "Konversationer i perioden: 9 412, varav 6 120 från användare, 2 870 via
+ * widget och 422 via API".
+ */
+function TargetTotals({
+  totals,
+  compare
+}: {
+  totals: InsightTargetPage["totals"];
+  compare: boolean;
+}) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const sourceSplit = useSourceSplit();
+  const { conversations } = totals;
+  const split = sourceSplit(conversations);
+  const total = format.number(conversations.total);
+  const counted =
+    split === null
+      ? total
+      : sourceParts(conversations).length === 1
+        ? split
+        : t("insights_split_of_total", { total, split });
+  return (
+    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
+      <span>{t("insights_conversations_in_period", { conversations: counted })}</span>
+      {compare ? (
+        <PeriodChange
+          change={countChange(conversations.total, totals.previous?.conversations.total)}
+          unit="percent"
+        />
+      ) : null}
+    </p>
   );
 }
 
@@ -317,6 +356,7 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
             </div>
           </div>
         </div>
+        {pages?.[0] ? <TargetTotals totals={pages[0].totals} compare={compare} /> : null}
         <QueryStateBoundary query={targets} rows={5} height={56}>
           {() =>
             rows.length === 0 ? (

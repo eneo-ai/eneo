@@ -397,7 +397,11 @@ export function ChatPage({
               className="flex min-h-0 min-w-0 flex-1 flex-col"
             >
               {insightsVisited && (
-                <InsightsPanel partner={insightPartner} hidden={viewTab !== "insights"} />
+                <InsightsPanel
+                  partner={insightPartner}
+                  editHref={editHref}
+                  hidden={viewTab !== "insights"}
+                />
               )}
             </div>
           )}

@@ -10,7 +10,12 @@ import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import { groupChatQueryOptions } from "@/features/group-chats/use-group-chat";
 import { AssistantInsights, type InsightsPartner } from "@/features/insights/assistant-insights";
-import { insightViewSearch, readInsightViewSearch } from "./assistant-insights-view";
+import {
+  insightFindingSearch,
+  insightViewSearch,
+  readInsightFindingSearch,
+  readInsightViewSearch
+} from "./assistant-insights-view";
 
 /**
  * The height from the top of `frame` to the end of the page panel (main),
@@ -61,22 +66,28 @@ function FilledFrame({ children }: { children: ReactNode }) {
 /**
  * An assistant's or group chat's insights in the administration: its name
  * with the way back to the organisation's insights, over the same insights
- * view as the chat page's Insikter tab. The filters live in the address
- * (`?from=&to=&source=&compare=`), so a link or a reload keeps them. A target
- * with insights switched off, or whose insights the caller may not see, says
- * so instead of asking for them.
+ * view as the chat page's Insikter tab. The filters and the finding open in
+ * place of the overview live in the address
+ * (`?from=&to=&source=&compare=&finding=`), so a link or a reload keeps them.
+ * The editor's links are there for a caller who may edit the target. A
+ * target with insights switched off, or whose insights the caller may not
+ * see, says so instead of asking for them.
  */
 function TargetInsightsPage({
   partner,
+  editorHref,
   offDescription
 }: {
   partner: InsightsPartner;
+  /** The target's editor, where the caller may edit it; null otherwise. */
+  editorHref: string | null;
   /** Where the insights switch is ("Slå på insikter i assistentens inställningar …"). */
   offDescription: string;
 }) {
   const t = useTranslations();
   const searchParams = useSearchParams();
   const filters = readInsightViewSearch(searchParams);
+  const finding = readInsightFindingSearch(searchParams);
 
   const header = (
     <PageHeader
@@ -116,6 +127,9 @@ function TargetInsightsPage({
         partner={partner}
         filters={filters}
         onFiltersChange={(next) => replaceUrl(insightViewSearch(next, searchParams.toString()))}
+        finding={finding}
+        onFindingChange={(next) => replaceUrl(insightFindingSearch(next, searchParams.toString()))}
+        editorHref={editorHref}
         header={header}
         framed
       />
@@ -137,6 +151,11 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
         insightEnabled: assistant.insight_enabled,
         permissions: assistant.permissions
       }}
+      editorHref={
+        assistant.permissions?.includes("edit")
+          ? `/spaces/${assistant.space_id}/assistants/${assistant.id}/edit`
+          : null
+      }
       offDescription={t("insights_off_description")}
     />
   );
@@ -156,6 +175,11 @@ export function GroupChatInsightsPage({ groupChatId }: { groupChatId: string }) 
         insightEnabled: groupChat.insight_enabled,
         permissions: groupChat.permissions
       }}
+      editorHref={
+        groupChat.permissions?.includes("edit")
+          ? `/spaces/${groupChat.space_id}/group-chats/${groupChat.id}/edit`
+          : null
+      }
       offDescription={t("insights_off_description_group_chat")}
     />
   );

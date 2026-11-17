@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  insightFindingSearch,
   insightViewSearch,
+  readInsightFindingSearch,
   readInsightRangeSearch,
   readInsightViewSearch,
   validateInsightViewSearch
@@ -59,5 +61,30 @@ describe("assistant insight URL period", () => {
         fallback
       )
     ).toEqual({ from: "2026-09-01", to: "2026-09-30", source: "api_key", compare: "1" });
+  });
+  it("keeps the open finding in the address beside the filters", () => {
+    const query = insightFindingSearch("knowledge_missed", "?from=2026-09-01&to=2026-09-30");
+    expect(readInsightFindingSearch(new URLSearchParams(query))).toBe("knowledge_missed");
+    expect(new URLSearchParams(query).get("from")).toBe("2026-09-01");
+    // A new filter keeps the finding; the way back drops it.
+    const filtered = insightViewSearch(
+      readInsightViewSearch(new URLSearchParams(query), fallback),
+      query
+    );
+    expect(readInsightFindingSearch(new URLSearchParams(filtered))).toBe("knowledge_missed");
+    expect(new URLSearchParams(insightFindingSearch(null, query)).has("finding")).toBe(false);
+    // Only a finding with a view of its own is kept.
+    expect(
+      validateInsightViewSearch(
+        { from: "2026-09-01", to: "2026-09-30", finding: "unanswered" },
+        fallback
+      )
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30", finding: "unanswered" });
+    expect(
+      validateInsightViewSearch(
+        { from: "2026-09-01", to: "2026-09-30", finding: "tool_failures" },
+        fallback
+      )
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
   });
 });

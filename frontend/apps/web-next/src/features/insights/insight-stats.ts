@@ -2,7 +2,11 @@ import { queryOptions } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { ChatPartner } from "@/lib/chat/types";
-import { insightSourceQuery, type InsightFilters } from "./insight-figures";
+import {
+  insightSourceQuery,
+  type InsightFilters,
+  type OpenableFindingKind
+} from "./insight-figures";
 import { browserTimeZone, insightPartnerQuery, insightRangeParams } from "./insights-range";
 
 type Target = Pick<ChatPartner, "type" | "id">;
@@ -54,6 +58,124 @@ export function insightActivityQueryOptions(partner: Target, filters: InsightFil
         })
       )
   });
+}
+
+/**
+ * `GET /analysis/conversation-insights/findings/`: what to look at in the
+ * period, most affected first; empty when nothing passes the thresholds.
+ */
+export function insightFindingsQueryOptions(partner: Target, filters: InsightFilters) {
+  const query = windowQuery(filters);
+  return queryOptions({
+    queryKey: ["conversation-insights", "findings", partner.type, partner.id, query],
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/findings/", {
+          params: { query: { ...query, ...insightPartnerQuery(partner) } },
+          signal
+        })
+      )
+  });
+}
+
+/** How many of the commonest questions "Vanligaste frågorna" lists. */
+export const TOP_QUESTIONS_LIMIT = 10;
+
+/** `GET /analysis/conversation-insights/questions/top/`: the commonest questions and how they fared. */
+export function insightTopQuestionsQueryOptions(partner: Target, filters: InsightFilters) {
+  const query = { ...windowQuery(filters), limit: TOP_QUESTIONS_LIMIT };
+  return queryOptions({
+    queryKey: ["conversation-insights", "top-questions", partner.type, partner.id, query],
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/questions/top/", {
+          params: { query: { ...query, ...insightPartnerQuery(partner) } },
+          signal
+        })
+      )
+  });
+}
+
+/** `GET /analysis/conversation-insights/knowledge/`: the knowledge the answers cited, and what none cited. */
+export function insightKnowledgeQueryOptions(partner: Target, filters: InsightFilters) {
+  const query = windowQuery(filters);
+  return queryOptions({
+    queryKey: ["conversation-insights", "knowledge", partner.type, partner.id, query],
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/knowledge/", {
+          params: { query: { ...query, ...insightPartnerQuery(partner) } },
+          signal
+        })
+      )
+  });
+}
+
+/** `GET /analysis/conversation-insights/tools/`: the tools the answers called, most called first. */
+export function insightToolsQueryOptions(partner: Target, filters: InsightFilters) {
+  const query = windowQuery(filters);
+  return queryOptions({
+    queryKey: ["conversation-insights", "tools", partner.type, partner.id, query],
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/tools/", {
+          params: { query: { ...query, ...insightPartnerQuery(partner) } },
+          signal
+        })
+      )
+  });
+}
+
+/** How many cases of a finding a page of its examples holds. */
+export const FINDING_CASES_PAGE_SIZE = 20;
+
+/**
+ * `GET /analysis/conversation-insights/findings/{kind}/`: the cases behind a
+ * finding, a page at a time from `cursor`.
+ */
+export function fetchFindingCases({
+  partner,
+  filters,
+  kind,
+  cursor,
+  signal
+}: {
+  partner: Target;
+  filters: InsightFilters;
+  kind: OpenableFindingKind;
+  cursor: string | undefined;
+  signal?: AbortSignal;
+}) {
+  return unwrap(
+    browserApi.GET("/api/v1/analysis/conversation-insights/findings/{kind}/", {
+      params: {
+        path: { kind },
+        query: {
+          ...windowQuery(filters),
+          ...insightPartnerQuery(partner),
+          limit: FINDING_CASES_PAGE_SIZE,
+          cursor
+        }
+      },
+      signal
+    })
+  );
+}
+
+/** The query key of a finding's cases: the target, the finding and the filters. */
+export function findingCasesKey(
+  partner: Target,
+  filters: InsightFilters,
+  kind: OpenableFindingKind
+) {
+  return [
+    "conversation-insights",
+    "finding-cases",
+    partner.type,
+    partner.id,
+    kind,
+    windowQuery(filters)
+  ] as const;
 }
 
 /**

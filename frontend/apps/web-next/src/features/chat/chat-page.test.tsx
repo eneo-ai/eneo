@@ -126,8 +126,18 @@ const api = vi.hoisted(() => ({
               returning_users: 1,
               unanswered: 2,
               knowledge: null,
-              answer_ratings: { positive: 3, negative: 1, with_comment: 0 },
-              conversation_ratings: { positive: 0, negative: 0 }
+              answer_ratings: {
+                positive: 3,
+                negative: 1,
+                with_comment: 0,
+                negative_with_comment: 0
+              },
+              conversation_ratings: {
+                positive: 0,
+                negative: 0,
+                with_comment: 0,
+                negative_with_comment: 0
+              }
             }
           },
           response: new Response()
@@ -139,6 +149,14 @@ const api = vi.hoisted(() => ({
           response: new Response()
         };
       }
+      // Nothing to improve, no common questions, knowledge or tools.
+      const empty = {
+        "/api/v1/analysis/conversation-insights/findings/": { findings: [] },
+        "/api/v1/analysis/conversation-insights/questions/top/": { groups: [] },
+        "/api/v1/analysis/conversation-insights/knowledge/": { sources: [], unused: [] },
+        "/api/v1/analysis/conversation-insights/tools/": { tools: [] }
+      }[path];
+      if (empty) return { data: empty, response: new Response() };
       return { data: { items: [], next_cursor: null }, response: new Response() };
     }
   ),

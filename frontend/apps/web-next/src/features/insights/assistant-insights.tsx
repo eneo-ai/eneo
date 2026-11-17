@@ -12,18 +12,32 @@ import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { cn } from "@/lib/utils";
 import { QuestionHistory } from "@/features/admin/insights/question-history";
 import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "@/features/chat/side-panel/side-panel";
-import { InsightsAnalysis } from "./chat/insights-analysis";
+import { InsightsAnalysis, type AnalysisSuggestion } from "./chat/insights-analysis";
 import { InsightCitationsContext } from "./chat/insight-citations";
 import { ExploreConversationsDialog } from "./explore-conversations-dialog";
-import { FeedbackInbox } from "./feedback-inbox";
-import { parseInsightSource, type InsightFilters } from "./insight-figures";
+import { FeedbackInbox, type FeedbackFilter } from "./feedback-inbox";
+import { FINDING_SUGGESTION, FindingView } from "./finding-view";
+import {
+  feedbackCounts,
+  parseInsightSource,
+  type InsightFilters,
+  type OpenableFindingKind
+} from "./insight-figures";
+import { findingTrigger, insightEditorLinks, InsightFindings } from "./insight-findings";
 import {
   insightActivityQueryOptions,
+  insightFindingsQueryOptions,
+  insightKnowledgeQueryOptions,
   insightSummaryQueryOptions,
+  insightToolsQueryOptions,
+  insightTopQuestionsQueryOptions,
   isInsightRefusal
 } from "./insight-stats";
 import { InsightsOverview } from "./insights-overview";
 import { InsightsRangePicker } from "./insights-range-picker";
+import { KnowledgeUseCard } from "./knowledge-use";
+import { ToolUseCard } from "./tool-use";
+import { TopQuestionsCard } from "./top-questions";
 
 /** An assistant or group chat whose insights are shown. */
 export type InsightsPartner = ChatPartner & { type: "assistant" | "group-chat" };
@@ -36,6 +50,11 @@ const PANEL_HANDLE_WIDTH = 1;
 /** The analysis panel's whereabouts: not yet opened (not mounted), open, or closed (kept). */
 type PanelState = "unopened" | "open" | "closed";
 
+/** The question offered to the analysis for the finding on screen. */
+type FindingSuggestion = AnalysisSuggestion & { kind: OpenableFindingKind };
+
+let suggestionCounter = 0;
+
 /**
  * The insights of an assistant or group chat, one view in both places it is
  * shown: the chat page's Insikter tab and the administration's page for an
@@ -46,18 +65,28 @@ type PanelState = "unopened" | "open" | "closed";
  * the source (every source, or only users, the widget or API keys) and the
  * comparison with the previous period. The administration keeps them in the
  * address, the chat page in the tab. The source applies to everything that
- * reads conversations. Under the filters: the period's figures, its activity
- * per day, the conversations themselves behind "Utforska konversationer",
- * the users' ratings ("Återkoppling från användarna") and, for an assistant,
- * the question history with each answer's rating.
+ * reads conversations. Under the filters: the period's figures, what to
+ * improve ("Det här kan du förbättra"), its activity per day, the commonest
+ * questions, the knowledge and the tools the answers used, the conversations
+ * themselves behind "Utforska konversationer", the users' ratings
+ * ("Återkoppling från användarna") and, for an assistant, the question
+ * history with each answer's rating. Each section loads, keeps its figures
+ * while the filters change and fails on its own.
+ *
+ * A finding with examples opens in place of the overview (`finding`, kept
+ * where the mount keeps the filters), with the filters above it; its way back
+ * returns focus to the finding's button. Its links to the knowledge and the
+ * editor are there only where the viewer may edit the target (`editorHref`).
  *
  * "Fråga analysen" opens the analysis in a side panel (Insiktsanalys): beside
  * the overview where the overview keeps 480 px (decision 14, measured on the
  * view's row, with a handle to resize it as on the flow page), and over the
- * view otherwise. The analysis stays mounted when the panel closes, so
- * opening it again shows the same analysis. A conversation an analysis cites
- * or the question history or a rating links to opens read-only in
- * "Utforska konversationer".
+ * view otherwise. Asked from a finding, it offers the finding's question: in
+ * the composer of an analysis not yet started with nothing typed, otherwise
+ * as a suggestion in the panel to use. Nothing is sent without a click. The
+ * analysis stays mounted when the panel closes, so opening it again shows the
+ * same analysis. A conversation an analysis cites or the question history or
+ * a rating links to opens read-only in "Utforska konversationer".
  *
  * Where the target's insights are not the caller's to see (403), the view
  * says so instead.
@@ -66,6 +95,9 @@ export function AssistantInsights({
   partner,
   filters,
   onFiltersChange,
+  finding = null,
+  onFindingChange,
+  editorHref = null,
   header,
   framed = false,
   hidden = false
@@ -73,6 +105,11 @@ export function AssistantInsights({
   partner: InsightsPartner;
   filters: InsightFilters;
   onFiltersChange: (filters: InsightFilters) => void;
+  /** The finding open in place of the overview; none for the overview. */
+  finding?: OpenableFindingKind | null;
+  onFindingChange: (finding: OpenableFindingKind | null) => void;
+  /** The target's editor, where the viewer may edit it; null otherwise. */
+  editorHref?: string | null;
   /** The page's own header, above the filters (the administration's page header). */
   header?: ReactNode;
   /** The view sits in a page frame that already insets it (PageFrame). */
@@ -85,8 +122,14 @@ export function AssistantInsights({
   const main = useRef<HTMLDivElement>(null);
   const aside = useRef<HTMLElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  /** What opened the analysis: focus goes back to it when the panel closes. */
+  const opener = useRef<HTMLElement | null>(null);
+  const findingHeading = useRef<HTMLHeadingElement>(null);
+  const inboxHeading = useRef<HTMLHeadingElement>(null);
   const [explore, setExplore] = useState<{ sessionId: string | null } | null>(null);
   const [panel, setPanel] = useState<PanelState>("unopened");
+  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackFilter>("all");
+  const [suggestion, setSuggestion] = useState<FindingSuggestion | null>(null);
   const open = panel === "open";
   const { range } = filters;
   // A new source or comparison keeps the figures on screen until the new ones are in.
@@ -98,7 +141,25 @@ export function AssistantInsights({
     ...insightActivityQueryOptions(partner, filters),
     placeholderData: keepPreviousData
   });
+  const findings = useQuery({
+    ...insightFindingsQueryOptions(partner, filters),
+    placeholderData: keepPreviousData
+  });
+  const topQuestions = useQuery({
+    ...insightTopQuestionsQueryOptions(partner, filters),
+    placeholderData: keepPreviousData
+  });
+  const knowledge = useQuery({
+    ...insightKnowledgeQueryOptions(partner, filters),
+    placeholderData: keepPreviousData
+  });
+  const tools = useQuery({
+    ...insightToolsQueryOptions(partner, filters),
+    placeholderData: keepPreviousData
+  });
   const change = (next: Partial<InsightFilters>) => onFiltersChange({ ...filters, ...next });
+  const editor = insightEditorLinks(partner.type, editorHref);
+  const targetKind = partner.type === "group-chat" ? "group_chat" : "assistant";
 
   // Beside the overview while it keeps its 480 px, measured on the row they
   // share; over the view otherwise. Until the row is measured it is over it.
@@ -117,13 +178,16 @@ export function AssistantInsights({
   });
   const covered = open && !beside;
 
-  // Focus moves into the panel when it opens and back to "Fråga analysen"
-  // when it closes. A panel that comes to cover the view (a narrower
-  // window) takes the focus the overview had: the overview is inert under it.
+  // Focus moves into the panel when it opens and back to what opened it
+  // ("Fråga analysen") when it closes. A panel that comes to cover the view
+  // (a narrower window) takes the focus the overview had: the overview is
+  // inert under it.
   const wasOpen = useRef(false);
   useEffect(() => {
     if (open && !wasOpen.current) aside.current?.focus();
-    if (!open && wasOpen.current) trigger.current?.focus();
+    if (!open && wasOpen.current) {
+      (opener.current?.isConnected ? opener.current : trigger.current)?.focus();
+    }
     wasOpen.current = open;
   }, [open]);
   useEffect(() => {
@@ -134,11 +198,45 @@ export function AssistantInsights({
     }
   }, [covered]);
 
+  // A finding opened here moves focus to its title; its way back returns
+  // focus to the finding's button. One open in the address at load is left
+  // where it is.
+  const shownFinding = useRef(finding);
+  useEffect(() => {
+    const was = shownFinding.current;
+    shownFinding.current = finding;
+    if (was === finding) return;
+    if (finding) findingHeading.current?.focus();
+    else if (was) (findingTrigger(main.current, was) ?? trigger.current)?.focus();
+  }, [finding]);
+
   function openPanel() {
     if (open) aside.current?.focus();
     else setPanel("open");
   }
 
+  /** "Fråga analysen": from a finding, with the finding's question offered. */
+  function askAnalysis(from: HTMLElement | null) {
+    opener.current = from;
+    if (finding && suggestion?.kind !== finding) {
+      suggestionCounter += 1;
+      setSuggestion({ id: suggestionCounter, kind: finding, text: t(FINDING_SUGGESTION[finding]) });
+    }
+    openPanel();
+  }
+
+  function showFinding(next: OpenableFindingKind | null) {
+    setSuggestion(null);
+    onFindingChange(next);
+  }
+
+  /** "Läs kommentarerna": the inbox, filtered to the bad ratings with a comment. */
+  function readComments() {
+    setFeedbackFilter("bad_commented");
+    inboxHeading.current?.focus();
+  }
+
+  const openConversation = (sessionId: string) => setExplore({ sessionId });
   const column = cn(
     "flex w-full min-w-0 flex-col gap-6",
     framed ? "pe-4 pb-2" : "wide:px-6 max-w-4xl p-4"
@@ -160,7 +258,7 @@ export function AssistantInsights({
   }
 
   return (
-    <InsightCitationsContext value={(sessionId) => setExplore({ sessionId })}>
+    <InsightCitationsContext value={openConversation}>
       <div ref={row} className="relative flex min-h-0 min-w-0 flex-1">
         <div ref={main} inert={covered} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
           <div className={column}>
@@ -198,28 +296,75 @@ export function AssistantInsights({
                 label={t("insights_ask_analysis")}
                 variant="primary"
                 icon={<MessageSquareText className="size-4" aria-hidden="true" />}
-                onClick={openPanel}
+                onClick={(event) => askAnalysis(event.currentTarget)}
               />
             </section>
-            <InsightsOverview
-              summary={summary}
-              activity={activity}
-              filters={filters}
-              onExplore={() => setExplore({ sessionId: null })}
-            />
-            <FeedbackInbox
-              partner={partner}
-              filters={filters}
-              onOpenConversation={(sessionId) => setExplore({ sessionId })}
-            />
-            {partner.type === "assistant" && (
-              <QuestionHistory
-                assistantId={partner.id}
-                range={range}
-                source={filters.source}
-                onOpenConversation={(sessionId) => setExplore({ sessionId })}
+            <div hidden={finding !== null} className="flex flex-col gap-6">
+              <InsightsOverview
+                summary={summary}
+                activity={activity}
+                filters={filters}
+                findings={
+                  <InsightFindings
+                    findings={findings}
+                    targetKind={targetKind}
+                    editor={editor}
+                    onOpen={showFinding}
+                    onReadComments={readComments}
+                  />
+                }
+                details={
+                  <>
+                    <div className="flex flex-wrap items-start gap-5">
+                      <TopQuestionsCard
+                        questions={topQuestions}
+                        onOpenConversation={openConversation}
+                        className="flex-[999_1_560px]"
+                      />
+                      <KnowledgeUseCard
+                        knowledge={knowledge}
+                        hasKnowledge={summary.data ? summary.data.period.knowledge !== null : null}
+                        className="flex-[1_1_340px]"
+                      />
+                    </div>
+                    <ToolUseCard tools={tools} />
+                  </>
+                }
+                onExplore={() => setExplore({ sessionId: null })}
               />
-            )}
+              <FeedbackInbox
+                partner={partner}
+                filters={filters}
+                filter={feedbackFilter}
+                onFilterChange={setFeedbackFilter}
+                counts={summary.data ? feedbackCounts(summary.data.period) : null}
+                headingRef={inboxHeading}
+                onOpenConversation={openConversation}
+              />
+              {partner.type === "assistant" && (
+                <QuestionHistory
+                  assistantId={partner.id}
+                  range={range}
+                  source={filters.source}
+                  onOpenConversation={openConversation}
+                />
+              )}
+            </div>
+            {finding ? (
+              <FindingView
+                key={finding}
+                partner={partner}
+                filters={filters}
+                kind={finding}
+                summary={summary}
+                editor={editor}
+                targetKind={targetKind}
+                headingRef={findingHeading}
+                onBack={() => showFinding(null)}
+                onOpenConversation={openConversation}
+                onAskAnalysis={askAnalysis}
+              />
+            ) : null}
           </div>
         </div>
         {open && beside && (
@@ -251,6 +396,8 @@ export function AssistantInsights({
               partner={partner}
               range={range}
               hidden={hidden || !open}
+              // The finding's question, while that finding is on screen.
+              suggestion={suggestion && suggestion.kind === finding ? suggestion : null}
               onClose={() => setPanel("closed")}
             />
           </aside>

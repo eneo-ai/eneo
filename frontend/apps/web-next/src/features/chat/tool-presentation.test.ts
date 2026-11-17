@@ -533,7 +533,10 @@ describe("Eneo's insights server", () => {
     "top_questions",
     "search_questions",
     "read_conversation",
-    "find_gaps"
+    "find_gaps",
+    "list_ratings",
+    "knowledge_use",
+    "tool_use"
   ];
 
   it("names each call in plain words while it runs and once it is done", () => {
@@ -548,6 +551,13 @@ describe("Eneo's insights server", () => {
       label: "Looked for gaps in the answers",
       server: "Insights"
     });
+    expect(toolPresentation(insights("list_ratings"), svT, false).label).toBe("Läser betygen");
+    expect(toolPresentation(insights("knowledge_use"), svT, true).label).toBe(
+      "Sammanställde kunskapen som används"
+    );
+    expect(toolPresentation(insights("tool_use"), enT, false).label).toBe(
+      "Summarizing the tools in use"
+    );
   });
 
   it("says what a search looked for", () => {
