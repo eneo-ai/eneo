@@ -882,6 +882,19 @@ class SpaceActor:
             resource_type=SpaceResourceType.SPACE,
         )
 
+    def can_manage_api_keys(self) -> bool:
+        """Whether the caller may create and manage keys scoped to this space.
+
+        A personal space has no admin role and cannot be edited, so its owner
+        stands in for the space admin a shared space requires.
+        """
+        if not self.space.is_personal():
+            return self.can_edit_space()
+        if self._get_role() != SpaceRole.OWNER:
+            return False
+        allowed = self._get_api_key_action_constraint()
+        return allowed is None or SpaceAction.EDIT in allowed
+
     def can_edit_retention(self) -> bool:
         """Preserve personal ownership; managed spaces use policy administration."""
         if self.space.is_personal():

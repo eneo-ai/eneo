@@ -38,7 +38,7 @@ User keys are bound to a specific user via `owner_user_id`. On every request, th
 1. Looks up the owner in the database
 2. Verifies the owner account is **active** (not deactivated or deleted)
 3. For tenant-scoped keys, whatever their permission level: verifies the owner still has the tenant **admin** permission (`403 owner_permission_revoked` otherwise)
-4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space (`403 owner_membership_revoked` otherwise)
+4. For space/assistant/app-scoped keys: verifies the owner is still a **member** of the target space (`403 owner_membership_revoked` otherwise). A personal space has no members: there the key must belong to the user the space was created for
 
 If any of these checks fail, the request is denied. This means user keys inherit the lifecycle of their owner: if a user is deactivated, suspended, or removed from a space, all their keys stop working.
 
@@ -197,6 +197,15 @@ Scopes define the boundary of what a key can access, from broadest to narrowest:
 | `app`       | Single app and its runs                | App UUID       |
 
 A flow-managed assistant (the internal assistant a Flow creates for one of its steps) is never a key scope. Creating a key for one returns `400 flow_managed_assistant`, rotating, reactivating or authenticating with an otherwise active or suspended one returns `403 flow_managed_assistant` (a revoked or expired key still returns `401 invalid_api_key` when used), and the daily API key maintenance job revokes any such key that still exists (reason `policy_violation`, audited as the system even when the tenant has turned that audit action off). Keys scoped to other hidden assistants keep their access. Deleting a space or removing a member also revokes keys scoped to the space's hidden assistants.
+
+Who may create a key depends on its scope:
+
+| Scope             | Who may create the key                                                                           |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `tenant`          | Tenant administrators                                                                            |
+| `space`           | Admins of that space. Being a tenant administrator does not make someone an admin of every space |
+| `space`, personal | The owner of the personal space, as a user key. A service key is refused (`400 invalid_request`) |
+| `assistant`/`app` | Editors and admins of the space that holds the assistant or app, and the owner of a personal one |
 
 Files are user-owned rather than space-owned. A scoped user key can access the file API when its `files` resource permission allows it, but file reads and deletes are still constrained to files owned by that key's user.
 
@@ -370,7 +379,7 @@ Scope limits where the key can operate:
 - `assistant` keys are limited to one assistant and its conversations
 - `app` keys are limited to one app and its runs
 
-Tenant-scoped user keys require the owner to remain a tenant administrator, whatever the key's own permission level. Endpoint-level guards additionally apply the owner's live role permissions. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space.
+Tenant-scoped user keys require the owner to remain a tenant administrator, whatever the key's own permission level. Endpoint-level guards additionally apply the owner's live role permissions. Space-, assistant-, and app-scoped user keys require the owner to remain a member of the target space; a key for a personal space, or for an assistant or app in one, belongs to that space's owner.
 
 ### Why does deletion fail even with admin permission?
 
