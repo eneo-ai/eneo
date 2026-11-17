@@ -97,14 +97,15 @@ export function InsightsHistory({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2">
-      <h2
+      {/* Under the analysis panel's title (h2). */}
+      <h3
         id={headingId}
         ref={headingRef}
         tabIndex={-1}
         className="text-base font-semibold focus:outline-none"
       >
         {t("insights_chat_history_heading")}
-      </h2>
+      </h3>
       {history.isError && rows.length === 0 ? (
         <ListError
           error={history.error}

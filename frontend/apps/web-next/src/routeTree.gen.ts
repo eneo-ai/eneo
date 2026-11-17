@@ -77,6 +77,7 @@ import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/space
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
 import { Route as AppAdminInsightsAssistantAssistantIdRouteImport } from "./routes/_app/admin/insights/assistant/$assistantId"
+import { Route as AppAdminInsightsGroupChatGroupChatIdRouteImport } from "./routes/_app/admin/insights/group-chat/$groupChatId"
 import { Route as AppAdminUsageUsersUserIdRouteImport } from "./routes/_app/admin/usage/users/$userId"
 import { Route as AppAdminWidgetsTemplatesTemplateIdRouteImport } from "./routes/_app/admin/widgets/templates/$templateId"
 import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
@@ -453,6 +454,12 @@ const AppAdminInsightsAssistantAssistantIdRoute =
     path: "/insights/assistant/$assistantId",
     getParentRoute: () => AppAdminRouteRoute,
   } as any)
+const AppAdminInsightsGroupChatGroupChatIdRoute =
+  AppAdminInsightsGroupChatGroupChatIdRouteImport.update({
+    id: "/insights/group-chat/$groupChatId",
+    path: "/insights/group-chat/$groupChatId",
+    getParentRoute: () => AppAdminRouteRoute,
+  } as any)
 const AppAdminUsageUsersUserIdRoute =
   AppAdminUsageUsersUserIdRouteImport.update({
     id: "/usage/users/$userId",
@@ -674,6 +681,7 @@ export interface FileRoutesByFullPath {
   "/admin/widgets/": typeof AppAdminWidgetsIndexRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
   "/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
+  "/admin/insights/group-chat/$groupChatId": typeof AppAdminInsightsGroupChatGroupChatIdRoute
   "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/admin/widgets/templates/$templateId": typeof AppAdminWidgetsTemplatesTemplateIdRoute
   "/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
@@ -764,6 +772,7 @@ export interface FileRoutesByTo {
   "/admin/widgets": typeof AppAdminWidgetsIndexRoute
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
   "/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
+  "/admin/insights/group-chat/$groupChatId": typeof AppAdminInsightsGroupChatGroupChatIdRoute
   "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/admin/widgets/templates/$templateId": typeof AppAdminWidgetsTemplatesTemplateIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
@@ -859,6 +868,7 @@ export interface FileRoutesById {
   "/_app/admin/widgets/": typeof AppAdminWidgetsIndexRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
   "/_app/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
+  "/_app/admin/insights/group-chat/$groupChatId": typeof AppAdminInsightsGroupChatGroupChatIdRoute
   "/_app/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/_app/admin/widgets/templates/$templateId": typeof AppAdminWidgetsTemplatesTemplateIdRoute
   "/_app/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
@@ -955,6 +965,7 @@ export interface FileRouteTypes {
     | "/admin/widgets/"
     | "/spaces/$spaceId/"
     | "/admin/insights/assistant/$assistantId"
+    | "/admin/insights/group-chat/$groupChatId"
     | "/admin/usage/users/$userId"
     | "/admin/widgets/templates/$templateId"
     | "/spaces/$spaceId/flows/$flowId"
@@ -1045,6 +1056,7 @@ export interface FileRouteTypes {
     | "/admin/widgets"
     | "/spaces/$spaceId"
     | "/admin/insights/assistant/$assistantId"
+    | "/admin/insights/group-chat/$groupChatId"
     | "/admin/usage/users/$userId"
     | "/admin/widgets/templates/$templateId"
     | "/spaces/$spaceId/skills/$skillId"
@@ -1139,6 +1151,7 @@ export interface FileRouteTypes {
     | "/_app/admin/widgets/"
     | "/_app/spaces/$spaceId/"
     | "/_app/admin/insights/assistant/$assistantId"
+    | "/_app/admin/insights/group-chat/$groupChatId"
     | "/_app/admin/usage/users/$userId"
     | "/_app/admin/widgets/templates/$templateId"
     | "/_app/spaces/$spaceId/flows/$flowId"
@@ -1661,6 +1674,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAdminInsightsAssistantAssistantIdRouteImport
       parentRoute: typeof AppAdminRouteRoute
     }
+    "/_app/admin/insights/group-chat/$groupChatId": {
+      id: "/_app/admin/insights/group-chat/$groupChatId"
+      path: "/insights/group-chat/$groupChatId"
+      fullPath: "/admin/insights/group-chat/$groupChatId"
+      preLoaderRoute: typeof AppAdminInsightsGroupChatGroupChatIdRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
     "/_app/admin/usage/users/$userId": {
       id: "/_app/admin/usage/users/$userId"
       path: "/usage/users/$userId"
@@ -1871,6 +1891,7 @@ interface AppAdminRouteRouteChildren {
   AppAdminUsageIndexRoute: typeof AppAdminUsageIndexRoute
   AppAdminWidgetsIndexRoute: typeof AppAdminWidgetsIndexRoute
   AppAdminInsightsAssistantAssistantIdRoute: typeof AppAdminInsightsAssistantAssistantIdRoute
+  AppAdminInsightsGroupChatGroupChatIdRoute: typeof AppAdminInsightsGroupChatGroupChatIdRoute
   AppAdminUsageUsersUserIdRoute: typeof AppAdminUsageUsersUserIdRoute
   AppAdminWidgetsTemplatesTemplateIdRoute: typeof AppAdminWidgetsTemplatesTemplateIdRoute
 }
@@ -1908,6 +1929,8 @@ const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
   AppAdminWidgetsIndexRoute: AppAdminWidgetsIndexRoute,
   AppAdminInsightsAssistantAssistantIdRoute:
     AppAdminInsightsAssistantAssistantIdRoute,
+  AppAdminInsightsGroupChatGroupChatIdRoute:
+    AppAdminInsightsGroupChatGroupChatIdRoute,
   AppAdminUsageUsersUserIdRoute: AppAdminUsageUsersUserIdRoute,
   AppAdminWidgetsTemplatesTemplateIdRoute:
     AppAdminWidgetsTemplatesTemplateIdRoute,

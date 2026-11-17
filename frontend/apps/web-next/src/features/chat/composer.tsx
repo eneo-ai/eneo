@@ -73,7 +73,8 @@ export type ComposerHandle = {
  * chats; on a touch screen Return adds a line, as in any text field. ⌘ or
  * Ctrl+Return sends everywhere; the hint is in its description. Return that
  * commits an input method's word never sends, pasted files become attachments
- * and Backspace in an empty field removes the last attachment.
+ * (where the partner takes any: `onPasteFiles`) and Backspace in an empty
+ * field removes the last attachment.
  */
 function ComposerTextarea({
   label,
@@ -92,7 +93,8 @@ function ComposerTextarea({
   invalid: boolean;
   placeholder: string;
   onSend: () => void;
-  onPasteFiles: (files: File[]) => void;
+  /** Without it a paste with files is an ordinary paste (its text, if any). */
+  onPasteFiles?: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   rows: number;
   returnSends: boolean;
@@ -140,6 +142,7 @@ function ComposerTextarea({
   };
 
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onPasteFiles) return;
     const files: File[] = [];
     for (const item of event.clipboardData?.items ?? []) {
       if (item.kind === "file") {
@@ -215,9 +218,10 @@ function removeTokenBeforeCaret(editable: HTMLElement): boolean {
  * The composer's text field: Astryx ChatComposerInput on ChatComposer's
  * context. Return keys as in ComposerTextarea (`returnSends`); an IME's
  * Return commits its candidate instead. Pasted or
- * dropped files become attachments and Backspace in an empty field removes
- * the last attachment. Message history and paste-as-token are off: a chat
- * draft is the person's own text. With `triggers`, typing their character
+ * dropped files become attachments (where the partner takes any:
+ * `onPasteFiles`) and Backspace in an empty field removes the last
+ * attachment. Message history and paste-as-token are off: a chat draft is
+ * the person's own text. With `triggers`, typing their character
  * opens a menu whose picks become inline tokens (the flow chat's references).
  */
 function ComposerInput({
@@ -238,7 +242,7 @@ function ComposerInput({
   invalid: boolean;
   placeholder: string;
   onSend: () => void;
-  onPasteFiles: (files: File[]) => void;
+  onPasteFiles?: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   minRows: 1 | 2;
   triggers?: ChatComposerTrigger[];
@@ -664,7 +668,9 @@ export function Composer({
               triggers={triggers}
               returnSends={!coarse}
               onSend={send}
-              onPasteFiles={(files) => void attachments.addFiles(files)}
+              // A partner that takes no files (the insights analysis) leaves a
+              // paste alone: no "at most 0 files" refusal for a pasted image.
+              onPasteFiles={canAttach ? (files) => void attachments.addFiles(files) : undefined}
               onBackspaceEmpty={() => {
                 const last = attachments.attachments.at(-1);
                 if (last) attachments.removeAttachment(last.key);

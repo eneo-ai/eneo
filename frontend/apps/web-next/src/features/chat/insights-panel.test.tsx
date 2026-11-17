@@ -15,10 +15,63 @@ const GONE = "33333333-0000-4000-8000-000000000003";
 /** The session the shared fixture's answer belongs to. */
 const STREAMED = "11111111-1111-1111-1111-111111111111";
 
+const counts = (user: number, widget: number, api_key: number) => ({
+  total: user + widget + api_key,
+  user,
+  widget,
+  api_key
+});
+
+/** The period's figures, and the previous period's when compared. */
+const PERIOD = {
+  start: "2026-09-02T00:00:00Z",
+  end: "2026-10-03T00:00:00Z",
+  conversations: counts(7, 4, 1),
+  questions: counts(20, 8, 2),
+  followups: 18,
+  users: 5,
+  single_question_conversations: 6,
+  returning_users: 2,
+  unanswered: 3,
+  knowledge: { searched: 20, missed: 5 },
+  answer_ratings: { positive: 7, negative: 2, with_comment: 1 },
+  conversation_ratings: { positive: 1, negative: 1 }
+};
+const PREVIOUS = {
+  ...PERIOD,
+  conversations: counts(6, 3, 1),
+  unanswered: 6,
+  answer_ratings: { positive: 7, negative: 3, with_comment: 0 }
+};
+
+/** The period's ratings, newest first. */
+const RATINGS = [
+  {
+    kind: "answer",
+    value: -1,
+    comment: "Hänvisar till en taxa som inte gäller.",
+    question: "Vilken avgift gäller för eldstad?",
+    question_id: "q-1",
+    session_id: "s-rated",
+    source: "widget",
+    created_at: "2026-10-01T10:00:00Z"
+  },
+  {
+    kind: "conversation",
+    value: 1,
+    comment: null,
+    question: "Var parkerar jag?",
+    question_id: null,
+    session_id: "s-1",
+    source: "user",
+    created_at: "2026-09-30T10:00:00Z"
+  }
+];
+
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
-  /** The query of every statistics request. */
-  statsQueries: [] as Record<string, unknown>[],
+  /** The query of every request, by path. */
+  queries: {} as Record<string, Record<string, unknown>[]>,
   /** The conversation the explore dialog was asked to show. */
   previewed: [] as string[],
   /** Every request to the insights chat: method, URL and JSON body. */
@@ -29,7 +82,8 @@ const spies = vi.hoisted(() => ({
   /** Analyses removed with their conversations: refused with 410. */
   removed: new Set<string>(),
   /** What a question streams back (an SSE body). */
-  answer: ""
+  answer: "",
+  toastError: vi.fn()
 }));
 
 /** The options of a typed request, as far as these fakes read them. */
@@ -41,10 +95,55 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async (path: string, init?: TypedRequestInit) => {
       if (path.startsWith(CHAT)) return typedInsightsChat("GET", path, init);
+      const query = init?.params?.query ?? {};
+      (spies.queries[path] ??= []).push(query);
+      if (path === "/api/v1/analysis/conversation-insights/summary/") {
+        return {
+          data: {
+            timezone: query.timezone,
+            source: query.source ?? null,
+            period: PERIOD,
+            previous: query.compare ? PREVIOUS : null
+          },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/activity/") {
+        return {
+          data: {
+            timezone: query.timezone,
+            source: query.source ?? null,
+            start: query.start_time,
+            end: query.end_time,
+            days: [
+              { date: "2026-09-30", conversations: counts(3, 1, 0), questions: counts(5, 1, 0) },
+              { date: "2026-10-01", conversations: counts(0, 0, 2), questions: counts(0, 0, 2) }
+            ]
+          },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/conversation-insights/feedback/") {
+        const items = RATINGS.filter(
+          (rating) =>
+            (query.value === undefined || rating.value === query.value) &&
+            (query.has_comment === undefined || Boolean(rating.comment) === query.has_comment)
+        );
+        return {
+          data: { items, total_count: items.length, next_cursor: null },
+          response: new Response()
+        };
+      }
+      if (path === "/api/v1/analysis/assistants/{assistant_id}/questions/") {
+        return {
+          data: { items: [], total_count: 0, next_cursor: null },
+          response: new Response()
+        };
+      }
       if (path === "/api/v1/analysis/conversation-insights/sessions/") {
         return {
           data: {
-            items: [{ id: "s-1", name: "Direktupphandling" }],
+            items: [{ id: "s-1", name: "Direktupphandling", source: "user" }],
             total_count: 1,
             next_cursor: null
           },
@@ -57,20 +156,13 @@ vi.mock("@/lib/api/browser", () => ({
           data: {
             id: init?.params?.path?.session_id,
             name: "Parkering",
+            source: "user",
             messages: [{ id: "m-1", question: "Var parkerar jag?", answer: "Vid entrén." }]
           },
           response: new Response()
         };
       }
-      spies.statsQueries.push(init?.params?.query ?? {});
-      return {
-        data: {
-          total_conversations: 12,
-          total_questions: 30,
-          feedback: { positive: 7, negative: 2 }
-        },
-        response: new Response()
-      };
+      throw new Error(`Unexpected GET ${path}`);
     }),
     POST: vi.fn(async () => ({ data: {}, response: new Response() })),
     PUT: vi.fn(async () => ({ data: {}, response: new Response() })),
@@ -152,14 +244,21 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => spies.announce
 }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/toast", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/toast")>();
+  return { ...actual, toast: { ...actual.toast, error: spies.toastError } };
+});
 
 /**
  * An answer in the shared stream contract's tool-call fixture, made the
- * analysis': a search of the questions, and an answer that cites a conversation.
+ * analysis': a search of the questions, and an answer that cites a
+ * conversation. Each turn of an analysis is a message of its own: a second
+ * answer passes its own `messageId`.
  */
-function analysisAnswer(text: string): string {
+function analysisAnswer(text: string, messageId?: string): string {
   const fixture = loadFixtures().find((item) => item.name === "tool-call-with-output")!;
   const events = fixture.events.map((event) => {
+    if (event.type === "start" && messageId) return { ...event, messageId };
     if (event.type === "text-delta") return { ...event, delta: text };
     if (!String(event.type).startsWith("tool-")) return event;
     const eneo = (event.providerMetadata as { eneo: Record<string, unknown> }).eneo;
@@ -182,12 +281,13 @@ afterEach(() => {
   vi.useRealTimers();
   sessionStorage.clear();
   spies.announce.mockReset();
-  spies.statsQueries.length = 0;
+  spies.queries = {};
   spies.previewed.length = 0;
   spies.requests.length = 0;
   spies.analyses = [];
   spies.nextPage = null;
   spies.removed.clear();
+  spies.toastError.mockReset();
 });
 
 const partner: ChatPartner & { type: "assistant" } = {
@@ -197,12 +297,39 @@ const partner: ChatPartner & { type: "assistant" } = {
   insightEnabled: true
 };
 
-function renderPanel() {
-  return renderInApp(
+/** The query of every request to one of the insight endpoints: "summary", "activity", "feedback". */
+const queriesOf = (name: string) =>
+  spies.queries[`/api/v1/analysis/conversation-insights/${name}/`] ?? [];
+
+/** "Fråga analysen", in the view's filters. */
+const askButton = () => screen.getByRole("button", { name: "Fråga analysen" });
+
+/**
+ * Lays out the row the overview shares with the analysis, as a browser
+ * measures it: the outermost measured element around "Fråga analysen".
+ */
+function layOutRow(width: number) {
+  const button = askButton();
+  const regions = observedElements().filter((element) => element.contains(button));
+  const row = regions.find((element) => regions.every((other) => element.contains(other)));
+  if (row) act(() => reportResize(row, { width, height: 700 }));
+}
+
+/** Renders the tab with room for the analysis beside the overview (`width`). */
+function renderPanel({ width = 1200 }: { width?: number } = {}) {
+  const view = renderInApp(
     <div className="flex h-[700px] flex-col">
       <InsightsPanel partner={partner} />
     </div>
   );
+  layOutRow(width);
+  return view;
+}
+
+/** Opens the analysis panel from "Fråga analysen". */
+function openAnalysis() {
+  fireEvent.click(askButton());
+  return screen.getByRole("complementary", { name: "Insiktsanalys" });
 }
 
 /** Types a question in the field, which has the focus, and sends it. */
@@ -216,54 +343,163 @@ function ask(question: string) {
 /** The questions sent to the analysis. */
 const questions = () => spies.requests.filter((request) => request.method === "POST");
 
-/** Lays out the region around the conversation, as a browser measures it. */
+/** Lays out the regions around the conversation (the view's row, the panel's), as a browser measures them. */
 function layOutConversation(width: number) {
   const log = screen.getByRole("log");
   const regions = observedElements().filter((element) => element.contains(log));
-  const region = regions.find((element) => regions.every((other) => element.contains(other)));
-  if (region) act(() => reportResize(region, { width, height: 700 }));
+  act(() => {
+    for (const region of regions) reportResize(region, { width, height: 700 });
+  });
 }
 
 describe("InsightsPanel", () => {
-  it("covers the last 30 days and refetches for a preset period", async () => {
+  it("covers the last 30 days as whole local days and refetches for a preset period", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 2, 12) });
     renderPanel();
-    await screen.findByText("Bra svar");
-    expect(spies.statsQueries[0]).toMatchObject({
+    await screen.findByText("Bra svar enligt betygen");
+    // From the first day's midnight to the midnight after the last (exclusive), in the browser's zone.
+    const period = {
       start_time: new Date("2026-09-02T00:00:00").toISOString(),
       end_time: new Date("2026-10-03T00:00:00").toISOString(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       assistant_id: "assistant-1"
-    });
+    };
+    expect(queriesOf("summary")[0]).toEqual({ ...period, compare: false });
+    expect(queriesOf("activity")[0]).toEqual(period);
 
     fireEvent.click(screen.getByRole("button", { name: /Period/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Senaste 7 dagarna" }));
     await waitFor(() =>
-      expect(spies.statsQueries.at(-1)).toMatchObject({
+      expect(queriesOf("summary").at(-1)).toMatchObject({
         start_time: new Date("2026-09-25T00:00:00").toISOString(),
         end_time: new Date("2026-10-03T00:00:00").toISOString()
       })
     );
   });
 
-  it("shows the period's counts and opens its conversations to explore", async () => {
+  it("shows the period's figures, its activity per day and its conversations to explore", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 2, 12) });
     renderPanel();
-    // Scoped to the statistics: the period picker's calendar also shows numbers.
-    const stats = (await screen.findByText("Bra svar")).closest("dl")!;
-    expect(within(stats).getByText("12")).toBeTruthy();
-    expect(within(stats).getByText("30")).toBeTruthy();
-    const good = within(stats).getByText("Bra svar").closest("div")!;
-    expect(good.querySelector("dd")?.textContent).toBe("7");
-    const bad = within(stats).getByText("Dåliga svar").closest("div")!;
-    expect(bad.querySelector("dd")?.textContent).toBe("2");
+    const tiles = await screen.findByRole("region", { name: "Nyckeltal" });
+    const tile = (label: string) => within(tiles).getByText(label).closest("div")!.textContent;
+    expect(tile("Konversationer")).toMatch(/^Konversationer12\s*7 användare, 4 widget, 1 API$/);
+    expect(tile("Besvarade frågor")).toMatch(
+      /Indikativt.*90\s%3 av 30 svar säger att de inte kan svara/
+    );
+    expect(tile("Bra svar enligt betygen")).toMatch(
+      /78\s%7 bra och 2 dåliga\. 30\s% av svaren har betyg.*Hela konversationer: 1 bra och 1 dålig/
+    );
+    expect(tile("Träff i kunskapen")).toMatch(/75\s%5 frågor fick ingen träff i kunskapen/);
+    // Nothing is compared until asked for.
+    expect(within(tiles).queryByText(/jämfört med föregående period/)).toBeNull();
+    expect(screen.getByRole("list", { name: "Hur konversationerna går" }).textContent).toMatch(
+      /2,5 frågor per konversation.*50\s% slutar efter första svaret.*40\s% av användarna/
+    );
+
+    // The chart's figures as a table, every day of the period, also the ones without activity.
+    const table = await screen.findByRole("table", { name: "Aktivitet per dag" });
+    const rows = within(table).getAllByRole("row");
+    expect(rows).toHaveLength(32);
+    const cells = (row: HTMLElement) =>
+      [within(row).getByRole("rowheader"), ...within(row).getAllByRole("cell")].map(
+        (cell) => cell.textContent
+      );
+    expect(rows.slice(-3).map(cells)).toEqual([
+      ["30 sep. 2026", "3", "1", "0", "4"],
+      ["1 okt. 2026", "0", "0", "2", "2"],
+      ["2 okt. 2026", "0", "0", "0", "0"]
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: "Utforska konversationer" }));
     const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
     expect(await within(dialog).findByRole("button", { name: /Direktupphandling/ })).toBeTruthy();
   });
 
+  it("limits everything that reads conversations to the chosen source", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 2, 12) });
+    renderPanel();
+    await screen.findByText("Bra svar enligt betygen");
+    fireEvent.click(screen.getByRole("radio", { name: "Widget" }));
+
+    const widgetOnly = (name: string) =>
+      waitFor(() => expect(queriesOf(name).at(-1)).toMatchObject({ source: "widget" }));
+    await widgetOnly("summary");
+    await widgetOnly("activity");
+    await widgetOnly("feedback");
+    await waitFor(() =>
+      expect(
+        spies.queries["/api/v1/analysis/assistants/{assistant_id}/questions/"]?.at(-1)
+      ).toMatchObject({ source: "widget" })
+    );
+    // The chart and its table show that source alone.
+    const table = await screen.findByRole("table", { name: "Aktivitet per dag" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent)
+    ).toEqual(["Dag", "Widget"]);
+    fireEvent.click(screen.getByRole("button", { name: "Utforska konversationer" }));
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    await widgetOnly("sessions");
+    // Every source (the start) sends no source at all.
+    expect(queriesOf("summary")[0]).not.toHaveProperty("source");
+    expect(await within(dialog).findByText("Användare")).toBeTruthy();
+  });
+
+  it("compares each figure with the previous period when asked", async () => {
+    renderPanel();
+    const tiles = await screen.findByRole("region", { name: "Nyckeltal" });
+    fireEvent.click(screen.getByRole("switch", { name: "Jämför med föregående period" }));
+    await waitFor(() => expect(queriesOf("summary").at(-1)).toMatchObject({ compare: true }));
+    const tile = (label: string) => within(tiles).getByText(label).closest("div")!;
+    // A count changes in percent, a share in points; the words say what it is compared with.
+    await waitFor(() =>
+      expect(tile("Konversationer").textContent).toMatch(/\+20\s% jämfört med föregående period/)
+    );
+    expect(tile("Besvarade frågor").textContent).toMatch(
+      /\+10 procentenheter jämfört med föregående period/
+    );
+    expect(tile("Bra svar enligt betygen").textContent).toMatch(/\+8 procentenheter/);
+    expect(tile("Träff i kunskapen").textContent).toMatch(
+      /oförändrat jämfört med föregående period/
+    );
+  });
+
+  it("lists the users' ratings, filters them and opens a rating's conversation", async () => {
+    renderPanel();
+    const inbox = await screen.findByRole("region", { name: "Återkoppling från användarna" });
+    const [answer, conversation] = await within(inbox).findAllByRole("listitem");
+    expect(answer!.textContent).toMatch(
+      /”Hänvisar till en taxa som inte gäller\.”På frågan: Vilken avgift gäller för eldstad\?Dåligt betyg på svaretWidget/
+    );
+    expect(conversation!.textContent).toMatch(
+      /Ingen kommentarPå frågan: Var parkerar jag\?Bra betyg på hela konversationenAnvändare/
+    );
+    expect(within(inbox).getByText("Visar 2 av 2")).toBeTruthy();
+
+    fireEvent.click(within(inbox).getByRole("radio", { name: "Dåliga med kommentar" }));
+    await waitFor(() =>
+      expect(queriesOf("feedback").at(-1)).toMatchObject({ value: -1, has_comment: true })
+    );
+    await waitFor(() => expect(within(inbox).getAllByRole("listitem")).toHaveLength(1));
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Visar 1 av 1"));
+    fireEvent.click(within(inbox).getByRole("radio", { name: "Bra" }));
+    await waitFor(() => expect(queriesOf("feedback").at(-1)).toMatchObject({ value: 1 }));
+    expect(queriesOf("feedback").at(-1)).not.toHaveProperty("has_comment");
+
+    // "Läs konversationen" opens the rated conversation read-only.
+    const open = await within(inbox).findByRole("button", { name: "Läs konversationen" });
+    expect(open.getAttribute("aria-haspopup")).toBe("dialog");
+    fireEvent.click(open);
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    expect(await within(dialog).findByText("Vid entrén.")).toBeTruthy();
+    expect(spies.previewed).toEqual(["s-1"]);
+  });
+
   it("asks about the period's conversations and announces the answer with its steps", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 2, 12) });
     renderPanel();
+    openAnalysis();
     ask("Vad frågar folk om?");
 
     const log = await screen.findByRole("log", { name: "Konversation" });
@@ -306,13 +542,17 @@ describe("InsightsPanel", () => {
   it("follows up in the same analysis with the period picked since", async () => {
     vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 2, 12) });
     renderPanel();
+    openAnalysis();
     ask("Vad frågar folk om?");
     await screen.findByText(/De flesta frågar om parkering/);
     await waitFor(() => expect(screen.getByRole("textbox", { name: "Fråga om användningen" })));
 
     fireEvent.click(screen.getByRole("button", { name: /Period/ }));
     fireEvent.click(await screen.findByRole("button", { name: "Senaste 7 dagarna" }));
-    spies.answer = analysisAnswer("Mest om parkering vid entrén.");
+    spies.answer = analysisAnswer(
+      "Mest om parkering vid entrén.",
+      "33333333-3333-3333-3333-333333333333"
+    );
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy()
     );
@@ -332,6 +572,7 @@ describe("InsightsPanel", () => {
 
   it("opens a conversation the answer cites in the explore dialog", async () => {
     renderPanel();
+    openAnalysis();
     ask("Vad frågar folk om?");
     const citation = await screen.findByRole("button", { name: "konversation 1a2b3c4d" });
     fireEvent.click(citation);
@@ -343,6 +584,7 @@ describe("InsightsPanel", () => {
 
   it("shows the steps the analysis took and reads a step's result from the analysis", async () => {
     renderPanel();
+    openAnalysis();
     ask("Vad frågar folk om?");
     const pill = await screen.findByRole("button", { name: /^Aktivitet: 2 steg/ });
     layOutConversation(1100);
@@ -363,6 +605,7 @@ describe("InsightsPanel", () => {
       { id: SAVED, name: "Vad frågar folk om?", created_at: "2026-10-01T10:00:00Z" }
     ];
     renderPanel();
+    openAnalysis();
     const history = await screen.findByRole("region", { name: "Tidigare analyser" });
     expect(spies.requests[0]).toMatchObject({
       method: "GET",
@@ -388,10 +631,14 @@ describe("InsightsPanel", () => {
       { id: SAVED, name: "Vad frågar folk om?", created_at: "2026-10-01T10:00:00Z" }
     ];
     renderPanel();
+    openAnalysis();
     const history = await screen.findByRole("region", { name: "Tidigare analyser" });
-    fireEvent.click(
-      within(history).getByRole("button", { name: "Ta bort analysen ”Vad frågar folk om?”" })
-    );
+    const remove = within(history).getByRole("button", {
+      name: "Ta bort analysen ”Vad frågar folk om?”"
+    });
+    // Pressed as a browser does it: the button takes the focus the panel had.
+    act(() => remove.focus());
+    fireEvent.click(remove);
     const confirm = await screen.findByRole("alertdialog", { name: "Ta bort analysen?" });
     spies.analyses = [];
     fireEvent.click(within(confirm).getByRole("button", { name: "Ta bort" }));
@@ -415,6 +662,7 @@ describe("InsightsPanel", () => {
     spies.analyses = [{ id: SAVED, name: "Senaste analysen", created_at: "2026-10-01T10:00:00Z" }];
     spies.nextPage = [{ id: GONE, name: "Äldre analys", created_at: "2026-09-01T10:00:00Z" }];
     renderPanel();
+    openAnalysis();
     const history = await screen.findByRole("region", { name: "Tidigare analyser" });
     fireEvent.click(within(history).getByRole("button", { name: "Visa fler analyser" }));
 
@@ -429,6 +677,7 @@ describe("InsightsPanel", () => {
     spies.analyses = [{ id: GONE, name: "Gamla frågor", created_at: "2026-10-01T10:00:00Z" }];
     spies.removed.add(GONE);
     renderPanel();
+    openAnalysis();
     const history = await screen.findByRole("region", { name: "Tidigare analyser" });
     fireEvent.click(within(history).getByRole("button", { name: /^Gamla frågor/ }));
 
@@ -450,6 +699,7 @@ describe("InsightsPanel", () => {
       { id: SAVED, name: "Vad frågar folk om?", created_at: "2026-10-01T10:00:00Z" }
     ];
     renderPanel();
+    openAnalysis();
     const history = await screen.findByRole("region", { name: "Tidigare analyser" });
     fireEvent.click(within(history).getByRole("button", { name: /^Vad frågar folk om\?/ }));
     await screen.findByText("Mest om parkering.");
@@ -475,12 +725,99 @@ describe("InsightsPanel", () => {
       { id: SAVED, name: "Vad frågar folk om?", created_at: "2026-10-01T10:00:00Z" }
     ];
     const { container } = renderPanel();
+    await screen.findByText("Bra svar enligt betygen");
+    await expectNoAxeViolations(container);
+
+    openAnalysis();
     await screen.findByRole("region", { name: "Tidigare analyser" });
-    await screen.findByText("Bra svar");
     await expectNoAxeViolations(container);
 
     ask("Vad frågar folk om?");
     await screen.findByRole("button", { name: "konversation 1a2b3c4d" });
     await expectNoAxeViolations(container);
+  });
+
+  it("opens the analysis beside the overview and closes it without losing the analysis", async () => {
+    renderPanel();
+    await screen.findByText("Bra svar enligt betygen");
+    // Nothing of the analysis is loaded before it is asked for.
+    expect(screen.queryByRole("complementary", { name: "Insiktsanalys" })).toBeNull();
+    expect(spies.requests).toEqual([]);
+
+    const panel = openAnalysis();
+    // Beside the overview, with a handle to resize it; focus moves into it.
+    expect(screen.getByRole("separator", { name: "Ändra analysens bredd" })).toBeTruthy();
+    expect(panel.closest("[inert]")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(panel));
+    expect(within(panel).getByRole("heading", { name: "Insiktsanalys", level: 2 })).toBeTruthy();
+
+    ask("Vad frågar folk om?");
+    expect(await within(panel).findByText(/De flesta frågar om parkering/)).toBeTruthy();
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga om användningen" }), {
+      target: { value: "Och igår?" }
+    });
+
+    // Closing hands focus back to "Fråga analysen".
+    fireEvent.click(within(panel).getByRole("button", { name: "Stäng analysen" }));
+    expect(screen.queryByRole("complementary", { name: "Insiktsanalys" })).toBeNull();
+    expect(screen.queryByRole("separator", { name: "Ändra analysens bredd" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(askButton()));
+
+    // Opened again: the same analysis, its answer and the unsent question, nothing asked again.
+    const reopened = openAnalysis();
+    expect(within(reopened).getByText(/De flesta frågar om parkering/)).toBeTruthy();
+    expect(
+      (screen.getByRole("textbox", { name: "Fråga om användningen" }) as HTMLTextAreaElement).value
+    ).toBe("Och igår?");
+    expect(questions()).toHaveLength(1);
+  });
+
+  it("covers the view where the overview would keep less than 480 px beside it", async () => {
+    renderPanel({ width: 700 });
+    await screen.findByText("Bra svar enligt betygen");
+    const panel = openAnalysis();
+
+    // No handle: the panel lies over the view, and what it covers is inert.
+    expect(screen.queryByRole("separator", { name: "Ändra analysens bredd" })).toBeNull();
+    expect(askButton().closest("[inert]")).not.toBeNull();
+    expect(panel.closest("[inert]")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(panel));
+
+    fireEvent.click(within(panel).getByRole("button", { name: "Stäng analysen" }));
+    expect(askButton().closest("[inert]")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(askButton()));
+  });
+
+  it("lays nothing of the analysis over the page while the tab is hidden", async () => {
+    const view = renderPanel();
+    openAnalysis();
+    ask("Vad frågar folk om?");
+    // Without room beside the answer in the panel, its steps open in a sheet.
+    fireEvent.click(await screen.findByRole("button", { name: /^Aktivitet: 2 steg/ }));
+    expect(await screen.findByRole("dialog", { name: "Aktivitet för svaret" })).toBeTruthy();
+
+    // Chatt is shown: the tab stays mounted behind it, its sheet does not stay over it.
+    view.rerender(
+      <div className="flex h-[700px] flex-col">
+        <InsightsPanel partner={partner} hidden />
+      </div>
+    );
+    expect(screen.queryByRole("dialog", { name: "Aktivitet för svaret" })).toBeNull();
+  });
+
+  it("leaves a pasted file alone: the analysis takes no attachments", async () => {
+    renderPanel();
+    openAnalysis();
+    const field = await screen.findByRole("textbox", { name: "Fråga om användningen" });
+    const file = new File(["png"], "skärmbild.png", { type: "image/png" });
+    fireEvent.paste(field, {
+      clipboardData: {
+        items: [{ kind: "file", getAsFile: () => file }],
+        files: [file],
+        getData: () => ""
+      }
+    });
+    // Before, it said "at most 0 files".
+    expect(spies.toastError).not.toHaveBeenCalled();
   });
 });

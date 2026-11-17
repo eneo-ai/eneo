@@ -2865,6 +2865,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/analysis/conversation-insights/activity/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Conversation Insight Activity
+     * @description Conversations and questions per local day of an assistant or group chat, split by source. Exactly one of assistant_id or group_chat_id. Conversations of every source count (users, service API keys, widget visitors) unless source names one; a conversation counts in the period when it has a question in it.
+     */
+    get: operations["get_conversation_insight_activity_api_v1_analysis_conversation_insights_activity__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/analysis/conversation-insights/chat/": {
     parameters: {
       query?: never;
@@ -2937,6 +2957,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/analysis/conversation-insights/feedback/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Conversation Insight Feedback
+     * @description Ratings of an assistant's or group chat's answers and conversations, newest first, never who gave them. An answer rating belongs to the period of its question, a conversation rating to every period the conversation had a question in. Pass a page's next_cursor back as cursor for the next page. Exactly one of assistant_id or group_chat_id. Conversations of every source count (users, service API keys, widget visitors) unless source names one; a conversation counts in the period when it has a question in it.
+     */
+    get: operations["get_conversation_insight_feedback_api_v1_analysis_conversation_insights_feedback__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/analysis/conversation-insights/jobs/{job_id}/": {
     parameters: {
       query?: never;
@@ -2966,8 +3006,9 @@ export interface paths {
     };
     /**
      * Get Conversation Insight Sessions
-     * @description Get all sessions for an assistant or group chat across all
-     *     users in the tenant (with insight access).
+     * @description Get all sessions for an assistant or group chat in the tenant, from
+     *     every source (users, service API keys, widget visitors) unless `source`
+     *     names one; each carries its source (with insight access).
      *
      *     This endpoint requires the user to be OWNER or EDITOR,
      *     and the assistant/group chat must have insight_enabled set to true.
@@ -3019,6 +3060,26 @@ export interface paths {
      *         Session data
      */
     get: operations["get_conversation_insight_session_api_v1_analysis_conversation_insights_sessions__session_id___get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/conversation-insights/summary/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Conversation Insight Summary
+     * @description Figures for an assistant or group chat over a period, optionally beside the previous period of equal length. Exactly one of assistant_id or group_chat_id. Conversations of every source count (users, service API keys, widget visitors) unless source names one; a conversation counts in the period when it has a question in it.
+     */
+    get: operations["get_conversation_insight_summary_api_v1_analysis_conversation_insights_summary__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -3079,6 +3140,26 @@ export interface paths {
      * @description Get aggregated analytics data in hourly buckets.
      */
     get: operations["get_metadata_aggregated_api_v1_analysis_metadata_statistics_aggregated__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/targets/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Targets
+     * @description Every assistant people see and every group chat of the tenant with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period.
+     */
+    get: operations["get_insight_targets_api_v1_analysis_targets__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -13521,6 +13602,27 @@ export interface components {
      */
     AnalysisProcessingMode: "sync" | "auto";
     /**
+     * AnswerRatingCounts
+     * @description Ratings of single answers in the period.
+     */
+    AnswerRatingCounts: {
+      /**
+       * Negative
+       * @description Answers rated bad (-1).
+       */
+      negative: number;
+      /**
+       * Positive
+       * @description Answers rated good (1).
+       */
+      positive: number;
+      /**
+       * With Comment
+       * @description Answer ratings that carry a comment.
+       */
+      with_comment: number;
+    };
+    /**
      * ApiKeyCapacityPublic
      * @example {
      *       "current_count": 412,
@@ -14791,6 +14893,12 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
+      /**
+       * Source
+       * @description Who the conversation is with: 'user' (a signed-in user), 'api_key' (a service API key) or 'widget' (a visitor of a website widget).
+       * @enum {string}
+       */
+      source: "user" | "api_key" | "widget";
     };
     /** AssistantMetadata */
     AssistantMetadata: {
@@ -16560,10 +16668,33 @@ export interface components {
     ConversationInsightResponse: {
       /** @description Ratings on the answers in these conversations. Conversation-level feedback is not included. */
       feedback: components["schemas"]["MessageFeedbackCounts"];
-      /** Total Conversations */
+      /**
+       * Total Conversations
+       * @description Conversations started in the period, from every source (users, service API keys and widget visitors) unless a source is asked for.
+       */
       total_conversations: number;
-      /** Total Questions */
+      /**
+       * Total Questions
+       * @description Questions in the conversations counted in total_conversations.
+       */
       total_questions: number;
+    };
+    /**
+     * ConversationRatingCounts
+     * @description Ratings of whole conversations (widget votes land here), counted once
+     *     per conversation of the period.
+     */
+    ConversationRatingCounts: {
+      /**
+       * Negative
+       * @description Conversations rated bad (-1).
+       */
+      negative: number;
+      /**
+       * Positive
+       * @description Conversations rated good (1).
+       */
+      positive: number;
     };
     /** ConversationRenameRequest */
     ConversationRenameRequest: {
@@ -17268,6 +17399,27 @@ export interface components {
       /** Total Count */
       total_count: number;
     };
+    /** CursorPaginatedResponse[InsightRating] */
+    CursorPaginatedResponse_InsightRating_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["InsightRating"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+    };
     /** CursorPaginatedResponse[SessionMetadataPublic] */
     CursorPaginatedResponse_SessionMetadataPublic_: {
       /**
@@ -17322,6 +17474,27 @@ export interface components {
        * @description List of items returned in the response
        */
       items: components["schemas"]["SkillSparse"][];
+      /** Limit */
+      limit?: number | null;
+      /** Next Cursor */
+      next_cursor?: string | null;
+      /** Previous Cursor */
+      previous_cursor?: string | null;
+      /** Total Count */
+      total_count: number;
+    };
+    /** CursorPaginatedResponse[SourcedSessionMetadata] */
+    CursorPaginatedResponse_SourcedSessionMetadata_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["SourcedSessionMetadata"][];
       /** Limit */
       limit?: number | null;
       /** Next Cursor */
@@ -31781,6 +31954,40 @@ export interface components {
      */
     InputFieldType:
       "text-field" | "text-upload" | "audio-upload" | "audio-recorder" | "image-upload";
+    /** InsightActivity */
+    InsightActivity: {
+      /**
+       * Days
+       * @description Days with at least one question, oldest first.
+       */
+      days: components["schemas"]["InsightActivityDay"][];
+      /**
+       * End
+       * Format: date-time
+       */
+      end: string;
+      /** Source */
+      source: ("user" | "api_key" | "widget") | null;
+      /**
+       * Start
+       * Format: date-time
+       */
+      start: string;
+      /** Timezone */
+      timezone: string;
+    };
+    /** InsightActivityDay */
+    InsightActivityDay: {
+      /** @description Conversations with a question that day. */
+      conversations: components["schemas"]["SourceCounts"];
+      /**
+       * Date
+       * Format: date
+       * @description A local calendar day in the requested timezone.
+       */
+      date: string;
+      questions: components["schemas"]["SourceCounts"];
+    };
     /**
      * InsightChatContinueRequest
      * @description A follow-up question in an existing insights conversation.
@@ -31823,6 +32030,103 @@ export interface components {
       timezone?: string;
     };
     /**
+     * InsightPeriodSummary
+     * @description The figures of one period. Every figure is derived from live rows, so
+     *     periods older than the retention period shrink as rows are removed.
+     */
+    InsightPeriodSummary: {
+      answer_ratings: components["schemas"]["AnswerRatingCounts"];
+      conversation_ratings: components["schemas"]["ConversationRatingCounts"];
+      /** @description Conversations with at least one question in the period. */
+      conversations: components["schemas"]["SourceCounts"];
+      /**
+       * End
+       * Format: date-time
+       * @description End of the period, exclusive.
+       */
+      end: string;
+      /**
+       * Followups
+       * @description Questions that were not the first of their conversation.
+       */
+      followups: number;
+      /** @description Indicative. Null when the target has no knowledge attached. */
+      knowledge: components["schemas"]["KnowledgeUse"] | null;
+      /** @description Questions asked in the period. */
+      questions: components["schemas"]["SourceCounts"];
+      /**
+       * Returning Users
+       * @description Signed-in users who asked on more than one local day of the period, in the requested timezone.
+       */
+      returning_users: number;
+      /**
+       * Single Question Conversations
+       * @description Conversations of the period that have exactly one question: they ended after the first answer.
+       */
+      single_question_conversations: number;
+      /**
+       * Start
+       * Format: date-time
+       * @description Start of the period, inclusive.
+       */
+      start: string;
+      /**
+       * Unanswered
+       * @description Indicative: answers whose text says they cannot answer, found by phrase matching.
+       */
+      unanswered: number;
+      /**
+       * Users
+       * @description Distinct signed-in users; API keys and widget visitors are not users.
+       */
+      users: number;
+    };
+    /**
+     * InsightRating
+     * @description One rating, never who gave it.
+     */
+    InsightRating: {
+      /** Comment */
+      comment: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       * @description When the rating was given, from the stored timestamps. A widget conversation vote without a comment keeps the time of its last comment, or of the conversation's start.
+       */
+      created_at: string;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "answer" | "conversation";
+      /**
+       * Question
+       * @description The rated answer's question, or a conversation rating's first question.
+       */
+      question: string;
+      /**
+       * Question Id
+       * @description The rated answer's question; null for a conversation rating.
+       */
+      question_id: string | null;
+      /**
+       * Session Id
+       * Format: uuid
+       */
+      session_id: string;
+      /**
+       * Source
+       * @description Who the conversation is with: 'user' (a signed-in user), 'api_key' (a service API key) or 'widget' (a visitor of a website widget).
+       * @enum {string}
+       */
+      source: "user" | "api_key" | "widget";
+      /**
+       * Value
+       * @enum {integer}
+       */
+      value: -1 | 1;
+    };
+    /**
      * InsightSelectedRange
      * @description The Insights tab's period picker, as inclusive local calendar dates.
      */
@@ -31837,6 +32141,77 @@ export interface components {
        * Format: date
        */
       start: string;
+    };
+    /** InsightSummary */
+    InsightSummary: {
+      period: components["schemas"]["InsightPeriodSummary"];
+      /** @description The same figures for the period of equal length just before, when compare was asked for. Reliable only inside the retention period. */
+      previous: components["schemas"]["InsightPeriodSummary"] | null;
+      /**
+       * Source
+       * @description The source the figures were limited to; null for all sources.
+       */
+      source: ("user" | "api_key" | "widget") | null;
+      /** Timezone */
+      timezone: string;
+    };
+    /** InsightTarget */
+    InsightTarget: {
+      /** @description Conversations with at least one question in the period. */
+      conversations: components["schemas"]["SourceCounts"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Insight Enabled */
+      insight_enabled: boolean;
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: "assistant" | "group_chat";
+      /** Name */
+      name: string;
+      /**
+       * Personal Space
+       * @description The target lives in a user's personal space.
+       */
+      personal_space: boolean;
+      /** @description Usage in the previous period of equal length, when compare was asked for. */
+      previous: components["schemas"]["InsightTargetUsage"] | null;
+      /** Questions */
+      questions: number;
+      /** @description Answer ratings in the period; null when insights are off for the target, which shows usage only. */
+      ratings: components["schemas"]["MessageFeedbackCounts"] | null;
+      /**
+       * Space Id
+       * Format: uuid
+       */
+      space_id: string;
+      /** Space Name */
+      space_name: string;
+    };
+    /** InsightTargetPage */
+    InsightTargetPage: {
+      /** Items */
+      items: components["schemas"]["InsightTarget"][];
+      /** Limit */
+      limit: number;
+      /** Offset */
+      offset: number;
+      /**
+       * Total Count
+       * @description Targets matching the filters.
+       */
+      total_count: number;
+    };
+    /** InsightTargetUsage */
+    InsightTargetUsage: {
+      /** @description Conversations with at least one question in the period. */
+      conversations: components["schemas"]["SourceCounts"];
+      /** Questions */
+      questions: number;
     };
     /** Integration */
     Integration: {
@@ -32371,6 +32746,23 @@ export interface components {
      * @enum {string}
      */
     KnowledgeMode: "tool" | "inject";
+    /**
+     * KnowledgeUse
+     * @description Indicative: how answers used the target's knowledge, from what each
+     *     answer stored.
+     */
+    KnowledgeUse: {
+      /**
+       * Missed
+       * @description Of the searched answers, those without a usable hit: the search reported no results, nothing was cited, or the best passage scored under the fixed floor. Absolute signals only.
+       */
+      missed: number;
+      /**
+       * Searched
+       * @description Answers that searched the knowledge: they cited a passage, called the knowledge search, or were given by an assistant that retrieves on every turn (judged by its current knowledge settings). In tool mode an answer that never searched is not counted.
+       */
+      searched: number;
+    };
     /** Limit */
     Limit: {
       /** Max Files */
@@ -39723,6 +40115,32 @@ export interface components {
      */
     SortOrder: "asc" | "desc";
     /**
+     * SourceCounts
+     * @description A count in total and per source.
+     */
+    SourceCounts: {
+      /**
+       * Api Key
+       * @description Of service API keys.
+       */
+      api_key: number;
+      /**
+       * Total
+       * @description Every source together.
+       */
+      total: number;
+      /**
+       * User
+       * @description Of signed-in users.
+       */
+      user: number;
+      /**
+       * Widget
+       * @description Of website widget visitors.
+       */
+      widget: number;
+    };
+    /**
      * SourceMetadataEntry
      * @description One document property from the source system, e.g. a SharePoint column.
      *
@@ -39744,6 +40162,56 @@ export interface components {
       name: string;
       /** Value */
       value: string | string[];
+    };
+    /**
+     * SourcedSessionMetadata
+     * @description A conversation in a listing that spans every source, such as the
+     *     insights explore list.
+     */
+    SourcedSessionMetadata: {
+      /** Created At */
+      created_at?: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /**
+       * Source
+       * @description Who the conversation is with: 'user' (a signed-in user), 'api_key' (a service API key) or 'widget' (a visitor of a website widget). Only a user conversation is a person's.
+       * @enum {string}
+       */
+      source: "user" | "api_key" | "widget";
+      /** Updated At */
+      updated_at?: string | null;
+    };
+    /**
+     * SourcedSessionPublic
+     * @description A conversation read through insights, tagged with its source.
+     */
+    SourcedSessionPublic: {
+      /** Created At */
+      created_at?: string | null;
+      feedback?: components["schemas"]["SessionFeedback"] | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Messages */
+      messages: components["schemas"]["Message"][];
+      /** Name */
+      name: string;
+      /**
+       * Source
+       * @description Who the conversation is with: 'user' (a signed-in user), 'api_key' (a service API key) or 'widget' (a visitor of a website widget). Only a user conversation is a person's.
+       * @enum {string}
+       */
+      source: "user" | "api_key" | "widget";
+      /** Updated At */
+      updated_at?: string | null;
     };
     /** SpaceDashboard */
     SpaceDashboard: {
@@ -53968,6 +54436,8 @@ export interface operations {
         from_date?: string | null;
         to_date?: string | null;
         include_followups?: boolean;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
       };
       header?: never;
       path: {
@@ -54034,6 +54504,8 @@ export interface operations {
         limit?: number;
         cursor?: string | null;
         q?: string | null;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
       };
       header?: never;
       path: {
@@ -54097,6 +54569,7 @@ export interface operations {
         end_time?: string | null;
         assistant_id?: string | null;
         group_chat_id?: string | null;
+        source?: ("user" | "api_key" | "widget") | null;
       };
       header?: never;
       path?: never;
@@ -54179,6 +54652,73 @@ export interface operations {
         };
         content: {
           "application/json": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_conversation_insight_activity_api_v1_analysis_conversation_insights_activity__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description IANA time zone for local days; 400 invalid_timezone when unknown. */
+        timezone?: string;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightActivity"];
         };
       };
       /** @description Bad Request */
@@ -54578,6 +55118,78 @@ export interface operations {
       };
     };
   };
+  get_conversation_insight_feedback_api_v1_analysis_conversation_insights_feedback__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
+        /** @description Only good (1) or bad (-1) ratings; 400 for anything else. */
+        value?: number | null;
+        /** @description Only ratings with (true) or without (false) a comment. */
+        has_comment?: boolean | null;
+        limit?: number;
+        /** @description The next_cursor of the previous page, as given. */
+        cursor?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["CursorPaginatedResponse_InsightRating_"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_conversation_insight_job_api_v1_analysis_conversation_insights_jobs__job_id___get: {
     parameters: {
       query?: never;
@@ -54638,6 +55250,8 @@ export interface operations {
         name_filter?: string | null;
         start_date?: string | null;
         end_date?: string | null;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
       };
       header?: never;
       path?: never;
@@ -54651,7 +55265,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["CursorPaginatedResponse_SessionMetadataPublic_"];
+          "application/json": components["schemas"]["CursorPaginatedResponse_SourcedSessionMetadata_"];
         };
       };
       /** @description Bad Request */
@@ -54709,7 +55323,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["SessionPublic"];
+          "application/json": components["schemas"]["SourcedSessionPublic"];
         };
       };
       /** @description Forbidden */
@@ -54732,6 +55346,75 @@ export interface operations {
       };
       /** @description Gone */
       410: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_conversation_insight_summary_api_v1_analysis_conversation_insights_summary__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description IANA time zone for local days; 400 invalid_timezone when unknown. */
+        timezone?: string;
+        /** @description Only conversations of this source: 'user', 'api_key' or 'widget'. All sources when omitted. */
+        source?: ("user" | "api_key" | "widget") | null;
+        /** @description Also return the previous period of equal length. */
+        compare?: boolean;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightSummary"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
         headers: {
           [name: string]: unknown;
         };
@@ -54841,6 +55524,68 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatisticsAggregated"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_insight_targets_api_v1_analysis_targets__get: {
+    parameters: {
+      query?: {
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description Also return each target's previous period. */
+        compare?: boolean;
+        sort?: "name" | "conversations" | "questions";
+        order?: "asc" | "desc";
+        /** @description Part of the name. */
+        q?: string | null;
+        /** @description 'unused': only targets without conversations in the period. */
+        activity?: "all" | "unused";
+        limit?: number;
+        offset?: number;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightTargetPage"];
         };
       };
       /** @description Bad Request */

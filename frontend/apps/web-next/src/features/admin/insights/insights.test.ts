@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { analysisAnswerText, assistantActivityRows } from "./insights";
+import { nextTargetOffset } from "./insights";
 import {
   insightPeriod,
   previousInsightRange,
@@ -131,111 +131,12 @@ describe("viewer-aligned hourly aggregates", () => {
   });
 });
 
-describe("assistantActivityRows", () => {
-  it("aggregates session and question metadata by assistant id and sorts by activity", () => {
-    const rows = assistantActivityRows({
-      assistants: [],
-      sessions: [
-        {
-          id: "session-1",
-          assistant_id: "assistant-a",
-          group_chat_id: null,
-          created_at: "2026-06-01T08:00:00Z"
-        },
-        {
-          id: "session-2",
-          assistant_id: "assistant-b",
-          group_chat_id: null,
-          created_at: "2026-06-01T09:00:00Z"
-        },
-        {
-          id: "session-3",
-          assistant_id: null,
-          group_chat_id: "group-1",
-          created_at: "2026-06-01T10:00:00Z"
-        }
-      ],
-      questions: [
-        {
-          id: "question-1",
-          assistant_id: "assistant-b",
-          session_id: "session-2",
-          created_at: "2026-06-01T09:10:00Z"
-        },
-        {
-          id: "question-2",
-          assistant_id: "assistant-a",
-          session_id: "session-1",
-          created_at: "2026-06-01T08:10:00Z"
-        },
-        {
-          id: "question-3",
-          assistant_id: "assistant-a",
-          session_id: "session-1",
-          created_at: "2026-06-01T08:20:00Z"
-        },
-        {
-          id: "question-4",
-          assistant_id: null,
-          session_id: "session-3",
-          created_at: "2026-06-01T10:10:00Z"
-        }
-      ]
-    });
-
-    expect(rows).toEqual([
-      {
-        assistantId: "assistant-a",
-        sessions: 1,
-        questions: 2,
-        latestAt: "2026-06-01T08:20:00Z"
-      },
-      {
-        assistantId: "assistant-b",
-        sessions: 1,
-        questions: 1,
-        latestAt: "2026-06-01T09:10:00Z"
-      }
-    ]);
-  });
-
-  it("respects the requested row limit", () => {
-    const rows = assistantActivityRows(
-      {
-        assistants: [],
-        sessions: [
-          {
-            id: "session-1",
-            assistant_id: "assistant-a",
-            group_chat_id: null,
-            created_at: "2026-06-01T08:00:00Z"
-          },
-          {
-            id: "session-2",
-            assistant_id: "assistant-b",
-            group_chat_id: null,
-            created_at: "2026-06-01T09:00:00Z"
-          }
-        ],
-        questions: []
-      },
-      1
-    );
-
-    expect(rows).toHaveLength(1);
-  });
-});
-
-describe("analysisAnswerText", () => {
-  it("extracts the backend answer string from unknown JSON", () => {
-    expect(analysisAnswerText({ answer: "Use fewer follow-up prompts." })).toBe(
-      "Use fewer follow-up prompts."
-    );
-  });
-
-  it("returns null for unsupported payload shapes", () => {
-    expect(analysisAnswerText(null)).toBeNull();
-    expect(analysisAnswerText({ answer: 12 })).toBeNull();
-    expect(analysisAnswerText(["answer"])).toBeNull();
+describe("the overview table's pages", () => {
+  it("asks for the next offset until every target is loaded", () => {
+    const items = (count: number) => Array.from({ length: count }, () => ({}));
+    expect(nextTargetOffset({ offset: 0, items: items(25), total_count: 60 })).toBe(25);
+    expect(nextTargetOffset({ offset: 50, items: items(10), total_count: 60 })).toBeUndefined();
+    // A page that came back empty (fewer targets since) ends the list.
+    expect(nextTargetOffset({ offset: 25, items: [], total_count: 60 })).toBeUndefined();
   });
 });

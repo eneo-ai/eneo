@@ -396,7 +396,9 @@ export function ChatPage({
               hidden={viewTab !== "insights"}
               className="flex min-h-0 min-w-0 flex-1 flex-col"
             >
-              {insightsVisited && <InsightsPanel partner={insightPartner} />}
+              {insightsVisited && (
+                <InsightsPanel partner={insightPartner} hidden={viewTab !== "insights"} />
+              )}
             </div>
           )}
           <div

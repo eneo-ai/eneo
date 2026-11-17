@@ -1,12 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Card } from "@astryxdesign/core/Card";
-import { Button } from "@astryxdesign/core/Button";
 import { Switch } from "@astryxdesign/core/Switch";
 import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
 import { insightRangeOfDays, type InsightRange } from "@/features/insights/insights-range";
@@ -14,17 +13,14 @@ import { tokenUsageQueryOptions } from "@/features/admin/usage/usage";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import {
-  type InsightsRange,
-  assistantActivityRows,
   insightActivityQueryOptions,
   insightAggregatedQueryOptions,
-  insightMetadataQueryOptions,
   insightPeriod,
   previousInsightRange,
   periodTotals,
-  insightTrend,
-  tenantAssistantsQueryOptions
+  insightTrend
 } from "@/features/admin/insights/insights";
+import { InsightTargets } from "./insight-targets";
 
 const CHART_HEIGHT = 320;
 const UsageAreaChart = lazy(() =>
@@ -207,74 +203,11 @@ function ActivityCards({ range, compare }: { range: InsightRange; compare: boole
   );
 }
 
-function AssistantActivityList({ range }: { range: InsightsRange }) {
-  const t = useTranslations();
-  const metadata = useQuery(insightMetadataQueryOptions(browserApi, range));
-  const assistants = useQuery(tenantAssistantsQueryOptions(browserApi));
-  const rows = useMemo(
-    () => (metadata.data ? assistantActivityRows(metadata.data) : []),
-    [metadata.data]
-  );
-  const assistantNames = useMemo(
-    () => new Map((assistants.data ?? []).map((assistant) => [assistant.id, assistant.name])),
-    [assistants.data]
-  );
-
-  return (
-    <QueryStateBoundary queries={[metadata, assistants]} rows={3} height={56}>
-      {() =>
-        rows.length === 0 ? (
-          <p className="text-muted-foreground text-sm">{t("no_usage_data")}</p>
-        ) : (
-          <AssistantActivityRows rows={rows} assistantNames={assistantNames} />
-        )
-      }
-    </QueryStateBoundary>
-  );
-}
-
-function AssistantActivityRows({
-  rows,
-  assistantNames
-}: {
-  rows: ReturnType<typeof assistantActivityRows>;
-  assistantNames: Map<string, string>;
-}) {
-  const t = useTranslations();
-  return (
-    <Card className="overflow-hidden p-0">
-      <div className="divide-y">
-        {rows.map((row) => (
-          <div
-            key={row.assistantId}
-            className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
-          >
-            <div className="min-w-0">
-              <p className="truncate font-medium">
-                {/* The list leaves out hidden assistants (a flow's chat) and deleted ones. */}
-                {assistantNames.get(row.assistantId) ?? t("unknown_assistant")}
-              </p>
-              <p className="text-muted-foreground text-sm">
-                {t("insights_assistant_row_counts", {
-                  questions: row.questions,
-                  sessions: row.sessions
-                })}
-              </p>
-            </div>
-            <Button
-              variant="secondary"
-              size="sm"
-              href={`/admin/insights/assistant/${row.assistantId}`}
-              label={t("details")}
-            />
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-/** Organization activity over whole viewer-local days. */
+/**
+ * Organization activity over whole viewer-local days, and every assistant
+ * and group chat with its use in the period ("Assistenter och gruppchattar").
+ * The period and "Jämför" drive both.
+ */
 export function InsightsPage() {
   const t = useTranslations();
   const { can } = useAppContext();
@@ -295,8 +228,8 @@ export function InsightsPage() {
       <div className="flex flex-col gap-3">
         <h2 className="font-semibold">{t("insights_assistant_activity")}</h2>
         <ActivityCards range={range} compare={compare} />
-        <AssistantActivityList range={insightPeriod(range)} />
       </div>
+      <InsightTargets range={range} compare={compare} />
     </div>
   );
 }

@@ -9,7 +9,7 @@ import {
 } from "./helpers";
 import type { components } from "../src/lib/api/schema";
 
-test("uses native period statistics, question logs and the analysis stream under production CSP", async ({
+test("uses native period statistics, question logs and the question's conversation under production CSP", async ({
   page
 }, testInfo) => {
   const requested: string[] = [];
@@ -73,9 +73,10 @@ test("uses native period statistics, question logs and the analysis stream under
     const date = new Date();
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
   });
-  await page.goto(
-    `/admin/insights/assistant/${assistant}?from=${today}&to=${today}&followups=true&tab=questions`
-  );
+  // The assistant's insights: the same view as the chat page's Insikter tab,
+  // with the question history on it.
+  await page.goto(`/admin/insights/assistant/${assistant}?from=${today}&to=${today}`);
+  await expect(page.getByRole("button", { name: "Fråga analysen", exact: true })).toBeVisible();
   const questionButton = page.getByRole("button", { name: question, exact: true });
   await expect(questionButton).toBeVisible();
   await questionButton.click();
@@ -96,30 +97,22 @@ test("uses native period statistics, question logs and the analysis stream under
   await expect(dialog).toBeHidden();
   await expect(questionButton).toBeFocused();
 
-  await page.getByRole("tab", { name: "Analysera", exact: true }).click();
-  await expect(page).toHaveURL(/tab=chat/);
-  const analysisResponse = page.waitForResponse(
-    (response) =>
-      new URL(response.url()).pathname === `/api/v1/analysis/assistants/${assistant}/` &&
-      response.request().method() === "POST"
-  );
+  // The question's conversation opens read-only in "Utforska konversationer".
   await page
-    .getByRole("textbox", { name: "Fråga om insikter" })
-    .fill("Vilka ämnen gäller frågorna?");
-  await page.getByRole("button", { name: "Skicka din fråga" }).click();
-  const response = await analysisResponse;
-  expect(response.request().postDataJSON().stream).toBe(true);
-  expect(response.headers()["content-type"]).toContain("text/event-stream");
-  await expect(page.getByText(MOCK_REPLY, { exact: true })).toBeVisible();
+    .getByRole("button", { name: /^Session från / })
+    .first()
+    .click();
+  const explore = page.getByRole("dialog", { name: "Utforska konversationer" });
+  await expect(explore.getByText(MOCK_REPLY)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(explore).toBeHidden();
+  // The one-shot analysis is gone; the analysis is the chat behind "Fråga analysen".
+  expect(requested).not.toContain(`/api/v1/analysis/assistants/${assistant}/`);
   await page.reload();
-  await expect(page.getByRole("tab", { name: "Analysera", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
   expect(new URL(page.url()).searchParams.get("from")).toBe(today);
 });
 
-test("keeps direct-link filters in sync with browser Back and Forward", async ({ page }) => {
+test("keeps a direct link's period in sync with browser Back and Forward", async ({ page }) => {
   await page.goto("/spaces/list");
   const space = await apiPost(page, "/spaces/", { name: uniqueName("Historik") });
   const assistant = await apiPost(page, `/spaces/${space}/applications/assistants/`, {
@@ -127,25 +120,13 @@ test("keeps direct-link filters in sync with browser Back and Forward", async ({
   });
   await apiPost(page, `/assistants/${assistant}/`, { insight_enabled: true });
   const route = `/admin/insights/assistant/${assistant}`;
-  await page.goto(`${route}?from=2026-09-01&to=2026-09-30&followups=false&tab=questions`);
-  await expect(
-    page.getByRole("switch", { name: "Inkludera uppföljningsfrågor" })
-  ).not.toBeChecked();
-  await page.goto(`${route}?from=2026-10-01&to=2026-10-31&followups=true&tab=chat`);
+  await page.goto(`${route}?from=2026-09-01&to=2026-09-30`);
+  await expect(page.getByRole("button", { name: /^Period: 1 sep\./ })).toBeVisible();
+  await page.goto(`${route}?from=2026-10-01&to=2026-10-31`);
   await page.goBack();
-  await expect(page.getByRole("tab", { name: "Frågehistorik", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-  await expect(
-    page.getByRole("switch", { name: "Inkludera uppföljningsfrågor" })
-  ).not.toBeChecked();
+  await expect(page.getByRole("button", { name: /^Period: 1 sep\./ })).toBeVisible();
   await page.goForward();
-  await expect(page.getByRole("tab", { name: "Analysera", exact: true })).toHaveAttribute(
-    "aria-selected",
-    "true"
-  );
-  await expect(page.getByRole("switch", { name: "Inkludera uppföljningsfrågor" })).toBeChecked();
+  await expect(page.getByRole("button", { name: /^Period: 1 okt\./ })).toBeVisible();
 });
 
 for (const colorScheme of ["light", "dark"] as const) {

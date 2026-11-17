@@ -23,6 +23,7 @@ import { createChatTransport } from "@/lib/chat/transport";
 import type { ChatPartner } from "@/lib/chat/types";
 import type { ConversationApi } from "@/features/chat/chat-view";
 import type { ToolResultSource } from "@/features/chat/tool-results";
+import { browserTimeZone } from "@/features/insights/insights-range";
 
 const CHAT_PATH = `${API_BASE}/api/v1/analysis/conversation-insights/chat`;
 
@@ -115,11 +116,6 @@ export const insightToolResults: ToolResultSource = {
     return response.result ?? null;
   }
 };
-
-/** The browser's IANA time zone. */
-function browserTimeZone(): string {
-  return Intl.DateTimeFormat().resolvedOptions().timeZone;
-}
 
 /** The analysis as ChatView talks to it, with the period its questions carry. */
 export type InsightConversationApi = ConversationApi & {

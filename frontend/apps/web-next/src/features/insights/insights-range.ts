@@ -45,6 +45,14 @@ export function insightRangeParams(range: InsightRange): {
   };
 }
 
+/**
+ * The browser's IANA time zone: the one the range's local days are counted
+ * in, which the endpoints that count per day are told.
+ */
+export function browserTimeZone(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone;
+}
+
 /** Which partner the insight endpoints are asked about. */
 export function insightPartnerQuery(partner: Pick<ChatPartner, "type" | "id">): {
   assistant_id?: string;

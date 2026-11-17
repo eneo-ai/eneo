@@ -1,10 +1,54 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IntlProvider } from "use-intl";
 import en from "@/lib/i18n/messages/en.json";
 import { EneoApiError } from "@/lib/api/errors";
 import { renderInApp, testAppContext } from "@/test/render";
+
+const counts = (user: number, widget: number, api_key: number) => ({
+  total: user + widget + api_key,
+  user,
+  widget,
+  api_key
+});
+
+const target = (id: string, name: string, overrides: Record<string, unknown> = {}) => ({
+  id,
+  kind: "assistant",
+  name,
+  space_id: `space-${id}`,
+  space_name: "Bygg och miljö",
+  personal_space: false,
+  insight_enabled: true,
+  conversations: counts(0, 0, 0),
+  questions: 0,
+  previous: null,
+  ratings: { positive: 0, negative: 0 },
+  ...overrides
+});
+
+/** Three targets of note, then enough unused assistants for a second page. */
+const TARGETS = [
+  target("t-1", "Bygglovsassistenten", {
+    conversations: counts(742, 468, 74),
+    questions: 2946,
+    ratings: { positive: 165, negative: 47 }
+  }),
+  target("t-2", "Upphandlingsstöd", {
+    kind: "group_chat",
+    space_name: "Ekonomi",
+    conversations: counts(611, 0, 0),
+    questions: 900
+  }),
+  target("t-3", "Skolskjutsfrågor", {
+    insight_enabled: false,
+    ratings: null,
+    conversations: counts(31, 69, 0),
+    questions: 120
+  }),
+  ...Array.from({ length: 24 }, (_, index) => target(`u-${index}`, `Oanvänd ${index + 1}`))
+];
 
 const state = vi.hoisted(() => ({
   aggregated: "pending" as "pending" | "fail" | "ok",
@@ -44,11 +88,23 @@ vi.mock("@/lib/api/browser", () => ({
             total_trackable_assistants: 3,
             active_user_count: 5
           });
-        case "/api/v1/analysis/metadata-statistics/":
-          return ok({ assistants: [], sessions: [], questions: [] });
+        case "/api/v1/analysis/targets/": {
+          const query = init!.params!.query! as unknown as Record<string, string | number>;
+          const offset = Number(query.offset);
+          const matching = TARGETS.filter(
+            (item) =>
+              (!query.q || item.name.toLowerCase().includes(String(query.q))) &&
+              (query.activity !== "unused" || item.conversations.total === 0)
+          );
+          return ok({
+            items: matching.slice(offset, offset + Number(query.limit)),
+            total_count: matching.length,
+            limit: Number(query.limit),
+            offset
+          });
+        }
         default:
-          // /api/v1/assistants/
-          return ok({ items: [], count: 0 });
+          throw new Error(`Unexpected GET ${path}`);
       }
     }
   }
@@ -64,6 +120,10 @@ beforeEach(() => {
   state.firstStart = "";
 });
 afterEach(cleanup);
+
+/** The query of every request for the table of assistants and group chats. */
+const targetsCalls = () =>
+  state.calls.filter((call) => call.path === "/api/v1/analysis/targets/").map((call) => call.query);
 
 const busyRegions = () =>
   screen.getAllByRole("status").filter((region) => region.getAttribute("aria-busy") === "true");
@@ -140,5 +200,100 @@ describe("InsightsPage", () => {
       const activity = (await screen.findByText(label)).closest(".astryx-card");
       expect(activity?.className.split(" ")).toContain("p-4");
     }
+  });
+
+  it("lists the assistants and group chats from the API, with their use and where to go", async () => {
+    renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
+    const table = await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
+    expect(targetsCalls()[0]).toMatchObject({
+      sort: "conversations",
+      order: "desc",
+      activity: "all",
+      compare: false,
+      offset: 0,
+      limit: 25
+    });
+    expect(state.calls.some((call) => call.path === "/api/v1/analysis/metadata-statistics/")).toBe(
+      false
+    );
+    const row = (name: string) =>
+      within(table)
+        .getAllByRole("row")
+        .find((candidate) => within(candidate).queryByText(name))!;
+
+    const assistant = row("Bygglovsassistenten");
+    expect(
+      within(assistant).getByRole("link", { name: "Bygglovsassistenten" }).getAttribute("href")
+    ).toMatch(/^\/admin\/insights\/assistant\/t-1\?from=\d{4}-\d{2}-\d{2}&to=\d{4}-\d{2}-\d{2}$/);
+    expect(
+      within(assistant).getByRole("img", {
+        name: /^58\s%\sanvändare, 36\s%\swidget, 6\s%\sAPI$/
+      })
+    ).toBeTruthy();
+    expect(within(assistant).getByText(/^78\s%$/)).toBeTruthy();
+
+    const groupChat = row("Upphandlingsstöd");
+    expect(
+      within(groupChat).getByRole("link", { name: "Upphandlingsstöd" }).getAttribute("href")
+    ).toMatch(/^\/admin\/insights\/group-chat\/t-2\?/);
+    expect(within(groupChat).getByText("Ekonomi, gruppchatt")).toBeTruthy();
+    expect(within(groupChat).getByText("Inga betyg")).toBeTruthy();
+
+    // Insights off: use only, and the way to the switch instead of the ratings.
+    const off = row("Skolskjutsfrågor");
+    expect(within(off).queryByRole("link", { name: "Skolskjutsfrågor" })).toBeNull();
+    expect(within(off).getByText("Insikter är avstängda")).toBeTruthy();
+    expect(
+      within(off).getByRole("link", { name: "Öppna inställningen" }).getAttribute("href")
+    ).toBe("/spaces/space-t-3/assistants/t-3/edit?section=publishing#publishing");
+  });
+
+  it("sorts, searches, filters and pages the table through the API", async () => {
+    renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
+    const table = await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
+    expect(screen.getByText("Visar 25 av 27")).toBeTruthy();
+    expect(
+      within(table)
+        .getByRole("columnheader", { name: /Konversationer/ })
+        .getAttribute("aria-sort")
+    ).toBe("descending");
+
+    // Names start A to Z; a second click flips them.
+    fireEvent.click(within(table).getByRole("button", { name: "Namn" }));
+    await waitFor(() =>
+      expect(targetsCalls().at(-1)).toMatchObject({ sort: "name", order: "asc", offset: 0 })
+    );
+    await waitFor(() =>
+      expect(
+        within(table).getByRole("columnheader", { name: /Namn/ }).getAttribute("aria-sort")
+      ).toBe("ascending")
+    );
+    fireEvent.click(within(table).getByRole("button", { name: "Namn" }));
+    await waitFor(() =>
+      expect(targetsCalls().at(-1)).toMatchObject({ sort: "name", order: "desc" })
+    );
+
+    // "Visa fler" asks for the next offset and keeps the rows it has.
+    fireEvent.click(await screen.findByRole("button", { name: "Visa fler" }));
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ offset: 25 }));
+    expect(await screen.findByText("Visar 27 av 27")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Visa fler" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("radio", { name: "Oanvända" }));
+    await waitFor(() =>
+      expect(targetsCalls().at(-1)).toMatchObject({ activity: "unused", offset: 0 })
+    );
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök assistent eller gruppchatt" }), {
+      target: { value: "  oanvänd 2  " }
+    });
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ q: "oanvänd 2" }));
+    expect(await screen.findByText("Visar 6 av 6")).toBeTruthy();
+  });
+
+  it("compares each target's conversations when Jämför is on", async () => {
+    renderInApp(<InsightsPage />, { appContext: testAppContext({ permissions: ["insights"] }) });
+    await screen.findByRole("table", { name: "Assistenter och gruppchattar" });
+    fireEvent.click(screen.getByRole("switch", { name: "Jämför" }));
+    await waitFor(() => expect(targetsCalls().at(-1)).toMatchObject({ compare: true }));
   });
 });

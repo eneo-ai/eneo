@@ -2,21 +2,25 @@ import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { insightSourceQuery, type InsightSource } from "@/features/insights/insight-figures";
 import { insightRangeParams, type InsightRange } from "@/features/insights/insights-range";
 import { isoDate, type IsoDate } from "@/lib/calendar-date";
-import { readEventStream } from "@/lib/api/event-stream";
 
 export type Counts = Schema<"Counts">;
-export type MetadataStatistics = Schema<"MetadataStatistics">;
 export type MetadataStatisticsAggregated = Schema<"MetadataStatisticsAggregated">;
 export type AssistantActivityStats = Schema<"AssistantActivityStats">;
 export type AssistantInsightQuestion = Schema<"AssistantInsightQuestion">;
 export type AssistantInsightQuestionPage =
   Schema<"CursorPaginatedResponse_AssistantInsightQuestion_">;
-export type TenantAssistant = Schema<"AssistantPublic">;
+export type InsightTarget = Schema<"InsightTarget">;
+export type InsightTargetPage = Schema<"InsightTargetPage">;
 
 export type InsightsRange = { start: string; end: string };
-export type AssistantInsightFilters = InsightsRange & { includeFollowups: boolean };
+export type AssistantInsightFilters = InsightsRange & {
+  includeFollowups: boolean;
+  /** One source's questions; every source's when left out. */
+  source?: InsightSource | null;
+};
 
 export const ASSISTANT_INSIGHT_QUESTION_LIMIT = 100;
 
@@ -63,19 +67,6 @@ export function insightAggregatedQueryOptions(
   });
 }
 
-/** Raw insight metadata for assistant-level drill-down links over a date range. */
-export function insightMetadataQueryOptions(api: EneoClient, range: InsightsRange) {
-  return queryOptions({
-    queryKey: ["admin-insights-metadata", range],
-    queryFn: (): Promise<MetadataStatistics> =>
-      unwrap(
-        api.GET("/api/v1/analysis/metadata-statistics/", {
-          params: { query: { start_date: range.start, end_date: range.end } }
-        })
-      )
-  });
-}
-
 /** Active-assistant / active-user activity summary over a date range. */
 export function insightActivityQueryOptions(api: EneoClient, range: InsightsRange) {
   return queryOptions({
@@ -86,41 +77,6 @@ export function insightActivityQueryOptions(api: EneoClient, range: InsightsRang
           params: { query: { start_date: range.start, end_date: range.end } }
         })
       )
-  });
-}
-
-/** Admin-visible assistants for resolving metadata assistant ids to names. */
-export function tenantAssistantsQueryOptions(api: EneoClient) {
-  return queryOptions({
-    queryKey: ["admin-insights-tenant-assistants"],
-    queryFn: async (): Promise<TenantAssistant[]> => {
-      const page = await unwrap(
-        api.GET("/api/v1/assistants/", { params: { query: { for_tenant: true } } })
-      );
-      return page.items;
-    }
-  });
-}
-
-export function assistantQuestionHistoryQueryOptions({
-  api,
-  assistantId,
-  filters,
-  cursor,
-  query,
-  limit = ASSISTANT_INSIGHT_QUESTION_LIMIT
-}: {
-  api: EneoClient;
-  assistantId: string;
-  filters: AssistantInsightFilters;
-  cursor?: string;
-  query?: string;
-  limit?: number;
-}) {
-  return queryOptions({
-    queryKey: ["admin-insights-assistant-questions", assistantId, filters, query, cursor, limit],
-    queryFn: (): Promise<AssistantInsightQuestionPage> =>
-      fetchAssistantQuestionHistory({ api, assistantId, filters, cursor, query, limit })
   });
 }
 
@@ -147,6 +103,7 @@ export function fetchAssistantQuestionHistory({
           from_date: filters.start,
           to_date: filters.end,
           include_followups: filters.includeFollowups,
+          ...insightSourceQuery(filters.source ?? null),
           cursor,
           limit,
           q: query
@@ -156,96 +113,69 @@ export function fetchAssistantQuestionHistory({
   );
 }
 
-export async function askAssistantInsightQuestion({
+/** How the overview's table of assistants and group chats is sorted (server side). */
+export type InsightTargetSort = {
+  by: "name" | "conversations" | "questions";
+  order: "asc" | "desc";
+};
+
+export const INSIGHT_TARGETS_PAGE_SIZE = 25;
+/** The endpoint's limit on the name search. */
+export const INSIGHT_TARGETS_SEARCH_MAX = 200;
+
+/**
+ * `GET /analysis/targets/`: every assistant and group chat with its usage in
+ * the period (whole local days, the end exclusive), a page at a time from
+ * `offset`.
+ */
+export function fetchInsightTargets({
   api,
-  assistantId,
-  filters,
-  question,
-  signal,
-  onAnswer
+  range,
+  compare,
+  sort,
+  search,
+  unusedOnly,
+  offset,
+  signal
 }: {
   api: EneoClient;
-  assistantId: string;
-  filters: AssistantInsightFilters;
-  question: string;
+  range: InsightRange;
+  compare: boolean;
+  sort: InsightTargetSort;
+  search: string;
+  unusedOnly: boolean;
+  offset: number;
   signal?: AbortSignal;
-  onAnswer?: (part: string) => void;
-}): Promise<string> {
-  const body = await unwrap(
-    api.POST("/api/v1/analysis/assistants/{assistant_id}/", {
+}): Promise<InsightTargetPage> {
+  const { startTime, endTime } = insightRangeParams(range);
+  return unwrap(
+    api.GET("/api/v1/analysis/targets/", {
       params: {
-        path: { assistant_id: assistantId },
         query: {
-          from_date: filters.start,
-          to_date: filters.end,
-          include_followups: filters.includeFollowups
+          start_time: startTime,
+          end_time: endTime,
+          compare,
+          sort: sort.by,
+          order: sort.order,
+          q: search || undefined,
+          activity: unusedOnly ? "unused" : "all",
+          limit: INSIGHT_TARGETS_PAGE_SIZE,
+          offset
         }
       },
-      body: { question, stream: true } satisfies Schema<"AskAnalysis">,
-      parseAs: "stream",
       signal
     })
   );
-  if (!body) throw new Error("The analysis response had no stream.");
-  let answer = "";
-  await readEventStream(body, (data) => {
-    signal?.throwIfAborted();
-    if (!data) return;
-    const part = analysisAnswerText(JSON.parse(data));
-    if (part === null) throw new Error("The analysis stream contained an invalid answer.");
-    answer += part;
-    onAnswer?.(part);
-  });
-  signal?.throwIfAborted();
-  if (!answer.trim()) throw new Error("The analysis stream returned no answer.");
-  return answer;
 }
 
-export function analysisAnswerText(response: unknown): string | null {
-  if (typeof response !== "object" || response === null || Array.isArray(response)) return null;
-  const answer = (response as Record<string, unknown>).answer;
-  return typeof answer === "string" ? answer : null;
-}
-
-export type AssistantActivityRow = {
-  assistantId: string;
-  sessions: number;
-  questions: number;
-  latestAt: string;
-};
-
-/** Aggregates raw metadata into assistant rows sorted by visible activity. */
-export function assistantActivityRows(data: MetadataStatistics, limit = 6): AssistantActivityRow[] {
-  const rows = new Map<string, AssistantActivityRow>();
-  const ensure = (assistantId: string, createdAt: string) => {
-    let row = rows.get(assistantId);
-    if (!row) {
-      row = { assistantId, sessions: 0, questions: 0, latestAt: createdAt };
-      rows.set(assistantId, row);
-    }
-    if (createdAt > row.latestAt) row.latestAt = createdAt;
-    return row;
-  };
-
-  for (const session of data.sessions) {
-    if (!session.assistant_id) continue;
-    ensure(session.assistant_id, session.created_at).sessions += 1;
-  }
-
-  for (const question of data.questions) {
-    if (!question.assistant_id) continue;
-    ensure(question.assistant_id, question.created_at).questions += 1;
-  }
-
-  return [...rows.values()]
-    .sort(
-      (a, b) =>
-        b.questions - a.questions ||
-        b.sessions - a.sessions ||
-        (a.latestAt < b.latestAt ? 1 : -1) ||
-        a.assistantId.localeCompare(b.assistantId)
-    )
-    .slice(0, limit);
+/** The offset of the page after `page`, or undefined after the last. */
+export function nextTargetOffset(page: {
+  offset: number;
+  items: readonly unknown[];
+  total_count: number;
+}): number | undefined {
+  const next = page.offset + page.items.length;
+  return page.items.length > 0 && next < page.total_count ? next : undefined;
 }
 
 /** Inclusive datetime endpoints need the last microsecond before the next local midnight. */
