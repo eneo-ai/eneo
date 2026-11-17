@@ -58,7 +58,14 @@ _HTML = """<!doctype html>
 router = APIRouter()
 
 
-@router.get("/docs", include_in_schema=False, response_class=HTMLResponse)
+@router.get(
+    "/docs",
+    include_in_schema=False,
+    response_class=HTMLResponse,
+    response_model=None,
+    description="Serve the locally packaged Swagger UI document.",
+    responses={200: {"description": "Interactive API documentation."}},
+)
 @endpoint_access(
     authentication=Authentication.PUBLIC,
     authorization=Authorization.PUBLIC,
@@ -68,7 +75,16 @@ async def interactive_api_docs() -> HTMLResponse:
     return HTMLResponse(_HTML, headers=_HEADERS)
 
 
-@router.get("/docs/assets/{filename}", include_in_schema=False)
+@router.get(
+    "/docs/assets/{filename}",
+    include_in_schema=False,
+    response_model=None,
+    description="Serve an allowlisted, locally packaged API documentation asset.",
+    responses={
+        200: {"description": "Packaged documentation asset."},
+        404: {"description": "Filename is not a published documentation asset."},
+    },
+)
 @endpoint_access(
     authentication=Authentication.PUBLIC,
     authorization=Authorization.PUBLIC,
