@@ -196,6 +196,19 @@ class InsightConversationRepository:
             next_cursor=next_cursor,
         )
 
+    async def set_completion_model(
+        self, *, session_id: UUID, tenant_id: UUID, completion_model_id: UUID
+    ) -> None:
+        """Record the model of the conversation's latest turn."""
+        await self.session.execute(
+            sa.update(InsightConversations)
+            .where(
+                InsightConversations.session_id == session_id,
+                InsightConversations.tenant_id == tenant_id,
+            )
+            .values(completion_model_id=completion_model_id)
+        )
+
     async def get_by_session_id(
         self, session_id: UUID, tenant_id: UUID
     ) -> InsightConversation | None:

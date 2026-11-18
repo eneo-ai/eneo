@@ -1,6 +1,7 @@
 """Unit tests for the insights conversation service.
 
-Covers model resolution, timezone validation, the completion call's
+Covers model resolution and the choice of a model per turn, timezone
+validation, the completion call's
 contract (insights server attached and scoped to the target and the
 conversation, no extended logging, tool approval off, always streamed),
 persistence of tool calls, the partial save of a stopped turn, the
@@ -33,6 +34,7 @@ from eneo.analysis.insight_conversation_service import (
     merge_tool_call_chunk,
 )
 from eneo.analysis.insight_exceptions import (
+    InsightsModelNotAllowedError,
     InsightsModelUnavailableError,
     InvalidTimezoneError,
 )
@@ -82,15 +84,17 @@ def _model(
 def _space(
     *,
     models: tuple[Any, ...] = (),
-    in_space: bool = True,
     classification: SecurityClassification | None = None,
 ) -> Any:
-    """A space with the real classification and default-model policies."""
+    """A space with the real membership, classification and default-model
+    policies."""
     space = SimpleNamespace(
         id=uuid4(),
         completion_models=list(models),
         security_classification=classification,
-        is_completion_model_in_space=lambda _id: in_space,
+    )
+    space.is_completion_model_in_space = partial(
+        Space.is_completion_model_in_space, space
     )
     space.allows_security_classification = partial(
         Space.allows_security_classification, space
@@ -119,7 +123,7 @@ class TestResolveModel:
 
     def test_own_model_outside_the_space_is_skipped(self):
         default = _model()
-        space = _space(models=(default,), in_space=False)
+        space = _space(models=(default,))
 
         assert self.resolve(_assistant(_model()), space) is default
 
@@ -316,6 +320,7 @@ class _Harness:
         self.loaded: Any = self.session
         self.removed_copy = False
         self.removal_checks: list[Any] = []
+        self.link_models: list[Any] = []
 
         async def assert_insight_access(**kwargs: Any):
             self.access_checks.append(kwargs)
@@ -361,12 +366,17 @@ class _Harness:
                 delete=self._delete_session,
             ),
             insight_conversation_repo=SimpleNamespace(
-                get_by_session_id=self._get_link, list_for_actor=self._list
+                get_by_session_id=self._get_link,
+                list_for_actor=self._list,
+                set_completion_model=self._set_link_model,
             ),
         )
 
     async def _get_link(self, session_id: Any, tenant_id: Any):
         return self.link
+
+    async def _set_link_model(self, **kwargs: Any):
+        self.link_models.append(kwargs["completion_model_id"])
 
     async def _get_session(self, session_id: Any, tenant_id: Any):
         return self.loaded
@@ -387,7 +397,9 @@ class _Harness:
         self.placeholders.append(kwargs)
         return self.question_id, datetime.now(timezone.utc)
 
-    def with_link(self, *, own: bool = True, kind: str = "assistant"):
+    def with_link(
+        self, *, own: bool = True, kind: str = "assistant", model_id: Any = None
+    ):
         target = uuid4()
         self.link = InsightConversation(
             id=uuid4(),
@@ -396,7 +408,7 @@ class _Harness:
             assistant_id=target if kind == "assistant" else None,
             group_chat_id=target if kind == "group_chat" else None,
             actor_user_id=self.user.id if own else uuid4(),
-            completion_model_id=self.model.id,
+            completion_model_id=model_id or self.model.id,
             timezone="Europe/Stockholm",
             created_at=datetime.now(timezone.utc),
             updated_at=datetime.now(timezone.utc),
@@ -751,6 +763,152 @@ class TestContinueTurn:
         assert harness.completion_kwargs["session"] is harness.session
         assert "timezone Europe/Stockholm" in harness.completion_kwargs["prompt"]
         assert turn.question_id == harness.question_id
+
+
+class TestChosenModel:
+    """A turn may name its model; it answers only if it passes the same rule
+    as the default, and a follow-up keeps the conversation's model."""
+
+    async def test_a_qualifying_chosen_model_answers_and_is_recorded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        harness = _Harness()
+        chosen = _model(name="chosen")
+        harness.space = _space(models=(harness.model, chosen))
+        added: dict[str, Any] = {}
+
+        class FakeRepo:
+            def __init__(self, session: Any):
+                pass
+
+            async def add(self, **kwargs: Any):
+                added.update(kwargs)
+
+        monkeypatch.setattr(module, "InsightConversationRepository", FakeRepo)
+
+        turn = await harness.start(completion_model_id=chosen.id)
+        await harness.link_writer(object(), harness.session)
+
+        assert turn.completion_model is chosen
+        assert harness.placeholder_kwargs["completion_model"] is chosen
+        assert harness.completion_kwargs["model"] is chosen
+        assert added["completion_model_id"] == chosen.id
+
+    @pytest.mark.parametrize(
+        "refused",
+        [
+            pytest.param(
+                lambda: _model(tool_calling=False, classification=_classification(2)),
+                id="no tool calling",
+            ),
+            pytest.param(
+                lambda: _model(classification=_classification(1)),
+                id="below the classification",
+            ),
+            pytest.param(
+                lambda: _model(accessible=False, classification=_classification(2)),
+                id="not accessible",
+            ),
+        ],
+    )
+    async def test_a_model_that_does_not_qualify_is_refused_before_any_write(
+        self, refused: Any
+    ):
+        harness = _Harness()
+        model = refused()
+        harness.model = _model(classification=_classification(2))
+        harness.target = _assistant(harness.model)
+        harness.space = _space(
+            models=(harness.model, model), classification=_classification(2)
+        )
+
+        with pytest.raises(InsightsModelNotAllowedError) as excinfo:
+            await harness.start(completion_model_id=model.id)
+
+        assert excinfo.value.code == "insights_model_not_allowed"
+        assert harness.placeholder_kwargs == {}
+        assert harness.completion_kwargs == {}
+
+    async def test_a_model_outside_the_space_is_refused_on_a_follow_up_too(self):
+        harness = _Harness()
+        harness.with_link()
+
+        with pytest.raises(InsightsModelNotAllowedError):
+            await harness.service.continue_turn(
+                session_id=harness.session.id,
+                question="q",
+                selected_range=None,
+                completion_model_id=_model().id,
+            )
+        assert harness.placeholders == []
+        assert harness.link_models == []
+
+    async def test_a_follow_up_keeps_the_conversations_model(self):
+        harness = _Harness()
+        kept = _model(name="kept", created=2020)
+        harness.space = _space(models=(harness.model, kept))
+        harness.with_link(model_id=kept.id)
+
+        turn = await harness.service.continue_turn(
+            session_id=harness.session.id, question="q", selected_range=None
+        )
+
+        assert turn.completion_model is kept
+        assert harness.link_models == []
+
+    async def test_a_follow_up_falls_back_once_its_model_stopped_qualifying(self):
+        harness = _Harness()
+        retired = _model(name="retired", tool_calling=False)
+        harness.space = _space(models=(harness.model, retired))
+        harness.with_link(model_id=retired.id)
+
+        turn = await harness.service.continue_turn(
+            session_id=harness.session.id, question="q", selected_range=None
+        )
+
+        assert turn.completion_model is harness.model
+        # The link row follows the latest turn's model.
+        assert harness.link_models == [harness.model.id]
+
+    async def test_another_operator_learns_nothing_from_a_model_choice(self):
+        """Mutant: the model is checked before the caller's ownership."""
+        harness = _Harness()
+        harness.with_link(own=False)
+
+        with pytest.raises(UnauthorizedException):
+            await harness.service.continue_turn(
+                session_id=harness.session.id,
+                question="q",
+                selected_range=None,
+                completion_model_id=uuid4(),
+            )
+        assert harness.access_checks == []
+
+    async def test_the_listing_has_the_qualifying_models_and_the_default(self):
+        harness = _Harness()
+        other = _model(name="other", org_default=True)
+        harness.space = _space(
+            models=(harness.model, other, _model(tool_calling=False))
+        )
+        assistant_id = uuid4()
+
+        models, default = await harness.service.list_models(
+            assistant_id=assistant_id, group_chat_id=None
+        )
+
+        assert harness.access_checks == [
+            {"assistant_id": assistant_id, "group_chat_id": None}
+        ]
+        assert models == [harness.model, other]
+        # The assistant's own model before the organisation default.
+        assert default is harness.model
+
+        harness.space = _space(models=(_model(tool_calling=False),))
+        assert await harness.service.list_models(
+            assistant_id=None, group_chat_id=uuid4()
+        ) == ([], None)
+        with pytest.raises(BadRequestException):
+            await harness.service.list_models(assistant_id=None, group_chat_id=None)
 
 
 class TestConversationManagement:

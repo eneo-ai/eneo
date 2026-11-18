@@ -18,6 +18,21 @@ class InsightsModelUnavailableError(Exception):
         )
 
 
+class InsightsModelNotAllowedError(Exception):
+    """The completion model a turn asked for may not answer an analysis of
+    this target: it is not a model of the target's space, or it does not
+    meet the rule every answering model meets."""
+
+    code = "insights_model_not_allowed"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This completion model cannot answer an analysis here. It must be "
+            "enabled in the space, support tool calling and meet the space's "
+            "security classification."
+        )
+
+
 class InvalidTimezoneError(Exception):
     """The request named a timezone that is not an IANA zone."""
 

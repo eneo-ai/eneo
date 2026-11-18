@@ -12,7 +12,7 @@ import json
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -33,6 +33,7 @@ from eneo.database.tables.insight_conversations_table import InsightConversation
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.retention_tables import ContentDerivations
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.internal_mcp.insights import read_conversation
 from tests.integration.data_retention.retention_support import (
     run_registered_retention,
@@ -338,6 +339,145 @@ async def test_no_tool_capable_model_is_a_bad_request_with_a_code(
 
     assert response.status_code == 400, response.text
     assert response.json()["code"] == "insights_model_unavailable"
+
+
+async def _add_model(
+    container, seed, *, name: str, tool_calling: bool, in_space: bool = True
+) -> UUID:
+    """A copy of the seeded model under another name, enabled in the space
+    unless ``in_space`` is false."""
+    db = container.session()
+    table = CompletionModels.__table__
+    source = (
+        (await db.execute(sa.select(table).where(table.c.id == seed["model_id"])))
+        .mappings()
+        .one()
+    )
+    model_id = uuid4()
+    values = {
+        key: value
+        for key, value in source.items()
+        if key not in ("id", "created_at", "updated_at")
+    }
+    values.update(
+        id=model_id,
+        name=name,
+        nickname=name,
+        supports_tool_calling=tool_calling,
+        is_default=False,
+    )
+    await db.execute(sa.insert(table).values(**values))
+    if in_space:
+        await db.execute(
+            sa.insert(SpacesCompletionModels).values(
+                space_id=seed["space_id"], completion_model_id=model_id
+            )
+        )
+    return model_id
+
+
+async def test_a_chosen_model_answers_until_it_no_longer_may(
+    db_container,
+    admin_user,
+    client,
+    patch_auth_service_jwt,
+    seed_insights,
+    stub_completion,
+):
+    seed, headers = await _seed_and_token(db_container, admin_user, seed_insights)
+    async with db_container() as container:
+        chosen = await _add_model(container, seed, name="analys-b", tool_calling=True)
+        no_tools = await _add_model(
+            container, seed, name="analys-c", tool_calling=False
+        )
+        outside = await _add_model(
+            container, seed, name="analys-d", tool_calling=True, in_space=False
+        )
+    target = {"assistant_id": str(seed["bygg"])}
+
+    listed = await client.get(f"{PATH}models/", params=target, headers=headers)
+    assert listed.status_code == 200, listed.text
+    models = {item["id"]: item for item in listed.json()["items"]}
+    assert set(models) == {str(seed["model_id"]), str(chosen)}
+    assert models[str(chosen)]["nickname"] == "analys-b"
+    # The assistant's own model is the default.
+    assert listed.json()["default_model_id"] == str(seed["model_id"])
+
+    with patch(AUDIT_ENQUEUE, new_callable=AsyncMock) as enqueue_audit:
+        for refused in (no_tools, outside, uuid4()):
+            response = await client.post(
+                PATH,
+                json={
+                    **target,
+                    "question": "Hur går det?",
+                    "completion_model_id": str(refused),
+                },
+                headers=headers,
+            )
+            assert response.status_code == 400, response.text
+            assert response.json()["code"] == "insights_model_not_allowed"
+    # Refused before anything was written.
+    assert enqueue_audit.await_count == 0
+    assert "model" not in stub_completion
+    async with db_container() as container:
+        links = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(InsightConversations)
+            .where(InsightConversations.assistant_id == seed["bygg"])
+        )
+    assert links == 1
+
+    started = await client.post(
+        PATH,
+        json={**target, "question": "Första", "completion_model_id": str(chosen)},
+        headers=headers,
+    )
+    assert started.status_code == 200, started.text
+    events = _events(started.text)
+    assert events[1]["data"]["completion_model"]["id"] == str(chosen)
+    assert stub_completion["model"].id == chosen
+    session_id = _session_id(events)
+    turn = f"{PATH}{session_id}/"
+
+    # Without a choice a follow-up keeps the conversation's model...
+    kept = await client.post(turn, json={"question": "Och sen?"}, headers=headers)
+    assert kept.status_code == 200, kept.text
+    assert stub_completion["model"].id == chosen
+
+    # ...until it may no longer answer: then the default answers.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == chosen)
+            .values(supports_tool_calling=False)
+        )
+    fallback = await client.post(turn, json={"question": "Och nu?"}, headers=headers)
+    assert fallback.status_code == 200, fallback.text
+    assert stub_completion["model"].id == seed["model_id"]
+    again = await client.post(
+        turn,
+        json={"question": "Med b?", "completion_model_id": str(chosen)},
+        headers=headers,
+    )
+    assert again.status_code == 400, again.text
+    assert again.json()["code"] == "insights_model_not_allowed"
+
+    async with db_container() as container:
+        link_model = await container.session().scalar(
+            sa.select(InsightConversations.completion_model_id).where(
+                InsightConversations.session_id == session_id
+            )
+        )
+    # The link row follows the latest turn's model.
+    assert link_model == seed["model_id"]
+    # Each saved turn names the model that answered it.
+    fetched = await client.get(turn, headers=headers)
+    assert fetched.status_code == 200, fetched.text
+    assert [m["completion_model"]["id"] for m in fetched.json()["messages"]] == [
+        str(chosen),
+        str(chosen),
+        str(seed["model_id"]),
+    ]
 
 
 async def test_follow_up_history_tool_result_and_delete_round_trip(

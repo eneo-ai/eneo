@@ -12,6 +12,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from eneo.analysis.insight_exceptions import (
+    InsightsModelNotAllowedError,
     InsightsModelUnavailableError,
     InvalidTimezoneError,
 )
@@ -415,6 +416,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     # --- Insights chat: the string ``code`` tells the cases apart ---
     InsightsModelUnavailableError: (400, None, ErrorCodes.BAD_REQUEST),
+    InsightsModelNotAllowedError: (400, None, ErrorCodes.BAD_REQUEST),
     InvalidTimezoneError: (400, None, ErrorCodes.BAD_REQUEST),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

@@ -64,6 +64,7 @@ GET /api/v1/analysis/assistants/{assistant_id}/questions/
 GET /api/v1/analysis/conversation-insights/
 GET /api/v1/analysis/conversation-insights/activity/
 GET /api/v1/analysis/conversation-insights/chat/
+GET /api/v1/analysis/conversation-insights/chat/models/
 GET /api/v1/analysis/conversation-insights/chat/{session_id}/
 GET /api/v1/analysis/conversation-insights/chat/{session_id}/tool-calls/{tool_call_id}/result/
 GET /api/v1/analysis/conversation-insights/feedback/

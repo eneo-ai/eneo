@@ -50,6 +50,7 @@ from eneo.analysis.insight_conversation_repo import (
     InsightConversationRepository,
 )
 from eneo.analysis.insight_exceptions import (
+    InsightsModelNotAllowedError,
     InsightsModelUnavailableError,
     InvalidTimezoneError,
 )
@@ -242,8 +243,10 @@ class InsightConversationService:
         question: str,
         timezone: str,
         selected_range: tuple[date, date] | None,
+        completion_model_id: UUID | None = None,
     ) -> InsightTurn:
-        """Start a new insights conversation with its first turn."""
+        """Start a new insights conversation with its first turn, answered by
+        the chosen model or, without a choice, the default."""
         if (assistant_id is None) == (group_chat_id is None):
             raise BadRequestException(
                 "Provide exactly one of assistant_id or group_chat_id"
@@ -252,7 +255,9 @@ class InsightConversationService:
         target, space = await self.analysis_service.assert_insight_access(
             assistant_id=assistant_id, group_chat_id=group_chat_id
         )
-        model = self._resolve_model(target, space)
+        model = self._model_for_turn(
+            target, space, chosen_id=completion_model_id, previous_id=None
+        )
 
         kind: InsightTargetKind = (
             "assistant" if assistant_id is not None else "group_chat"
@@ -324,21 +329,35 @@ class InsightConversationService:
         session_id: UUID,
         question: str,
         selected_range: tuple[date, date] | None,
+        completion_model_id: UUID | None = None,
     ) -> InsightTurn:
         """Append a follow-up turn to one of the operator's own conversations.
 
-        Access and model resolution are re-run every turn: insights may have
-        been disabled for the target, or its model replaced, since the
-        conversation started. Prior turns replay through the session's
-        history, tool calls included.
+        Access and the model are decided again every turn: insights may have
+        been disabled for the target, or a model may no longer qualify, since
+        the conversation started. Without a choice the turn keeps the model of
+        the latest turn while it qualifies. The link row follows the model of
+        the latest turn. Prior turns replay through the session's history,
+        tool calls included.
         """
         link = await self._own_conversation(session_id)
         target, space = await self.analysis_service.assert_insight_access(
             assistant_id=link.assistant_id, group_chat_id=link.group_chat_id
         )
-        model = self._resolve_model(target, space)
+        model = self._model_for_turn(
+            target,
+            space,
+            chosen_id=completion_model_id,
+            previous_id=link.completion_model_id,
+        )
         zone = self._parse_timezone(link.timezone)
         session = await self._load_session(session_id)
+        if model.id != link.completion_model_id:
+            await self.insight_conversation_repo.set_completion_model(
+                session_id=session_id,
+                tenant_id=self.user.tenant_id,
+                completion_model_id=model.id,
+            )
 
         (
             question_id,
@@ -400,6 +419,20 @@ class InsightConversationService:
             limit=limit,
             cursor=cursor,
         )
+
+    async def list_models(
+        self, *, assistant_id: UUID | None, group_chat_id: UUID | None
+    ) -> tuple[list["CompletionModel"], "CompletionModel | None"]:
+        """The models that may answer an analysis of the target, in the
+        space's order, and the one a turn uses without a choice."""
+        if (assistant_id is None) == (group_chat_id is None):
+            raise BadRequestException(
+                "Provide exactly one of assistant_id or group_chat_id"
+            )
+        target, space = await self.analysis_service.assert_insight_access(
+            assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+        return self._qualifying_models(space), self._default_model(target, space)
 
     async def get_conversation(self, session_id: UUID) -> SessionInDB:
         """One of the operator's own conversations, with every turn."""
@@ -514,41 +547,79 @@ class InsightConversationService:
             raise InvalidTimezoneError(timezone)
 
     @staticmethod
-    def _resolve_model(
-        target: "Assistant | GroupChat", space: "Space"
-    ) -> "CompletionModel":
-        """Pick the model that answers: it must be accessible, call tools and
-        meet the space's security classification, since the tools feed it the
-        space's conversations.
-
-        The assistant's own model when it qualifies and is in the space (a
-        group chat has none), else the one this space would pick among the
-        qualifying models: the organisation default, else the newest.
-        """
-
-        def qualifies(model: "CompletionModel | None") -> bool:
-            return (
-                model is not None
-                and model.can_access
-                and bool(model.supports_tool_calling)
-                and space.allows_security_classification(model)
-            )
-
-        if isinstance(target, Assistant):
-            own = target.completion_model
-            if (
-                own is not None
-                and qualifies(own)
-                and space.is_completion_model_in_space(own.id)
-            ):
-                return own
-
-        chosen = space.select_default_completion_model(
-            model for model in space.completion_models if qualifies(model)
+    def _qualifies(model: "CompletionModel | None", space: "Space") -> bool:
+        """Whether a model may answer an analysis in this space: it is
+        accessible, calls tools, is enabled in the space and meets the space's
+        security classification, since the tools feed it the space's
+        conversations. Every model that answers passes this, chosen or not."""
+        return (
+            model is not None
+            and model.can_access
+            and bool(model.supports_tool_calling)
+            and space.is_completion_model_in_space(model.id)
+            and space.allows_security_classification(model)
         )
-        if chosen is None:
+
+    @classmethod
+    def _qualifying_models(cls, space: "Space") -> list["CompletionModel"]:
+        return [
+            model for model in space.completion_models if cls._qualifies(model, space)
+        ]
+
+    @classmethod
+    def _default_model(
+        cls, target: "Assistant | GroupChat", space: "Space"
+    ) -> "CompletionModel | None":
+        """The assistant's own model when it qualifies (a group chat has
+        none), else the one this space would pick among the qualifying
+        models: the organisation default, else the newest."""
+        if isinstance(target, Assistant) and cls._qualifies(
+            target.completion_model, space
+        ):
+            return target.completion_model
+        return space.select_default_completion_model(cls._qualifying_models(space))
+
+    @classmethod
+    def _resolve_model(
+        cls, target: "Assistant | GroupChat", space: "Space"
+    ) -> "CompletionModel":
+        """The model that answers when none is chosen (:meth:`_default_model`);
+        refused when no model qualifies."""
+        model = cls._default_model(target, space)
+        if model is None:
             raise InsightsModelUnavailableError()
-        return chosen
+        return model
+
+    @classmethod
+    def _model_for_turn(
+        cls,
+        target: "Assistant | GroupChat",
+        space: "Space",
+        *,
+        chosen_id: UUID | None,
+        previous_id: UUID | None,
+    ) -> "CompletionModel":
+        """The chosen model, refused unless it qualifies; without a choice the
+        conversation's previous model while it qualifies, else the default."""
+        if chosen_id is not None:
+            chosen = cls._qualifying_model(space, chosen_id)
+            if chosen is None:
+                raise InsightsModelNotAllowedError()
+            return chosen
+        if previous_id is not None:
+            previous = cls._qualifying_model(space, previous_id)
+            if previous is not None:
+                return previous
+        return cls._resolve_model(target, space)
+
+    @classmethod
+    def _qualifying_model(
+        cls, space: "Space", model_id: UUID
+    ) -> "CompletionModel | None":
+        return next(
+            (model for model in cls._qualifying_models(space) if model.id == model_id),
+            None,
+        )
 
     def _stream_and_persist(
         self,

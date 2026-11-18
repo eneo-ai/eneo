@@ -20,6 +20,7 @@ from sse_starlette import EventSourceResponse
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.analysis.insight_chat_models import (
     InsightChatContinueRequest,
+    InsightChatModels,
     InsightChatStartRequest,
     InsightSelectedRange,
 )
@@ -101,7 +102,9 @@ def _stream(
     response_model=None,
     description=(
         "Start an insights analysis conversation about an assistant or group "
-        f"chat. {_STREAM_DESCRIPTION}"
+        "chat, answered by completion_model_id when given (400 "
+        "insights_model_not_allowed unless the models route lists it) and else "
+        f"by the default. {_STREAM_DESCRIPTION}"
     ),
     responses=responses.streaming_response(response_codes=[400, 403, 404]),
 )
@@ -129,6 +132,7 @@ async def start_insight_conversation(
             question=body.question,
             timezone=body.timezone,
             selected_range=_range(body.selected_range),
+            completion_model_id=body.completion_model_id,
         )
 
     if body.assistant_id is not None:
@@ -208,6 +212,40 @@ async def list_insight_conversations(
 
 
 @router.get(
+    "/models/",
+    response_model=InsightChatModels,
+    description=(
+        "The completion models that may answer an analysis of an assistant or "
+        "group chat (exactly one of assistant_id or group_chat_id), and the "
+        "one a turn uses when none is chosen. An empty list when no model "
+        "qualifies."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TARGET_INSIGHTS_ACCESS_REASON,
+)
+async def list_insight_models(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+) -> InsightChatModels:
+    models, default = await container.insight_conversation_service().list_models(
+        assistant_id=assistant_id, group_chat_id=group_chat_id
+    )
+    show_pricing = container.user().can_view_model_pricing
+    return InsightChatModels(
+        items=[
+            CompletionModelPublic.from_domain(model, show_pricing=show_pricing)
+            for model in models
+        ],
+        default_model_id=default.id if default is not None else None,
+    )
+
+
+@router.get(
     "/{session_id}/",
     response_model=SessionPublic,
     description=(
@@ -266,8 +304,11 @@ async def get_insight_tool_call_result(
     "/{session_id}/",
     response_model=None,
     description=(
-        "A follow-up question in one of the caller's insights conversations. "
-        f"{_STREAM_DESCRIPTION}"
+        "A follow-up question in one of the caller's insights conversations, "
+        "answered by completion_model_id when given (400 "
+        "insights_model_not_allowed unless the models route lists it), else by "
+        "the model of the latest turn while it may still answer, else by the "
+        f"default. {_STREAM_DESCRIPTION}"
     ),
     responses=responses.streaming_response(response_codes=[400, 403, 404, 410]),
 )
@@ -292,6 +333,7 @@ async def continue_insight_conversation(
             session_id=session_id,
             question=body.question,
             selected_range=_range(body.selected_range),
+            completion_model_id=body.completion_model_id,
         )
     return _stream(
         turn, http_request=http_request, show_pricing=user.can_view_model_pricing
