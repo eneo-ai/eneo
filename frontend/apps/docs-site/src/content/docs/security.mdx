@@ -87,7 +87,7 @@ SeaweedFS source with its own supply-chain checks; see
 
 ## From change to release
 
-![Three lanes. People: a change starts as an issue and a pull request, a Core Maintainer adds it to the merge queue into develop, a second Core Maintainer approves pull requests into release branches, and a Core Maintainer creates the v tag. GitHub runs the checks on each pull request and builds, scans, describes and attests the release bundle. Operators verify the completed bundle and deploy it.](/diagrams/security-change-to-deployment.svg)
+![A change goes through the checks and the merge queue into develop. Core Maintainers approve changes into a release branch and authorise the release. GitHub completes the release bundle, and operators deploy the image digests it records.](/diagrams/security-change-to-deployment.svg)
 
 Every change is a pull request, and GitHub rulesets decide what may be merged.
 The rules are public at
@@ -137,18 +137,18 @@ The rules are public at
   images for testing; only a `v*` tag produces a versioned release.
 
 <Callout type="info">
-  Third-party GitHub Actions are pinned to full commit SHAs. Pull requests from
-  forks run with a read-only token and no secrets, and no pull request workflow
-  publishes images. How to work with each check is described in [Security for
-  Contributors](/contributing/security).
+  Third-party GitHub Actions are pinned to full commit SHAs. CI that runs code
+  from a fork gets a read-only token and no repository secrets, and no pull
+  request workflow publishes images. How to work with each check is described in
+  [Security for Contributors](/contributing/security).
 </Callout>
 
 Some choices are deliberate, and some checks have known gaps:
 
-- **CodeQL is paused.** Its alerts were mostly false positives, so code
-  scanning relies on Semgrep's security rules and on review.
-- **Dependabot update pull requests are paused.** They produced more noise
-  than fixes. Dependabot alerts stay on, and the Core Maintainers triage them.
+- **CodeQL is paused.** Code scanning relies on Semgrep's security rules and
+  on review.
+- **Dependabot update pull requests are paused.** Dependabot alerts stay on,
+  and the Core Maintainers triage them.
 - **Not every artefact is scanned.** The backend image is covered by the audit
   of its Python lockfile, not by an image scan, and the tool runtime's own
   lockfile is not part of the automated audit.
@@ -158,7 +158,7 @@ replace review.
 
 ## Vulnerabilities and updates
 
-![Five steps. In private: report on GitHub, or by e-mail as a fallback, triage to confirm and rate the severity, and prepare the fix for the affected supported releases. At disclosure, the first public pull request: merge the fixes through the normal checks and review and build the patch releases, then publish the advisory so operators can upgrade.](/diagrams/security-vulnerability-response.svg)
+![For an accepted private report, the Core Maintainers prepare the fix in private. The first public pull request discloses it, followed by the patch releases and the advisory.](/diagrams/security-vulnerability-response.svg)
 
 A reported vulnerability stays private while the Core Maintainers confirm it
 and prepare a fix or mitigation for the affected supported release lines, in a

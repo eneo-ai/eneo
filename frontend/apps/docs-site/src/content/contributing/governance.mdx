@@ -76,7 +76,7 @@ from a fork, the same way Collaborators do, only without Triage rights.
 
 ## How a change reaches Eneo
 
-![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and publish a release from a release branch, where a second Core Maintainer approves each change, with a v tag. GitHub rulesets ensure that only people with write access can merge into develop, and that only Core Maintainers can push to release branches and create v tags.](/diagrams/contribution-governance.svg)
+![A contribution moves from an issue and a fork through the required checks, Core Maintainer review and the merge queue into develop, and from there to a release that Core Maintainers authorise.](/diagrams/contribution-governance.svg)
 
 1. **Issue.** The change is described and agreed in an issue.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
@@ -173,7 +173,7 @@ directly to an individual outside collaborator.
 
 ## Releases
 
-Only Core Maintainers cut `release/vX.Y` branches and publish releases. A `v*`
+Core Maintainers cut `release/vX.Y` branches and authorise releases. A `v*`
 tag starts **Build and Push Docker Images**, which builds, tests, scans and
 attests the release images that deployments consume. Restricting who can create
 those tags is how Eneo controls what is released.
@@ -191,8 +191,8 @@ flowchart LR
   D["develop"] -->|"Core Maintainers cut"| R["release/vX.Y"]
   R -->|"Core Maintainers authorise"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
   T --> B["Build and Push<br/>Docker Images"]
-  B --> I["Release images<br/>in GHCR"]
-  I --> E["Test and production<br/>deployments"]
+  B --> I["Completed<br/>release bundle"]
+  I --> E["Deploy the recorded<br/>image digests"]
 ```
 
 To propose a fix for a released version, open a pull request against the
@@ -203,10 +203,10 @@ and the release artefacts in [Release SBOMs](/docs/release-sboms).
 
 ## Urgent fixes
 
-An urgent fix takes the normal route: open a pull request, choose **Merge when
-ready** and let the checks run. There is no bypass that skips CI or the merge
-queue. On a release branch, a second Core Maintainer approves the fix as soon
-as it is ready.
+An urgent fix follows the rules for its target branch. On `develop`, it is an
+ordinary pull request that must pass the required checks and the merge queue;
+there is no bypass. On a release branch, it needs an approval from a Core
+Maintainer other than its author.
 
 <Callout type="warning">
   If GitHub itself blocks a critical fix, for example because a required check
@@ -255,9 +255,8 @@ Working from a fork gives you the same ability to propose and test changes.
 
 ### Why is my push to `eneo-ai/eneo` refused with 403?
 
-Only Core Maintainers have write access, so GitHub refuses a push to
-`eneo-ai/eneo` from everyone else. That includes Collaborators, also if you
-could push branches here before. You are still a member of the organisation
+GitHub refuses a push to `eneo-ai/eneo` from everyone without write access.
+That includes Collaborators, also if you could push branches here before. You are still a member of the organisation
 and of your team.
 
 Push your branch to a fork and open the pull request from there. In a clone of

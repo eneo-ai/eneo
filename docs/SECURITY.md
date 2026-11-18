@@ -238,9 +238,9 @@ The repository uses GitHub security features and CI to prevent regressions:
 - The normal `CI` gate validates frozen backend and frontend installs before
   dependency update pull requests are merged.
 
-The `develop` ruleset requires `CI` and `Dependency Review`, and the PR label
-classification ruleset requires `PR labels` on `develop`, `main` and
-`release/**`. No ruleset requires a CodeQL check while code scanning is paused.
+Pull requests into `develop` must pass `CI`, `Dependency Review`, `PR labels`
+and `User-facing section`. The PR label classification ruleset also requires
+`PR labels` on `main` and `release/**`. No ruleset requires a CodeQL check while code scanning is paused.
 
 ## Repository Access and Change Control
 

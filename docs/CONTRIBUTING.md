@@ -68,8 +68,8 @@ cd backend && uv run worker             # Terminal 3
 
 **Already have a clone of `eneo-ai/eneo`?**
 
-You do not need to clone again. A push to `eneo-ai/eneo` is refused with 403
-for everyone outside Core Maintainers, so point `origin` at your fork and keep
+You do not need to clone again. Without write access, a push to
+`eneo-ai/eneo` is refused with 403, so point `origin` at your fork and keep
 the main repository as `upstream`:
 
 ```bash

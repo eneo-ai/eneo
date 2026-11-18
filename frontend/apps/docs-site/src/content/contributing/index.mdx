@@ -34,11 +34,11 @@ Everything in this table works with an ordinary GitHub account.
 Everyone contributes through pull requests, and Core Maintainers decide what is
 merged. The steps below are the same for all; this is what differs:
 
-| You are                                                                             | You work from              | Labels and checks                                                                                    |
-| ----------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Anyone with a GitHub account                                                        | A fork                     | A maintainer adds the labels to your pull request and approves your workflow runs before they start. |
-| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | You label your own pull request, and your checks start without approval.                             |
-| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.             |
+| You are                                                                             | You work from              | Labels and checks                                                                                                                  |
+| ----------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Anyone with a GitHub account                                                        | A fork                     | A maintainer adds the labels during review and approves the CI, Dependency Review and User-facing workflow runs before they start. |
+| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | With Triage access you label your own pull request. As a member of the `eneo-ai` organisation, your checks start without approval. |
+| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.                                           |
 
 [Governance and Roles](/contributing/governance) explains the roles, why only
 Core Maintainers have write access, and
@@ -116,9 +116,9 @@ Open the folder in VS Code and choose **Reopen in Container**. The
 [development environment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment)
 covers the rest of the setup.
 
-Already have a clone of `eneo-ai/eneo`? A push to it is refused with 403 unless
-you are a Core Maintainer. Run `gh repo fork --remote` in the clone instead of
-cloning again; the same guide shows the steps.
+Already have a clone of `eneo-ai/eneo`? Without write access, a push to it is
+refused with 403. Run `gh repo fork --remote` in the clone and push to your
+fork; the same guide shows the steps.
 
 ### Branch from the latest `develop`
 
@@ -168,8 +168,9 @@ Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`,
 If you are not a member of the `eneo-ai` organisation, a maintainer approves
 your workflow runs before they start.
 
-Collaborators add the labels themselves. For everyone else, a maintainer adds
-them during review, and the PR label check turns green when they do. A ready pull request
+If you have Triage access, as Collaborators do, add the labels yourself.
+Otherwise a maintainer adds them during review, and the PR label check turns
+green when they do. A ready pull request
 into `develop` that links no issue gets a `needs:task-link` label until you
 add `Fixes #123`.
 

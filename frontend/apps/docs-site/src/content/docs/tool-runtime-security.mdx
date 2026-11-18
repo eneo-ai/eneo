@@ -18,7 +18,8 @@ and what the operator must provide.
 - The model never holds a download link: the backend swaps each file handle
   for a short-lived signed URL, and only for files in the same conversation.
 - Each job runs in its own child process. With Landlock active (Linux 5.13 or
-  later, permitted by seccomp), each job can access only its own files. If the
+  later, permitted by seccomp), each job can read only the input data assigned
+  to it and write only to its own work and output locations. If the
   host cannot provide Landlock, jobs run without that file confinement by
   default; set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run on
   those hosts.
@@ -58,11 +59,11 @@ The runtime protects four things:
 - **Eneo's credentials and data.** The runtime has no path to the database,
   Redis, the signing key, the model providers or the internet, given the
   network isolation described in [Layer 5](#layer-5-the-container).
-- **The host and the rest of the deployment.** One job's resource use stays
-  within the runtime's own limits and cannot affect the backend or other
-  containers.
-- **The user who receives the output.** A file the runtime produced is safe
-  to open: no macros, scripts or externally loaded content.
+- **The host and the rest of the deployment.** The reference deployment limits
+  the runtime container's CPU, memory and process count.
+- **The user who receives the output.** Before delivering a generated file,
+  the backend checks its format and rejects disallowed features, including
+  Office macros and PDF JavaScript. It skips files that fail validation.
 
 The separation between jobs is strongest on a host whose kernel supports
 Landlock (Linux 5.13 or later). On a host without it, the other layers remain
