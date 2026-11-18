@@ -597,7 +597,8 @@ class ApiKeysV2Repository:
 
     # Each maintenance step selects keys by one condition. The same condition
     # guards the step's change to each key, so a key that stopped matching
-    # after it was selected is left as it is.
+    # after it was selected is left as it is, as is a key another transaction
+    # holds.
 
     def due_for_expiry(self, *, now: datetime) -> sa.ColumnElement[bool]:
         """Keys past their end date that are not yet recorded as expired."""
@@ -666,8 +667,9 @@ class ApiKeysV2Repository:
         """Record ``key`` as expired at ``expires_at`` if it still matches
         ``condition`` and still has the end date it was selected with.
 
-        None when no row changed: the key was used, revoked or given another
-        end date after it was selected, and the change belongs to that writer.
+        None when no row changed: another transaction holds the key, or it
+        was used, revoked or given another end date after it was selected,
+        and the change belongs to that writer.
         """
         return await self._update_matching(
             condition,
@@ -685,7 +687,8 @@ class ApiKeysV2Repository:
         **values: object,
     ) -> Optional[ApiKeyV2InDB]:
         """Revoke ``key`` if it still matches ``condition``; None when no row
-        changed, so a concurrent revocation or a new grace period stands."""
+        changed, so a concurrent revocation or a new grace period stands, and
+        a key another transaction holds is left to a later run."""
         return await self._update_matching(
             condition, key=key, state=ApiKeyState.REVOKED.value, **values
         )
@@ -696,14 +699,32 @@ class ApiKeysV2Repository:
         key: ApiKeyV2InDB,
         **values: object,
     ) -> Optional[ApiKeyV2InDB]:
-        # When another transaction changed the row since this one's snapshot,
-        # Postgres waits for it and evaluates the conditions again on the
-        # committed row (READ COMMITTED), so no change is made on stale facts.
+        # Take the row's lock under the same conditions as the update, skipping
+        # the row when another transaction holds it: the job never waits for a
+        # revocation, use or edit in progress, which may take the job's keys in
+        # another order. Such a key is left as it is (None) for a later run.
+        # The conditions in the lock keep the job from locking a row that
+        # already fails them in the statement's snapshot; a change committed
+        # between that snapshot and the lock can still leave the row unchanged
+        # but locked until the job commits, as Postgres keeps a lock it took
+        # before rechecking the row.
+        # The update keeps the same filter, so Postgres checks it again on the
+        # committed row if it changed while the statement ran (READ COMMITTED).
+        matching = (
+            self.table.id == key.id,
+            self.table.tenant_id == key.tenant_id,
+            *conditions,
+        )
+        locked = (
+            sa.select(self.table.id)
+            .where(*matching)
+            .with_for_update(key_share=True, skip_locked=True)
+            .cte("locked_key")
+        )
         record = await self.session.scalar(
             sa.update(self.table)
-            .where(self.table.id == key.id)
-            .where(self.table.tenant_id == key.tenant_id)
-            .where(*conditions)
+            .where(*matching)
+            .where(self.table.id == locked.c.id)
             .values(**values)
             .returning(self.table)
         )

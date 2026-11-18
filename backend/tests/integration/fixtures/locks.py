@@ -28,3 +28,29 @@ async def wait_until_blocked(session, racer: "asyncio.Task") -> None:
             return
         await asyncio.sleep(0.05)
     raise AssertionError(f"the racer never waited for the lock: {racer!r}")
+
+
+async def wait_until_blocked_by(
+    session, racer: "asyncio.Task", racer_pid: "asyncio.Future[int]"
+) -> None:
+    """Return once the racer's backend (``racer_pid``) waits for a lock that
+    ``session``'s backend holds: this pair, not any wait in the database."""
+    holder_pid = await session.scalar(sa.text("SELECT pg_backend_pid()"))
+    await asyncio.wait(
+        {racer, racer_pid}, timeout=10, return_when=asyncio.FIRST_COMPLETED
+    )
+    if not racer_pid.done():
+        raise AssertionError(f"the racer never reported its backend: {racer!r}")
+    for _ in range(200):
+        if racer.done():
+            raise AssertionError(
+                f"racer finished before the lock was released: {racer.exception()!r}"
+            )
+        blocked = await session.scalar(
+            sa.text("SELECT :holder = ANY(pg_blocking_pids(:racer))"),
+            {"holder": holder_pid, "racer": racer_pid.result()},
+        )
+        if blocked:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"the racer never waited for this session's lock: {racer!r}")

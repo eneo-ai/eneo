@@ -9,7 +9,8 @@ cannot sign in and read the stored state.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+import contextlib
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID, uuid4
@@ -33,6 +34,7 @@ from eneo.authentication.auth_models import (
     ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
+    ApiKeyStateReasonCode,
     ApiKeyType,
     ApiKeyUpdateRequest,
     ApiKeyV2InDB,
@@ -43,7 +45,10 @@ from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.container.container import Container
 from eneo.tenants.tenant import TenantBase
-from tests.integration.fixtures.locks import wait_until_blocked
+from tests.integration.fixtures.locks import (
+    wait_until_blocked,
+    wait_until_blocked_by,
+)
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -842,3 +847,312 @@ async def test_a_change_waiting_on_a_run_that_rolls_back_goes_ahead(
     assert key.state == "active"
     assert key.expires_at == later
     assert await sign_in_status(client, secret) == 200
+
+
+# Another transaction holding a key the run selected: a revocation, use or
+# edit that has not committed yet.
+
+
+async def run_maintenance_beside_a_lock(db_container) -> dict[str, Any]:
+    """Run and commit the job while another transaction holds a key. A job
+    that waits for that key gives up after a few seconds and reports it in
+    ``errors``, so the test fails instead of hanging."""
+    async with db_container() as job:
+        await job.session().execute(sa.text("SET LOCAL lock_timeout = '3s'"))
+        return await job.api_key_maintenance_service().run_daily_maintenance()
+
+
+@contextlib.asynccontextmanager
+async def holding(db_container, key_id: UUID, tenant_id: UUID) -> AsyncIterator[None]:
+    """Hold the key's row lock until the block ends, then release it without
+    changing the key."""
+    async with db_container() as holder:
+        locked = await holder.api_key_v2_repo().get(
+            key_id=key_id, tenant_id=tenant_id, for_update=True
+        )
+        assert locked is not None
+        yield
+
+
+async def test_a_key_another_transaction_holds_is_left_to_the_next_run(
+    db_container, admin_user
+):
+    first, held, last = await insert_due_keys(db_container, admin_user.tenant_id, 3)
+
+    async with holding(db_container, held, admin_user.tenant_id):
+        result = await run_maintenance_beside_a_lock(db_container)
+        # Committed while the key is still held.
+        assert await expired_ids(db_container, [first, held, last]) == {first, last}
+
+    assert result["errors"] == []
+    assert result["expired"] == 2
+    assert result["selected_unchanged"] == [{"step": "expires_at", "count": 1}]
+    assert await audit_rows(db_container, held) == []
+
+    second = await run_maintenance(db_container)
+
+    assert second["errors"] == []
+    assert second["expired"] == 1
+    assert second["selected_unchanged"] == []
+    assert await expired_ids(db_container, [first, held, last]) == {first, held, last}
+    assert await audit_actions(db_container, held) == [ActionType.API_KEY_EXPIRED.value]
+
+
+async def test_a_use_committed_while_the_run_skips_the_key_keeps_it_open(
+    db_container, admin_user
+):
+    """The key can only be selected as unused: it has no end date and no
+    grace period, so the use is what keeps it."""
+    tenant_id = admin_user.tenant_id
+    key_id = await insert_key(
+        db_container,
+        tenant_id,
+        name="unused",
+        created_at=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+    await set_unused_days(db_container, tenant_id, 7)
+
+    async with db_container() as using:
+        used = await using.api_key_v2_repo().update_last_used_at(
+            key_id=key_id,
+            tenant_id=tenant_id,
+            last_used_at=datetime.now(timezone.utc),
+            min_interval_seconds=0,
+        )
+        assert used is not None
+        first = await run_maintenance_beside_a_lock(db_container)
+
+    assert first["errors"] == []
+    assert first["auto_expired"] == 0
+    assert first["selected_unchanged"] == [
+        {"step": "unused", "tenant_id": str(tenant_id), "count": 1}
+    ]
+
+    second = await run_maintenance(db_container)
+
+    assert second["errors"] == []
+    assert second["auto_expired"] == 0
+    assert second["selected_unchanged"] == []
+    key = await read_key(db_container, key_id)
+    assert key.state == "active"
+    assert key.expires_at is None
+    assert await audit_rows(db_container, key_id) == []
+
+
+async def test_an_extension_in_progress_keeps_its_end_date_but_not_an_unused_key(
+    client, db_container, token, admin_user
+):
+    """The run leaves a key being extended alone, so the new end date stands.
+    An extension is not a use: the next run still ends the unused key."""
+    future = datetime.now(timezone.utc) + timedelta(days=30)
+    key_id, secret = await create_key(
+        client, token, name="extending", expires_at=future
+    )
+    await make_unused(db_container, key_id, days=10)
+    await set_unused_days(db_container, admin_user.tenant_id, 7)
+    later = datetime.now(timezone.utc) + timedelta(days=60)
+
+    async with db_container() as extending:
+        await extending.api_key_lifecycle_service().extend_expiration(
+            key_id=key_id, request=ApiKeyExtendRequest(expires_at=later)
+        )
+        first = await run_maintenance_beside_a_lock(db_container)
+
+    assert first["errors"] == []
+    assert first["auto_expired"] == 0
+    assert first["selected_unchanged"] == [
+        {"step": "unused", "tenant_id": str(admin_user.tenant_id), "count": 1}
+    ]
+    assert (await read_key(db_container, key_id)).expires_at == later
+    assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
+        db_container, key_id
+    )
+
+    second = await run_maintenance(db_container)
+
+    assert second["auto_expired"] == 1
+    key = await read_key(db_container, key_id)
+    assert key.state == "expired"
+    [expired_row] = [
+        row
+        for row in await audit_rows(db_container, key_id)
+        if row.action == ActionType.API_KEY_EXPIRED.value
+    ]
+    assert expired_row.log_metadata["extra"]["previous_expires_at"] == (
+        later.isoformat()
+    )
+    assert await sign_in_status(client, secret) == 401
+
+
+async def test_a_held_key_takes_its_place_in_the_selection_limit(
+    db_container, admin_user, monkeypatch
+):
+    """As before, a key the run selects but cannot take counts against the
+    selection's limit: the run does not look past the limit for another."""
+    monkeypatch.setattr(api_key_maintenance, "API_KEY_MAINTENANCE_BATCH_LIMIT", 2)
+    held, taken, beyond = await insert_due_keys(db_container, admin_user.tenant_id, 3)
+
+    async with holding(db_container, held, admin_user.tenant_id):
+        result = await run_maintenance_beside_a_lock(db_container)
+
+    assert result["errors"] == []
+    assert result["expired"] == 1
+    assert result["limit_reached"] == [{"step": "expires_at"}]
+    assert result["selected_unchanged"] == [{"step": "expires_at", "count": 1}]
+    assert await expired_ids(db_container, [held, taken, beyond]) == {taken}
+
+
+async def test_keys_left_unchanged_are_counted_apart_from_failures(
+    db_container, admin_user, monkeypatch
+):
+    held, changed, failing, closed = await insert_due_keys(
+        db_container, admin_user.tenant_id, 4
+    )
+
+    async def revoke_changed() -> None:
+        await set_key_columns(
+            db_container, changed, revoked_at=datetime.now(timezone.utc)
+        )
+
+    after_selection(monkeypatch, changed, revoke_changed)
+    fail_with_sql_error(
+        monkeypatch, "expire_matching", lambda *_, key, **__: key.id == failing
+    )
+
+    async with holding(db_container, held, admin_user.tenant_id):
+        result = await run_maintenance_beside_a_lock(db_container)
+
+    assert [error["key_id"] for error in result["errors"]] == [str(failing)]
+    # Held and changed together: an update that matches no row cannot tell
+    # which of the two it was.
+    assert result["selected_unchanged"] == [{"step": "expires_at", "count": 2}]
+    assert result["expired"] == 1
+    assert await expired_ids(db_container, [held, changed, failing, closed]) == {closed}
+    for key_id in (held, changed, failing):
+        assert await audit_rows(db_container, key_id) == []
+    assert await audit_actions(db_container, closed) == [
+        ActionType.API_KEY_EXPIRED.value
+    ]
+
+
+async def test_a_key_that_stopped_matching_is_not_held_until_the_run_commits(
+    db_container, admin_user, monkeypatch
+):
+    """The run locks a key only to change it: a key revoked after selection,
+    with the revocation committed before the run's write starts, is left
+    unlocked, so its own writers do not wait for the run's commit. A
+    revocation committed while the write runs is not covered: Postgres can
+    then keep the lock it took before rechecking the row."""
+    [key_id] = await insert_due_keys(db_container, admin_user.tenant_id, 1)
+
+    async def revoke() -> None:
+        await set_key_columns(
+            db_container, key_id, revoked_at=datetime.now(timezone.utc)
+        )
+
+    after_selection(monkeypatch, key_id, revoke)
+    async with db_container() as job:
+        result = await job.api_key_maintenance_service().run_daily_maintenance()
+        async with db_container() as writer:
+            # Fails at once if the uncommitted run still holds the key.
+            await writer.session().execute(
+                sa.select(ApiKeysV2.id)
+                .where(ApiKeysV2.id == key_id)
+                .with_for_update(key_share=True, nowait=True)
+            )
+
+    assert result["expired"] == 0
+    assert result["errors"] == []
+
+
+async def test_a_revocation_taking_the_keys_in_the_other_order_does_not_deadlock(
+    db_container, admin_user, monkeypatch
+):
+    """Revoking a scope takes its keys newest first. The run takes keys past
+    their end date in an earlier selection than unused keys. With the older
+    key past its end date and the newer one unused, the run holds the older
+    key when the revocation holds the newer, and each then writes the key the
+    other holds."""
+    tenant_id = admin_user.tenant_id
+    now = datetime.now(timezone.utc)
+    assistant_id = uuid4()
+    # Used recently, so only its end date selects it.
+    older = await insert_key(
+        db_container,
+        tenant_id,
+        name="past-end-date",
+        created_at=now - timedelta(days=30),
+        expires_at=now - timedelta(days=1),
+        last_used_at=now,
+    )
+    # Never used and without an end date, so only the unused policy selects it.
+    newer = await insert_key(
+        db_container, tenant_id, name="unused", created_at=now - timedelta(days=20)
+    )
+    for key_id in (older, newer):
+        await set_key_columns(
+            db_container,
+            key_id,
+            scope_type=ApiKeyScopeType.ASSISTANT.value,
+            scope_id=assistant_id,
+        )
+    await set_unused_days(db_container, tenant_id, 7)
+
+    async def revoke_the_assistants_keys(pid: asyncio.Future[int]) -> int:
+        async with db_container() as container:
+            pid.set_result(
+                await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            )
+            return await container.api_key_scope_revoker().revoke_scope(
+                scope_type=ApiKeyScopeType.ASSISTANT,
+                scope_id=assistant_id,
+                reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+            )
+
+    original = ApiKeysV2Repository.list_matching
+    revoking: list[asyncio.Task[int]] = []
+
+    async def select_then_let_the_revocation_in(self, *args, **kwargs):
+        keys = await original(self, *args, **kwargs)
+        if not revoking and any(key.id == newer for key in keys):
+            # The run has written the older key. Hand the selection back only
+            # once the revocation has written the newer key and waits for the
+            # older one, on this run's backend.
+            revoker_pid = asyncio.get_running_loop().create_future()
+            revoking.append(
+                asyncio.create_task(revoke_the_assistants_keys(revoker_pid))
+            )
+            await wait_until_blocked_by(self.session, revoking[0], revoker_pid)
+        return keys
+
+    monkeypatch.setattr(
+        ApiKeysV2Repository, "list_matching", select_then_let_the_revocation_in
+    )
+    result = await run_maintenance_beside_a_lock(db_container)
+    [revocation] = revoking
+
+    # The run has committed, so the revocation gets the older key.
+    assert await asyncio.wait_for(revocation, timeout=10) == 2
+    assert (await read_key(db_container, newer)).revoked_reason_code == (
+        ApiKeyStateReasonCode.SCOPE_REMOVED.value
+    )
+    assert result["errors"] == []
+    assert (result["expired"], result["auto_expired"]) == (1, 0)
+    assert result["selected_unchanged"] == [
+        {"step": "unused", "tenant_id": str(tenant_id), "count": 1}
+    ]
+    assert ActionType.API_KEY_EXPIRED.value in await audit_actions(db_container, older)
+    assert (await read_key(db_container, older)).state == "revoked"
+
+    monkeypatch.setattr(ApiKeysV2Repository, "list_matching", original)
+    later = await run_maintenance(db_container)
+
+    assert later["errors"] == []
+    assert later["auto_expired"] == 0
+    assert later["selected_unchanged"] == []
+    newer_key = await read_key(db_container, newer)
+    assert newer_key.state == "revoked"
+    assert newer_key.revoked_reason_code == ApiKeyStateReasonCode.SCOPE_REMOVED.value
+    assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
+        db_container, newer
+    )
