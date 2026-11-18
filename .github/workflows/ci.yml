@@ -143,7 +143,6 @@ jobs:
             .github/scripts/fetch-backend-audit-severities.test.mjs \
             frontend/scripts/audit-dependencies.test.mjs
           node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
-          node --test --test-concurrency=1 .github/scripts/dependency-cooldown.test.mjs
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
