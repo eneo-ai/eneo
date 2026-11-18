@@ -321,6 +321,12 @@ type ChatViewProps = {
   onGone?: () => void;
   /** The composer's unsent text, for a page that offers a question to send. */
   draftRef?: Ref<ComposerDraftHandle>;
+  /**
+   * A question failed: refused, or its answer broke off. The conversation
+   * says so and returns the question as it always does; the page may act on
+   * the cause too (the insights analysis reloads its models on a refused one).
+   */
+  onTurnFailed?: (error: unknown) => void;
 };
 
 /**
@@ -368,7 +374,8 @@ function ConversationView({
   start,
   lead,
   onGone,
-  draftRef
+  draftRef,
+  onTurnFailed
 }: ChatViewProps) {
   const t = useTranslations();
   const locale = useLocale();
@@ -574,6 +581,7 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
+        onTurnFailed?.(failure);
         const described = describeChatFailure(failure, streamErrorRef.current, t);
         if (described.gone && onGone) {
           // The page takes the conversation away and says why itself.

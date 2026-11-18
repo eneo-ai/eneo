@@ -2,7 +2,7 @@ import { notFound } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { ModelSelector } from "@/components/ai-elements/model-selector";
+import { COMPOSER_PICKER_CLASS, ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -21,10 +21,6 @@ import {
 } from "@/features/chat/model-reasoning-picker";
 import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
-
-/** The composer's compact (ghost) trigger look of the model picker. */
-const COMPOSER_PICKER_CLASS =
-  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
 
 /**
  * The personal chat's model and reasoning-level choices, with their saves.

@@ -10790,5 +10790,7 @@
   "insights_empty_title": "No conversations in the period",
   "insights_empty_hint": "Choose a longer period.",
   "insights_empty_hint_source": "Choose a longer period or another source.",
-  "insights_empty_previous": "Previous period: {count, plural, one {# conversation} other {# conversations}}"
+  "insights_empty_previous": "Previous period: {count, plural, one {# conversation} other {# conversations}}",
+  "insights_chat_model_label": "Model for the analysis",
+  "insights_chat_model_not_allowed": "The chosen model can no longer be used for the analysis. Choose another model and try again."
 }

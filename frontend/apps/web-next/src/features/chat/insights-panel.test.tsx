@@ -153,8 +153,34 @@ const spies = vi.hoisted(() => ({
   knowledge: { sources: [] as unknown[], unused: [] as unknown[] },
   tools: [] as unknown[],
   /** The period has no conversations. */
-  empty: false
+  empty: false,
+  /** The models that may answer an analysis, and every time they were asked for. */
+  models: { items: [] as unknown[], default_model_id: null as string | null },
+  modelRequests: 0,
+  /** A question is refused: its chosen model may no longer answer. */
+  refuseModel: false
 }));
+
+/** A model that may answer an analysis. */
+const answering = (id: string, nickname: string, org: string) => ({
+  id,
+  name: id,
+  nickname,
+  org,
+  max_input_tokens: 128_000,
+  max_output_tokens: 4_096,
+  is_deprecated: false,
+  vision: false,
+  reasoning: false,
+  supports_tool_calling: true
+});
+const MODELS = {
+  items: [
+    answering("model-a", "Modell A", "Leverantör A"),
+    answering("model-b", "Modell B", "Leverantör B")
+  ],
+  default_model_id: "model-a"
+};
 
 /** The options of a typed request, as far as these fakes read them. */
 type TypedRequestInit = {
@@ -307,9 +333,20 @@ async function insightsChat(input: RequestInfo | URL, init?: RequestInit): Promi
   const url = new URL(String(input), "http://localhost");
   const method = init?.method ?? "GET";
   const body = typeof init?.body === "string" ? (JSON.parse(init.body) as unknown) : undefined;
-  spies.requests.push({ method, url: `${url.pathname}${url.search}`, body });
   const [, session, ...rest] = url.pathname.slice(CHAT.length).split("/");
+  // The models are counted apart: the analysis asks for them whenever it is shown.
+  if (session === "models") {
+    spies.modelRequests += 1;
+    return Response.json(spies.models);
+  }
+  spies.requests.push({ method, url: `${url.pathname}${url.search}`, body });
   if (session && spies.removed.has(session)) return gone();
+  if (method === "POST" && spies.refuseModel) {
+    return Response.json(
+      { message: "Model not allowed", code: "insights_model_not_allowed" },
+      { status: 400 }
+    );
+  }
   if (method === "POST") return sseResponse(spies.answer);
   if (method === "DELETE") return new Response(null, { status: 204 });
   if (!session) {
@@ -335,7 +372,8 @@ async function insightsChat(input: RequestInfo | URL, init?: RequestInit): Promi
         question: "Vad frågar folk om?",
         answer: "Mest om parkering.",
         created_at: "2026-10-01T10:00:00Z",
-        updated_at: "2026-10-01T10:00:05Z"
+        updated_at: "2026-10-01T10:00:05Z",
+        completion_model: { id: "model-b", name: "model-b", nickname: "Modell B" }
       }
     ]
   });
@@ -414,6 +452,9 @@ afterEach(() => {
   spies.knowledge = { sources: [], unused: [] };
   spies.tools = [];
   spies.empty = false;
+  spies.models = { items: [], default_model_id: null };
+  spies.modelRequests = 0;
+  spies.refuseModel = false;
 });
 
 const partner: ChatPartner & { type: "assistant" } = {
@@ -1271,5 +1312,85 @@ describe("InsightsPanel", () => {
     // Compared, a drop to none shows: the previous period's conversations.
     fireEvent.click(screen.getByRole("switch", { name: "Jämför med föregående period" }));
     expect(await screen.findByText("Föregående period: 10 konversationer")).toBeTruthy();
+  });
+
+  describe("the model that answers", () => {
+    const picker = (name: string) =>
+      screen.findByRole("button", { name: `Modell för analysen ${name}` });
+    /** Picks a model in the composer's picker. */
+    async function pick(name: string) {
+      fireEvent.click(await picker("Modell A"));
+      fireEvent.click(await screen.findByRole("option", { name: new RegExp(`^${name}`) }));
+    }
+
+    it("shows the default and sends no model while the picker is untouched", async () => {
+      spies.models = MODELS;
+      renderPanel();
+      openAnalysis();
+      expect(await picker("Modell A")).toBeTruthy();
+      ask("Vad frågar folk om?");
+      await waitFor(() => expect(questions()).toHaveLength(1));
+      expect(questions()[0]!.body).not.toHaveProperty("completion_model_id");
+    });
+
+    it("sends the chosen model with the first question and the next", async () => {
+      spies.models = MODELS;
+      renderPanel();
+      openAnalysis();
+      await pick("Modell B");
+      expect(await picker("Modell B")).toBeTruthy();
+      // Choosing a model sends nothing.
+      expect(questions()).toEqual([]);
+      ask("Vad frågar folk om?");
+      await screen.findByText(/De flesta frågar om parkering/);
+      expect(questions()[0]!.body).toMatchObject({ completion_model_id: "model-b" });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Skicka meddelande" })).toBeTruthy()
+      );
+      ask("Och igår?");
+      await waitFor(() => expect(questions()).toHaveLength(2));
+      expect(questions()[1]).toMatchObject({
+        url: `${CHAT}/${STREAMED}/`,
+        body: { completion_model_id: "model-b" }
+      });
+      // "Ny analys" goes back to the default.
+      fireEvent.click(screen.getByRole("button", { name: "Ny analys" }));
+      expect(await picker("Modell A")).toBeTruthy();
+    });
+
+    it("shows an opened analysis' own model", async () => {
+      spies.models = MODELS;
+      spies.analyses = [
+        { id: SAVED, name: "Vad frågar folk om?", created_at: "2026-10-01T10:00:00Z" }
+      ];
+      renderPanel();
+      openAnalysis();
+      const history = await screen.findByRole("region", { name: "Tidigare analyser" });
+      fireEvent.click(within(history).getByRole("button", { name: /^Vad frågar folk om\?/ }));
+      expect(await picker("Modell B")).toBeTruthy();
+    });
+
+    it("says a refused model can no longer answer, keeps the question and goes back to the default", async () => {
+      spies.models = MODELS;
+      renderPanel();
+      openAnalysis();
+      await pick("Modell B");
+      await picker("Modell B");
+      spies.refuseModel = true;
+      ask("Vad frågar folk om?");
+
+      const refusal =
+        "Den valda modellen kan inte längre användas för analysen. Välj en annan modell och försök igen.";
+      expect(await screen.findByText(refusal)).toBeTruthy();
+      await waitFor(() => expect(spies.announce).toHaveBeenCalledWith(refusal));
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("textbox", { name: "Fråga om användningen" }) as HTMLTextAreaElement)
+            .value
+        ).toBe("Vad frågar folk om?")
+      );
+      expect(await picker("Modell A")).toBeTruthy();
+      await waitFor(() => expect(spies.modelRequests).toBe(2));
+    });
   });
 });

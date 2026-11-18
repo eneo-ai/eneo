@@ -2900,9 +2900,29 @@ export interface paths {
     put?: never;
     /**
      * Start Insight Conversation
-     * @description Start an insights analysis conversation about an assistant or group chat. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
+     * @description Start an insights analysis conversation about an assistant or group chat, answered by completion_model_id when given (400 insights_model_not_allowed unless the models route lists it) and else by the default. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
      */
     post: operations["start_insight_conversation_api_v1_analysis_conversation_insights_chat__post"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/conversation-insights/chat/models/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Insight Models
+     * @description The completion models that may answer an analysis of an assistant or group chat (exactly one of assistant_id or group_chat_id), and the one a turn uses when none is chosen. An empty list when no model qualifies.
+     */
+    get: operations["list_insight_models_api_v1_analysis_conversation_insights_chat_models__get"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -2924,7 +2944,7 @@ export interface paths {
     put?: never;
     /**
      * Continue Insight Conversation
-     * @description A follow-up question in one of the caller's insights conversations. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
+     * @description A follow-up question in one of the caller's insights conversations, answered by completion_model_id when given (400 insights_model_not_allowed unless the models route lists it), else by the model of the latest turn while it may still answer, else by the default. Streams the answer as the chat API's version 3 UI Message Stream (Server-Sent Events, header x-vercel-ai-ui-message-stream: v1).
      */
     post: operations["continue_insight_conversation_api_v1_analysis_conversation_insights_chat__session_id___post"];
     /**
@@ -32108,6 +32128,11 @@ export interface components {
      * @description A follow-up question in an existing insights conversation.
      */
     InsightChatContinueRequest: {
+      /**
+       * Completion Model Id
+       * @description The completion model that answers this turn, one of those the models route lists for the target; 400 insights_model_not_allowed for any other. Omitted: the model of the conversation's latest turn while it may still answer, else the default.
+       */
+      completion_model_id?: string | null;
       /** Question */
       question: string;
       selected_range?: components["schemas"]["InsightSelectedRange"] | null;
@@ -32120,12 +32145,33 @@ export interface components {
       stream?: true;
     };
     /**
+     * InsightChatModels
+     * @description The completion models that may answer an analysis of one target.
+     */
+    InsightChatModels: {
+      /**
+       * Default Model Id
+       * @description The model a turn uses when none is chosen: the assistant's own model when it is listed, else the space's default among the listed ones. Null when the list is empty.
+       */
+      default_model_id: string | null;
+      /**
+       * Items
+       * @description Every model enabled in the target's space that is accessible, supports tool calling and meets the space's security classification. Empty when none does.
+       */
+      items: components["schemas"]["CompletionModelPublic"][];
+    };
+    /**
      * InsightChatStartRequest
      * @description Start a new insights conversation about one assistant or group chat.
      */
     InsightChatStartRequest: {
       /** Assistant Id */
       assistant_id?: string | null;
+      /**
+       * Completion Model Id
+       * @description The completion model that answers this turn, one of those the models route lists for the target; 400 insights_model_not_allowed for any other. Omitted: the default.
+       */
+      completion_model_id?: string | null;
       /** Group Chat Id */
       group_chat_id?: string | null;
       /** Question */
@@ -55472,6 +55518,65 @@ export interface operations {
         content: {
           "application/json": unknown;
           "text/event-stream": unknown;
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_insight_models_api_v1_analysis_conversation_insights_chat_models__get: {
+    parameters: {
+      query?: {
+        assistant_id?: string | null;
+        group_chat_id?: string | null;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightChatModels"];
         };
       };
       /** @description Bad Request */

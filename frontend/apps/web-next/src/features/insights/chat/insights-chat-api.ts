@@ -11,7 +11,9 @@
  * goes and what its body says. An analysis whose conversations have been
  * removed is removed with them: the list leaves it out, and opening or
  * continuing it is refused with 410 `derived_source_removed`
- * (`isDerivedSourceRemoved`).
+ * (`isDerivedSourceRemoved`). A turn may name the model that answers it,
+ * one of those `models/` lists; any other is refused with 400
+ * `insights_model_not_allowed` before anything is written.
  */
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { API_BASE } from "@/lib/api/base";
@@ -51,8 +53,16 @@ export const insightChatKeys = {
   all: ["conversation-insights", "chat"] as const,
   list: (target: InsightTarget) =>
     [...insightChatKeys.all, "list", target.type, target.id] as const,
-  conversation: (sessionId: string) => [...insightChatKeys.all, "conversation", sessionId] as const
+  conversation: (sessionId: string) => [...insightChatKeys.all, "conversation", sessionId] as const,
+  models: (target: InsightTarget) =>
+    [...insightChatKeys.all, "models", target.type, target.id] as const
 };
+
+/** The models that may answer an analysis of a target, and the one that answers when none is chosen. */
+export type InsightChatModels = Schema<"InsightChatModels">;
+
+/** The refusal of a turn whose chosen model may no longer answer an analysis. */
+export const INSIGHTS_MODEL_NOT_ALLOWED = "insights_model_not_allowed";
 
 function targetQuery(target: InsightTarget): { assistant_id?: string; group_chat_id?: string } {
   return target.type === "group-chat" ? { group_chat_id: target.id } : { assistant_id: target.id };
@@ -94,6 +104,20 @@ export function insightConversationQueryOptions(sessionId: string) {
   });
 }
 
+/** `GET /models/`: the models that may answer an analysis of the target; empty when none may. */
+export function insightModelsQueryOptions(target: InsightTarget) {
+  return queryOptions({
+    queryKey: insightChatKeys.models(target),
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/analysis/conversation-insights/chat/models/", {
+          params: { query: targetQuery(target) },
+          signal
+        })
+      )
+  });
+}
+
 /** `DELETE /{session_id}/`: answers 204. */
 export async function deleteInsightConversation(sessionId: string): Promise<void> {
   await unwrap(
@@ -117,31 +141,39 @@ export const insightToolResults: ToolResultSource = {
   }
 };
 
-/** The analysis as ChatView talks to it, with the period its questions carry. */
+/** The analysis as ChatView talks to it, with the period and the model its questions carry. */
 export type InsightConversationApi = ConversationApi & {
   /** The period every question sent from now on carries (the picker's). */
   setSelectedRange: (range: InsightSelectedRange | null) => void;
+  /** The model the person chose for the questions sent from now on; null for none chosen. */
+  setModel: (modelId: string | null) => void;
 };
 
 /**
  * The analysis as ChatView talks to it. A turn without a session starts an
  * analysis of the target ChatView names (`assistant_id` or `group_chat_id`)
  * with the browser's time zone; one with a session continues it. Each turn
- * carries the period set last (`setSelectedRange`), read when it is sent.
+ * carries the period set last (`setSelectedRange`) and the model chosen last
+ * (`setModel`), read when it is sent. Without a chosen model the turn names
+ * none, so the server's rule decides: the default for a new analysis, the
+ * analysis' own model while it may still answer for a follow-up.
  */
 export function insightConversationApi(
   initialRange: InsightSelectedRange | null
 ): InsightConversationApi {
   let selectedRange = initialRange;
+  let modelId: string | null = null;
   return {
     transport: createChatTransport({
       request: ({ question, options }) => {
         const range = selectedRange ?? undefined;
+        const model = modelId ? { completion_model_id: modelId } : {};
         if (options.session_id) {
           const body: InsightChatContinueRequest = {
             question,
             stream: true,
-            selected_range: range
+            selected_range: range,
+            ...model
           };
           return { api: `${CHAT_PATH}/${encodeURIComponent(options.session_id)}/`, body };
         }
@@ -152,7 +184,8 @@ export function insightConversationApi(
           question,
           timezone: browserTimeZone(),
           stream: true,
-          selected_range: range
+          selected_range: range,
+          ...model
         };
         return { api: `${CHAT_PATH}/`, body };
       }
@@ -161,6 +194,9 @@ export function insightConversationApi(
     draftScope: "insights",
     setSelectedRange: (range) => {
       selectedRange = range;
+    },
+    setModel: (next) => {
+      modelId = next;
     }
   };
 }

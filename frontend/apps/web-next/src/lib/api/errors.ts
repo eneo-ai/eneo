@@ -310,6 +310,7 @@ const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
   // A copy (an insights analysis) whose sources were removed is refused (410).
   [DERIVED_SOURCE_REMOVED, "derived_source_removed"],
   ["insights_model_unavailable", "insights_chat_model_unavailable"],
+  ["insights_model_not_allowed", "insights_chat_model_not_allowed"],
   ["invalid_timezone", "insights_chat_invalid_timezone"]
 ]);
 

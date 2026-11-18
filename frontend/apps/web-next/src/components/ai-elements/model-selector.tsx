@@ -97,6 +97,10 @@ function ModelValue({
   );
 }
 
+/** The composer's compact (ghost) trigger look of a model picker. */
+export const COMPOSER_PICKER_CLASS =
+  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
+
 /** The value of the "follow the default" option; never a model id. */
 const DEFAULT_VALUE = "default-model";
 
@@ -143,6 +147,8 @@ type ModelSelectorProps = {
    * default the picker is named "Chattmodell" and its label is hidden.
    */
   field?: { label: string; description?: string };
+  /** The hidden name, where a composer's model is not the chat's ("Modell för analysen"). */
+  label?: string;
   /** A problem to show at the field (a refused save). */
   status?: { type: "error"; message: string };
 };
@@ -166,10 +172,11 @@ export function ModelSelector({
   showPricing = true,
   defaultChoice,
   field,
+  label: name,
   status
 }: ModelSelectorProps) {
   const t = useTranslations();
-  const label = field?.label ?? t("completion_model");
+  const label = field?.label ?? name ?? t("completion_model");
   const compact = size === "sm";
 
   const [pendingId, setPendingId] = useState<string | null>(null);

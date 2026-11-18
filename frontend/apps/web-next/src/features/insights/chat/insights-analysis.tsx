@@ -1,5 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
+import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -7,7 +8,9 @@ import { useEffect, useEffectEvent, useId, useMemo, useRef, useState, type React
 import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
-import { isDerivedSourceRemoved } from "@/lib/api/errors";
+import { COMPOSER_PICKER_CLASS, ModelSelector } from "@/components/ai-elements/model-selector";
+import { useAppContext } from "@/components/providers/app-context";
+import { EneoApiError, isDerivedSourceRemoved } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -17,9 +20,12 @@ import { PanelFrame } from "@/features/chat/side-panel/panel-frame";
 import type { InsightRange } from "../insights-range";
 import { insightCitationReferences } from "./insight-citations";
 import {
+  INSIGHTS_MODEL_NOT_ALLOWED,
   insightChatKeys,
   insightConversationApi,
   insightConversationQueryOptions,
+  insightModelsQueryOptions,
+  type InsightChatModels,
   type InsightConversation,
   type InsightTarget
 } from "./insights-chat-api";
@@ -40,6 +46,8 @@ type Analysis =
       started: boolean;
       /** Replaces an analysis that went away: its composer takes focus if focus was lost. */
       focusComposer?: boolean;
+      /** The model of the opened analysis' latest turn that names one; null for a new analysis. */
+      lastModelId: string | null;
     }
   /** An earlier analysis on its way from the history. */
   | { kind: "opening"; sessionId: string }
@@ -56,7 +64,8 @@ function newAnalysis(focusComposer = false): Analysis {
     sessionId: null,
     messages: [],
     started: false,
-    focusComposer
+    focusComposer,
+    lastModelId: null
   };
 }
 
@@ -67,8 +76,26 @@ function savedAnalysis(conversation: InsightConversation): Analysis {
     key: conversation.id,
     sessionId: conversation.id,
     messages,
-    started: messages.length > 0
+    started: messages.length > 0,
+    lastModelId:
+      conversation.messages.findLast((message) => message.completion_model)?.completion_model?.id ??
+      null
   };
+}
+
+/**
+ * The model the picker shows: the person's choice; else, for an opened
+ * analysis, the model of its latest turn while it may still answer; else the
+ * one that answers when none is chosen.
+ */
+function shownModel(
+  chosen: string | null,
+  lastModelId: string | null,
+  models: InsightChatModels
+): string | null {
+  if (chosen) return chosen;
+  if (lastModelId && models.items.some((model) => model.id === lastModelId)) return lastModelId;
+  return models.default_model_id;
 }
 
 /** No files: the analysis reads conversations, not attachments. */
@@ -113,6 +140,13 @@ function RemovedAnalysis({ onStartNew }: { onStartNew: () => void }) {
  * removed with them: opening or continuing it says so and offers a new one.
  * Nothing is sent without the person pressing send.
  *
+ * The composer's model picker lists the models that may answer and shows
+ * the one that will: the default for a new analysis, an opened analysis'
+ * own model while it may still answer. A model the person picks is the
+ * analysis' own and goes with every question sent after it; until then a
+ * question names none, and the server decides. "Ny analys" and opening
+ * another analysis start again from what the server would use.
+ *
  * A question offered by the page (`suggestion`, a finding's) goes into the
  * composer of an analysis not yet started with nothing typed. Anywhere else
  * (an analysis under way, a question typed, an earlier analysis opening) it
@@ -147,6 +181,11 @@ export function InsightsAnalysis({
   // Every analysis talks to the same endpoints; each question carries the period picked then.
   const [api] = useState(() => insightConversationApi(range));
   useEffect(() => api.setSelectedRange(range), [api, range]);
+  const { tenant } = useAppContext();
+  // The model the person chose for this analysis; null while the picker is
+  // untouched, so a turn names none and the server's own rule decides.
+  const [chosenModel, setChosenModel] = useState<string | null>(null);
+  useEffect(() => api.setModel(chosenModel), [api, chosenModel]);
   const [analysis, setAnalysis] = useState<Analysis>(() => newAnalysis());
   const [activity, setActivity] = useState<ActivityState | null>(null);
   const leaveConfirmation = useRef<LeaveConfirmationHandle>(null);
@@ -159,6 +198,8 @@ export function InsightsAnalysis({
     () => ({ type: partner.type, id: partner.id }),
     [partner.type, partner.id]
   );
+  // The models that may answer: listed in the composer, the one that will answer shown.
+  const models = useQuery(insightModelsQueryOptions(target));
 
   // Opening an earlier analysis: never from cache, so it shows its latest turns.
   const opening = analysis.kind === "opening" ? analysis.sessionId : null;
@@ -214,6 +255,7 @@ export function InsightsAnalysis({
   function startNew(focusComposer = false) {
     setAnalysis(newAnalysis(focusComposer));
     setActivity(null);
+    setChosenModel(null);
   }
 
   /** A typed, unsent question is lost with the analysis: asked first. */
@@ -226,6 +268,7 @@ export function InsightsAnalysis({
     leaveAnalysis(() => {
       setAnalysis({ kind: "opening", sessionId });
       setActivity(null);
+      setChosenModel(null);
       // The history's row goes with the start state: focus moves to the analysis.
       rescue(() => body.current);
     });
@@ -248,6 +291,37 @@ export function InsightsAnalysis({
     }),
     [partner.type, partner.id, t]
   );
+
+  // While the list loads the composer works and the picker's place is quiet;
+  // without a model that may answer (or without the list) there is no picker,
+  // and a question is refused as before.
+  let modelPicker: ReactNode = null;
+  if (models.isPending) {
+    modelPicker = <Skeleton width={96} height={32} radius="rounded" />;
+  } else if (models.data && models.data.items.length > 0 && analysis.kind === "conversation") {
+    modelPicker = (
+      <ModelSelector
+        models={models.data.items}
+        selectedId={shownModel(chosenModel, analysis.lastModelId, models.data)}
+        onSelect={setChosenModel}
+        label={t("insights_chat_model_label")}
+        size="sm"
+        showPricing={tenant.show_model_pricing}
+        className={COMPOSER_PICKER_CLASS}
+      />
+    );
+  }
+
+  /**
+   * A question refused because the chosen model may no longer answer: the
+   * conversation says so and returns the question to the composer; the list
+   * is read again and the choice goes back to the default.
+   */
+  function onTurnFailed(error: unknown) {
+    if (!(error instanceof EneoApiError) || error.reason !== INSIGHTS_MODEL_NOT_ALLOWED) return;
+    setChosenModel(null);
+    void queryClient.invalidateQueries({ queryKey: insightChatKeys.models(target) });
+  }
 
   let content: ReactNode;
   if (analysis.kind === "removed") {
@@ -288,6 +362,8 @@ export function InsightsAnalysis({
         placeholder={t("insights_chat_placeholder")}
         onNewConversation={() => startNew(true)}
         onGone={() => setAnalysis({ kind: "removed" })}
+        modelSelector={modelPicker}
+        onTurnFailed={onTurnFailed}
         onStartedChange={(value) =>
           setAnalysis((current) =>
             current.kind === "conversation" && current.started !== value

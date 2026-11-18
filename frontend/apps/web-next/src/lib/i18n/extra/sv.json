@@ -4748,5 +4748,7 @@
   "insights_empty_title": "Inga konversationer i perioden",
   "insights_empty_hint": "Välj en längre period.",
   "insights_empty_hint_source": "Välj en längre period eller en annan källa.",
-  "insights_empty_previous": "Föregående period: {count, plural, one {# konversation} other {# konversationer}}"
+  "insights_empty_previous": "Föregående period: {count, plural, one {# konversation} other {# konversationer}}",
+  "insights_chat_model_label": "Modell för analysen",
+  "insights_chat_model_not_allowed": "Den valda modellen kan inte längre användas för analysen. Välj en annan modell och försök igen."
 }
