@@ -27,6 +27,10 @@ from eneo.flows.domain.flow_suggestion_model import (
     describe_site,
 )
 from eneo.flows.flow_metadata import FlowFormSchemaParseMode, parse_flow_form_schema
+from eneo.flows.flow_validators_template import (
+    orphaned_template_bindings,
+    unbound_template_fields,
+)
 from eneo.flows.http_transport.authored_config import (
     HTTP_CONFIG_KEYS,
     HttpAuthApiKey,
@@ -475,3 +479,31 @@ def output_fields(output_contract: Mapping[str, object] | None) -> list[str] | N
     if not isinstance(properties, Mapping):
         return []
     return [str(name) for name in properties]  # pyright: ignore[reportUnknownVariableType, reportUnknownArgumentType]
+
+
+def word_fields(output_config: Mapping[str, object] | None) -> dict[str, Any]:
+    """A Word step's fields as its draft saves them: each field of the
+    uploaded template with what it reads (its reference, "" when it is left
+    empty on purpose, None when nothing binds it), and, when there are any,
+    the bindings that name no field of the template
+    (``bindings_without_field``). The comparison is publish's
+    (``unbound_template_fields``); no template, no fields."""
+    config = _mapping(output_config)
+    raw_names = config.get("placeholders")
+    names = (
+        [name for name in cast(list[object], raw_names) if isinstance(name, str)]
+        if isinstance(raw_names, list)
+        else []
+    )
+    bindings = dict(_mapping(config.get("bindings")))
+    unbound = set(unbound_template_fields(names, bindings))
+    result: dict[str, Any] = {
+        "fields": [
+            {"name": name, "reads": None if name in unbound else bindings[name]}
+            for name in names
+        ]
+    }
+    orphaned = orphaned_template_bindings(names, bindings)
+    if orphaned:
+        result["bindings_without_field"] = orphaned
+    return result

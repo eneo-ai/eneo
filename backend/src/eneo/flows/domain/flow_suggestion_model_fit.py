@@ -168,8 +168,9 @@ def _suggestion(
             f"{step.step_order} asked its model for {effort} reasoning effort to "
             f"write a JSON result, and each call took at most {peak_input} input "
             f"tokens ({_percent(share)} of the model's limit) and wrote at most "
-            f"{peak_output} output tokens, reasoning included; an extraction "
-            "this small rarely needs that effort."
+            f"{peak_output} output tokens, reasoning included; these sizes do "
+            "not show how hard the task is, so a lower effort is worth trying "
+            "and comparing."
         ),
         level="low",
         fix=FlowSuggestionFix(kind="advice"),

@@ -7,7 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 from uuid import UUID
 
+import pytest
+
 from eneo.flows.domain.flow_suggestions import (
+    FLOW_SUGGESTION_AUTHORING_RULES,
     FlowSuggestion,
     FlowSuggestionCode,
     SuggestionFlow,
@@ -499,3 +502,155 @@ def test_the_form_fingerprint_is_the_field() -> None:
     )
 
     assert renamed.fingerprint == before.fingerprint
+
+
+# --------------------------------------------------------------------------- #
+# The authoring rules name the situations the engine does not judge
+# --------------------------------------------------------------------------- #
+
+_HTTP_POST = {
+    "url": "https://example.org/",
+    "auth": {"mode": "none"},
+    "timeout_seconds": 30,
+    "body": {"mode": "auto"},
+    "custom_headers": [],
+}
+_ITEMS = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": {"type": "string"}}},
+    "required": ["items"],
+}
+_STEP_2_TITLE = {"question": "{{ step_2.output.structured.title }}"}
+_PER_SOURCE = {
+    "runtime_input": {
+        "enabled": True,
+        "input_format": "document",
+        "execution_mode": "per_source",
+    }
+}
+# A form whose field ``rubrik`` no step reads but which names the run.
+_ROLE_FORM = {
+    "form_schema": {
+        "fields": [
+            {"name": "kommun", "type": "text"},
+            {"name": "rubrik", "type": "text", "role": "run_label"},
+        ]
+    }
+}
+
+
+def _unreader() -> SuggestionStep:
+    """A last step that reads none of step 1."""
+    return _step(2, input_source="flow_input")
+
+
+def _mapped_producer(**columns: Any) -> list[SuggestionStep]:
+    """Step 2 writes a contract only step 3 reads, one field of it."""
+    return [
+        _step(1, output_type="json", output_contract=_ITEMS),
+        _step(
+            2,
+            input_type="json",
+            output_type="json",
+            output_contract=_CONTRACT,
+            **columns,
+        ),
+        _step(3, input_source="flow_input", input_bindings=_STEP_2_TITLE),
+    ]
+
+
+def _per_source_producer(**columns: Any) -> list[SuggestionStep]:
+    return [_producer(input_type="document", **columns), _title_reader()]
+
+
+def _second_contract(**columns: Any) -> list[SuggestionStep]:
+    """Step 2 passes step 1's JSON on under a contract step 3 reads one
+    field of."""
+    return [
+        _step(1, output_type="json", output_contract=_CONTRACT),
+        _step(
+            2,
+            input_type="json",
+            output_type="json",
+            output_contract=_CONTRACT,
+            **columns,
+        ),
+        _step(3, input_source="flow_input", input_bindings=_STEP_2_TITLE),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("code", "concept", "steps"),
+    [
+        (_FIELDS, "last step", [_producer()]),
+        (_FIELDS, "review", [_producer(has_review_policy=True), _title_reader()]),
+        (
+            _FIELDS,
+            "posts",
+            [
+                _producer(output_mode="http_post", output_config=_HTTP_POST),
+                _title_reader(),
+            ],
+        ),
+        (
+            _FIELDS,
+            "per item",
+            _mapped_producer(input_config={"item_map": {"enabled": True}}),
+        ),
+        (_FIELDS, "per source", _per_source_producer(input_config=_PER_SOURCE)),
+        (
+            _FIELDS,
+            "from its AI instruction",
+            _second_contract(output_mode="copy_input", prompt_text=None),
+        ),
+        (
+            _FIELDS,
+            "per section",
+            [
+                _producer(
+                    input_config={"text_processing": {"mode": "process_each_section"}}
+                ),
+                _title_reader(),
+            ],
+        ),
+        (_UNREAD, "intermediate", [_step(1)]),
+        (_UNREAD, "review", [_step(1, has_review_policy=True), _unreader()]),
+        (_UNREAD, "document", [_step(1, output_type="docx"), _unreader()]),
+        (
+            _UNREAD,
+            "posts",
+            [_step(1, output_mode="http_post", output_config=_HTTP_POST), _unreader()],
+        ),
+        (
+            _UNREAD,
+            "transcribes",
+            [_step(1, output_mode="transcribe_only"), _unreader()],
+        ),
+        (_UNREAD, "speakers", [_step(1, output_mode="speaker_mapping"), _unreader()]),
+        (_UNREAD, "tool", [_step(1, input_source="tool"), _unreader()]),
+        (_RELAY, "review", [_step(1), _relay(has_review_policy=True), _step(3)]),
+        (_FORM, "name or date the run", [_question("{{ flow_input.kommun }}")]),
+    ],
+)
+def test_a_situation_the_engine_does_not_judge_is_named_in_its_rule(
+    code: FlowSuggestionCode, concept: str, steps: list[SuggestionStep]
+) -> None:
+    metadata = _ROLE_FORM if code is _FORM else None
+
+    assert _of(code, steps, metadata) == []
+    assert concept in FLOW_SUGGESTION_AUTHORING_RULES[code]
+
+
+@pytest.mark.parametrize(
+    ("code", "steps"),
+    [
+        (_FIELDS, _mapped_producer()),
+        (_FIELDS, _per_source_producer()),
+        (_FIELDS, _second_contract()),
+        (_UNREAD, [_step(1), _unreader()]),
+    ],
+)
+def test_the_same_shape_without_its_exemption_is_judged(
+    code: FlowSuggestionCode, steps: list[SuggestionStep]
+) -> None:
+    assert len(_of(code, steps)) == 1

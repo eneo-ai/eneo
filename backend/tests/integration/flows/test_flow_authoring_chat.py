@@ -30,6 +30,7 @@ from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
     load_authoring_chat,
 )
+from eneo.flows.domain.step_kinds import FlowStepKind, StepKindValues
 from eneo.internal_mcp import flows
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId
@@ -1578,3 +1579,730 @@ async def test_a_flow_deleted_while_its_chat_waits_for_the_flow_gets_no_chat(
             .where(FlowAuthoringChats.flow_id == UUID(flow["id"]))
         )
     assert chats == 0
+
+
+# --- What a step reads, through the chat's tools -------------------------------
+
+
+_FACTS_CONTRACT = {
+    "type": "object",
+    "properties": {"beslut": {"type": "string"}, "datum": {"type": "string"}},
+    "required": ["beslut", "datum"],
+}
+
+
+async def test_a_read_the_step_rules_refuse_comes_back_with_their_shape(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    facts = _new_step("Fakta", "Ta fram fakta.", input_source="flow_input")
+    facts["configuration"].update(
+        output_mode="pass_through",
+        output_type="json",
+        output_contract=_FACTS_CONTRACT,
+    )
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                facts,
+                _new_step("Brev", "Skriv brevet.", input_source="previous_step"),
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    _facts, letter = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(letter["id"]),
+        {"input_bindings": {"source_refs": [{"step": "step_1", "output": "text"}]}},
+    )
+
+    assert refused.isError
+    page = _page(refused)
+    assert page["code"] == "flow_input_binding_unsupported_key"
+    assert "has unsupported key 'step'" in page["message"]
+    assert "step_ref" in page["message"] and "update_step" in page["message"]
+
+    saved = await flows.update_step(
+        ctx,
+        revision,
+        UUID(letter["id"]),
+        {"input_bindings": flows.INPUT_BINDINGS_EXAMPLES["fields"]},
+    )
+    assert not saved.isError, saved.content[0].text
+
+
+# --- A Word step through the chat's tools --------------------------------------
+
+
+async def _upload_template(client, base, headers, name: str, field: str) -> str:
+    """The id of a Word template with one field, uploaded to the flow."""
+    from tests.integration.flows.test_flow_template_attachment_persistence import (
+        DOCX_MIME,
+        _template_bytes,
+    )
+
+    upload = await client.post(
+        base + "/template-files/",
+        files={"upload_file": (name, _template_bytes(field), DOCX_MIME)},
+        headers=headers,
+    )
+    assert upload.status_code == 201, upload.text
+    return upload.json()["id"]
+
+
+async def _word_flow(client, enabled_flow, db_container, admin_user):
+    """A flow whose step 2 fills an uploaded template, mall.docx, with one
+    field, case_id, that nothing reads yet; the chat's context in edit mode."""
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    template_id = await _upload_template(client, base, headers, "mall.docx", "case_id")
+    word = _new_step("Beslut", "", input_source="previous_step")
+    word["configuration"].update(
+        output_mode="template_fill",
+        output_type="docx",
+        output_config={"template_asset_id": template_id, "bindings": {}},
+    )
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Fakta", "Ta fram fakta.", input_source="flow_input"),
+                word,
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    return base, headers, ctx, created.json()["steps"][1], revision
+
+
+async def test_a_word_steps_fields_are_read_and_its_template_kept(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    saved_config = word["output_config"]
+    template_id = saved_config["template_asset_id"]
+    template = {"id": template_id, "name": "mall.docx"}
+
+    async def saved_word_config():
+        steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+        return steps[1]["output_config"]
+
+    overview = json.loads(_page(await flows.read_flow(ctx))["content"])
+    step = overview["steps"][1]
+    assert step["word_fields"] == {"fields": [{"name": "case_id", "reads": None}]}
+    # The template is named beside its fields and among the flow's templates.
+    assert step["word_template"] == template
+    assert overview["word_templates"] == [template]
+    # The unbound field blocks publishing, named with its step.
+    listed = json.loads(
+        _page(await flows.read_flow(ctx, section="blockers"))["content"]
+    )
+    unbound = [b for b in listed["publish_blockers"] if b["code"] == "template_unbound"]
+    assert [(b["step"]["step_order"], "case_id" in b["message"]) for b in unbound] == [
+        (2, True)
+    ]
+
+    # Only the bindings: the template the person uploaded stays, with its
+    # fields, and the bindings are the new ones.
+    bound = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"bindings": {"case_id": "{{ step_1.output.text }}"}}},
+    )
+    assert not bound.isError, bound.content[0].text
+    assert "template_unbound" not in {
+        b["code"] for b in _page(bound)["publish_blockers"]
+    }
+    after = await saved_word_config()
+    assert after["template_asset_id"] == template_id
+    assert after["placeholders"] == saved_config["placeholders"]
+    assert after["bindings"] == {"case_id": "{{ step_1.output.text }}"}
+    overview = json.loads(_page(await flows.read_flow(ctx, steps=[2]))["content"])
+    assert overview["steps"][0]["word_template"] == template
+    assert overview["steps"][0]["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }
+    revision = _page(bound)["draft_revision"]
+
+    # A change of several steps keeps it the same way, and an empty id inside
+    # the object names no template: it is not a removal.
+    emptied = await flows.update_steps(
+        ctx,
+        revision,
+        [
+            {
+                "step_id": word["id"],
+                "changes": {
+                    "output_config": {
+                        "template_asset_id": None,
+                        "bindings": {"case_id": ""},
+                    }
+                },
+            }
+        ],
+    )
+    assert not emptied.isError, emptied.content[0].text
+    after = await saved_word_config()
+    assert after["template_asset_id"] == template_id
+    assert after["placeholders"] == saved_config["placeholders"]
+    assert after["bindings"] == {"case_id": ""}
+    revision = _page(emptied)["draft_revision"]
+
+    # A template the flow does not have is refused, with those it has.
+    refused = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"template_asset_id": str(uuid4()), "bindings": {}}},
+    )
+    assert refused.isError
+    assert _page(refused)["code"] == "flow_template_not_accessible"
+    assert _page(refused)["templates"] == [template]
+    assert await saved_word_config() == after
+
+    # Another template of the flow replaces the step's.
+    other_id = await _upload_template(client, base, headers, "avslag.docx", "skal")
+    replaced = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_config": {"template_asset_id": other_id, "bindings": {}}},
+    )
+    assert not replaced.isError, replaced.content[0].text
+    after = await saved_word_config()
+    assert after["template_asset_id"] == other_id
+    assert after["placeholders"] == ["skal"]
+    revision = _page(replaced)["draft_revision"]
+
+    # null removes the template on purpose.
+    detached = await flows.update_step(
+        ctx, revision, UUID(word["id"]), {"output_config": None}
+    )
+    assert not detached.isError, detached.content[0].text
+    assert not (await saved_word_config() or {}).get("template_asset_id")
+
+
+async def test_a_word_step_turned_into_another_kind_leaves_its_template(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+
+    changed = await flows.update_step(
+        ctx,
+        revision,
+        UUID(word["id"]),
+        {"output_mode": "pass_through", "output_type": "text", "output_config": {}},
+    )
+
+    assert not changed.isError, changed.content[0].text
+    after = (await client.get(base + "/", headers=headers)).json()["steps"][1]
+    assert after["output_mode"] == "pass_through"
+
+
+async def _flow_assistant_count(db_container, flow_id: str) -> int:
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(Assistants)
+            .where(Assistants.managing_flow_id == UUID(flow_id))
+        )
+
+
+async def test_a_recording_put_first_takes_the_run_input_over_in_one_revision(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    form = {
+        "fields": [
+            {"name": "arende", "type": "text", "label": "Ärende", "role": "run_label"}
+        ]
+    }
+    summarise = {
+        "name": "Sammanfatta",
+        "configuration": {
+            "input_source": "flow_input",
+            "input_type": "text",
+            "output_mode": "pass_through",
+            "output_type": "text",
+            "review_policy": {"mode": "view"},
+        },
+        "assistant": {"prompt": {"text": "Sammanfatta {{ flow_input.arende }}."}},
+    }
+    deliver = {
+        "name": "Leverera",
+        "configuration": {
+            "input_source": "previous_step",
+            "input_type": "text",
+            "output_mode": "compose_text",
+            "output_type": "text",
+            "input_bindings": {"question": "Sammanfattning: {{ step_1.output.text }}"},
+        },
+        "assistant": {},
+    }
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {"metadata_json": {"form_schema": form}},
+            "new_steps": [summarise, deliver],
+        },
+    )
+    assert created.status_code == 200, created.text
+    revision = created.json()["draft_revision"]
+    first, last = created.json()["steps"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    kinds = json.loads(_page(await flows.read_step_kinds(ctx, position=1))["content"])
+    (offered,) = [item for item in kinds["kinds"] if item["kind"] == "transcribe"]
+    assert offered["allowed"] is True
+
+    added = await flows.add_step(
+        ctx, revision, "Transkribera", FlowStepKind.TRANSCRIBE, position=1
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    assert page["draft_revision"] == revision + 1
+    content = json.loads(page["content"])
+    assert content["hand_over"] == [
+        {
+            "step_id": first["id"],
+            "step_order": 2,
+            "name": "Sammanfatta",
+            "changes": {"input_source": "previous_step"},
+        }
+    ]
+    # The read said beforehand what the addition would hand over.
+    assert offered["hand_over"] == [
+        {key: item[key] for key in ("step_order", "changes")}
+        for item in content["hand_over"]
+    ]
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    steps = current["steps"]
+    assert [step["user_description"] for step in steps] == [
+        "Transkribera",
+        "Sammanfatta",
+        "Leverera",
+    ]
+    assert (steps[0]["input_source"], steps[0]["output_mode"]) == (
+        "flow_input",
+        "transcribe_only",
+    )
+    # The step that was first keeps its instruction, form reads and review,
+    # and now reads the transcript.
+    assert steps[1]["input_source"] == "previous_step"
+    assert steps[1]["review_policy"]["mode"] == "view"
+    assert await _prompt(client, base, headers, steps[1]) == (
+        "Sammanfatta {{ flow_input.arende }}."
+    )
+    # The delivery still reads the summary, now step 2.
+    assert steps[2]["id"] == last["id"]
+    assert steps[2]["input_bindings"] == {
+        "question": "Sammanfattning: {{ step_2.output.text }}"
+    }
+    metadata = current["metadata_json"]
+    assert metadata["form_schema"]["fields"][0]["role"] == "run_label"
+    assert metadata["wizard"]["transcription_enabled"] is True
+
+
+async def test_a_step_added_on_a_revision_read_before_a_change_leaves_no_trace(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    ctx = await _editing_chat(
+        client, db_container, admin_user, base, headers, flow["draft_revision"]
+    )
+    read = _page(await flows.read_flow(ctx))["draft_revision"]
+    changed = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={"expected_revision": read, "definition": {"description": "Ny"}},
+    )
+    assert changed.status_code == 200, changed.text
+    before = (await client.get(base + "/", headers=headers)).json()
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    stale = await flows.add_step(
+        ctx,
+        read,
+        "Sammanfatta",
+        FlowStepKind.AI,
+        values=StepKindValues(instruction="Sammanfatta."),
+        settings={
+            "metadata_json": {
+                "form_schema": {"fields": [{"name": "arende", "type": "text"}]}
+            }
+        },
+    )
+
+    assert stale.isError
+    assert _page(stale)["code"] == "stale_revision"
+    after = (await client.get(base + "/", headers=headers)).json()
+    assert after["draft_revision"] == before["draft_revision"]
+    assert after["steps"] == []
+    assert after["metadata_json"] == before["metadata_json"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+
+async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    builds = [
+        (
+            "Fakta",
+            FlowStepKind.STRUCTURED,
+            {
+                "instruction": "Ta fram beslutet och datumet.",
+                "example": '{"beslut": "Bifall", "datum": "2026-11-11"}',
+                "upload": {"format": "document"},
+            },
+        ),
+        (
+            "Text",
+            FlowStepKind.COMPOSE,
+            {
+                "input_bindings": {
+                    "question": "Beslut {{ step_1.output.structured.beslut }}"
+                }
+            },
+        ),
+        ("Beslut", FlowStepKind.TEMPLATE, {}),
+    ]
+    for name, kind, values in builds:
+        added = await flows.add_step(
+            ctx, revision, name, kind, values=StepKindValues.model_validate(values)
+        )
+        assert not added.isError, added.content[0].text
+        revision += 1
+    page = _page(added)
+    # A Word step in a flow without templates is saved and waits for one:
+    # publish names that step's missing template.
+    (waiting,) = [
+        blocker
+        for blocker in page["publish_blockers"]
+        if blocker.get("step", {}).get("step_order") == 3
+    ]
+    assert waiting["code"] == "flow_step_invalid"
+    assert "output_config.template_asset_id" in waiting["message"]
+    assert json.loads(page["content"])["step"]["word_template"] is None
+
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    facts, text, word = steps
+    assert facts["output_contract"]["required"] == ["beslut", "datum"]
+    assert facts["input_type"] == "document"
+    assert facts["input_config"]["runtime_input"]["required"] is True
+    assert await _prompt(client, base, headers, facts) == (
+        "Ta fram beslutet och datumet."
+    )
+    assert text["output_mode"] == "compose_text"
+    assert text["input_bindings"]["question"] == (
+        "Beslut {{ step_1.output.structured.beslut }}"
+    )
+    assert (word["output_mode"], word["output_type"]) == ("template_fill", "docx")
+
+
+async def test_a_speaker_step_is_added_with_the_run_form_field_it_reads(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    transcribed = await flows.add_step(
+        ctx, revision, "Transkribera", FlowStepKind.TRANSCRIBE
+    )
+    assert not transcribed.isError, transcribed.content[0].text
+    revision += 1
+    form = {"fields": [{"name": "deltagare", "type": "list", "label": "Deltagare"}]}
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Granska transkript",
+        FlowStepKind.SPEAKERS,
+        values={"participants_field": "deltagare"},
+        settings={"metadata_json": {"form_schema": form}},
+    )
+
+    assert not added.isError, added.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    speakers = current["steps"][1]
+    assert speakers["output_mode"] == "speaker_mapping"
+    assert speakers["review_policy"]["mode"] == "edit"
+    assert speakers["output_config"]["speaker_mapping"]["participants_field"] == (
+        "deltagare"
+    )
+    assert current["metadata_json"]["form_schema"]["fields"][0]["name"] == ("deltagare")
+    # The transcription turned on by the first step survives the new form.
+    assert current["metadata_json"]["wizard"]["transcription_enabled"] is True
+
+
+async def test_a_word_step_is_added_with_a_template_the_flow_has(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    template_id = word["output_config"]["template_asset_id"]
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={
+            "template_asset_id": template_id,
+            "bindings": {"case_id": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    assert not [
+        blocker
+        for blocker in page["publish_blockers"]
+        if blocker.get("step", {}).get("step_order") == 3
+    ]
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    new = steps[2]
+    assert new["output_mode"] == "template_fill"
+    assert new["output_config"]["template_asset_id"] == template_id
+    assert new["output_config"]["placeholders"] == ["case_id"]
+    assert new["output_config"]["bindings"] == {"case_id": "{{ step_1.output.text }}"}
+
+
+async def test_a_word_step_added_without_a_template_takes_the_flows_only_one(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+    template_id = word["output_config"]["template_asset_id"]
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={"bindings": {"case_id": "{{ step_1.output.text }}"}},
+    )
+
+    assert not added.isError, added.content[0].text
+    # The answer says which template the step got, with its fields.
+    step = json.loads(_page(added)["content"])["step"]
+    assert step["word_template"] == {"id": template_id, "name": "mall.docx"}
+    assert step["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }
+    steps = (await client.get(base + "/", headers=headers)).json()["steps"]
+    assert steps[2]["output_config"]["template_asset_id"] == template_id
+    assert steps[2]["output_config"]["placeholders"] == ["case_id"]
+    revision = _page(added)["draft_revision"]
+
+    # With a second template the flow has several: the step must say which.
+    other_id = await _upload_template(client, base, headers, "avslag.docx", "skal")
+    refused = await flows.add_step(ctx, revision, "Avslag", FlowStepKind.TEMPLATE)
+
+    assert refused.isError
+    page = _page(refused)
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert {item["id"]: item["name"] for item in page["templates"]} == {
+        template_id: "mall.docx",
+        other_id: "avslag.docx",
+    }
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert len(current["steps"]) == 3
+
+
+async def test_a_step_added_before_a_step_with_a_long_name_answers_whole(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    first = await flows.add_step(
+        ctx, revision, "Sammanfatta", FlowStepKind.AI, values={"instruction": "Läs."}
+    )
+    assert not first.isError, first.content[0].text
+    step_id = json.loads(_page(first)["content"])["step_id"]
+    long_name = "Sammanfatta mötet " * 300
+    renamed = await flows.update_step(
+        ctx, revision + 1, UUID(step_id), {"user_description": long_name}
+    )
+    assert not renamed.isError, renamed.content[0].text
+
+    added = await flows.add_step(
+        ctx,
+        revision + 2,
+        "Läs underlaget",
+        FlowStepKind.AI,
+        values={"instruction": "Läs underlaget."},
+        position=1,
+    )
+
+    assert not added.isError, added.content[0].text
+    page = _page(added)
+    # One whole page: a change cannot be read on from an offset.
+    assert page["next_offset"] is None
+    assert page["draft_revision"] == revision + 3
+    content = json.loads(page["content"])
+    assert content["saved"] is True
+    (handed,) = content["hand_over"]
+    assert (handed["step_id"], handed["step_order"]) == (step_id, 2)
+    assert handed["changes"]["input_source"] == "previous_step"
+    assert len(handed["name"]) <= 81
+    assert long_name.startswith(handed["name"].removesuffix("…"))
+
+
+def _overview_step(page: dict, order: int) -> dict:
+    steps = json.loads(page["content"])["steps"]
+    return next(step for step in steps if step["step_order"] == order)
+
+
+async def test_an_added_step_answers_with_what_it_reads_as_the_overview_does(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    form = {"fields": [{"name": "kommun", "type": "text", "label": "Kommun"}]}
+    for name, settings in (
+        ("Fakta", {"metadata_json": {"form_schema": form}}),
+        ("Sammanfatta", None),
+    ):
+        added = await flows.add_step(
+            ctx,
+            revision,
+            name,
+            FlowStepKind.AI,
+            values={"instruction": f"{name}."},
+            settings=settings,
+        )
+        assert not added.isError, added.content[0].text
+        revision += 1
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Svar",
+        FlowStepKind.AI,
+        values={
+            "instruction": "Svara för {{ flow_input.kommun }}.",
+            "input_bindings": {"question": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    step = json.loads(_page(added)["content"])["step"]
+    overview = _overview_step(_page(await flows.read_flow(ctx)), 3)
+    # It reads step 1, not the step before it, and the run form field.
+    assert [read["step_order"] for read in step["reads"]] == [1]
+    assert [read["field"] for read in step["form_fields"]] == ["kommun"]
+    for key in ("reads", "readers", "form_fields", "connections"):
+        assert step[key] == overview[key], key
+
+
+async def test_an_added_word_step_answers_with_what_its_fields_read(
+    client, enabled_flow, db_container, admin_user
+):
+    base, headers, ctx, word, revision = await _word_flow(
+        client, enabled_flow, db_container, admin_user
+    )
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Beslut igen",
+        FlowStepKind.TEMPLATE,
+        values={
+            "template_asset_id": word["output_config"]["template_asset_id"],
+            "bindings": {"case_id": "{{ step_1.output.text }}"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    step = json.loads(_page(added)["content"])["step"]
+    assert step["word_fields"] == {
+        "fields": [{"name": "case_id", "reads": "{{ step_1.output.text }}"}]
+    }
+    overview = _overview_step(_page(await flows.read_flow(ctx)), 3)
+    assert step["word_fields"] == overview["word_fields"]
+    assert step["reads"] == overview["reads"]
+
+
+async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
+    client, enabled_flow, db_container, admin_user, monkeypatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    first = await flows.add_step(
+        ctx, revision, "Sammanfatta", FlowStepKind.AI, values={"instruction": "Läs."}
+    )
+    assert not first.isError, first.content[0].text
+    revision += 1
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    from eneo.flows.application.flow_service import FlowService
+
+    made: list[UUID] = []
+    create = FlowService.create_flow_assistant
+
+    async def recorded(self, *args, **kwargs):
+        result = await create(self, *args, **kwargs)
+        made.append(result[0].id)
+        return result
+
+    monkeypatch.setattr(FlowService, "create_flow_assistant", recorded)
+
+    # The values pass their own check; the save makes the new step's assistant
+    # and then refuses an upload on step 2.
+    refused = await flows.add_step(
+        ctx,
+        revision,
+        "Läs bilaga",
+        FlowStepKind.AI,
+        values={"instruction": "Läs.", "upload": {"format": "document"}},
+    )
+
+    assert refused.isError, refused.content[0].text
+    assert "only supported with input_source 'flow_input'" in (refused.content[0].text)
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert [step["user_description"] for step in current["steps"]] == ["Sammanfatta"]
+    # The assistant was made before the refusal, and is gone with it.
+    assert len(made) == 1
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants

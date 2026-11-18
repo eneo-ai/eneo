@@ -621,3 +621,33 @@ def test_the_change_card_keeps_a_structure_and_more_of_a_text():
     assert fields[1]["after"] == long
     page = step_changes(saved, {"output_config": after}, None, None)
     assert isinstance(page[0]["after"], str)
+
+
+def test_a_word_steps_fields_say_what_each_reads_and_which_is_unbound():
+    from eneo.flows.application.flow_authoring_reads import word_fields
+
+    fields = word_fields(
+        {
+            "template_asset_id": str(uuid4()),
+            "placeholders": ["namn", "datum", "bilaga"],
+            "bindings": {
+                "namn": "{{ flow_input.namn }}",
+                "bilaga": "",
+                "gammal": "{{ step_1.output.text }}",
+            },
+        }
+    )
+
+    assert fields == {
+        "fields": [
+            {"name": "namn", "reads": "{{ flow_input.namn }}"},
+            # No binding at all: publish refuses it until one is chosen.
+            {"name": "datum", "reads": None},
+            # An empty binding leaves the field empty on purpose.
+            {"name": "bilaga", "reads": ""},
+        ],
+        "bindings_without_field": ["gammal"],
+    }
+    # Before a template is uploaded the step has no fields.
+    assert word_fields({"bindings": {}}) == {"fields": []}
+    assert word_fields(None) == {"fields": []}

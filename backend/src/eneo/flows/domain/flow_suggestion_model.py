@@ -103,14 +103,19 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "result with many fields."
     ),
     FlowSuggestionCode.UNREAD_CONTRACT_FIELDS: (
-        "Declare only the output fields that later steps read."
+        "In a step that writes its result from its AI instruction, declare "
+        "only the output fields that later steps read, except in the last "
+        "step, a step with a review, and a step that posts its result or runs "
+        "once per item, per source or per section."
     ),
     FlowSuggestionCode.UNREAD_RESULT: (
-        "Add an intermediate step only when a later step reads its result."
+        "Add an intermediate step only when a later step reads its result, "
+        "unless the step has a review, makes a document (pdf or docx), posts "
+        "its result, transcribes, maps speakers or calls a tool."
     ),
     FlowSuggestionCode.RELAY_STEP: (
-        "Add no step that only passes data along: let the later steps read "
-        "its source directly."
+        "Add no step that only passes data along, unless it has a review: let "
+        "the later steps read its source directly."
     ),
     FlowSuggestionCode.PER_ITEM_PROMPT_READ: (
         "Put no whole earlier result in the prompt of a step that runs once "
@@ -122,7 +127,8 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "rather than in several steps."
     ),
     FlowSuggestionCode.UNUSED_FORM_FIELD: (
-        "Declare only the run form fields that a step reads."
+        "Declare only the run form fields that a step reads or that name or "
+        "date the run."
     ),
     FlowSuggestionCode.IDENTICAL_INPUTS: (
         "Give a step each text once: read the original rather than also a "
@@ -144,12 +150,13 @@ FLOW_SUGGESTION_AUTHORING_RULES: Mapping[FlowSuggestionCode, str] = {
         "Give a step a text or a result that quotes it at length, not both."
     ),
     FlowSuggestionCode.DETERMINISTIC_CANDIDATE: (
-        "Use a compose_text step, not a model, for a step that only puts "
-        "earlier results together with a little fixed text."
+        "Consider a compose_text step rather than a model for a step that only "
+        "puts earlier results together with a little fixed text, unless the "
+        "model's own words matter."
     ),
     FlowSuggestionCode.OVERSIZED_REASONING: (
-        "Ask for high reasoning effort only for a step that has to reason, "
-        "not for a small extraction into a JSON result."
+        "Ask for high reasoning effort only for a step that has to reason; for "
+        "a small extraction into a JSON result, try a lower effort and compare."
     ),
 }
 
@@ -368,7 +375,7 @@ class DraftReads:
     form_fields: tuple[str, ...]
     unreadable: frozenset[int]
     # Form fields that name or date the run: used though no step reads them.
-    role_form_fields: frozenset[str] = frozenset()
+    role_form_fields: frozenset[str]
 
     @classmethod
     def of(cls, flow: SuggestionFlow) -> DraftReads:

@@ -14,7 +14,7 @@ SUPPORTED_INPUT_BINDING_KEYS = frozenset({"question", SOURCE_REFS_BINDING_KEY})
 SourceRefOutput = Literal["text", "structured"]
 InputContractBindingConflict = Literal["question", "source_refs"]
 _SOURCE_REF_OUTPUTS: frozenset[SourceRefOutput] = frozenset(("text", "structured"))
-_SOURCE_REF_KEYS = frozenset(
+SOURCE_REF_KEYS = frozenset(
     {"step_ref", "output", "field_path", "label", "item_template"}
 )
 _ITEM_TEMPLATE_FIELD_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -512,7 +512,7 @@ def _parse_source_ref(raw_ref: object, *, index: int) -> SourceRefBinding:
         )
     ref = cast(Mapping[object, object], raw_ref)
     for key in ref:
-        if not isinstance(key, str) or key not in _SOURCE_REF_KEYS:
+        if not isinstance(key, str) or key not in SOURCE_REF_KEYS:
             raise InputBindingContractError(
                 f"input_bindings.source_refs[{index}] has unsupported key '{key}'."
             )

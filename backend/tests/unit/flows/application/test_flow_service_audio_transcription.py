@@ -291,3 +291,50 @@ async def test_a_draft_that_does_not_transcribe_asks_nothing_of_its_space():
     service, _ = await _publish_blockers(flow, SimpleNamespace())
 
     service.space_service.get_space.assert_not_awaited()
+
+
+def _word_flow(bindings: dict[str, str]) -> Flow:
+    """A draft whose step 2 fills an uploaded template with the fields namn
+    and datum, bound as ``bindings``."""
+    word = _step(2, input_type="text", output_mode="template_fill").model_copy(
+        update={
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(uuid4()),
+                "placeholders": ["namn", "datum"],
+                "bindings": bindings,
+            },
+        }
+    )
+    return _saved_flow(_user()).model_copy(
+        update={
+            "steps": [_step(1, input_type="text", output_mode="pass_through"), word]
+        }
+    )
+
+
+async def test_a_word_field_without_a_binding_blocks_publishing():
+    flow = _word_flow({"namn": "{{ step_1.output.text }}"})
+
+    _, blockers = await _publish_blockers(flow)
+
+    (blocker,) = [blocker for blocker in blockers if "missing bindings" in str(blocker)]
+    assert str(blocker) == "Step 2: template placeholders are missing bindings: datum."
+    assert blocker.step_order == 2
+    assert blocker.context == {"issue_code": "template_unbound", "step_order": 2}
+
+
+async def test_word_fields_left_empty_on_purpose_or_bound_elsewhere_do_not_block():
+    # "" leaves a field empty; a binding without a field is ignored by
+    # publish and the run, so neither stands in the way of publishing.
+    flow = _word_flow(
+        {
+            "namn": "{{ step_1.output.text }}",
+            "datum": "",
+            "gammal": "{{ step_1.output.text }}",
+        }
+    )
+
+    _, blockers = await _publish_blockers(flow)
+
+    assert not [blocker for blocker in blockers if "template" in str(blocker)]
