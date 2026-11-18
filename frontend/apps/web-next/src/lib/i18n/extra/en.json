@@ -4802,5 +4802,13 @@
   "helper_card_earlier_text": "Earlier text",
   "helper_card_no_model": "No model",
   "helper_card_locked": "{setting} is set by the organisation's policy and cannot be changed here.",
-  "helper_card_model_not_offered": "{model} cannot be chosen for this assistant."
+  "helper_card_model_not_offered": "{model} cannot be chosen for this assistant.",
+  "helper_ask": "Ask",
+  "helper_ask_about": "Ask the helper about {section}",
+  "helper_ask_model": "Help me choose a model",
+  "helper_ask_model_question": "Help me choose the {setting}",
+  "helper_reference_button": "Refer to a setting",
+  "helper_reference_menu": "Settings",
+  "helper_reference_empty": "No setting matches.",
+  "helper_reference_whole_section": "The whole section"
 }

@@ -1,10 +1,12 @@
+import { Button } from "@astryxdesign/core/Button";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { useQueryClient } from "@tanstack/react-query";
-import { Sparkles } from "lucide-react";
+import { MessageSquarePlus, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";
-import type { Ref } from "react";
+import type { ReactNode, Ref } from "react";
 import { EneoApiError } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import type { ChatReferences } from "@/features/chat/chat-references";
 import type { HelperAdapter } from "@/features/helper/helper-adapter";
 import { useSpace } from "@/features/spaces/use-space";
 import { assistantHelperApi, type AssistantHelperAvailability } from "./assistant-helper-api";
@@ -40,15 +42,20 @@ const REFUSAL_KEYS: Record<string, string> = {
  * shows as a card to apply, a change made in Redigera as a card to undo.
  * When one of the chat's tools finishes, and when an answer ends, the
  * assistant and its space are read again, so the form shows what the
- * helper changed.
+ * helper changed. The page hands it what the chat can refer to (the
+ * assistant's settings) and the composer's "@" button.
  */
 export function useAssistantHelper({
   assistant,
-  availability
+  availability,
+  references,
+  footerActions
 }: {
   assistant: Assistant;
   /** The availability read; undefined while it is pending or failed. */
   availability: AssistantHelperAvailability | undefined;
+  references?: ChatReferences;
+  footerActions?: ReactNode;
 }): HelperAdapter {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -94,6 +101,8 @@ export function useAssistantHelper({
       const reason = error instanceof EneoApiError ? error.reason : undefined;
       toastApiError(error, t, { title, message: refusalText(reason) ?? undefined });
     },
+    references,
+    footerActions,
     toolCards: (call) => assistantHelperCardFor(call, assistant.id),
     onToolCallFinished: (call) => {
       if (isAssistantToolCall(call)) refresh();
@@ -140,5 +149,26 @@ export function AssistantHelperToggle({
       tooltip={disabled ? t("helper_unavailable_no_model") : undefined}
       onPressedChange={(pressed) => onOpenChange(pressed)}
     />
+  );
+}
+
+/**
+ * "Fråga" at the end of a section's heading row: puts a reference to the
+ * section in the helper's composer, opening the helper first. Its name says
+ * which section it asks about.
+ */
+export function AskHelperButton({ section, onAsk }: { section: string; onAsk: () => void }) {
+  const t = useTranslations();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      label={t("helper_ask_about", { section })}
+      icon={<MessageSquarePlus aria-hidden="true" className="size-4" />}
+      onClick={onAsk}
+      className="text-ax-text-secondary hover:text-ax-text"
+    >
+      {t("helper_ask")}
+    </Button>
   );
 }

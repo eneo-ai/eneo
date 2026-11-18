@@ -1,14 +1,19 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
-import { useEffect, useLayoutEffect, useState } from "react";
+import { createRef, useEffect, useLayoutEffect, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { replaceUrl, router, setRoute } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { reportResize, setViewport } from "@/test/setup-dom";
 import { SaveStatusProvider, useSetSaveStatus } from "./save-status";
-import { SectionedSettings, type SettingsSection } from "./sectioned-settings";
+import {
+  SectionedSettings,
+  type SectionedSettingsHandle,
+  type SettingsSection
+} from "./sectioned-settings";
+import { SettingsGroup } from "./settings-rows";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
@@ -604,5 +609,117 @@ describe("SectionedSettings on a phone (decision 21)", () => {
     expect(document.querySelector("[data-editor-view]")).toBeNull();
     expect(document.querySelector("[data-editor-index]")).toBeNull();
     expect(document.querySelector("[data-phone-page-bar]")).toBeNull();
+  });
+});
+
+describe("SectionedSettings: a section's own control, and showing a setting", () => {
+  const groups: SettingsSection[] = [
+    {
+      id: "general",
+      label: "Allmänt",
+      icon: SlidersHorizontal,
+      node: (
+        <SettingsGroup title="Allmänt" headerEnd={<button type="button">Historik</button>}>
+          <label htmlFor="name">Namn</label>
+          <input id="name" />
+          <SettingsGroup title="Inuti">
+            <p>Ett inre kort</p>
+          </SettingsGroup>
+        </SettingsGroup>
+      )
+    },
+    {
+      id: "ai",
+      label: "AI",
+      icon: Sparkles,
+      node: (
+        <SettingsGroup title="AI">
+          <div id="ai-choice">
+            <input type="radio" name="mode" aria-label="Vid behov" />
+            <input type="radio" name="mode" aria-label="Alltid" defaultChecked />
+          </div>
+          <label htmlFor="ai-locked">Låst</label>
+          <input id="ai-locked" disabled />
+        </SettingsGroup>
+      )
+    }
+  ];
+  const ask = (section: SettingsSection) => (
+    <button type="button">{`Fråga om ${section.label}`}</button>
+  );
+
+  it("puts the page's control last in each section's heading row, once", () => {
+    renderInApp(
+      <SectionedSettings
+        navigationLabel="Avsnitt"
+        header={<h1>Redigera</h1>}
+        sections={groups}
+        sectionAction={ask}
+      />
+    );
+    const ends = [...document.querySelectorAll("[data-settings-group-end]")];
+    expect(
+      ends.map((end) => [...end.querySelectorAll("button")].map((b) => b.textContent))
+    ).toEqual([["Historik", "Fråga om Allmänt"], ["Fråga om AI"]]);
+  });
+
+  it("leaves the heading rows as they were without one", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={groups} />
+    );
+    const ends = [...document.querySelectorAll("[data-settings-group-end]")];
+    expect(ends.map((end) => end.textContent)).toEqual(["Historik"]);
+  });
+
+  it("moves focus to a control, a container's chosen option or a section's heading", () => {
+    const handle = createRef<SectionedSettingsHandle>();
+    renderInApp(
+      <SectionedSettings
+        navigationLabel="Avsnitt"
+        header={<h1>Redigera</h1>}
+        sections={groups}
+        sectionAction={ask}
+        handleRef={handle}
+      />
+    );
+
+    expect(handle.current!.show({ section: "general", control: "name" })).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Namn" }));
+    // A container: its checked option, never the heading row's controls.
+    handle.current!.show({ section: "ai", control: "ai-choice" });
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Alltid" }));
+    // A whole section, and a field that cannot take focus: the section's heading.
+    handle.current!.show({ section: "general" });
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Allmänt" }));
+    handle.current!.show({ section: "ai", control: "ai-locked" });
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "AI" }));
+    expect(handle.current!.show({ section: "security" })).toBe(false);
+  });
+
+  it("opens the section on a phone and focuses the control in it", () => {
+    setViewport("phone");
+    setRoute(EDIT);
+    const handle = createRef<SectionedSettingsHandle>();
+    renderInApp(
+      <SaveStatusProvider>
+        <SectionedSettings
+          navigationLabel="Avsnitt"
+          header={<h1>Min assistent</h1>}
+          sections={groups}
+          phone={{ title: "Min assistent" }}
+          handleRef={handle}
+        />
+      </SaveStatusProvider>
+    );
+    expect(view()).toBe("index");
+
+    act(() => void handle.current!.show({ section: "ai", control: "ai-choice" }));
+    expect(view()).toBe("section");
+    expect(current()).toEqual(["ai"]);
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: "Alltid" }));
+    // In the section in view, without another history entry.
+    act(() => void handle.current!.show({ section: "ai", control: "ai-locked" }));
+    expect(document.activeElement).toBe(screen.getAllByRole("heading", { name: "AI" }).at(-1));
+    setViewport("desktop");
   });
 });

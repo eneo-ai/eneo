@@ -1,5 +1,23 @@
-import { useId } from "react";
+import { createContext, useContext, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+/** What the page puts at the end of the heading row of the settings group inside. */
+const GroupActionContext = createContext<ReactNode>(null);
+
+/**
+ * Puts `action` at the end of the heading row of the settings group inside,
+ * after its own header actions (an editor's "Fråga" for each section). A
+ * group nested in that group does not repeat it.
+ */
+export function SettingsGroupAction({
+  action,
+  children
+}: {
+  action: ReactNode;
+  children: ReactNode;
+}) {
+  return <GroupActionContext.Provider value={action}>{children}</GroupActionContext.Provider>;
+}
 
 /**
  * The card's frame and inset give way to the page's gutter in an editor's
@@ -40,6 +58,7 @@ export function SettingsGroup({
   headerEnd?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const action = useContext(GroupActionContext);
   return (
     <section
       id={id}
@@ -61,14 +80,17 @@ export function SettingsGroup({
               <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
             ) : null}
           </div>
-          {headerEnd ? (
+          {headerEnd || action ? (
             <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
               {headerEnd}
+              {action}
             </div>
           ) : null}
         </div>
       </div>
-      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>{children}</div>
+      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>
+        <GroupActionContext.Provider value={null}>{children}</GroupActionContext.Provider>
+      </div>
     </section>
   );
 }

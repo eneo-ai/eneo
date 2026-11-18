@@ -225,7 +225,12 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
       startHeadingLevel={3}
       references={references}
       toolCards={adapter.toolCards}
-      footerActions={<ModePicker chat={chat} adapter={adapter} />}
+      footerActions={
+        <>
+          {adapter.footerActions}
+          <ModePicker chat={chat} adapter={adapter} />
+        </>
+      }
       placeholder={editing ? texts.placeholder.edit : texts.placeholder.ask}
       // Named by what a message does in the mode it is sent in.
       composerLabel={editing ? texts.composerLabelEdit : undefined}

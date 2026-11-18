@@ -6,6 +6,8 @@ from __future__ import annotations
 from eneo.helper_chats.personas.assistant import (
     ASSISTANT_FRAGMENT,
     ASSISTANT_INSTRUCTIONS,
+    SETTING_REFERENCE_KEYS,
+    SETTING_REFERENCE_PARAGRAPH,
 )
 from eneo.helper_chats.personas.shared import HELPER_BASICS, PROMPT_WRITING
 
@@ -15,12 +17,22 @@ def _unwrapped(text: str) -> str:
 
 
 def test_the_assistant_persona_is_the_basics_its_fragment_and_prompt_writing():
-    for part in (HELPER_BASICS, ASSISTANT_FRAGMENT, PROMPT_WRITING):
+    for part in (
+        HELPER_BASICS,
+        ASSISTANT_FRAGMENT,
+        SETTING_REFERENCE_PARAGRAPH,
+        PROMPT_WRITING,
+    ):
         assert part in ASSISTANT_INSTRUCTIONS
 
 
 def test_the_personas_use_no_long_dashes():
-    for text in (HELPER_BASICS, ASSISTANT_FRAGMENT, PROMPT_WRITING):
+    for text in (
+        HELPER_BASICS,
+        ASSISTANT_FRAGMENT,
+        SETTING_REFERENCE_PARAGRAPH,
+        PROMPT_WRITING,
+    ):
         assert chr(0x2014) not in text
         assert chr(0x2013) not in text
 
@@ -81,3 +93,62 @@ def test_the_assistant_fragment_sends_the_rest_to_the_editor():
 
     assert "Everything else you cannot change, in either mode" in fragment
     assert "say where in the editor they change it" in fragment
+
+
+# The same list, in the same order, as SETTING_REFERENCE_KEYS in the editor
+# (frontend/apps/web-next/src/features/assistants/editor/setting-references.ts),
+# whose test holds it to this one: change both together.
+EDITOR_REFERENCE_KEYS = (
+    "name",
+    "description",
+    "prompt",
+    "knowledge_mode",
+    "inline_file_text",
+    "knowledge",
+    "mcp_servers",
+    "attachments",
+    "completion_model",
+    "completion_model_kwargs",
+    "completion_model_kwargs.reasoning_effort",
+    "completion_model_kwargs.verbosity",
+    "completion_model_kwargs.top_p",
+    "completion_model_kwargs.presence_penalty",
+    "completion_model_kwargs.frequency_penalty",
+    "completion_model_kwargs.top_k",
+    "enabled_capabilities",
+    "data_retention_days",
+    "published",
+    "insight_enabled",
+    "section:general",
+    "section:instructions",
+    "section:knowledge",
+    "section:skills",
+    "section:mcp",
+    "section:attachments",
+    "section:ai",
+    "section:capabilities",
+    "section:security",
+    "section:api-keys",
+    "section:widget",
+    "section:publishing",
+)
+
+
+def test_setting_references_name_the_editors_keys():
+    assert SETTING_REFERENCE_KEYS == EDITOR_REFERENCE_KEYS
+
+
+def test_the_persona_explains_setting_references_and_lists_every_key():
+    paragraph = _unwrapped(SETTING_REFERENCE_PARAGRAPH)
+
+    assert "The person may point at a setting or a part of the editor as" in paragraph
+    assert "@[name](setting:key)" in paragraph
+    assert "it means that setting or part as the form shows it now" in paragraph
+    assert "you may write it the same way, with the name the editor shows" in (
+        paragraph
+    )
+    assert "one of the keys below" in paragraph
+    assert "never shows the key" in paragraph
+    assert "Use only these keys" in paragraph
+    for key in EDITOR_REFERENCE_KEYS:
+        assert f"\n- {key}: " in SETTING_REFERENCE_PARAGRAPH

@@ -324,4 +324,13 @@ describe("HelperPanel's conversation", () => {
     expect(screen.getByRole("button", { name: messages.flows_chat_new_conversation })).toBeTruthy();
     expect(screen.getByRole("button", { name: messages.flows_chat_settings })).toBeTruthy();
   });
+
+  it("puts the target's controls in the composer's footer, before the mode picker", async () => {
+    openChat(false);
+    renderPanel(adapter({ footerActions: <button type="button">Målets kontroll</button> }));
+
+    const mode = await screen.findByRole("button", { name: "Läge: Fråga" });
+    const control = screen.getByRole("button", { name: "Målets kontroll" });
+    expect(control.compareDocumentPosition(mode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
 });

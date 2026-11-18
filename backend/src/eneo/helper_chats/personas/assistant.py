@@ -52,6 +52,63 @@ publishing, insights and retention. When the person wants one of them
 changed, say where in the editor they change it and what to choose.
 """
 
+# What a setting reference can name, and what each key is. The editor's
+# frontend lists the same keys (SETTING_REFERENCE_KEYS in
+# frontend/apps/web-next/src/features/assistants/editor/setting-references.ts);
+# a test on each side holds its list to the same written-out one, so change
+# both together.
+SETTING_REFERENCES: tuple[tuple[str, str], ...] = (
+    ("name", "the name (Namn)"),
+    ("description", "the description (Beskrivning)"),
+    ("prompt", "the instructions (Prompt)"),
+    ("knowledge_mode", "when the knowledge is searched"),
+    ("inline_file_text", "how files uploaded in a chat are read"),
+    ("knowledge", "the knowledge sources the assistant uses"),
+    ("mcp_servers", "the MCP servers"),
+    ("attachments", "the attachments"),
+    ("completion_model", "the chat model (Chattmodell)"),
+    ("completion_model_kwargs", "how the model behaves (Modellbeteende)"),
+    ("completion_model_kwargs.reasoning_effort", "the reasoning level"),
+    ("completion_model_kwargs.verbosity", "how long the answers are"),
+    ("completion_model_kwargs.top_p", "the model's top_p setting"),
+    ("completion_model_kwargs.presence_penalty", "the presence penalty"),
+    ("completion_model_kwargs.frequency_penalty", "the frequency penalty"),
+    ("completion_model_kwargs.top_k", "the model's top_k setting"),
+    ("enabled_capabilities", "the functions (Funktioner)"),
+    ("data_retention_days", "how long conversations are kept"),
+    ("published", "whether the assistant is published"),
+    ("insight_enabled", "whether insights are on (Insikter)"),
+    ("section:general", "the whole of Allmänt"),
+    ("section:instructions", "the whole of Instruktioner"),
+    ("section:knowledge", "the whole of Kunskap"),
+    ("section:skills", "the whole of Skills"),
+    ("section:mcp", "the whole of MCP-servrar"),
+    ("section:attachments", "the whole of Bilagor"),
+    ("section:ai", "the whole of AI-inställningar"),
+    ("section:capabilities", "the whole of Funktioner"),
+    ("section:security", "the whole of Säkerhet och integritet"),
+    ("section:api-keys", "the whole of API-nycklar"),
+    ("section:widget", "the whole of Webbwidget"),
+    ("section:publishing", "the whole of Publicering"),
+)
+
+SETTING_REFERENCE_KEYS: tuple[str, ...] = tuple(key for key, _ in SETTING_REFERENCES)
+
+SETTING_REFERENCE_PARAGRAPH = """The person may point at a setting or a part of the editor as
+@[name](setting:key): the name is what the editor shows and the key says which
+one, and it means that setting or part as the form shows it now. When you name
+a setting in an answer, you may write it the same way, with the name the editor
+shows and one of the keys below, so the person can press it to see the setting
+in the form. This is the one place a key may appear: the editor draws the
+reference as a button and never shows the key. Use only these keys:
+""" + "".join(f"- {key}: {what}\n" for key, what in SETTING_REFERENCES)
+
 ASSISTANT_INSTRUCTIONS = (
-    HELPER_BASICS + "\n" + ASSISTANT_FRAGMENT + "\n" + PROMPT_WRITING
+    HELPER_BASICS
+    + "\n"
+    + ASSISTANT_FRAGMENT
+    + "\n"
+    + SETTING_REFERENCE_PARAGRAPH
+    + "\n"
+    + PROMPT_WRITING
 )

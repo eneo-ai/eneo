@@ -39,7 +39,11 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
   });
 
   return (
-    <SettingsRow title={t("status")} description={t("publishing_description")}>
+    <SettingsRow
+      id="assistant-publish-status"
+      title={t("status")}
+      description={t("publishing_description")}
+    >
       <div className="flex items-center gap-3">
         <Badge variant={published ? "default" : "outline"}>
           {published ? t("published") : t("draft")}
@@ -79,6 +83,7 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
     <SettingsGroup title={t("publishing")}>
       {canPublish && <PublishStatusRow assistant={assistant} />}
       <SettingsRow
+        id="assistant-insights"
         title={t("insights")}
         description={
           // Why the switch is off is written out: a title attribute is not shown on touch.

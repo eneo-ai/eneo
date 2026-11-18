@@ -123,6 +123,8 @@ export type HelperAdapter = {
   toolCards?: ToolCards;
   /** The target's own actions in the panel's title row, before the chat's. */
   headerActions?: ReactNode;
+  /** The target's own controls in the composer's footer, before the mode picker (an "@" button). */
+  footerActions?: ReactNode;
   /** A tool call of this visit finished; the page knows whether it can have changed the target. */
   onToolCallFinished?: (call: ToolCallRecord) => void;
   /** An answer ended: the target may have changed. */

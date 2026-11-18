@@ -11,11 +11,13 @@ import {
 } from "@/lib/navigation";
 import {
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
-  type ReactNode
+  type ReactNode,
+  type Ref
 } from "react";
 import { NAV_ITEM_CLASSES } from "@/components/shell/nav-styles";
 import { PageBar } from "@/components/shell/page-bar";
@@ -25,6 +27,7 @@ import { cn } from "@/lib/utils";
 import { IndexGroup, IndexRow } from "./index-rows";
 import { inPlaceLink } from "./in-place-link";
 import { SaveStatusIndicator } from "./save-status";
+import { SettingsGroupAction } from "./settings-rows";
 
 export type SettingsSection = {
   id: string;
@@ -67,6 +70,23 @@ type SectionedSettingsProps = {
    * header's content, the pages' shared column, instead of centring.
    */
   isFramed?: boolean;
+  /** A control at the end of each section's heading row (its settings group's), such as "Fråga". */
+  sectionAction?: (section: SettingsSection) => ReactNode;
+  /** A way for the page to show a section or a control in it. */
+  handleRef?: Ref<SectionedSettingsHandle>;
+};
+
+/** What a page can ask of its settings editor. */
+export type SectionedSettingsHandle = {
+  /**
+   * Shows a section, or a control in it (`control`: the element's id, the
+   * control itself or a container whose first usable control is meant), and
+   * moves focus there, clear of the sticky header: on a phone's index its
+   * section opens first. A section, or a control that cannot take focus (a
+   * disabled field), puts focus on the section's heading. False when the
+   * section is not in the editor.
+   */
+  show: (target: { section: string; control?: string }) => boolean;
 };
 
 /**
@@ -125,6 +145,13 @@ type FocusNext = { section: string } | { row: string } | { element: HTMLElement 
  */
 const openedFromIndex = () => readUrlState().settingsSectionFromIndex === true;
 
+/** Focus a section's heading (made focusable for this), else the section itself. */
+function focusHeadingOf(section: HTMLElement | null, options?: FocusOptions) {
+  const heading = section?.querySelector<HTMLElement>("h2, h3") ?? section;
+  if (heading && heading.tabIndex < 0) heading.setAttribute("tabindex", "-1");
+  heading?.focus(options);
+}
+
 /**
  * Focus what a view shows: an element in it if it takes focus, else its
  * section's heading (made focusable for this), else the section itself.
@@ -138,13 +165,28 @@ function focusIn(root: HTMLElement, next: Exclude<FocusNext, null>) {
     next.element.focus();
     return;
   }
-  const section =
+  focusHeadingOf(
     "element" in next
       ? next.element.closest<HTMLElement>("[data-editor-section]")
-      : root.querySelector<HTMLElement>(`[data-editor-section="${next.section}"]`);
-  const heading = section?.querySelector<HTMLElement>("h2, h3") ?? section;
-  if (heading && heading.tabIndex < 0) heading.setAttribute("tabindex", "-1");
-  heading?.focus();
+      : root.querySelector<HTMLElement>(`[data-editor-section="${next.section}"]`)
+  );
+}
+
+const FOCUSABLE =
+  'input:not([type="hidden"]), select, textarea, button, a[href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+/**
+ * The control an element stands for: itself when it takes focus, else the
+ * checked radio in it, else its first control that takes focus. Disabled
+ * controls do not; a group's heading actions are never a setting's control.
+ */
+function controlIn(element: HTMLElement): HTMLElement | null {
+  const usable = (candidate: HTMLElement) =>
+    !candidate.matches(":disabled") && !candidate.closest("[data-settings-group-end]");
+  if (element.matches(FOCUSABLE)) return usable(element) ? element : null;
+  const checked = element.querySelector<HTMLElement>('input[type="radio"]:checked');
+  if (checked && usable(checked)) return checked;
+  return [...element.querySelectorAll<HTMLElement>(FOCUSABLE)].find(usable) ?? null;
 }
 
 /**
@@ -321,6 +363,8 @@ function SettingsLayout({
   navigationLabel,
   sections,
   isFramed = false,
+  sectionAction,
+  handleRef,
   views
 }: Omit<SectionedSettingsProps, "phone"> & { views?: PhoneViews }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? "");
@@ -383,11 +427,45 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
+  const ownRootRef = useRef<HTMLDivElement>(null);
+  const rootRef = views?.rootRef ?? ownRootRef;
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      show: ({ section, control }) => {
+        const root = rootRef.current;
+        const element = document.getElementById(section);
+        if (!root || !element || !root.contains(element)) return false;
+        const target = control ? document.getElementById(control) : null;
+        const focus = target && root.contains(target) ? controlIn(target) : null;
+        if (views && window.matchMedia(PHONE_SCREEN_QUERY).matches) {
+          // One section at a time: open it, or focus in the one in view.
+          if (views.view !== section) views.open(section, focus);
+          else if (focus) views.reveal(focus);
+          else focusHeadingOf(element);
+          return true;
+        }
+        // The scroll margin under the sticky header keeps both in view below it.
+        if (target && focus) {
+          focus.focus({ preventScroll: true });
+          // The setting's row, then its control within it where the row is taller than the view.
+          target.scrollIntoView({ block: "nearest" });
+          if (focus !== target) focus.scrollIntoView({ block: "nearest" });
+        } else {
+          focusHeadingOf(element, { preventScroll: true });
+          element.scrollIntoView({ block: "start" });
+        }
+        return true;
+      }
+    }),
+    [rootRef, views]
+  );
+
   const PhoneTitle = views?.phone.parent ? "h1" : "h2";
 
   return (
     <div
-      ref={views?.rootRef}
+      ref={rootRef}
       data-space-full-bleed
       data-editor-view={views ? (shown ? "section" : "index") : undefined}
       onClickCapture={views ? openFailedField : undefined}
@@ -548,7 +626,9 @@ function SettingsLayout({
               data-current={views && section === shown ? "" : undefined}
               className={cn(views && section !== shown && "phone:hidden")}
             >
-              {section.node}
+              <SettingsGroupAction action={sectionAction?.(section) ?? null}>
+                {section.node}
+              </SettingsGroupAction>
             </div>
           ))}
         </div>

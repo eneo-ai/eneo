@@ -96,7 +96,11 @@ export function KnowledgeSection({
           assistantToolModel(space.completion_models, assistant)?.supports_tool_calling === true
         }
       />
-      <SettingsRow title={t("knowledge")} description={t("select_additional_knowledge")}>
+      <SettingsRow
+        id="assistant-knowledge"
+        title={t("knowledge")}
+        description={t("select_additional_knowledge")}
+      >
         <div className="flex flex-col gap-2">
           {warning}
           <KnowledgePicker

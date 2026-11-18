@@ -10852,5 +10852,13 @@
   "helper_card_earlier_text": "Tidigare text",
   "helper_card_no_model": "Ingen modell",
   "helper_card_locked": "{setting} styrs av organisationens policy och kan inte ändras här.",
-  "helper_card_model_not_offered": "{model} kan inte väljas för den här assistenten."
+  "helper_card_model_not_offered": "{model} kan inte väljas för den här assistenten.",
+  "helper_ask": "Fråga",
+  "helper_ask_about": "Fråga hjälpassistenten om {section}",
+  "helper_ask_model": "Hjälp mig välja modell",
+  "helper_ask_model_question": "Hjälp mig välja {setting}",
+  "helper_reference_button": "Referera till en inställning",
+  "helper_reference_menu": "Inställningar",
+  "helper_reference_empty": "Ingen inställning matchar.",
+  "helper_reference_whole_section": "Hela avsnittet"
 }

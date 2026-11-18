@@ -28,7 +28,8 @@ import {
   type NumericSettingName
 } from "./model-kwargs";
 
-const BEHAVIOUR_LABEL_KEYS: Record<ModelBehaviour, string> = {
+/** What each behaviour preset is called in the behaviour select. */
+export const BEHAVIOUR_LABEL_KEYS: Record<ModelBehaviour, string> = {
   creative: "creative",
   default: "default_behavior",
   deterministic: "deterministic",
