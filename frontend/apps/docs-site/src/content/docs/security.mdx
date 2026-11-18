@@ -102,9 +102,10 @@ The rules are public at
   the team before queueing them, and that Core Maintainers agree on their own
   changes together; GitHub does not require a formal approval for either.
 - **Into a release.** A pull request into a `release/vX.Y` branch, or into
-  `main`, needs an approval from a Core Maintainer other than its author. Only
-  Core Maintainers can create release branches, and they authorise every
-  `v*` tag.
+  `main`, needs an approval from a Core Maintainer other than its author.
+  When no second maintainer is available, a Core Maintainer can bypass the
+  approval for a single pull request; GitHub records the bypass. Only Core
+  Maintainers can create release branches, and they authorise every `v*` tag.
 - **What the checks cover.** CI runs on pull requests into `develop` and the
   release branches. It:
   - runs the tests, linters and type checks, and builds the container images

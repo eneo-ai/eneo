@@ -285,8 +285,11 @@ on the documentation site.
   Every pull request
   into a release branch needs an approval from a Core Maintainer other than its
   author: the `Release and main review` ruleset requires one approval and
-  code-owner review, has no bypass actors, and dismisses an approval when new
-  commits are pushed. Each release branch therefore needs `.github/CODEOWNERS`.
+  code-owner review, and dismisses an approval when new commits are pushed.
+  Each release branch therefore needs `.github/CODEOWNERS`. When no second
+  maintainer is available, a Core Maintainer can bypass the approval for a
+  single pull request and states the reason in it; GitHub records the bypass.
+  Direct pushes and force pushes stay blocked.
 - **`main`.** The same review rule applies, and `main` is protected against
   deletion and force pushes.
 - **No bypass on `develop`.** The `develop` ruleset has no bypass actors, so

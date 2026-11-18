@@ -201,7 +201,7 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 Core Maintainers is the only team with write access, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
-**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer.
+**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer, or a recorded bypass when none is available.
 
 ---
 

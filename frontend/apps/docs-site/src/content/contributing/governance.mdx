@@ -28,8 +28,9 @@ Eneo's other security controls, see [Security at Eneo](/docs/security).
   without a formal approval, and approve every contribution from outside the
   team before queueing it. The required checks and the merge queue always
   apply, and there is no bypass.
-- On `release/**` and `main`, every pull request needs an approval from a Core
-  Maintainer other than its author.
+- On `release/**` and `main`, a pull request needs an approval from a Core
+  Maintainer other than its author. A Core Maintainer can bypass that for a
+  single pull request, and GitHub records it.
 - Core Maintainers authorise every release. They create the release branches
   and the `v*` tags; for a managed final release, the release App creates the
   tag after they approve the preparation pull request. A `v*` tag starts the
@@ -122,10 +123,13 @@ changes within the team are our own procedures; the list says which is which.
   the merge queue for every pull request and has no bypass. Merging from a
   security advisory's private fork would skip them, so our procedure is not to
   use it.
-- **Two people on every release.** A pull request into a release branch or
-  `main` needs an approval from a Core Maintainer other than its author.
-  `.github/CODEOWNERS` makes the Core Maintainers the required reviewers, and
-  new commits dismiss an earlier approval.
+- **A second approval on release changes.** A pull request into a release
+  branch or `main` needs an approval from a Core Maintainer other than its
+  author. `.github/CODEOWNERS` makes the Core Maintainers the required
+  reviewers, and new commits dismiss an earlier approval. When no second
+  maintainer is available, a Core Maintainer can bypass the approval for a
+  single pull request and states the reason in it. GitHub records the bypass,
+  and direct pushes stay blocked.
 - **Tested before and after merging.** Required checks run on the pull request
   and, as the full suite, in the merge queue. Publishing `develop` reuses that
   full run for the exact commit and still runs a fresh security scan and scans
@@ -164,12 +168,12 @@ directly to an individual outside collaborator.
 
 ## Protected branches and tags
 
-| Ref          | Rules                                                                                                                                                                                                             |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `develop`    | Changes only through pull requests, which only people with write access can add to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed. |
-| `release/**` | Only Core Maintainers can create, update or delete release branches. Every pull request needs an approval from a Core Maintainer other than its author and must pass the PR label check.                          |
-| `main`       | Every pull request needs an approval from a Core Maintainer other than its author and must pass the PR label check. Cannot be deleted or force-pushed.                                                            |
-| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.                     |
+| Ref          | Rules                                                                                                                                                                                                                            |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `develop`    | Changes only through pull requests, which only people with write access can add to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed.                |
+| `release/**` | Only Core Maintainers can create, update or delete release branches. A pull request needs an approval from a Core Maintainer other than its author, or a recorded bypass by a Core Maintainer, and must pass the PR label check. |
+| `main`       | A pull request needs an approval from a Core Maintainer other than its author, or a recorded bypass by a Core Maintainer, and must pass the PR label check. Cannot be deleted or force-pushed.                                   |
+| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.                                    |
 
 ## Releases
 
@@ -206,7 +210,8 @@ and the release artefacts in [Release SBOMs](/docs/release-sboms).
 An urgent fix follows the rules for its target branch. On `develop`, it is an
 ordinary pull request that must pass the required checks and the merge queue;
 there is no bypass. On a release branch, it needs an approval from a Core
-Maintainer other than its author.
+Maintainer other than its author. If none is available, a Core Maintainer can
+bypass the approval for that pull request and states the reason in it.
 
 <Callout type="warning">
   If GitHub itself blocks a critical fix, for example because a required check
@@ -299,8 +304,9 @@ On `develop`, without a formal approval, yes. The team works together and
 agrees on each change before one of them chooses **Merge when ready**, so it is
 not slowed down waiting for approvals. They ask for a written review when a
 change is large or risky, and the required checks and the merge queue always
-apply. On release branches and `main`, no: another Core Maintainer approves
-every pull request.
+apply. On release branches and `main`, another Core Maintainer approves the
+pull request. When none is available, a Core Maintainer can bypass that
+approval for a single pull request, and GitHub records it.
 
 ### Can a pull request be merged with failing checks?
 

@@ -275,7 +275,7 @@ CI rejects a `next` block on a release branch and an undated release block on `d
 5. Check **Set as pre-release**
 6. Click **Publish release**
 
-**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs an approval from a Core Maintainer other than its author; direct pushes are rejected.
+**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs an approval from a Core Maintainer other than its author; direct pushes are rejected. If no second maintainer is available, a Core Maintainer can bypass the approval for that pull request and states the reason in it.
 
 **4. Create subsequent RCs** the same way via GitHub Releases (tag `v1.8.0-rc.2`, target `release/v1.8`, mark as pre-release)
 
@@ -472,7 +472,7 @@ move at release time.
 **A:** For any change that adds functionality, fixes a bug, or modifies behavior. Even small changes should go through a PR for code review.
 
 ### Q: Can I push directly to develop or release branches?
-**A:** No. `develop` only accepts pull requests through the merge queue, and release branches only accept pull requests that another Core Maintainer has approved. See [Carrying a Fix to Another Branch](#carrying-a-fix-to-another-branch) and [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
+**A:** No. `develop` only accepts pull requests through the merge queue, and release branches only accept pull requests, normally approved by another Core Maintainer. See [Carrying a Fix to Another Branch](#carrying-a-fix-to-another-branch) and [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
 ### Q: Where and how do I create version tags?
 **A:** Always on a `release/v1.X` branch. Use **GitHub Releases** (not the CLI) to create tags — this gives you release notes, pre-release marking, and a clean audit trail. See [Quick Command Reference](#creating-tags-github-ui).
