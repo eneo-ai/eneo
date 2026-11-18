@@ -97,6 +97,12 @@ class SpaceSecurityClassificationImpactAnalysis:
 
 
 TENANT_SPACE_NAME = "Organization space"
+# The effect_on_get of a GET that calls get_or_create_tenant_space.
+TENANT_HUB_ON_GET = (
+    "Resolving the tenant hub creates it when missing and makes its members exactly "
+    "the tenant's admins. Idempotent, and the outcome follows from tenant state, "
+    "not from the request."
+)
 
 
 class SpaceService:
@@ -319,18 +325,22 @@ class SpaceService:
         if space_security_classification is None:
             return
         from eneo.mcp_servers.application.capability_resolver import (
-            get_active_capability_servers,
+            active_capability_providers,
             meets_security_classification,
         )
 
-        for purpose in {
+        purposes = {
             server.purpose
             for server in mcp_servers
             if is_capability_purpose(server.purpose)
-        }:
-            providers = await get_active_capability_servers(
-                self.repo.session, self.user.tenant_id, purpose
-            )
+        }
+        if not purposes:
+            return
+        all_providers = await active_capability_providers(
+            self.repo.session, self.user.tenant_id, purposes
+        )
+        for purpose in purposes:
+            providers = [p for p in all_providers if p.purpose == purpose]
             if providers and not any(
                 meets_security_classification(provider, space_security_classification)
                 for provider in providers
@@ -939,15 +949,16 @@ class SpaceService:
         if space.is_personal():
             raise BadRequestException("Cannot add group members to personal spaces")
 
-        user_group = await self.user_groups_repo.get_user_group(group_id)
-        if user_group is None or user_group.tenant_id != self.user.tenant_id:
+        found = await self.user_groups_repo.get_user_group_with_user_count(group_id)
+        if found is None or found[0].tenant_id != self.user.tenant_id:
             raise NotFoundException(f"User group {group_id} not found")
+        user_group, user_count = found
 
         group_member = SpaceGroupMember(
             id=user_group.id,
             name=user_group.name,
             role=role,
-            user_count=len(user_group.users) if user_group.users else 0,
+            user_count=user_count,
         )
 
         space.add_group_member(group_member)

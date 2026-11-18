@@ -424,6 +424,7 @@ class OrganizationSkillService:
                 content_digest=source_revision.content_digest,
                 created_by_user_id=self.user.id,
                 expected_current_revision_id=reviewed_current_revision_id,
+                restore_reference_revision_id=source_revision_id,
             )
         except SkillRevisionConflictError as error:
             raise SkillRevisionConflictException(
@@ -882,6 +883,9 @@ class OrganizationSkillService:
                 incompatible_count=0,
             )
 
+        runtime_policy_snapshot = await self.repo.get_runtime_policy_snapshot(
+            tenant_id=self.user.tenant_id
+        )
         app_ids = [target.app_id for target in targets]
         validation_inputs = (
             await self.app_service.repo.get_by_ids_for_context_validation(
@@ -951,6 +955,7 @@ class OrganizationSkillService:
                         from_revision_id=target.from_revision_id,
                         candidate_binding=candidate_binding,
                         completion_prompt_files=completion_files,
+                        runtime_policy=runtime_policy_snapshot.policy,
                     )
                 )
                 confirmed_targets.append(
@@ -968,6 +973,7 @@ class OrganizationSkillService:
                 skill_id=skill_id,
                 expected_published_revision_id=expected_published_revision_id,
                 targets=confirmed_targets,
+                expected_runtime_policy_version=runtime_policy_snapshot.row_version,
             )
         except SkillRevisionConflictError as error:
             raise SkillRevisionConflictException(

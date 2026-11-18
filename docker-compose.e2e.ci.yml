@@ -63,6 +63,12 @@ services:
   e2e-backend:
     build:
       context: ./backend
+      additional_contexts:
+        web: ./frontend
+      # This stack serves the Svelte app; docker-compose.e2e.web-app.yml
+      # builds the Vite app it serves.
+      args:
+        WEB_APP_STAGE: no-web-app
     working_dir: /app
     depends_on:
       e2e-db:
@@ -153,5 +159,6 @@ services:
       start_period: 60s
 
 networks:
-  e2e:
-    name: eneo-e2e
+  # Named by the compose project, so stacks started side by side with their
+  # own -p never resolve each other's e2e-db or e2e-redis.
+  e2e: {}

@@ -47,19 +47,23 @@ def test_accepts_release_versions_as_written_in_releases_json(version: str):
     assert WhatsNewVersionUpdate(version=version).version == version
 
 
-@pytest.mark.parametrize("version", ["v2.2.0", "2.2", "latest", "", "2.2.0 "])
+@pytest.mark.parametrize("version", ["v2.2.0", "2.2", "latest", "next", "", "2.2.0 "])
 def test_rejects_versions_that_cannot_match_a_release(version: str):
     with pytest.raises(ValidationError):
         WhatsNewVersionUpdate(version=version)
 
 
 def test_version_pattern_matches_the_release_notes_schema():
-    """The backend accepts exactly the release ids releases.json may contain."""
+    """The backend accepts exactly the release ids releases.json may contain.
+
+    The unreleased block ("next") is outside this pattern on purpose: it is
+    never announced or recorded as seen.
+    """
     from eneo.whats_new.whats_new_models import RELEASE_VERSION_PATTERN
 
     schema_path = PACKAGE / "releases.schema.json"
     schema = json.loads(schema_path.read_text(encoding="utf-8"))
-    schema_pattern = schema["$defs"]["release"]["properties"]["version"]["pattern"]
+    schema_pattern = schema["$defs"]["releaseVersion"]["pattern"]
     # The schema uses a non-capturing-free form; normalise both to compare intent.
     assert schema_pattern.replace("(-", "(?:-") == RELEASE_VERSION_PATTERN
 

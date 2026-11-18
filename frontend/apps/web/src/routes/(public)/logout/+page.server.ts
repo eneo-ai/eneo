@@ -1,11 +1,15 @@
-import { redirect } from "@sveltejs/kit";
+import { fail, redirect } from "@sveltejs/kit";
 import {
   clearFrontendCookies,
   decodeState,
   encodeState,
+  endEneoSession,
+  EneoAccessTokenCookie,
+  EneoIdTokenCookie,
   type LogoutStateParam
 } from "$lib/features/auth/auth.server";
 import { env } from "$env/dynamic/private";
+import type { Actions, PageServerLoad } from "./$types";
 
 /**
  * Get the configured public origin for OIDC redirect URIs.
@@ -13,7 +17,7 @@ import { env } from "$env/dynamic/private";
  * SECURITY: Uses explicit PUBLIC_ORIGIN configuration instead of
  * event.url.origin to prevent redirect_uri mismatches behind reverse proxies.
  *
- * @returns The configured public origin (e.g., "https://eneo.sundsvall.se")
+ * @returns The configured public origin (e.g., "https://eneo.example.com")
  * @throws Error if PUBLIC_ORIGIN is not configured
  */
 function getPublicOrigin(): string {
@@ -22,7 +26,7 @@ function getPublicOrigin(): string {
     throw new Error(
       "[OIDC] PUBLIC_ORIGIN environment variable is required for OIDC authentication. " +
         "Set it to the externally-reachable URL for this application. " +
-        "Example: PUBLIC_ORIGIN=https://eneo.sundsvall.se"
+        "Example: PUBLIC_ORIGIN=https://eneo.example.com"
     );
   }
 
@@ -37,45 +41,58 @@ function getPublicOrigin(): string {
   return publicOrigin.replace(/\/$/, "");
 }
 
-export const load = async (event) => {
-  // always delete cookies
-  clearFrontendCookies(event);
+// Navigation, image requests and IdP callbacks only read the current state.
+// In particular, an old callback must not clear a newer login session.
+export const load = (({ url, locals }) => {
+  const state = decodeState<LogoutStateParam>(url.searchParams.get("state"));
+  const message = state?.completed ? state.message : url.searchParams.get("message");
+  return {
+    message: message === "expired" ? "expired" : "logout",
+    signedIn: Boolean(locals.id_token)
+  };
+}) satisfies PageServerLoad;
 
-  // Message to show, we just pass this on
-  const message = event.url.searchParams.get("message") ?? undefined;
+type SignOutAction = "logout" | "switchOrganisation" | "clearCookies";
 
-  // Feature flag should guarantee ZITADEL_PROJECT_CLIENT_ID and ZITADEL_INSTANCE_URL to be set
-  if (event.locals.featureFlags.newAuth) {
-    const state = decodeState<LogoutStateParam>(event.url.searchParams.get("state"));
+/** The end of the session is not confirmed (it may have ended with its
+ * answer lost), so its cookies stay and the page offers the same action
+ * again; once the session has ended, a retry succeeds. */
+function signOutFailed(action: SignOutAction, message: "expired" | "logout" = "logout") {
+  return fail(503, { signOutFailed: action, message });
+}
 
-    // If we are coming back from Zitadel (state.completed === true),
-    // We return and the +page.svelte will be rendered with the message like a normal page load
-    if (state && state.completed) {
-      return {
-        message: state.message ?? "logout"
-      };
+// SvelteKit form actions require form-encoded POSTs and enforce its origin
+// check before any cookies change. Keep the three user intents distinct:
+// recovery and organisation switching must not end the provider's session.
+// Each ends the Eneo session first, so a copy of its token stops working.
+export const actions = {
+  logout: async (event) => {
+    const form = await event.request.formData();
+    const message = form.get("message") === "expired" ? "expired" : "logout";
+    if (!(await endEneoSession(event))) return signOutFailed("logout", message);
+    clearFrontendCookies(event);
+
+    if (event.locals.featureFlags.newAuth) {
+      const searchParams = new URLSearchParams({
+        client_id: env.ZITADEL_PROJECT_CLIENT_ID!,
+        post_logout_redirect_uri: `${getPublicOrigin()}/logout`,
+        state: encodeState({ completed: true, message })
+      });
+      if (event.locals.id_token) searchParams.set("id_token_hint", event.locals.id_token);
+      redirect(303, `${env.ZITADEL_INSTANCE_URL}/oidc/v1/end_session?${searchParams}`);
     }
 
-    // Otherwise we first redirect to Zitadel for logout and wait until we come back from there
-    const searchParams = new URLSearchParams({
-      client_id: env.ZITADEL_PROJECT_CLIENT_ID!,
-      post_logout_redirect_uri: `${getPublicOrigin()}/logout`,
-      state: encodeState({
-        completed: true,
-        message
-      })
-    });
-
-    if (event.locals.id_token) {
-      searchParams.append("id_token_hint", event.locals.id_token);
-    }
-
-    const redirectUrl =
-      env.ZITADEL_INSTANCE_URL! + "/oidc/v1/end_session?" + searchParams.toString();
-
-    redirect(302, redirectUrl);
+    redirect(303, `/login?message=${message}`);
+  },
+  clearCookies: async (event) => {
+    if (!(await endEneoSession(event))) return signOutFailed("clearCookies");
+    clearFrontendCookies(event);
+    redirect(303, "/login");
+  },
+  switchOrganisation: async (event) => {
+    if (!(await endEneoSession(event))) return signOutFailed("switchOrganisation");
+    event.cookies.delete(EneoIdTokenCookie, { path: "/" });
+    event.cookies.delete(EneoAccessTokenCookie, { path: "/" });
+    redirect(303, "/login");
   }
-
-  // Fallback for old auth
-  redirect(302, `/login?message=${message ?? "logout"}`);
-};
+} satisfies Actions;

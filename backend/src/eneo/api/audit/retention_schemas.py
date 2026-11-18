@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+
 
 class RetentionPolicyResponse(BaseModel):
     """Schema for audit log retention policy response.
@@ -16,8 +18,8 @@ class RetentionPolicyResponse(BaseModel):
 
     tenant_id: UUID
     retention_days: int = Field(
-        ge=1,
-        le=2555,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
         description="Days to retain audit logs (1-2555). Recommended: 90+",
     )
     last_purge_at: Optional[datetime] = None
@@ -34,7 +36,7 @@ class RetentionPolicyUpdateRequest(BaseModel):
     """
 
     retention_days: int = Field(
-        ge=1,
-        le=2555,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
         description="Days to retain audit logs (1 day minimum, 2555 days/7 years maximum). Recommended: 90+ days for compliance",
     )

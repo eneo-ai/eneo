@@ -1,12 +1,22 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { ShieldCheck, SlidersHorizontal, Sparkles } from "lucide-react";
-import { afterEach, describe, expect, it } from "vitest";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { replaceUrl, router, setRoute } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
-import { SectionedSettings } from "./sectioned-settings";
+import { reportResize, setViewport } from "@/test/setup-dom";
+import { SaveStatusProvider, useSetSaveStatus } from "./save-status";
+import { SectionedSettings, type SettingsSection } from "./sectioned-settings";
 
-afterEach(cleanup);
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  window.history.replaceState(null, "", "/");
+});
 
 const sections = [
   { id: "general", label: "Allmänt", icon: SlidersHorizontal, node: <h2>Allmänt</h2> },
@@ -19,13 +29,18 @@ const sections = [
   }
 ];
 
+/** The sticky header, with the title block and, below 1024 px, the section strip. */
+const header = () => document.querySelector<HTMLElement>("[data-space-full-bleed] > header")!;
+/** The section list beside the form from 1024 px. */
+const rail = () => document.querySelector<HTMLElement>("[data-editor-rail]")!;
+
 describe("SectionedSettings", () => {
   it("keeps navigation and content in the same section order and marks the selected anchor", () => {
     renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
     );
 
-    const navigation = screen.getByRole("navigation", { name: "Avsnitt" });
+    const navigation = within(header()).getByRole("navigation", { name: "Avsnitt" });
     const links = within(navigation).getAllByRole("link");
     const generalLink = within(navigation).getByRole("link", { name: "Allmänt" });
     const aiLink = within(navigation).getByRole("link", { name: "AI" });
@@ -47,7 +62,7 @@ describe("SectionedSettings", () => {
     const { container } = renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
     );
-    const navigation = screen.getByRole("navigation", { name: "Avsnitt" });
+    const navigation = within(header()).getByRole("navigation", { name: "Avsnitt" });
     const current = within(navigation).getByRole("link", { name: "Allmänt" });
     const others = within(navigation)
       .getAllByRole("link")
@@ -65,10 +80,529 @@ describe("SectionedSettings", () => {
     expect(within(navigation).getByRole("link", { name: "Säkerhet och integritet" })).toBeTruthy();
   });
 
+  it("keeps anchors clear of the header at the height it has now", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    const surface = document.querySelector<HTMLElement>("[data-space-full-bleed]")!;
+    // The header is taller with the strip (below 1024 px) than without it.
+    act(() => reportResize(header(), { height: 167 }));
+    expect(surface.style.getPropertyValue("--editor-header-h")).toBe("167px");
+    act(() => reportResize(header(), { height: 127 }));
+    expect(surface.style.getPropertyValue("--editor-header-h")).toBe("127px");
+  });
+
+  it("lists the sections beside the form from 1024 px, the strip in the header below it", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    expect(rail().getAttribute("aria-label")).toBe("Avsnitt");
+    const links = within(rail()).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "#general",
+      "#ai",
+      "#security"
+    ]);
+    // Sections without a group are listed without a heading.
+    expect(within(rail()).queryAllByRole("group")).toEqual([]);
+    // CSS shows one of the two.
+    expect(rail().className).toContain("max-lg:hidden");
+    const strip = within(header()).getByRole("navigation", { name: "Avsnitt" });
+    expect(strip.closest(".lg\\:hidden")).toBeTruthy();
+
+    const ai = within(rail()).getByRole("link", { name: "AI" });
+    expect(within(rail()).getByRole("link", { name: "Allmänt" }).getAttribute("aria-current")).toBe(
+      "page"
+    );
+    fireEvent.click(ai);
+    expect(ai.getAttribute("aria-current")).toBe("page");
+    expect(within(strip).getByRole("link", { name: "AI" }).getAttribute("aria-current")).toBe(
+      "true"
+    );
+  });
+
+  it("centres the editor, or lines it up under a frame's header in the pages' column", () => {
+    const layout = (isFramed: boolean) => {
+      renderInApp(
+        <SectionedSettings
+          navigationLabel="Avsnitt"
+          header={<h1>Redigera</h1>}
+          sections={sections}
+          isFramed={isFramed}
+        />
+      );
+      const column = document.getElementById("general")!.parentElement!.parentElement!;
+      const result = [header().firstElementChild!, column].map((element) =>
+        ["mx-auto", "max-w-4xl", "max-w-[75rem]"].filter((name) => element.classList.contains(name))
+      );
+      cleanup();
+      return result;
+    };
+    expect(layout(false)).toEqual([
+      ["mx-auto", "max-w-4xl"],
+      ["mx-auto", "max-w-4xl"]
+    ]);
+    // The pages' 72rem column with the editor's own 1.5rem inset on each side: its text starts
+    // on the line of the space header above.
+    expect(layout(true)).toEqual([
+      ["mx-auto", "max-w-[75rem]"],
+      ["mx-auto", "max-w-[75rem]"]
+    ]);
+  });
+
   it("has no axe violations", async () => {
     const { container } = renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
     );
     await expectNoAxeViolations(container);
+  });
+});
+
+/** A field whose typed text lives in its own state, as an editor section's draft does. */
+function Draft() {
+  const [value, setValue] = useState("");
+  return (
+    <input
+      aria-label="Beskrivning"
+      value={value}
+      onChange={(event) => setValue(event.target.value)}
+    />
+  );
+}
+
+/** A field whose save failed: the save status links to it by id. */
+function FailedField() {
+  const setStatus = useSetSaveStatus();
+  useEffect(() => setStatus?.("ai-model", "error"), [setStatus]);
+  return <input id="ai-model" aria-label="Modell" />;
+}
+
+const EDIT = "/spaces/s1/assistants/a1/edit";
+
+const phoneSections: SettingsSection[] = [
+  {
+    id: "general",
+    label: "Allmänt",
+    icon: SlidersHorizontal,
+    group: "Innehåll",
+    summary: "Ingen beskrivning",
+    node: (
+      <section>
+        <h2>Allmänt</h2>
+        <Draft />
+      </section>
+    )
+  },
+  {
+    id: "ai",
+    label: "AI-inställningar",
+    icon: Sparkles,
+    group: "Modell och funktioner",
+    summary: "GPT-OSS 120B",
+    node: (
+      <section>
+        <h2>AI-inställningar</h2>
+        <FailedField />
+      </section>
+    )
+  },
+  {
+    id: "security",
+    label: "Säkerhet och integritet",
+    icon: ShieldCheck,
+    group: "Åtkomst",
+    node: <h2>Säkerhet och integritet</h2>
+  }
+];
+
+function renderEditor(phone: { openFirst?: string } = {}) {
+  return renderInApp(
+    <SaveStatusProvider>
+      <SectionedSettings
+        navigationLabel="Avsnitt"
+        header={<h1>Min assistent</h1>}
+        sections={phoneSections}
+        phone={{
+          parent: { label: "Assistenter", href: "/spaces/s1/assistants" },
+          title: "Min assistent",
+          ...phone
+        }}
+      />
+    </SaveStatusProvider>
+  );
+}
+
+const view = () => document.querySelector("[data-editor-view]")?.getAttribute("data-editor-view");
+const current = () =>
+  [...document.querySelectorAll("[data-editor-section][data-current]")].map((element) =>
+    element.getAttribute("data-editor-section")
+  );
+const index = () => document.querySelector<HTMLElement>("[data-editor-index]")!;
+
+describe("SectionedSettings on a phone (decision 21)", () => {
+  it("opens on an index: the sections as rows in groups, each with what it holds now", async () => {
+    setRoute(EDIT);
+    const { container } = renderEditor();
+
+    expect(view()).toBe("index");
+    expect(current()).toEqual([]);
+    const rows = within(index()).getAllByRole("link");
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+      `${EDIT}?section=general`,
+      `${EDIT}?section=ai`,
+      `${EDIT}?section=security`
+    ]);
+    // The summary is read once, as part of the row's name.
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Allmänt, Ingen beskrivning",
+      "AI-inställningar, GPT-OSS 120B",
+      "Säkerhet och integritet"
+    ]);
+    expect(
+      within(index())
+        .getAllByRole("heading", { level: 2 })
+        .map((h) => h.textContent)
+    ).toEqual(["Innehåll", "Modell och funktioner", "Åtkomst"]);
+    // Every section is there once, mounted, whichever view shows.
+    for (const id of ["general", "ai", "security"]) {
+      expect(document.querySelectorAll(`[data-editor-section="${id}"]`)).toHaveLength(1);
+    }
+    // The page bar goes back to the list, and the resource's name is the h1.
+    const bar = container.querySelector("[data-phone-page-bar]")!;
+    expect(
+      within(bar as HTMLElement)
+        .getByRole("link", { name: "Tillbaka till Assistenter" })
+        .getAttribute("href")
+    ).toBe("/spaces/s1/assistants");
+    expect(
+      screen.getAllByRole("heading", { level: 1 }).some((h) => h.textContent === "Min assistent")
+    ).toBe(true);
+    await expectNoAxeViolations(container);
+  });
+
+  it("names the index in the page, and keeps the bar to the back link until it scrolls away", () => {
+    setRoute(EDIT);
+    const { container } = renderEditor();
+    const title = screen
+      .getAllByRole("heading", { level: 1 })
+      .find((h) => h.textContent === "Min assistent")!;
+    expect(title.classList.contains("sr-only")).toBe(false);
+    expect(container.querySelector("[data-phone-page-bar] .page-bar-title")?.textContent).toBe(
+      "Min assistent"
+    );
+  });
+
+  it("opens a section in place and goes back to the index with what was typed still there", () => {
+    setRoute(EDIT);
+    const push = vi.spyOn(window.history, "pushState");
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {
+      window.history.replaceState(null, "", EDIT);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    renderEditor();
+    const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+
+    const row = within(index()).getByRole("link", { name: /^Allmänt/ });
+    // Handled in place: no server round trip, a history entry the system back pops.
+    expect(fireEvent.click(row)).toBe(false);
+    expect(new URL(String(push.mock.lastCall?.[2]), "http://localhost").search).toBe(
+      "?section=general"
+    );
+    expect(router.push).not.toHaveBeenCalled();
+    expect(view()).toBe("section");
+    expect(current()).toEqual(["general"]);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Allmänt" }));
+
+    fireEvent.change(draft, { target: { value: "Svarar på frågor om bygglov" } });
+    const bar = document.querySelector<HTMLElement>("[data-phone-page-bar]")!;
+    const toIndex = within(bar).getByRole("link", { name: "Tillbaka till Min assistent" });
+    expect(fireEvent.click(toIndex)).toBe(false);
+
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(view()).toBe("index");
+    // Nothing remounted: the same field, with the draft.
+    expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
+    expect((draft as HTMLInputElement).value).toBe("Svarar på frågor om bygglov");
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("follows the address: ?section= opens that section, the system back the index", () => {
+    setRoute(`${EDIT}?section=ai`);
+    window.history.replaceState(null, "", `${EDIT}?section=ai`);
+    renderEditor();
+    expect(current()).toEqual(["ai"]);
+
+    // The system back lands on the editor's own address.
+    act(() => {
+      window.history.replaceState(null, "", EDIT);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(view()).toBe("index");
+
+    cleanup();
+    setRoute(`${EDIT}?section=bogus`);
+    renderEditor();
+    expect(view()).toBe("index");
+  });
+
+  it("follows external same-route navigation without remounting a draft", () => {
+    setRoute(EDIT);
+    renderEditor();
+    const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+    fireEvent.change(draft, { target: { value: "Utkast" } });
+    act(() => replaceUrl(`${EDIT}?section=ai`));
+    expect(current()).toEqual(["ai"]);
+    act(() => replaceUrl(`${EDIT}?section=general`));
+    expect(current()).toEqual(["general"]);
+    expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
+    expect(draft).toHaveProperty("value", "Utkast");
+  });
+
+  it("shows the creation section before its fields run their mount focus", () => {
+    setRoute(EDIT);
+    const mountedViews: ReturnType<typeof current>[] = [];
+    function CreationField() {
+      useLayoutEffect(() => {
+        mountedViews.push(current());
+      }, []);
+      return <input aria-label="Namn" defaultValue="Ny app" />;
+    }
+    renderInApp(
+      <SectionedSettings
+        header={<h1>Ny app</h1>}
+        navigationLabel="Avsnitt"
+        phone={{ parent: { label: "Appar", href: "/apps" }, title: "Ny app", openFirst: "general" }}
+        sections={[
+          { id: "general", label: "Allmänt", icon: SlidersHorizontal, node: <CreationField /> }
+        ]}
+      />
+    );
+    expect(mountedViews).toEqual([["general"]]);
+  });
+
+  it("opens a resource just created on the section it names, and Back replaces the address", () => {
+    setRoute(EDIT);
+    const replace = vi.spyOn(window.history, "replaceState");
+    const back = vi.spyOn(window.history, "back");
+    renderEditor({ openFirst: "general" });
+    expect(current()).toEqual(["general"]);
+
+    const bar = document.querySelector<HTMLElement>("[data-phone-page-bar]")!;
+    fireEvent.click(within(bar).getByRole("link", { name: "Tillbaka till Min assistent" }));
+    // Nothing was pushed to go back to: the editor's own address stays.
+    expect(back).not.toHaveBeenCalled();
+    expect(new URL(String(replace.mock.lastCall?.[2]), "http://localhost").pathname).toBe(EDIT);
+    expect(view()).toBe("index");
+  });
+
+  it.each(["phone", "phone-landscape"] as const)(
+    "opens the section of a field whose save failed, from the save status's link (%s)",
+    async (phone) => {
+      setViewport(phone);
+      setRoute(EDIT);
+      vi.spyOn(window.history, "pushState");
+      renderEditor();
+      // The phone's strip shows the save state; its link names the field.
+      const strip = document.querySelector<HTMLElement>("[data-editor-strip]")!;
+      const failed = await within(strip).findByRole("link", { name: /Kunde inte spara/ });
+      act(() => {
+        fireEvent.click(failed);
+      });
+      expect(current()).toEqual(["ai"]);
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Modell" }));
+    }
+  );
+
+  it("keeps the view through a move that only changes the hash (a skip link)", () => {
+    setRoute(EDIT);
+    window.history.replaceState(null, "", EDIT);
+    renderEditor({ openFirst: "general" });
+    act(() => {
+      const url = new URL(window.location.href);
+      url.hash = "main-content";
+      window.history.pushState(window.history.state, "", url);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(current()).toEqual(["general"]);
+  });
+
+  // A phone turned sideways is wider than 768 px, and still a phone's layout.
+  it.each(["phone", "phone-landscape"] as const)(
+    "keeps a draft and its focus when a tablet turns into a phone (%s)",
+    (phone) => {
+      setViewport("tablet-portrait");
+      setRoute(`${EDIT}?section=ai`);
+      renderEditor();
+      const draft = screen.getByRole("textbox", { name: "Beskrivning" });
+      fireEvent.change(draft, { target: { value: "Oavslutat utkast" } });
+      act(() => draft.focus());
+      act(() => setViewport(phone));
+      expect(current()).toEqual(["general"]);
+      expect(document.activeElement).toBe(draft);
+      expect(draft).toHaveProperty("value", "Oavslutat utkast");
+      // jsdom has no layout; the field stays visible on the wider layout.
+      vi.spyOn(draft, "getClientRects").mockReturnValue([
+        new DOMRect(0, 0, 200, 44)
+      ] as unknown as DOMRectList);
+      act(() => setViewport("tablet-portrait"));
+      expect(document.activeElement).toBe(draft);
+      expect(screen.getByRole("textbox", { name: "Beskrivning" })).toBe(draft);
+    }
+  );
+
+  it("goes back with the system back, focus on the row it came from", () => {
+    setRoute(EDIT);
+    window.history.replaceState(null, "", EDIT);
+    renderEditor();
+    fireEvent.click(within(index()).getByRole("link", { name: /^AI-inställningar/ }));
+    act(() => {
+      window.history.replaceState(null, "", EDIT);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    });
+    expect(view()).toBe("index");
+    expect(document.activeElement).toBe(
+      within(index()).getByRole("link", { name: /^AI-inställningar/ })
+    );
+  });
+
+  it("pops the entry it opened a section into, after a reload too", () => {
+    // A reload keeps the entry's state: it was opened from the index.
+    setRoute(`${EDIT}?section=ai`);
+    window.history.replaceState({ settingsSectionFromIndex: true }, "", `${EDIT}?section=ai`);
+    const back = vi.spyOn(window.history, "back").mockImplementation(() => {});
+    renderEditor();
+    const bar = document.querySelector<HTMLElement>("[data-phone-page-bar]")!;
+    fireEvent.click(within(bar).getByRole("link", { name: "Tillbaka till Min assistent" }));
+    expect(back).toHaveBeenCalledTimes(1);
+  });
+
+  it("focuses a failed field in the section in view without a history entry", async () => {
+    setViewport("phone");
+    setRoute(`${EDIT}?section=ai`);
+    window.history.replaceState(null, "", `${EDIT}?section=ai`);
+    const push = vi.spyOn(window.history, "pushState");
+    renderEditor();
+    // On a section the save state sits in the page bar, in a word or two.
+    const bar = document.querySelector<HTMLElement>("[data-phone-page-bar]")!;
+    const failed = await within(bar).findByRole("link", { name: "Kunde inte spara" });
+    expect(fireEvent.click(failed)).toBe(false);
+    expect(push).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Modell" }));
+  });
+
+  it("opens the index when the section in view goes, and does not bring it back", () => {
+    setRoute(`${EDIT}?section=ai`);
+    const props = {
+      navigationLabel: "Avsnitt",
+      header: <h1>Min assistent</h1>,
+      phone: {
+        parent: { label: "Assistenter", href: "/spaces/s1/assistants" },
+        title: "Min assistent"
+      }
+    };
+    const { rerender } = renderInApp(
+      <SaveStatusProvider>
+        <SectionedSettings {...props} sections={phoneSections} />
+      </SaveStatusProvider>
+    );
+    expect(current()).toEqual(["ai"]);
+    // A permission changed: the section is gone, then back.
+    for (const sections of [
+      phoneSections.filter((section) => section.id !== "ai"),
+      phoneSections
+    ]) {
+      rerender(
+        <SaveStatusProvider>
+          <SectionedSettings {...props} sections={sections} />
+        </SaveStatusProvider>
+      );
+      expect(view()).toBe("index");
+    }
+  });
+
+  it("focuses the heading of a section whose own save failed", async () => {
+    setViewport("phone");
+    setRoute(EDIT);
+    window.history.replaceState(null, "", EDIT);
+    vi.spyOn(window.history, "pushState");
+    function FailedSection() {
+      const setStatus = useSetSaveStatus();
+      useEffect(() => setStatus?.("security", "error"), [setStatus]);
+      return <h2>Säkerhet och integritet</h2>;
+    }
+    renderInApp(
+      <SaveStatusProvider>
+        <SectionedSettings
+          navigationLabel="Avsnitt"
+          header={<h1>Min assistent</h1>}
+          sections={[
+            phoneSections[0]!,
+            { ...phoneSections[1]!, node: <h2>AI-inställningar</h2> },
+            { ...phoneSections[2]!, node: <FailedSection /> }
+          ]}
+          phone={{
+            parent: { label: "Assistenter", href: "/spaces/s1/assistants" },
+            title: "Min assistent"
+          }}
+        />
+      </SaveStatusProvider>
+    );
+    // The error names the section itself (its key is the section's id).
+    const strip = document.querySelector<HTMLElement>("[data-editor-strip]")!;
+    fireEvent.click(await within(strip).findByRole("link", { name: /Kunde inte spara/ }));
+    expect(current()).toEqual(["security"]);
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Säkerhet och integritet" })
+    );
+  });
+
+  it("lists the sections beside the form under the index's group headings", () => {
+    setRoute(EDIT);
+    renderEditor();
+    const groups = within(rail()).getAllByRole("group");
+    expect(
+      groups.map(
+        (group) => document.getElementById(group.getAttribute("aria-labelledby")!)!.textContent
+      )
+    ).toEqual(["Innehåll", "Modell och funktioner", "Åtkomst"]);
+    expect(
+      groups.map((group) =>
+        within(group)
+          .getAllByRole("link")
+          .map((link) => link.getAttribute("href"))
+      )
+    ).toEqual([["#general"], ["#ai"], ["#security"]]);
+  });
+
+  it("keeps focus on a section link turned across 1024 px, on the one now shown", () => {
+    setViewport("tablet-portrait");
+    setRoute(EDIT);
+    renderEditor();
+    const inStrip = within(header()).getByRole("link", { name: "AI-inställningar" });
+    const inRail = within(rail()).getByRole("link", { name: "AI-inställningar" });
+    // jsdom has no layout: the link CSS shows has a box, the hidden one none.
+    const shown = (link: HTMLElement) =>
+      vi
+        .spyOn(link, "getClientRects")
+        .mockReturnValue([new DOMRect(0, 0, 200, 44)] as unknown as DOMRectList);
+
+    act(() => inStrip.focus());
+    const railShown = shown(inRail);
+    act(() => setViewport("tablet-landscape"));
+    expect(document.activeElement).toBe(inRail);
+
+    railShown.mockRestore();
+    shown(inStrip);
+    act(() => setViewport("tablet-portrait"));
+    expect(document.activeElement).toBe(inStrip);
+  });
+
+  it("leaves a settings page without the phone index as it was", () => {
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    expect(document.querySelector("[data-editor-view]")).toBeNull();
+    expect(document.querySelector("[data-editor-index]")).toBeNull();
+    expect(document.querySelector("[data-phone-page-bar]")).toBeNull();
   });
 });

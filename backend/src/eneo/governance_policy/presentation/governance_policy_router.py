@@ -30,6 +30,12 @@ from eneo.skills.presentation.skill_assembler import (
     skill_binding_audit_entries,
 )
 
+_EMPTY_POLICY_ON_GET = (
+    "Creates the tenant's empty policy on first read (INSERT ... ON CONFLICT DO "
+    "NOTHING). Every restriction is off, so the result is the state the read "
+    "reports either way."
+)
+
 router = APIRouter()
 
 _ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
@@ -160,6 +166,7 @@ def _policy_changes(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Organization administration requires the admin permission.",
+    effect_on_get=_EMPTY_POLICY_ON_GET,
 )
 async def get_governance_policy(container: _ContainerWithUser):
     service = container.governance_policy_service()
@@ -272,7 +279,7 @@ async def update_governance_policy(
         or mcp_restriction is not None
     ):
         assistant_service = container.assistant_service()
-        await assistant_service.assert_personal_default_governance_context_fit()
+        await assistant_service.confirm_personal_default_governance_fit()
     assert policy.id is not None
     after_skills = await service.get_skill_bindings(policy)
     changes = _policy_changes(

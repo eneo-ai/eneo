@@ -371,8 +371,8 @@ covers deployment and operations.
 - **Queue**: Redis-based ARQ (Async Redis Queue)
 - **Language**: Python with async/await
 - **Concurrency**: `WORKER_MAX_JOBS` concurrent jobs per worker process
-  (default 15) and `TENANT_WORKER_CONCURRENCY_LIMIT` concurrent crawl jobs per
-  tenant (default 4), enforced through durable PostgreSQL admission
+  (default 15) and `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` concurrent crawl jobs
+  per tenant (default 4), enforced through durable PostgreSQL admission
 
 **Responsibilities:**
 
@@ -399,9 +399,18 @@ async def log_audit_event(
 ```
 
 ```python
-# backend/src/eneo/data_retention/infrastructure/data_retention_worker.py
-@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+# backend/src/eneo/data_retention/infrastructure/retention_worker.py
+@worker.cron_job(
+    hour=_settings.retention_cron_hour,  # 03:30 by default
+    minute=_settings.retention_cron_minute,
+    manages_own_session=True,
+)
+async def run_retention(container: Container) -> list[RetentionRunReport]:
 ```
+
+`run_retention` runs every registered task once a day. `run_retention_frequent`,
+in the same file, starts every five minutes and runs only the tasks registered to
+run often whose due probe finds something due or fails.
 
 **Web Crawling:**
 
@@ -627,7 +636,7 @@ There is no separate CSRF token or refresh-token mechanism.
   (`NUM_WORKERS`).
 - Worker capacity scales with additional worker containers; per-process
   concurrency is `WORKER_MAX_JOBS`, and crawl fan-out per tenant is capped by
-  `TENANT_WORKER_CONCURRENCY_LIMIT`.
+  `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`.
 
 ### Database
 

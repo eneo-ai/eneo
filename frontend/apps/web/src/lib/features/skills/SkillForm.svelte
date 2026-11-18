@@ -12,8 +12,13 @@
   import { m } from "$lib/paraglide/messages";
   import { tick, untrack } from "svelte";
   import type { SkillFormValue, SkillRevisionFormValue } from "./skillBindings";
+  import type { ReferenceCatalog } from "@eneo/skill-instructions";
+  import SkillInstructionEditor from "./SkillInstructionEditor.svelte";
+  import "./skillAuthoring.css";
 
   type SharedProps = {
+    referenceCatalog?: ReferenceCatalog;
+    referencePickerInline?: boolean;
     class?: string;
     submitLabel?: string;
     submittingLabel?: string;
@@ -76,6 +81,7 @@
   let displayNameInput = $state<HTMLInputElement | null>(null);
   let descriptionInput = $state<HTMLTextAreaElement | null>(null);
   let instructionsInput = $state<HTMLTextAreaElement | null>(null);
+  let instructionEditor = $state<SkillInstructionEditor | null>(null);
   let slugInput = $state<HTMLInputElement | null>(null);
 
   const isCreateMode = $derived(props.mode !== "revision");
@@ -133,6 +139,7 @@
       await tick();
       if (displayNameInvalid) displayNameInput?.focus();
       else if (descriptionInvalid) descriptionInput?.focus();
+      else if (props.referenceCatalog) instructionEditor?.focus();
       else instructionsInput?.focus();
       return;
     }
@@ -194,7 +201,7 @@
 </script>
 
 <form
-  class={["flex w-full max-w-[80ch] flex-col gap-5", props.class]}
+  class={["skill-authoring flex w-full max-w-[80ch] flex-col gap-5", props.class]}
   onsubmit={handleSubmit}
   aria-busy={isSubmitting}
   novalidate
@@ -208,7 +215,7 @@
         bind:value={displayName}
         oninput={handleDisplayNameInput}
         aria-invalid={displayNameInvalid || undefined}
-        aria-describedby={`${displayNameId}-description`}
+        aria-describedby={`${displayNameId}-description ${displayNameId}-error`}
         disabled={isSubmitting}
         maxlength={200}
         required
@@ -217,7 +224,7 @@
         {m.skills_display_name_description()}
       </Field.Description>
       {#if displayNameInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${displayNameId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
 
@@ -228,7 +235,7 @@
         id={descriptionId}
         bind:value={description}
         aria-invalid={descriptionInvalid || undefined}
-        aria-describedby={`${descriptionId}-description`}
+        aria-describedby={`${descriptionId}-description ${descriptionId}-error`}
         disabled={isSubmitting}
         class="max-h-64 min-h-24 overflow-y-auto"
         rows={3}
@@ -239,28 +246,46 @@
         {m.skills_description_description()}
       </Field.Description>
       {#if descriptionInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${descriptionId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
 
     <Field.Field data-invalid={instructionsInvalid || undefined}>
       <Field.Label for={instructionsId}>{m.skills_instructions_label()}</Field.Label>
-      <Textarea
-        bind:ref={instructionsInput}
-        id={instructionsId}
-        bind:value={instructions}
-        aria-invalid={instructionsInvalid || undefined}
-        aria-describedby={`${instructionsId}-description`}
-        disabled={isSubmitting}
-        class={["max-h-[min(50dvh,32rem)] overflow-y-auto", isCreateMode ? "min-h-48" : "min-h-72"]}
-        rows={isCreateMode ? 8 : 12}
-        required
-      />
-      <Field.Description class="max-w-[65ch]" id={`${instructionsId}-description`}>
-        {m.skills_instructions_description()}
-      </Field.Description>
+      {#if props.referenceCatalog}
+        <SkillInstructionEditor
+          bind:this={instructionEditor}
+          id={instructionsId}
+          describedBy={`${instructionsId}-error`}
+          bind:value={instructions}
+          disabled={isSubmitting}
+          invalid={instructionsInvalid}
+          catalog={props.referenceCatalog}
+          inlinePicker={props.referencePickerInline}
+        />
+      {:else}
+        <Textarea
+          bind:ref={instructionsInput}
+          id={instructionsId}
+          bind:value={instructions}
+          aria-invalid={instructionsInvalid || undefined}
+          aria-describedby={`${instructionsId}-description ${instructionsId}-error`}
+          disabled={isSubmitting}
+          class={[
+            "max-h-[min(50dvh,32rem)] overflow-y-auto",
+            isCreateMode ? "min-h-48" : "min-h-72"
+          ]}
+          rows={isCreateMode ? 8 : 12}
+          required
+        />
+      {/if}
+      {#if !props.referenceCatalog}
+        <Field.Description class="max-w-[65ch]" id={`${instructionsId}-description`}>
+          {m.skills_instructions_description()}
+        </Field.Description>
+      {/if}
       {#if instructionsInvalid}
-        <Field.Error>{m.skills_required_field()}</Field.Error>
+        <Field.Error id={`${instructionsId}-error`}>{m.skills_required_field()}</Field.Error>
       {/if}
     </Field.Field>
   </Field.Group>
@@ -294,7 +319,7 @@
             bind:value={slug}
             oninput={handleSlugInput}
             aria-invalid={slugInvalid || undefined}
-            aria-describedby={`${slugId}-description`}
+            aria-describedby={`${slugId}-description ${slugId}-error`}
             disabled={isSubmitting}
             autocomplete="off"
             maxlength={64}
@@ -304,7 +329,7 @@
             {m.skills_slug_description()}
           </Field.Description>
           {#if slugInvalid}
-            <Field.Error>{m.skills_required_field()}</Field.Error>
+            <Field.Error id={`${slugId}-error`}>{m.skills_required_field()}</Field.Error>
           {/if}
         </Field.Field>
       </div>

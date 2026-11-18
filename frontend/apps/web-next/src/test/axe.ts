@@ -49,7 +49,10 @@ export async function expectNoAxeViolations(
 ): Promise<void> {
   assertDocumented(options.disableRules ?? {}, (rule) => `Skipping the axe rule "${rule}"`);
   const disabled = [...JSDOM_UNSUPPORTED_RULES, ...Object.keys(options.disableRules ?? {})];
+  // jsdom frames have no document axe can message, so the run would throw on
+  // the first <iframe>; embedded pages are checked by their own tests.
   const results = await axe.run(container, {
+    iframes: false,
     runOnly: { type: "tag", values: WCAG_22_AA_TAGS },
     rules: Object.fromEntries(disabled.map((rule) => [rule, { enabled: false }])),
     resultTypes: ["violations"]
@@ -58,6 +61,40 @@ export async function expectNoAxeViolations(
     throw new Error(
       `axe found ${results.violations.length} WCAG 2.2 A/AA violation(s):\n\n` +
         results.violations.map(describeViolation).join("\n\n")
+    );
+  }
+}
+
+/** What axe ignores when it compares a name with a label: case, its punctuation set and runs of white space. */
+function curate(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[ -⁯⸀-⹿\\'!"#$%&£¢¥§€()*+,\-./:;<=>?@[\]^_`{|}~±]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * WCAG 2.5.3 Label in Name as axe's label-content-name-mismatch checks it in the browser scans
+ * (tests/a11y.spec.ts, tests/a11y-routes.spec.ts); jsdom cannot run that rule (no CSS hides
+ * `sr-only` text). Throws unless a control named by `aria-label` or `aria-labelledby` has an
+ * accessible name, `name` (as the test found it by), that holds what the control shows, in order.
+ * Shown text is read as axe reads it: text nodes joined with no separator (so words in separate
+ * spans need a space between them), `aria-hidden` text counted, `sr-only` text left out. A
+ * control named by its content passes: the rule does not apply to it.
+ *
+ * @example
+ * const name = "Verktyg: 2 av 3 aktiva";
+ * expectNameToHoldVisibleText(screen.getByRole("button", { name }), name);
+ */
+export function expectNameToHoldVisibleText(control: Element, name: string): void {
+  if (!control.hasAttribute("aria-label") && !control.hasAttribute("aria-labelledby")) return;
+  const shown = control.cloneNode(true) as Element;
+  shown.querySelectorAll(".sr-only").forEach((node) => node.remove());
+  const visible = curate(shown.textContent ?? "");
+  if (!curate(name).includes(visible)) {
+    throw new Error(
+      `The name "${name}" does not hold what the control shows, "${visible}", in order (WCAG 2.5.3).`
     );
   }
 }

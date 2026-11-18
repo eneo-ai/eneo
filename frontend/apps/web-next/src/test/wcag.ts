@@ -8,6 +8,30 @@
 /** The axe-core rule tags for web-next's required level, WCAG 2.2 A + AA. */
 export const WCAG_22_AA_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
 
+/**
+ * What the browser scans (tests/a11y.spec.ts, tests/a11y-routes.spec.ts) switch on beyond the
+ * WCAG tags. axe leaves these out of a tag run: they are best-practice or experimental rules that
+ * find real structure faults (a paragraph styled as a heading, a table without header cells, two
+ * landmarks of one kind with no name, an empty heading or header cell, a scope on the wrong cell).
+ * The first three are ACCESSIBILITY.md rule 1: one main landmark, an h1, headings in order.
+ * `label-content-name-mismatch` is axe's experimental check of WCAG 2.5.3 Label in Name (rule 8):
+ * a control named by aria-label holds what it shows, in order. It joins text in separate spans
+ * with no separator, so words that sit in different spans need a space between them.
+ */
+export const AXE_PAGE_RULES = [
+  "page-has-heading-one",
+  "landmark-one-main",
+  "heading-order",
+  "p-as-heading",
+  "td-has-header",
+  "table-fake-caption",
+  "landmark-unique",
+  "empty-heading",
+  "empty-table-header",
+  "scope-attr-valid",
+  "label-content-name-mismatch"
+];
+
 /** An issue reference: a URL, `#1234` or `owner/repo#1234`. */
 const ISSUE_LINK = /https?:\/\/\S+|(?<![\w/])(?:[\w.-]+\/[\w.-]+)?#\d+\b/;
 

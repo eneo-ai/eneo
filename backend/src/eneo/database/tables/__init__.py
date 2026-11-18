@@ -13,6 +13,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.app_template_table",
     "eneo.database.tables.assistant_table",
     "eneo.database.tables.assistant_template_table",
+    "eneo.database.tables.browser_sessions_table",
     "eneo.database.tables.collections_table",
     "eneo.database.tables.completion_model_migration_history_table",
     "eneo.database.tables.feature_flag_table",
@@ -23,6 +24,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.help_assistant_assignment_history_table",
     "eneo.database.tables.help_assistant_runs_table",
     "eneo.database.tables.icons_table",
+    "eneo.database.tables.identity_bindings_table",
     "eneo.database.tables.info_blob_chunk_table",
     "eneo.database.tables.info_blobs_table",
     "eneo.database.tables.integration_table",
@@ -40,6 +42,7 @@ _TABLE_MODULES = (
     "eneo.database.tables.prompt_library_table",
     "eneo.database.tables.prompts_table",
     "eneo.database.tables.questions_table",
+    "eneo.database.tables.retention_tables",
     "eneo.database.tables.roles_table",
     "eneo.database.tables.service_table",
     "eneo.database.tables.sessions_table",
@@ -55,6 +58,9 @@ _TABLE_MODULES = (
     "eneo.database.tables.websites_spaces_table",
     "eneo.database.tables.websites_table",
     "eneo.database.tables.whats_new_table",
+    "eneo.database.tables.widget_templates_table",
+    "eneo.database.tables.widget_usage_table",
+    "eneo.database.tables.widgets_table",
     "eneo.database.tables.workflow_tables",
 )
 

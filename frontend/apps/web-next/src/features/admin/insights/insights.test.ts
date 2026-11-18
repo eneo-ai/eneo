@@ -1,43 +1,133 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient } from "@tanstack/react-query";
+import type { EneoClient } from "@/lib/api/browser";
+import { analysisAnswerText, assistantActivityRows } from "./insights";
 import {
-  analysisAnswerText,
-  assistantActivityRows,
-  isoFromDateInput,
-  localDate,
-  mergeInsightSeries
+  insightPeriod,
+  previousInsightRange,
+  periodTotals,
+  insightTrend,
+  groupedInsightSeries
 } from "./insights";
+import { insightAggregatedQueryOptions } from "./insights";
+import type { InsightRange } from "@/features/insights/insights-range";
 
-describe("mergeInsightSeries", () => {
-  it("merges the three per-day series, fills gaps with 0, and sorts by day", () => {
-    const rows = mergeInsightSeries({
-      assistants: [{ created_at: "2026-06-02T00:00:00Z", count: 2 }],
-      sessions: [
-        { created_at: "2026-06-01T08:00:00Z", count: 5 },
-        { created_at: "2026-06-02T09:00:00Z", count: 3 }
-      ],
-      questions: [{ created_at: "2026-06-01T10:00:00Z", count: 9 }]
+describe("overview periods", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("includes whole local days without sharing midnight with the previous calendar period", () => {
+    vi.stubEnv("TZ", "Europe/Stockholm");
+    const range = { start: "2026-10-24", end: "2026-10-26" } as InsightRange;
+    expect(insightPeriod(range)).toEqual({
+      start: "2026-10-23T22:00:00.000Z",
+      end: "2026-10-26T22:59:59.999999Z"
     });
-
-    expect(rows).toEqual([
-      { date: "2026-06-01", assistants: 0, sessions: 5, questions: 9 },
-      { date: "2026-06-02", assistants: 2, sessions: 3, questions: 0 }
-    ]);
+    expect(previousInsightRange(range)).toEqual({ start: "2026-10-21", end: "2026-10-23" });
+    expect(insightPeriod(previousInsightRange(range)).end).toBe("2026-10-23T21:59:59.999999Z");
   });
 
-  it("collapses multiple same-day buckets into one row", () => {
-    const rows = mergeInsightSeries({
+  it.each([
+    ["2026-03-29", "2026-03-29", "2026-03-28T23:00:00.000Z", "2026-03-29T21:59:59.999999Z"],
+    ["2026-10-25", "2026-10-25", "2026-10-24T22:00:00.000Z", "2026-10-25T22:59:59.999999Z"],
+    ["2026-12-31", "2026-12-31", "2026-12-30T23:00:00.000Z", "2026-12-31T22:59:59.999999Z"]
+  ])(
+    "keeps complete local days at DST and year boundaries: %s",
+    (start, end, expectedStart, expectedEnd) => {
+      vi.stubEnv("TZ", "Europe/Stockholm");
+      expect(insightPeriod({ start, end } as InsightRange)).toEqual({
+        start: expectedStart,
+        end: expectedEnd
+      });
+    }
+  );
+
+  it("sums hourly counts and expresses changes against the previous period, including zero baselines", () => {
+    expect(
+      periodTotals({
+        assistants: [],
+        sessions: [
+          { created_at: "2026-10-01T00:00:00Z", count: 3 },
+          { created_at: "2026-10-01T01:00:00Z", count: 5 }
+        ],
+        questions: []
+      })
+    ).toEqual({ assistants: 0, sessions: 8, questions: 0 });
+    expect(insightTrend(15, 10)).toBe(50);
+    expect(insightTrend(0, 10)).toBe(-100);
+    expect(insightTrend(0, 0)).toBe(0);
+    expect(insightTrend(5, 0)).toBeNull();
+  });
+
+  it("groups real hourly buckets by the viewer's date, weekday and hour", () => {
+    vi.stubEnv("TZ", "Europe/Stockholm");
+    const data = {
       assistants: [],
       sessions: [
-        { created_at: "2026-06-01T01:00:00Z", count: 1 },
-        { created_at: "2026-06-01T20:00:00Z", count: 4 }
+        { created_at: "2026-10-25T23:00:00Z", count: 3 },
+        { created_at: "2026-10-26T00:00:00Z", count: 2 }
       ],
       questions: []
-    });
-    expect(rows).toEqual([{ date: "2026-06-01", assistants: 0, sessions: 5, questions: 0 }]);
+    };
+    expect(groupedInsightSeries(data, "date")).toEqual([
+      { date: "2026-10-26", assistants: 0, sessions: 5, questions: 0 }
+    ]);
+    expect(groupedInsightSeries(data, "weekday")[0]).toMatchObject({ date: "0", sessions: 5 });
+    expect(groupedInsightSeries(data, "hour").slice(0, 2)).toMatchObject([
+      { date: "0", sessions: 3 },
+      { date: "1", sessions: 2 }
+    ]);
+    expect(groupedInsightSeries(data, "hour")).toHaveLength(24);
   });
+});
 
-  it("returns an empty array when all series are empty", () => {
-    expect(mergeInsightSeries({ assistants: [], sessions: [], questions: [] })).toEqual([]);
+it("keys hourly aggregates by the viewer's zone and sends it without changing the instant bounds", async () => {
+  const GET = vi.fn().mockResolvedValue({
+    data: { assistants: [], sessions: [], questions: [] },
+    response: new Response("{}")
+  });
+  const api = { GET } as unknown as EneoClient;
+  const range = { start: "2026-04-10T18:30:00.000Z", end: "2026-04-11T18:29:59.999999Z" };
+  const query = insightAggregatedQueryOptions(api, range, "Asia/Kolkata");
+  expect(query.queryKey).toEqual(["admin-insights-aggregated", range, "Asia/Kolkata"]);
+  const client = new QueryClient();
+  try {
+    await client.query(query);
+    expect(GET).toHaveBeenCalledWith("/api/v1/analysis/metadata-statistics/aggregated/", {
+      params: {
+        query: { start_date: range.start, end_date: range.end, time_zone: "Asia/Kolkata" }
+      },
+      signal: expect.any(AbortSignal)
+    });
+    expect(insightAggregatedQueryOptions(api, range).queryKey).toContain(
+      Intl.DateTimeFormat().resolvedOptions().timeZone
+    );
+  } finally {
+    client.clear();
+  }
+});
+
+describe("viewer-aligned hourly aggregates", () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it.each([
+    ["Asia/Kolkata", "2026-04-10T17:30:00Z", "2026-04-10T18:30:00Z"],
+    ["Asia/Kathmandu", "2026-04-10T17:15:00Z", "2026-04-10T18:15:00Z"]
+  ])("keeps local midnight and weighted hour counts in %s", (zone, before, after) => {
+    vi.stubEnv("TZ", zone);
+    const data = {
+      assistants: [],
+      sessions: [
+        { created_at: before, count: 2 },
+        { created_at: after, count: 3 }
+      ],
+      questions: []
+    };
+    expect(groupedInsightSeries(data, "date")).toMatchObject([
+      { date: "2026-04-10", sessions: 2 },
+      { date: "2026-04-11", sessions: 3 }
+    ]);
+    const hours = groupedInsightSeries(data, "hour");
+    expect(hours[23]?.sessions).toBe(2);
+    expect(hours[0]?.sessions).toBe(3);
   });
 });
 
@@ -147,23 +237,5 @@ describe("analysisAnswerText", () => {
     expect(analysisAnswerText(null)).toBeNull();
     expect(analysisAnswerText({ answer: 12 })).toBeNull();
     expect(analysisAnswerText(["answer"])).toBeNull();
-  });
-});
-
-describe("date fields in the viewer's time zone", () => {
-  // East of UTC a day starts on the previous UTC date (22:00Z in summer), so
-  // taking the UTC date showed the day before the one chosen.
-  afterEach(() => vi.unstubAllEnvs());
-
-  it("shows the viewer's day of an instant", () => {
-    vi.stubEnv("TZ", "Europe/Stockholm");
-    expect(localDate("2026-09-09T22:00:00.000Z")).toBe("2026-09-10");
-    expect(localDate("2026-09-10T21:59:59.000Z")).toBe("2026-09-10");
-  });
-
-  it("filters from the start to the end of the chosen day", () => {
-    vi.stubEnv("TZ", "Europe/Stockholm");
-    expect(isoFromDateInput("2026-09-10", "start")).toBe("2026-09-09T22:00:00.000Z");
-    expect(isoFromDateInput("2026-09-10", "end")).toBe("2026-09-10T21:59:59.000Z");
   });
 });

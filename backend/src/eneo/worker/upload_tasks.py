@@ -474,7 +474,7 @@ async def transcription_task(
                 adapter=prepared_transcription,
             )
             if not text.strip():
-                raise NoExtractableTextError(params.filename)
+                raise NoExtractableTextError()
 
             await _publish_knowledge_upload(
                 container=container,
@@ -528,7 +528,7 @@ async def upload_info_blob_task(
                 params.filename,
             )
             if not text.strip():
-                raise NoExtractableTextError(params.filename)
+                raise NoExtractableTextError()
 
             await _publish_knowledge_upload(
                 container=container,

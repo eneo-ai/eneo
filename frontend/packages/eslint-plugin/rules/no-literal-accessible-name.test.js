@@ -49,9 +49,11 @@ jsxRuleTester.run("no-literal-accessible-name", rule, {
     { code: '<Field hint="Välj en fil" />' },
     // Astryx names and tooltips from the message layer.
     { code: '<Button label={t("save")} tooltip={t("save_hint")} />' },
-    // next/image's placeholder is "blur" | "empty" | a data URL, not text.
-    { code: '<Image src={src} alt="" placeholder="blur" />' },
-    // Per-component ignores (they replace the default).
+    // Per-component ignores: an image component's placeholder is not text.
+    {
+      code: '<Image src={src} alt="" placeholder="blur" />',
+      options: [{ ignoreComponents: { Image: ["placeholder"] } }],
+    },
     {
       code: '<Chart title="sales-by-month" />',
       options: [{ ignoreComponents: { Chart: ["title"] } }],
@@ -173,11 +175,12 @@ jsxRuleTester.run("no-literal-accessible-name", rule, {
     },
     {
       code: '<Image src={src} alt="Logotyp" placeholder="blur" />',
+      options: [{ ignoreComponents: { Image: ["placeholder"] } }],
       errors: [literal("alt", "Logotyp")],
     },
+    // No component is ignored by default.
     {
       code: '<Image placeholder="blur" />',
-      options: [{ ignoreComponents: {} }],
       errors: [literal("placeholder", "blur")],
     },
     // More props through `attributes`.

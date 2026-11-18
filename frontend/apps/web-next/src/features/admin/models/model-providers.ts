@@ -52,16 +52,7 @@ export function providerCapabilitiesQueryOptions(api: EneoClient) {
   });
 }
 
-export function createProvider(
-  api: EneoClient,
-  body: {
-    name: string;
-    provider_type: string;
-    credentials: Record<string, string>;
-    config: Record<string, string>;
-    key_expires_on?: string | null;
-  }
-) {
+export function createProvider(api: EneoClient, body: Schema<"ModelProviderCreate">) {
   return unwrap(api.POST("/api/v1/admin/model-providers/", { body }));
 }
 
@@ -334,4 +325,24 @@ export function favoriteProvidersQueryOptions(api: EneoClient) {
 /** Replace the tenant's full favorites list (the endpoint is a full overwrite). */
 export function setFavoriteProviders(api: EneoClient, providers: string[]) {
   return unwrap(api.PUT("/api/v1/admin/model-providers/favorites/", { body: { providers } }));
+}
+
+export const OUTBOUND_HEADER_OPTIONS_KEY = ["admin-model-provider-outbound-header-options"];
+
+export function outboundHeaderOptionsQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: OUTBOUND_HEADER_OPTIONS_KEY,
+    staleTime: Infinity,
+    queryFn: ({ signal }) =>
+      unwrap(api.GET("/api/v1/admin/model-providers/outbound-headers/options/", { signal }))
+  });
+}
+
+export function previewOutboundHeaders(api: EneoClient, providerId: string, userId: string) {
+  return unwrap(
+    api.POST("/api/v1/admin/model-providers/{provider_id}/outbound-headers/preview/", {
+      params: { path: { provider_id: providerId } },
+      body: { user_id: userId }
+    })
+  );
 }

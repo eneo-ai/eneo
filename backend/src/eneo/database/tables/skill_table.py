@@ -120,6 +120,53 @@ class SkillRevisions(BasePublic):
     )
 
 
+class SkillRevisionDependencies(BaseCrossReference):
+    """Approved helper closure, derived atomically from immutable instructions."""
+
+    space_id: Mapped[UUID] = mapped_column()
+    source_skill_id: Mapped[UUID] = mapped_column()
+    source_revision_id: Mapped[UUID] = mapped_column()
+    target_skill_id: Mapped[UUID] = mapped_column()
+    target_revision_id: Mapped[UUID] = mapped_column()
+
+    __table_args__ = (
+        PrimaryKeyConstraint("source_revision_id", "target_skill_id"),
+        ForeignKeyConstraint(
+            ["space_id", "source_skill_id"],
+            ["skills.space_id", "skills.id"],
+            name="fk_skill_dependencies_source_space",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["space_id", "target_skill_id"],
+            ["skills.space_id", "skills.id"],
+            name="fk_skill_dependencies_target_space",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        ForeignKeyConstraint(
+            ["source_skill_id", "source_revision_id"],
+            ["skill_revisions.skill_id", "skill_revisions.id"],
+            name="fk_skill_dependencies_source_revision",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["target_skill_id", "target_revision_id"],
+            ["skill_revisions.skill_id", "skill_revisions.id"],
+            name="fk_skill_dependencies_target_revision",
+            deferrable=True,
+            initially="DEFERRED",
+        ),
+        CheckConstraint(
+            "source_skill_id <> target_skill_id",
+            name="ck_skill_dependencies_no_self_reference",
+        ),
+        Index("ix_skill_dependencies_source", "source_skill_id"),
+        Index("ix_skill_dependencies_target", "target_skill_id", "target_revision_id"),
+    )
+
+
 class SkillExecutionBlocks(BasePublic):
     tenant_id: Mapped[UUID] = mapped_column()
     skill_space_id: Mapped[UUID] = mapped_column()

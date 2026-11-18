@@ -120,3 +120,17 @@ def test_mode_for_unattached_file_is_rejected():
 
     with pytest.raises(BadRequestException):
         assistant.set_attachment_inline_text({uuid4(): False})
+
+
+def test_withholding_the_file_reader_inlines_open_with_tool_attachments():
+    """A principal without the files tool (a widget visitor) cannot open a
+    link, so the per-turn flag makes every attachment inline; it is never
+    part of the saved modes."""
+    attachment = _attachment()
+    assistant = _assistant([attachment], {attachment.id: False})
+    assert assistant.url_only_attachment_ids(_model()) == {attachment.id}
+    assistant.withhold_file_reader()
+    assert assistant.url_only_attachment_ids(_model()) == set()
+    assert assistant.attachment_inline_text == {attachment.id: False}
+    assistant.restore_file_reader()
+    assert assistant.url_only_attachment_ids(_model()) == {attachment.id}

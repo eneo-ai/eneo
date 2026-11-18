@@ -39,6 +39,8 @@ updates:
       time: "06:30"
       timezone: "Europe/Stockholm"
     open-pull-requests-limit: 0
+    cooldown:
+      default-days: 7
     rebase-strategy: "disabled"
     labels:
       - "dependencies"

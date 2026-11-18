@@ -89,6 +89,13 @@ E2E_MANAGE_STACK=0 bun run test:e2e
 docker compose -f docker-compose.e2e.yml down
 ```
 
+The reused Linux `backend_venv` must match this checkout's `backend/uv.lock`.
+Synchronize it through the usual devcontainer setup after a branch adds a Python
+dependency. A host Python environment does not update that mounted environment.
+The backend healthcheck requires an HTTP response from `/api/livez`, since a
+listening Gunicorn socket can precede a worker import failure. For startup
+failures, inspect the `e2e-backend` logs before running browser tests.
+
 The suite authenticates once (`auth.setup.ts` logs in the seeded user and saves a
 session to `playwright/.auth/`), then every spec reuses that session — login is
 exercised for real, but each test starts authenticated.
@@ -141,6 +148,110 @@ infrastructure, is documented in
 Prioritize one happy path and one failure or permission path for each critical
 workflow. Seed deterministic fixtures in `e2e/seed.py` instead of relying on test
 ordering, production data, or third-party services.
+
+### React beta: Vite and FastAPI
+
+The React beta's full Playwright suite requires a production build served by
+FastAPI. Set `E2E_USER` and `E2E_PASSWORD` for the isolated stack's seeded user,
+then run from the repository root:
+
+```bash
+(
+  set -e
+  trap 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v' EXIT
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait
+  mkdir -p frontend/apps/web-next/node_modules/.cache
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+    e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
+  (cd frontend/apps/web-next && E2E_BASE_URL=http://localhost:8124 bun run test:e2e --grep-invert '@upload-worker')
+
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T -d \
+    e2e-backend sh -c 'exec /app/.venv/bin/worker >/proc/1/fd/1 2>/proc/1/fd/2'
+  worker_ready=false
+  for _ in $(seq 1 15); do
+    if docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T \
+      e2e-backend /app/.venv/bin/worker --check; then
+      worker_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [ "$worker_ready" = true ] || { echo "Upload worker did not become healthy" >&2; exit 1; }
+  (cd frontend/apps/web-next && E2E_BASE_URL=http://localhost:8124 \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/upload-worker \
+    bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker)
+)
+```
+
+Copy the module report from the running image: fault-injection tests need the
+exact chunk filenames that image serves. Do not rebuild a mounted `dist/` while
+FastAPI is running; it reads its HTML once at startup. Use `localhost`,
+since the stack's `127.0.0.1` address is the separate MCP content origin. To run
+selected cases, append their paths, for example `tests/csp.spec.ts`.
+
+Run the ordinary suite before starting the worker: app-result tests require
+pending jobs to stay queued. Only the native 25 MiB upload carries
+`@upload-worker`. Both phases use normal success gating and separate output
+and HTML report directories so the second run preserves the first run's results.
+The worker may drain earlier app jobs after their assertions have finished.
+
+The existing worker runs inside the backend container so knowledge ingestion
+shares its staged files and environment. Start it once per stack. Its output
+joins the container logs, and the cleanup trap stops it with the backend on
+success or failure. The web-app overlay sets a 32 MiB inline storage ceiling.
+The native upload test raises the knowledge policy through the admin API and
+restores it using the current revision; production defaults and seed policy
+are unchanged.
+
+CI enables both backend settings through `docker-compose.e2e.web-app.yml` and
+runs the full browser suite there, including CSP, boot failure and recovery,
+locale, cookie login and cross-origin rejection. CI splits the suite into three
+legs by tag, each on its own stack: a new whole-route walk adds its tag to a walk
+leg and to the rest leg's exclusion in `.github/workflows/ci.yml`. The commands
+above are unchanged.
+
+The first phase writes `test-results-fastapi/` and the CI HTML report in
+`playwright-report-fastapi/`. The upload phase writes `test-results/upload-worker/`
+and `playwright-report/upload-worker/`. All four are ignored by Git and uploaded
+by CI. `E2E_BASE_URL` is required;
+Playwright starts no server. Use `bun run dev` for interactive development, not
+this suite: the development server has neither production CSP nor hashed chunks.
+
+#### An open tab across a deployment
+
+`tests/two-release.spec.ts` exercises actual replacement builds. It is skipped
+unless `TWO_RELEASE_SWAP_CMD` names a local executable. The executable receives
+one argument, `A` or `B`, and must replace the server on the same origin, wait
+until it is ready, and exit nonzero on failure. Keep the database, signing keys
+and seeded credentials unchanged between releases. Run this against an isolated
+test stack.
+
+Prepare both builds before starting the test:
+
+- Build A from the candidate source; serve it with backend `APP_REVISION=release-A`.
+- For B, change `AdminUsersPage`'s `PageHeader` title in
+  `src/features/admin/users/users-page.tsx` to `Users release B`, and append
+  ` release B` to the clipboard renderer's `plainText` in
+  `src/components/ai-elements/answer-clipboard.ts`. Build it separately and use
+  backend `APP_REVISION=release-B`. Restore the original source after both builds.
+- Swap the complete served build and restart FastAPI; replacing files under a
+  running process does not replace its cached HTML. Do not retain A's assets in B:
+  this test must encounter real missing chunks.
+
+From `frontend/apps/web-next`, with the seeded credentials already exported:
+
+```bash
+E2E_BASE_URL=http://localhost:8124 TWO_RELEASE_SWAP_CMD=/absolute/path/to/swap-release \
+  bun run test:e2e tests/two-release.spec.ts --project=smoke --no-deps
+```
+
+The spec signs in for each case. It checks an unvisited route, cancellation and
+confirmation with an unsent question in new and saved conversations, and a lazy
+clipboard feature. Staying must retain the visible, editable composer and URL;
+leaving must reach usable B with one reload and no second confirmation. Native
+reload cancellation and dirty document edits are also covered by
+`chat-draft.spec.ts` and `navigation.spec.ts`. The deployment observations are
+attached to the Playwright report.
 
 ## Writing tests
 
@@ -218,6 +329,67 @@ test("authenticated user lands in the personal chat workspace", async ({ page })
 Prefer stable, language-agnostic locators (`input[name="email"]`,
 `button[type="submit"]`, `getByRole`) over text — the UI is localized via
 Paraglide `m.*`.
+
+## Accessibility (WCAG)
+
+The embeddable widget runs on other organisations' websites, which are bound by
+the accessibility law (EN 301 549 / WCAG), so its accessibility is tested in
+layers that each fail CI. Automated checks find roughly half of WCAG problems;
+the rest needs a person with a screen reader.
+
+| Layer | What it catches | Where |
+| --- | --- | --- |
+| Svelte a11y warnings | Missing `alt`, click handlers without keyboard support, invalid ARIA; `svelte-check --fail-on-warnings` turns every warning into an error | `bun run check` (`apps/web`, `packages/ui`) |
+| axe in component tests | Every WCAG 2.0–2.2 A/AA rule, contrast included, in light and dark: the chat, its error and single-turn states, the paused notice | `WidgetChat.svelte.test.ts`, `WidgetUnavailable.svelte.test.ts` |
+| Virtual screen reader | What a screen reader user hears: reading order of landmarks, headings and labels, and what live regions announce (each answer once, never the stream, the vote acknowledgement, the paused notice) | The same files, with `@guidepup/virtual-screen-reader` |
+| Layout | Reflow at 320 px (1.4.10), WCAG text spacing (1.4.12) and a short, zoomed panel, without clipped content or sideways scrolling | `WidgetChat.svelte.test.ts` |
+| Loader | Dialog semantics, modal full screen with the host page inert, Escape on the host page, focus return | `packages/widget-loader/src/element.test.ts` |
+| E2E | axe on the host page and the frame together (closed, open, full-screen notice), ARIA snapshots of the launcher, dialog and chat, the keyboard flow | `tests/widget-embed.spec.ts` |
+
+When writing these tests:
+
+- Run axe with the WCAG tags (`wcag2a` … `wcag22aa`) and fail on any violation;
+  axe's impact rating says nothing about conformance.
+- Assert announcements through the virtual screen reader, not a live region's
+  text: `virtual.start({ container: document.body })`, act, then read the
+  `polite:`/`assertive:` entries of `virtual.spokenPhraseLog()`. Stop it in a
+  `finally`.
+- A live region must exist before its text changes; one rendered together with
+  its text is not announced (real screen readers make an exception for
+  `role="alert"`). The same text twice is only announced when the region is
+  emptied in between, see `lib/features/widget/announcer.svelte.ts`.
+- Prove the negative: break the markup a test guards and watch it fail.
+
+Not automated yet: real screen readers (NVDA, JAWS, VoiceOver, TalkBack).
+Guidepup can drive NVDA and VoiceOver in CI; until that is set up, test the
+widget with them by hand before a release.
+
+## Widget test ownership
+
+Framework-neutral widget contracts live in `packages/eneo-js/src/widgets/`:
+visitor identity/rotation/storage, install snippets, origin validation,
+colour calculations, template locks/publication summaries and the iframe bridge.
+Their Node tests run once for both apps through the existing SDK test command.
+The Python policy test owns the cross-language budget-ceiling contract; there is no mirrored frontend source-reading test.
+
+Keep component tests for each UI's rendering, focus, announcements, feedback
+and editor state. Markdown announcements use different parsers in the apps,
+and autosave uses different reactive integrations: their app-specific tests
+remain useful. Keep backend unit, HTTP, real-PostgreSQL/Redis concurrency,
+retention and migration tests; these protect different boundaries.
+
+The worker lifecycle has fast SDK tests (deadline, cancellation, failure,
+retry and cookie omission). `proofOfWork.svelte.test.ts` exercises the actual
+vendor worker and verifies its signed solution in Chromium. The cross-origin
+`widget-embed.spec.ts` flows in both apps run with ALTCHA enabled against the
+real backend and the deterministic model. They must not replace the worker
+or its solution with a test bypass. The loader's immutable-byte and frozen
+bridge contracts remain independent of the current apps.
+
+For a test removal, identify the surviving test and the same failure it
+catches. Similar names across layers are not evidence of duplication. Change
+shared owners before removing app copies. Use one worker locally, the global
+resource supervisor and the repository's local execution rules.
 
 ## AI-assisted workflow
 

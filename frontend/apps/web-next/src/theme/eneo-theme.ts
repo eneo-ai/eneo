@@ -16,7 +16,7 @@
  * <style> injection for built themes, so the production CSP stays nonce-only.
  * `bun run lint` fails when the generated files are stale.
  *
- * The shadcn variables in src/app/globals.css (--background, --primary, …)
+ * The shadcn variables in src/styles/globals.css (--background, --primary, …)
  * point at these tokens, and the `ax-*` Tailwind bridge exposes them as
  * utilities. See AGENTS.md for the mapping.
  */
@@ -59,18 +59,18 @@ const categorical = {
   },
   // Status-aligned hues so Badge/Token colours match the status palette.
   green: {
-    fg: ["#1E7A32", "#6CC382"],
-    icon: ["#1E7A32", "#6CC382"],
+    fg: ["#1A6B2C", "#6CC382"],
+    icon: ["#1A6B2C", "#6CC382"],
     bg: ["#E2F2E5", "rgba(108, 195, 130, 0.15)"]
   },
   yellow: {
-    fg: ["#8A5A00", "#E9B949"],
-    icon: ["#8A5A00", "#E9B949"],
+    fg: ["#805400", "#E9B949"],
+    icon: ["#805400", "#E9B949"],
     bg: ["#FCF0D4", "rgba(233, 185, 73, 0.15)"]
   },
   red: {
-    fg: ["#B42330", "#FF8177"],
-    icon: ["#B42330", "#FF8177"],
+    fg: ["#B22330", "#FF8177"],
+    icon: ["#B22330", "#FF8177"],
     bg: ["#FBE5E6", "rgba(255, 129, 119, 0.15)"]
   }
 } as const satisfies Record<string, Record<"fg" | "icon" | "bg", readonly [string, string]>>;
@@ -127,15 +127,30 @@ export const eneoTheme = defineTheme({
     "--color-border-emphasized": ["#D3D7DE", "#2C323B"],
 
     // Status.
-    "--color-success": ["#1E7A32", "#6CC382"],
+    "--color-success": ["#1A6B2C", "#6CC382"],
     "--color-success-muted": ["#E2F2E5", "rgba(108, 195, 130, 0.15)"],
     "--color-on-success": ["#FFFFFF", "#06101C"],
-    "--color-warning": ["#8A5A00", "#E9B949"],
+    "--color-warning": ["#805400", "#E9B949"],
     "--color-warning-muted": ["#FCF0D4", "rgba(233, 185, 73, 0.15)"],
     "--color-on-warning": ["#FFFFFF", "#06101C"],
-    "--color-error": ["#B42330", "#FF8177"],
+    "--color-error": ["#B22330", "#FF8177"],
     "--color-error-muted": ["#FBE5E6", "rgba(255, 129, 119, 0.15)"],
     "--color-on-error": ["#FFFFFF", "#06101C"],
+    // Info is a status of its own: Eneo blue, as the accent.
+    "--color-info": ["#1A6FD2", "#4D94F2"],
+    "--color-info-muted": ["#E6EEFA", "rgba(77, 148, 242, 0.16)"],
+    "--color-on-info": ["#FFFFFF", "#06101C"],
+    // Status text, and text on the muted status fills (banners, the
+    // destructive button): the categorical status hues. Status icons and
+    // borders follow the text colour.
+    "--color-text-info": ["#1557A8", "#8DBAF7"],
+    "--color-text-success": ["#1E7A32", "#6CC382"],
+    "--color-text-warning": ["#8A5A00", "#E9B949"],
+    "--color-text-error": ["#B42330", "#FF8177"],
+    "--color-on-info-muted": ["#1557A8", "#8DBAF7"],
+    "--color-on-success-muted": ["#1E7A32", "#6CC382"],
+    "--color-on-warning-muted": ["#8A5A00", "#E9B949"],
+    "--color-on-error-muted": ["#B42330", "#FF8177"],
 
     // Effects.
     "--color-skeleton": ["#E6E9EE", "#242A32"],
@@ -176,7 +191,7 @@ export const eneoTheme = defineTheme({
       "0 24px 56px light-dark(rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.6)), " +
       "inset 0 0 0 1px light-dark(transparent, rgba(255, 255, 255, 0.09))",
 
-    // Fonts are loaded by next/font in src/app/layout.tsx (CSS variables on <html>).
+    // Fonts are self-hosted by src/styles/globals.css (CSS variables on :root).
     "--font-family-body": FONT_BODY,
     "--font-family-heading": FONT_BODY,
     "--font-family-code": FONT_CODE
@@ -192,13 +207,12 @@ export const eneoTheme = defineTheme({
     // tracks): 3:1 on every surface, WCAG 1.4.11. The emphasized border above
     // stays the lighter, decorative edge.
     "--eneo-color-border-control": ["#7E8593", "#747C8B"],
-    // Neutral paints Badge/StatusDot/ProgressBar status fills from these; point
-    // them at the Eneo status colours so fills pair with the on-* colours above.
-    "--astryx-theme-neutral-color-status-fill-accent": ["#1A6FD2", "#4D94F2"],
-    "--astryx-theme-neutral-color-status-fill-success": ["#1E7A32", "#6CC382"],
-    "--astryx-theme-neutral-color-status-fill-warning": ["#8A5A00", "#E9B949"],
-    "--astryx-theme-neutral-color-status-fill-error": ["#B42330", "#FF8177"],
-    "--astryx-theme-neutral-color-status-muted-accent": ["#E6EEFA", "rgba(77, 148, 242, 0.16)"]
+    // The selected option of a segmented control or the legacy tabs: a plate
+    // raised above its track, lighter than it in both modes. Light mode keeps
+    // the white plate with no edge; in dark mode a white lift composes over
+    // whichever track it sits on, and the control border edges it (3:1).
+    "--eneo-color-segment-selected": ["#FFFFFF", "rgba(255, 255, 255, 0.14)"],
+    "--eneo-color-segment-selected-edge": ["rgba(0, 0, 0, 0)", "var(--eneo-color-border-control)"]
   },
 
   // Astryx draws form-control boundaries with --color-border-emphasized (and
@@ -231,32 +245,67 @@ export const eneoTheme = defineTheme({
     ),
     switch: {
       base: { "--color-background-gray": "var(--eneo-color-border-control)" }
+    },
+    // Neutral draws the selected segment in the surface colour, darker than its
+    // track in dark mode, so it looked pressed in: the shared raised plate.
+    // An inset edge adds no size.
+    "segmented-control-item": {
+      // The small size would sit 20 px high in its track; a target is at least 24 (2.5.8).
+      base: { minHeight: "24px" },
+      selected: {
+        backgroundColor: "var(--eneo-color-segment-selected)",
+        boxShadow: "inset 0 0 0 1px var(--eneo-color-segment-selected-edge)"
+      }
     }
   },
 
   // Touch layouts: 44×44 px targets (ACCESSIBILITY.md → Target size, the
-  // Eneo standard above WCAG 2.5.8's 24 px). The element sizes drive buttons
-  // (icon-only ones are square), menu triggers, tabs, nav items, inputs and
-  // selectors; segmented items sit 4 px inside theirs, checkbox, radio and
-  // switch rows get the height their enlarged inputs need (globals.css), and
-  // a Selector's search field and option rows get 44 px of their own.
+  // Eneo standard above WCAG 2.5.8's 24 px), and text a step larger for
+  // reading at arm's length: body and labels 15 px, supporting text 13 px
+  // (globals.css section 14 moves Tailwind's text-sm and text-xs with it).
+  // The element sizes drive buttons (icon-only ones are square), menu
+  // triggers, tabs, nav items, inputs and selectors; segmented items sit 4 px
+  // inside theirs, checkbox, radio and switch rows get the height their
+  // enlarged inputs need (globals.css), and a Selector's search field and
+  // option rows, every menu row (plain, checkbox, radio, submenu) and a
+  // Collapsible's trigger get 44 px of their own: Astryx sizes those by text
+  // and padding alone.
   adaptations: {
     rules: [
+      // Neutral moves touch phones to a 16 px type scale and re-emits its own
+      // font stacks there (no JetBrains Mono for code). Keep Eneo's scale and
+      // fonts; the coarse rule below sets the touch text sizes.
+      {
+        when: { pointer: "coarse", width: { below: "lg" } },
+        value: {
+          typography: { scale: { base: 14, ratio: 1.2 } },
+          tokens: {
+            "--font-family-body": FONT_BODY,
+            "--font-family-heading": FONT_BODY,
+            "--font-family-code": FONT_CODE
+          }
+        }
+      },
       {
         when: { pointer: "coarse" },
         value: {
           tokens: {
             "--size-element-sm": "44px",
             "--size-element-md": "44px",
-            "--size-element-lg": "44px"
+            "--size-element-lg": "44px",
+            "--text-body-size": "0.9375rem",
+            "--text-label-size": "0.9375rem",
+            "--text-supporting-size": "0.8125rem"
           },
           components: {
-            "segmented-control-item": { base: { minHeight: "44px" } },
+            "segmented-control-item": { base: { minHeight: "44px", minWidth: "44px" } },
             "checkbox-input": { base: { minHeight: "44px" } },
             "radio-list-item": { base: { minHeight: "44px" } },
             "switch-field": { base: { minHeight: "44px" } },
             "selector-search": { base: { minHeight: "44px" } },
-            "selector-option-row": { base: { minHeight: "44px" } }
+            "selector-option-row": { base: { minHeight: "44px" } },
+            "dropdown-menu-item": { base: { minHeight: "44px" } },
+            "collapsible-trigger": { base: { minHeight: "44px" } }
           }
         }
       }

@@ -163,10 +163,11 @@ async def test_non_admin_mutations_raise_unauthorized(method: str, kwargs: dict)
     non_admin = _make_user()  # no permissions
     org_space_id = uuid4()
 
-    service, _ = _build_service(user=non_admin, org_space_id=org_space_id)
+    service, mocks = _build_service(user=non_admin, org_space_id=org_space_id)
 
     with pytest.raises(UnauthorizedException):
         await getattr(service, method)(**kwargs)
+    mocks["users_repo"].get_or_create_system_user_id_for_tenant.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -374,7 +375,7 @@ async def test_install_helper_creates_assistant_with_shipped_prompt_and_visible_
     prompt_service.create_prompt.return_value = new_prompt
 
     users_repo = AsyncMock()
-    users_repo.get_system_user_id_for_tenant.return_value = system_user_id
+    users_repo.get_or_create_system_user_id_for_tenant.return_value = system_user_id
 
     completion_model_crud_service = AsyncMock()
     # No eligible model is fine: install proceeds with completion_model=None.
@@ -391,16 +392,25 @@ async def test_install_helper_creates_assistant_with_shipped_prompt_and_visible_
 
     result = await service.install_helper(kind=HelperKind.PROMPT_GUIDE)
 
+    users_repo.get_or_create_system_user_id_for_tenant.assert_awaited_once_with(
+        tenant_id=admin.tenant_id
+    )
+
     # The shipped template prompt is applied (it drives the Q&A UI), not blank.
     prompt_service.create_prompt.assert_awaited_once()
     installed_text = prompt_service.create_prompt.await_args.kwargs["text"]
     assert installed_text == get_template(HelperKind.PROMPT_GUIDE).prompt_text
     assert installed_text != ""
+    assert (
+        prompt_service.create_prompt.await_args.kwargs["owner_user_id"]
+        == system_user_id
+    )
 
     # A new assistant row was created in the org-space.
     mocks["assistant_repo"].add.assert_awaited_once()
     new_assistant = mocks["assistant_repo"].add.await_args.args[0]
     assert new_assistant.space_id == org_space_id
+    assert new_assistant.user.id == system_user_id
 
     # The role is installed enabled and visible, pointing at the new assistant.
     role_repo.add.assert_awaited_once()

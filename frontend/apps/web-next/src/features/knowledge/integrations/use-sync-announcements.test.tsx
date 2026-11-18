@@ -94,9 +94,10 @@ describe("useSourceAnnouncements", () => {
     await show(idle());
     await show(synced());
 
-    // The queued sync started before the region took the first text.
+    // The queued sync started before the region took the first text: Astryx
+    // says both texts of that frame.
     expect(said).toEqual([
-      "Synk av Avtal har startat",
+      "Synk av Avtal köad Synk av Avtal har startat",
       "Avtal: 12 av 40 lästa",
       "Avtal: 40 av 40 lästa",
       "Synk av Avtal klar"
@@ -120,7 +121,8 @@ describe("useSourceAnnouncements", () => {
     await act(() => vi.advanceTimersByTimeAsync(OUTCOME_WAIT_MS));
     vi.useRealTimers();
     await frame();
-    expect(said).toEqual(["Synk av Avtal pågår inte längre"]);
+    // Astryx says every text given in one frame (the start, then the end).
+    expect(said).toEqual(["Synk av Avtal har startat Synk av Avtal pågår inte längre"]);
   });
 
   it("keeps a change notification's sync quiet", async () => {

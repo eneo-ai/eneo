@@ -57,7 +57,8 @@ it("asks for a free answer at its field when the question has no options", () =>
   );
   const answer = screen.getByRole("textbox", { name: "Ditt svar" });
 
-  fireEvent.keyDown(answer, { key: "Enter" });
+  // Ctrl+Enter sends; plain Return is a line break (a phone has no Shift).
+  fireEvent.keyDown(answer, { key: "Enter", ctrlKey: true });
 
   expect(document.activeElement).toBe(answer);
   expect(answer.getAttribute("aria-invalid")).toBe("true");
@@ -67,4 +68,24 @@ it("asks for a free answer at its field when the question has no options", () =>
   fireEvent.change(answer, { target: { value: "Svara på frågor om bygglov" } });
   fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
   expect(onAnswer).toHaveBeenCalledWith("Svara på frågor om bygglov");
+});
+
+it("does not send on plain Return, which adds a line", () => {
+  const onAnswer = vi.fn();
+  renderInApp(
+    <PromptGuideQuestionCard
+      question={{
+        header: "Syfte",
+        question: "Vad ska assistenten hjälpa till med?",
+        multiSelect: false,
+        options: []
+      }}
+      disabled={false}
+      onAnswer={onAnswer}
+    />
+  );
+  const answer = screen.getByRole("textbox", { name: "Ditt svar" });
+  fireEvent.change(answer, { target: { value: "Svara på frågor" } });
+  fireEvent.keyDown(answer, { key: "Enter" });
+  expect(onAnswer).not.toHaveBeenCalled();
 });

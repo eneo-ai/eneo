@@ -1,4 +1,4 @@
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import type { ModelKind } from "./models";
 
 /** Translated model type for UI labels ("Chatt", "Inbäddning", "Transkription", "Bildgenerering", "Rerankning"). */

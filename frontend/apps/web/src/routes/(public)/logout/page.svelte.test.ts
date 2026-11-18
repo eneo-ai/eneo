@@ -12,7 +12,7 @@ import LogoutPage from "./+page.svelte";
 
 describe("logout page", () => {
   test("confirms the logout with a heading and a way back in", async () => {
-    render(LogoutPage, { data: { message: "logout" } });
+    render(LogoutPage, { data: { message: "logout", signedIn: false } });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("logout_success");
@@ -23,10 +23,45 @@ describe("logout page", () => {
   });
 
   test("explains an expired session", async () => {
-    render(LogoutPage, { data: { message: "expired" } });
+    render(LogoutPage, { data: { message: "expired", signedIn: false } });
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("session_expired");
     await expect.element(page.getByText("session_expired_description")).toBeVisible();
   });
+
+  test("a direct visit offers a deliberate logout instead of ending the session", async () => {
+    render(LogoutPage, { data: { message: "logout", signedIn: true } });
+    await expect.element(page.getByRole("heading", { level: 1 })).toHaveTextContent("logout");
+    await expect
+      .element(page.getByRole("button", { name: "logout", exact: true }))
+      .toHaveAttribute("type", "submit");
+    expect(document.querySelector("form")?.method).toBe("post");
+    expect(document.querySelector("form")?.getAttribute("action")).toBe("/logout?/logout");
+  });
+
+  test.each([
+    ["logout", "expired"],
+    ["switchOrganisation", "logout"],
+    ["clearCookies", "logout"]
+  ] as const)(
+    "a %s the server could not complete says so and retries it",
+    async (action, message) => {
+      render(LogoutPage, {
+        data: { message: "logout", signedIn: true },
+        form: { signOutFailed: action, message }
+      });
+      await expect
+        .element(page.getByRole("heading", { level: 1 }))
+        .toHaveTextContent("logout_unavailable");
+      await expect.element(page.getByText("logout_unavailable_description")).toBeVisible();
+      await expect
+        .element(page.getByRole("button", { name: "retry" }))
+        .toHaveAttribute("type", "submit");
+      const form = document.querySelector("form");
+      expect(form?.method).toBe("post");
+      expect(form?.getAttribute("action")).toBe(`/logout?/${action}`);
+      expect(form?.querySelector<HTMLInputElement>("input[name=message]")?.value).toBe(message);
+    }
+  );
 });

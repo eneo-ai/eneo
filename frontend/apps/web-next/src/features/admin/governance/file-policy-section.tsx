@@ -1,7 +1,5 @@
-"use client";
-
 import { Paperclip } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { PolicySection } from "./policy-section";
@@ -21,9 +19,20 @@ export function FilePolicySection({ draft }: { draft: PolicyDraft }) {
       <div className="flex items-start justify-between gap-4">
         <div>
           <Label htmlFor="files-large">{t("attachments_open_files_label")}</Label>
-          <p id="files-large-help" className="text-muted-foreground mt-1 text-sm">
-            {t("attachments_open_files_help")}
-          </p>
+          <div id="files-large-help" className="text-muted-foreground mt-1 space-y-2 text-sm">
+            <p>
+              <span className="font-semibold">{t("attachments_open_files_on_label")}:</span>{" "}
+              {t("attachments_open_files_on")}
+            </p>
+            <p>
+              <span className="font-semibold">{t("attachments_open_files_off_label")}:</span>{" "}
+              {t("attachments_open_files_off")}
+            </p>
+            <p>
+              <span className="font-semibold">{t("attachments_open_files_example_label")}:</span>{" "}
+              {t("attachments_open_files_example")}
+            </p>
+          </div>
         </div>
         <Switch
           id="files-large"

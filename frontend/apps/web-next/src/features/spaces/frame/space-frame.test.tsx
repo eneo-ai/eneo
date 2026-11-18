@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -17,8 +18,8 @@ const state = vi.hoisted(() => ({
   routeId: "space-1"
 }));
 
-vi.mock("next/navigation", () => ({
-  useSelectedLayoutSegments: () => state.segments,
+vi.mock("@/lib/navigation", () => ({
+  useSpaceSegments: () => state.segments,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/spaces/space-1"
 }));
@@ -67,6 +68,19 @@ const sharedSpace = () =>
     }
   });
 
+// A tablet's header is a chunk of its own: one render loads it, so every test then renders it at once.
+let h1WhileLoading: string | null | undefined;
+beforeAll(async () => {
+  // Fetched first: on a loaded test machine the chunk outlasts findBy's wait.
+  await import("./space-header");
+  setViewport("tablet-portrait");
+  show(sharedSpace(), ["overview"]);
+  h1WhileLoading = document.querySelector('[aria-busy="true"] h1')?.textContent;
+  await screen.findByRole("button", { name: "Lägg till medlem" });
+  cleanup();
+  setViewport("desktop");
+});
+
 describe("SpaceFrame", () => {
   it("renders the chat full-bleed, without the space header", () => {
     show(sharedSpace(), ["chat"]);
@@ -85,17 +99,78 @@ describe("SpaceFrame", () => {
     expect(screen.queryByRole("link", { name: "Ny chatt" })).toBeNull();
   });
 
+  it("gives a page beside the sidebar no header of its own: the page's title is its h1", () => {
+    const { container } = show(sharedSpace(), ["overview"]);
+    // As in Svelte, the sidebar carries the space and its sections (SpaceNav).
+    expect(screen.queryByRole("banner")).toBeNull();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(container.querySelector("[data-own-phone-header]")).toBeNull();
+  });
+
+  it("names the space above a section page for when the sidebar is its icon rail", () => {
+    // A small laptop: a mouse, under 1280 px.
+    setViewport({ width: 1024, height: 768, pointer: "fine" });
+    show(sharedSpace(), ["assistants"]);
+    // Shown by CSS only while the shell marks the rail (app-shell.tsx data-side-nav-rail).
+    const eyebrow = document.querySelector<HTMLElement>("[data-space-eyebrow]")!;
+    expect(eyebrow.textContent).toContain("Upphandling");
+    expect(eyebrow.textContent).toContain("Klass 2 · Intern");
+    expect(eyebrow.className).toMatch(/group-has-\[\[data-side-nav-rail\]\]\/shell:flex/);
+    expect(eyebrow.className).toMatch(/(^| )hidden( |$)/);
+    setViewport("desktop");
+  });
+
+  it("names it nowhere else: Översikt shows the name, a phone and a tablet have their header", () => {
+    show(sharedSpace(), ["overview"]);
+    expect(document.querySelector("[data-space-eyebrow]")).toBeNull();
+    cleanup();
+    for (const viewport of ["phone", "tablet-portrait"] as const) {
+      cleanup();
+      setViewport(viewport);
+      show(sharedSpace(), ["assistants"]);
+      expect(document.querySelector("[data-space-eyebrow]")).toBeNull();
+    }
+    setViewport("desktop");
+  });
+
+  it("scrolls with the page panel instead of a scroll container of its own", () => {
+    const { container } = show(sharedSpace(), ["overview"]);
+    // main#main-content (the app shell) is the one scroll container, so Page
+    // Down works after the skip link and nothing inside can trap the scroll.
+    expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
+    const column = screen.getByText("Sidans innehåll").parentElement!;
+    const inset = column.parentElement!;
+    // The page inset, which a full-bleed page (the space settings) drops.
+    expect(inset.className).toContain("p-6");
+    expect(inset.className).toContain("has-[[data-space-full-bleed]]:p-0");
+    // The pages' shared column, which a full-bleed page spans edge to edge.
+    expect(column.className).toContain("max-w-6xl");
+    expect(column.className).toContain("has-[[data-space-full-bleed]]:max-w-none");
+  });
+});
+
+describe("SpaceFrame on a tablet: the space's header and tabs (#1328)", () => {
+  // Touch: the SideNav lists every space, so the page names its own.
+  beforeEach(() => setViewport("tablet-portrait"));
+  afterEach(() => setViewport("desktop"));
+
+  it("is busy until the header's chunk lands, with the space name as the h1", () => {
+    expect(h1WhileLoading).toBe("Upphandling");
+  });
+
   it("gives a tab page the space name as its h1, breadcrumbs, members and tabs", async () => {
     const { container } = show(sharedSpace(), ["overview"]);
 
     expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
     expect(screen.getByText("Stöd för kommunens upphandlare.")).toBeTruthy();
-    expect(screen.getByText("Klass 2 · Intern").textContent).toBe(
+    // ClassificationToken: read with its prefix.
+    expect(screen.getByText("Klass 2 · Intern").parentElement!.textContent).toBe(
       "Säkerhetsklass: Klass 2 · Intern"
     );
 
     const crumbs = screen.getAllByRole("navigation")[0]!;
-    expect(within(crumbs).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe(
+    expect(within(crumbs).getByRole("link", { name: "Dina ytor" }).getAttribute("href")).toBe(
       "/spaces/list"
     );
     expect(within(crumbs).getByText("Upphandling").closest("[aria-current='page']")).toBeTruthy();
@@ -108,35 +183,49 @@ describe("SpaceFrame", () => {
       "/spaces/space-1/apps",
       "/spaces/space-1/knowledge",
       "/spaces/space-1/skills",
-      "/spaces/space-1/services",
       "/spaces/space-1/members",
       "/spaces/space-1/settings"
     ]);
     expect(within(tabs).getByRole("link", { name: "Översikt" }).getAttribute("aria-current")).toBe(
       "true"
     );
-    expect(within(tabs).getByRole("link", { name: "Assistenter (2)" })).toBeTruthy();
+    // Named by what it shows, the count with it, so the name holds the visible label (WCAG 2.5.3).
+    const assistants = within(tabs).getByRole("link", { name: "Assistenter 2" });
+    expect(assistants.hasAttribute("aria-label")).toBe(false);
     expect(within(tabs).getByRole("link", { name: "Skills" })).toBeTruthy();
 
     expect(screen.getByRole("group", { name: "4 medlemmar" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till medlem" })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
-      "/spaces/space-1/chat"
-    );
+    const newChat = screen.getByRole("link", { name: "Ny chatt" });
+    expect(newChat.getAttribute("href")).toBe("/spaces/space-1/chat");
+    // Each tab's own create button is the one primary action; a new chat stays in reach.
+    expect(newChat.getAttribute("data-variant")).toBe("secondary");
     expect(screen.getByText("Sidans innehåll")).toBeTruthy();
 
     await expectNoAxeViolations(container);
   });
 
-  it("scrolls with the page panel instead of a scroll container of its own", () => {
-    const { container } = show(sharedSpace(), ["overview"]);
-    // main#main-content (the app shell) is the one scroll container, so Page
-    // Down works after the skip link and nothing inside can trap the scroll.
-    expect(container.querySelector(".overflow-y-auto, .overflow-auto")).toBeNull();
-    const content = screen.getByText("Sidans innehåll").parentElement!;
-    // The page inset, which a full-bleed page (the assistant editor) drops.
-    expect(content.className).toContain("p-6");
-    expect(content.className).toContain("has-[[data-space-full-bleed]]:p-0");
+  it("centres the name on the tile when no description runs under it", () => {
+    const column = () =>
+      screen.getByRole("heading", { level: 1, name: "Upphandling" }).closest(".flex-col")!;
+    show(sharedSpace(), ["overview"]);
+    // A description under the name: both start at the tile's top edge.
+    expect(column().className).not.toContain("self-center");
+    cleanup();
+    show(makeSpace({ overrides: { description: null } }), ["overview"]);
+    expect(column().className).toContain("self-center");
+  });
+
+  it("lines the header up with the page below it, in the pages' shared column", () => {
+    show(sharedSpace(), ["overview"]);
+    const header = screen
+      .getByRole("heading", { level: 1, name: "Upphandling" })
+      .closest("header")!;
+    // The band and its border span the frame; the name, actions and tabs start on the page's line.
+    expect(header.className).toContain("border-b");
+    expect(header.className).not.toContain("max-w-6xl");
+    expect(header.firstElementChild!.className).toContain("max-w-6xl");
+    expect(header.firstElementChild!.className).toContain("mx-auto");
   });
 
   it("leaves the h1 to a detail page and marks its tab as current", async () => {
@@ -152,9 +241,9 @@ describe("SpaceFrame", () => {
       "/spaces/space-1/overview"
     );
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    expect(
-      within(tabs).getByRole("link", { name: "Kunskap (0)" }).getAttribute("aria-current")
-    ).toBe("true");
+    expect(within(tabs).getByRole("link", { name: "Kunskap 0" }).getAttribute("aria-current")).toBe(
+      "true"
+    );
 
     await expectNoAxeViolations(container);
   });
@@ -169,15 +258,15 @@ describe("SpaceFrame", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Lägg till medlem" })).toBeNull();
     expect(screen.queryByRole("group", { name: /medlem/ })).toBeNull();
-    expect(screen.getByRole("link", { name: "Ny chatt" }).getAttribute("href")).toBe(
-      "/spaces/personal/chat"
-    );
+    const newChat = screen.getByRole("link", { name: "Ny chatt" });
+    expect(newChat.getAttribute("href")).toBe("/spaces/personal/chat");
+    expect(newChat.getAttribute("data-variant")).toBe("secondary");
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
     expect(within(tabs).queryByRole("link", { name: /Medlemmar/ })).toBeNull();
     expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
   });
 
-  it("keeps the organization space to its four tabs, named by the h1 on its Skills tab", () => {
+  it("keeps the organization space to its three tabs, named by the h1 on its Skills tab", () => {
     show(makeSpace({ overrides: { organization: true } }), ["skills"], "organization");
 
     // The Skills page is a tab like any other: its own title is an h2.
@@ -191,7 +280,6 @@ describe("SpaceFrame", () => {
     ).toEqual([
       "/spaces/organization/knowledge",
       "/spaces/organization/skills",
-      "/spaces/organization/services",
       "/spaces/organization/settings"
     ]);
     expect(within(tabs).getByRole("link", { name: "Skills" }).getAttribute("aria-current")).toBe(
@@ -217,7 +305,7 @@ describe("SpaceFrame", () => {
   it("keeps the tabs one tab stop that arrow keys move through", () => {
     show(sharedSpace(), ["knowledge"]);
     const tabs = screen.getByRole("navigation", { name: "Ytans innehåll" });
-    const current = within(tabs).getByRole("link", { name: "Kunskap (0)" });
+    const current = within(tabs).getByRole("link", { name: "Kunskap 0" });
     const others = within(tabs)
       .getAllByRole("link")
       .filter((link) => link !== current);
@@ -252,5 +340,140 @@ describe("SpaceFrame", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(invite));
+  });
+});
+
+describe("SpaceFrame on a phone (decision 24)", () => {
+  const phoneHeader = () => document.querySelector<HTMLElement>("[data-own-phone-header]");
+  const tabHrefs = () =>
+    within(screen.getByRole("navigation", { name: "Ytans innehåll" }))
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"));
+
+  it("pushes a shared space: back to Dina ytor, its name and class, the content tabs only", async () => {
+    setViewport("phone");
+    const { container } = show(sharedSpace(), ["overview"]);
+
+    const back = screen.getByRole("link", { name: "Tillbaka till Dina ytor" });
+    expect(back.getAttribute("href")).toBe("/spaces/list");
+    expect(phoneHeader()?.contains(back)).toBe(true);
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
+    expect(screen.getByText("Säkerhetsklass:").parentElement?.textContent).toContain(
+      "Klass 2 · Intern"
+    );
+    expect(tabHrefs()).toEqual([
+      "/spaces/space-1/overview",
+      "/spaces/space-1/assistants",
+      "/spaces/space-1/apps",
+      "/spaces/space-1/knowledge"
+    ]);
+    // The chat is one tap away in the bar; the breadcrumbs and the member stack are not here.
+    expect(
+      within(phoneHeader()!).getByRole("link", { name: "Ny chatt" }).getAttribute("href")
+    ).toBe("/spaces/space-1/chat");
+    expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
+    expect(screen.queryByRole("group", { name: /medlemmar/ })).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("keeps the menu for the personal space, which the menu leads to", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        overrides: { personal: true, members: { items: [], count: 0, permissions: [] } },
+        permissions: ["read"]
+      }),
+      ["assistants"],
+      "personal"
+    );
+    expect(screen.queryByRole("link", { name: /^Tillbaka till/ })).toBeNull();
+    expect(phoneHeader()).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
+    expect(tabHrefs()).toEqual([
+      "/spaces/personal/overview",
+      "/spaces/personal/assistants",
+      "/spaces/personal/apps",
+      "/spaces/personal/knowledge"
+    ]);
+  });
+
+  it("keeps every tab of the organisation space, which has no Översikt (F4)", () => {
+    setViewport("phone");
+    show(makeSpace({ overrides: { organization: true } }), ["knowledge"], "organization");
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toEqual([
+      "/spaces/organization/knowledge",
+      "/spaces/organization/skills",
+      "/spaces/organization/settings"
+    ]);
+  });
+
+  it("pushes Medlemmar from the space: back to the space, no tabs", () => {
+    setViewport("phone");
+    show(sharedSpace(), ["members"]);
+    const back = screen.getByRole("link", { name: "Tillbaka till Upphandling" });
+    expect(back.getAttribute("href")).toBe("/spaces/space-1/overview");
+    expect(screen.queryByRole("navigation", { name: "Ytans innehåll" })).toBeNull();
+    // The page's own heading follows the space's.
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
+  });
+
+  it("pushes a page below a tab: back to the tab, its own heading", () => {
+    setViewport("phone");
+    show(sharedSpace(), ["knowledge", "collections", "c1"]);
+    const back = screen.getByRole("link", { name: "Tillbaka till Kunskap" });
+    expect(back.getAttribute("href")).toBe("/spaces/space-1/knowledge");
+    expect(screen.queryByRole("navigation", { name: "Ytans innehåll" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("gives a section root outside the tabs its h1, and keeps the menu for the organisation space", () => {
+    setViewport("phone");
+    // /spaces/organization redirects here, though the organisation space has no Översikt.
+    show(makeSpace({ overrides: { organization: true } }), ["overview"], "organization");
+    expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual([
+      "Organisation"
+    ]);
+    expect(phoneHeader()).toBeNull();
+  });
+
+  it("goes back from an app's result to the app, the screen it was opened from", () => {
+    setViewport("phone");
+    show(makeSpace({ apps: [{ id: "p1", name: "Bygglovsguiden" }] }), [
+      "apps",
+      "p1",
+      "results",
+      "r1"
+    ]);
+    expect(
+      screen.getByRole("link", { name: "Tillbaka till Bygglovsguiden" }).getAttribute("href")
+    ).toBe("/spaces/space-1/apps/p1");
+  });
+
+  it("is not on a tablet, which keeps the header with every tab", () => {
+    setViewport("tablet-portrait");
+    show(sharedSpace(), ["overview"]);
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toHaveLength(7);
+  });
+
+  it("is on a phone turned sideways, which has no height for the breadcrumb and seven tabs", () => {
+    setViewport("phone-landscape");
+    show(sharedSpace(), ["overview"]);
+    expect(phoneHeader()).not.toBeNull();
+    expect(tabHrefs()).toHaveLength(4);
+    expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
+  });
+
+  it("turns with the phone: the header swaps for the phone's when it is laid sideways", () => {
+    setViewport("tablet-portrait");
+    show(sharedSpace(), ["overview"]);
+    act(() => setViewport("phone-landscape"));
+    expect(phoneHeader()).not.toBeNull();
+    expect(tabHrefs()).toHaveLength(4);
+    // An iPad turned with its keyboard up is short too, but as wide as a laptop: the tablet's.
+    act(() => setViewport({ width: 1180, height: 470, pointer: "coarse" }));
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toHaveLength(7);
   });
 });

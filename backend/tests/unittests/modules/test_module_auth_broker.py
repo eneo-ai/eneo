@@ -14,6 +14,7 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyType,
+    CredentialFacts,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings
@@ -90,6 +91,7 @@ def make_user(**overrides):
     user.username = "user"
     user.is_active = True
     user.credential_version = 0
+    user.credential = None
     for key, value in overrides.items():
         setattr(user, key, value)
     return user
@@ -305,6 +307,18 @@ class TestExchangeTicket:
         with pytest.raises(AuthenticationException):
             await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
 
+    @pytest.mark.parametrize("session_ref", ["not-a-session", None, 7])
+    async def test_a_ticket_naming_a_malformed_session_is_refused(self, session_ref):
+        broker = make_broker()
+        ticket = issued_ticket(await issue(broker))
+        ticket_key = next(iter(broker.redis_client.store))
+        payload = json.loads(broker.redis_client.store[ticket_key])
+        payload["session_ref"] = session_ref
+        broker.redis_client.store[ticket_key] = json.dumps(payload)
+
+        with pytest.raises(AuthenticationException):
+            await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+
     @pytest.mark.parametrize("missing_claim", ["token_version", "credential_version"])
     async def test_legacy_ticket_cannot_mint_a_new_session(self, missing_claim):
         broker = make_broker(user=make_user(credential_version=0))
@@ -433,6 +447,7 @@ class TestModuleResourceAuthentication:
 
         assert principal.module.id == MODULE_ID
         assert principal.user.id == USER_ID
+        assert principal.user.credential == CredentialFacts(kind="derived")
         assert principal.api_key.id == SERVICE_KEY_ID
         broker.module_repo.get_module_client_config.assert_awaited_once_with(
             tenant_id=TENANT_ID,
@@ -625,11 +640,37 @@ class TestRefreshToken:
         original = self.claims_of(broker, exchanged.access_token)
         renewed = self.claims_of(broker, refreshed.access_token)
         assert renewed[MODULE_HANDOFF_AT_CLAIM] == original[MODULE_HANDOFF_AT_CLAIM]
+        # A handoff outside a browser session names none, before or after,
+        # and the renewed token still validates.
+        assert "session_ref" not in original
+        assert "session_ref" not in renewed
+        broker.validate_module_user_token(refreshed.access_token, make_module())
         assert renewed["user_id"] == original["user_id"]
         assert renewed["tenant_id"] == original["tenant_id"]
         assert refreshed.session_expires_at == exchanged.session_expires_at
         assert refreshed.module_key == MODULE_KEY
         assert refreshed.user.id == USER_ID
+
+    async def test_a_module_refresh_copies_the_signed_session_ref(self):
+        ref = uuid4()
+        broker = make_broker()
+        in_session = make_user(
+            credential=CredentialFacts(kind="browser_session", session_ref=ref)
+        )
+        ticket = issued_ticket(await issue(broker, user=in_session))
+        exchanged = await broker.exchange_ticket(api_key=make_api_key(), ticket=ticket)
+        principal = await broker.authenticate_resource_request(
+            module_key=MODULE_KEY,
+            access_token=exchanged.access_token,
+            api_key=make_api_key(),
+        )
+
+        refreshed = await broker.refresh_token(principal=principal)
+
+        # The handoff's session is signed into the module token, and refresh
+        # copies it from the token it renews.
+        for token in (exchanged.access_token, refreshed.access_token):
+            assert self.claims_of(broker, token)["session_ref"] == str(ref)
 
     async def test_refresh_near_ceiling_clips_token_expiry(self):
         broker = make_broker()

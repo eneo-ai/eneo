@@ -16,6 +16,8 @@
 ## User-facing
 <!-- One or two sentences from the user's point of view, or "No".
      Feeds the What's new page at release time — see frontend/packages/whats-new/PLAYBOOK.md.
+     "No" for anything a person does not see or do differently inside Eneo:
+     IdP, environment or deployment configuration, operator-only fixes, performance, CI.
      Give anything worth pointing at a data-tour="..." anchor. -->
 
 ## Testing

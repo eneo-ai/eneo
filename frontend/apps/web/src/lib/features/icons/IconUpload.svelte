@@ -13,6 +13,10 @@
   export let iconUrl: string | null = null;
   export let uploading = false;
   export let error: string | null = null;
+  /** The file input's id; give each upload on a page its own so labels match (WCAG 1.3.1). */
+  export let inputId = "avatarInput";
+  /** The remove button's name; the default says "Delete" as the icon itself goes. */
+  export let removeLabel: string | null = null;
 
   const dispatch = createEventDispatcher<{
     upload: File;
@@ -86,7 +90,7 @@
     <Button
       variant="destructive"
       size="icon"
-      aria-label={m.delete()}
+      aria-label={removeLabel ?? m.delete()}
       onclick={handleDelete}
       disabled={uploading}
     >
@@ -126,7 +130,7 @@
   </div>
 {:else}
   <label
-    for="avatarInput"
+    for={inputId}
     class="border-default hover:bg-hover-stronger flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-lg border transition-colors"
   >
     <IconUpload />
@@ -142,7 +146,7 @@
 
 <input
   type="file"
-  id="avatarInput"
+  id={inputId}
   accept={ALLOWED_TYPES.join(",")}
   on:change={handleFileSelect}
   class="pointer-events-none absolute h-0 w-0 rounded-lg file:border-none file:bg-transparent file:text-transparent"

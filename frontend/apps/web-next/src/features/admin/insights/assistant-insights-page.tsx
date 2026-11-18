@@ -1,16 +1,14 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
-import { DateInput } from "@astryxdesign/core/DateInput";
-import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
-import { Switch } from "@/components/astryx/switch";
+import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
+import { revealProblems } from "@/components/composites/field-problem";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@/components/astryx/text-input";
-import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   Check,
@@ -19,47 +17,42 @@ import {
   History,
   RotateCcw,
   Search,
-  SendHorizontal
+  SendHorizontal,
+  Square
 } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
-import {
-  type Dispatch,
-  type SetStateAction,
-  useDeferredValue,
-  useEffect,
-  useId,
-  useRef,
-  useState
-} from "react";
-import { flushSync } from "react-dom";
+import { useFormatter, useTranslations } from "use-intl";
+import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
+import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import {
   askAssistantInsightQuestion,
   assistantQuestionHistoryQueryOptions,
   fetchAssistantQuestionHistory,
-  isoFromDateInput,
-  localDate,
   type AssistantInsightFilters,
   type AssistantInsightQuestion
 } from "./insights";
 import { AnswerFeedbackCell } from "./answer-feedback-cell";
 import { AnswerFeedbackSummary } from "./answer-feedback-summary";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
+import { QuestionDetails } from "./question-details";
+import {
+  readAssistantInsightView,
+  assistantInsightViewSearch,
+  type AssistantInsightView
+} from "./assistant-insights-view";
+import { useSearchParams, replaceUrl } from "@/lib/navigation";
+import { insightPeriod } from "./insights";
+import { insightRangeOfDays } from "@/features/insights/insights-range";
+import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
-type InsightsTab = "analysis" | "questions";
-
-function defaultFilters(): AssistantInsightFilters {
-  const end = new Date();
-  const start = new Date(end);
-  start.setDate(start.getDate() - 30);
-  return { start: start.toISOString(), end: end.toISOString(), includeFollowups: true };
-}
+type InsightsTab = AssistantInsightView["tab"];
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
@@ -71,48 +64,38 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function FilterBar({
-  filters,
-  setFilters
+  view,
+  onChange
 }: {
-  filters: AssistantInsightFilters;
-  setFilters: Dispatch<SetStateAction<AssistantInsightFilters>>;
+  view: AssistantInsightView;
+  onChange: (view: AssistantInsightView) => void;
 }) {
   const t = useTranslations();
-  // Astryx's own calendar everywhere: the native picker it uses on touch
-  // probes the engine with a <style> element, which the production CSP blocks
-  // (AGENTS.md → CSP).
-  const dateField = (boundary: "start" | "end") => (
-    <DateInput
-      label={boundary === "start" ? t("from") : t("to")}
-      value={localDate(boundary === "start" ? filters.start : filters.end)}
-      onChange={(value) => {
-        if (!value) return;
-        setFilters((current) => ({ ...current, [boundary]: isoFromDateInput(value, boundary) }));
-      }}
-      presentation="adaptive-bottom-sheet"
-      weekStartsOn="mon"
-      format="date"
-      width="11rem"
-    />
-  );
-
   return (
     <Card className="flex flex-wrap items-end gap-3">
-      {dateField("start")}
-      {dateField("end")}
+      <div className="min-w-0 flex-1">
+        <InsightsRangePicker
+          value={view.range}
+          onChange={(range) => onChange({ ...view, range })}
+        />
+      </div>
       <Switch
         label={t("include_follow_up_questions")}
-        value={filters.includeFollowups}
-        onChange={(checked) => setFilters((current) => ({ ...current, includeFollowups: checked }))}
+        value={view.includeFollowups}
+        onChange={(checked) => onChange({ ...view, includeFollowups: checked })}
       />
       <Button
         label={t("reset")}
         icon={<RotateCcw className="size-4" aria-hidden="true" />}
-        onClick={() => setFilters(defaultFilters())}
+        onClick={() => onChange({ ...view, range: insightRangeOfDays(30), includeFollowups: true })}
       />
     </Card>
   );
 }
+
+type AnalysisResult = { context: string; answer: string } & (
+  { status: "streaming" | "complete" | "stopped" } | { status: "error"; error: unknown }
+);
 
 function AnalysisTab({
   assistantId,
@@ -125,65 +108,119 @@ function AnalysisTab({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  const coarse = useMediaQuery("(pointer: coarse)");
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const questionProblem = asked && !question.trim() ? t("required_field") : null;
-  const [answer, setAnswer] = useState("");
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const context = `${assistantId}|${filters.start}|${filters.end}|${filters.includeFollowups}`;
+  const [previousContext, setPreviousContext] = useState(context);
+  if (previousContext !== context) {
+    setPreviousContext(context);
+    setResult(null);
+  }
+  const current = result?.context === context ? result : null;
+  const answer = current?.answer ?? "";
+  const running = current?.status === "streaming";
+  const request = useRef<AbortController | null>(null);
+  const { copy, isCopied } = useCopy();
+  useEffect(() => () => request.current?.abort(), [context]);
 
-  const ask = useMutation({
-    mutationFn: (text: string) =>
-      askAssistantInsightQuestion({ api: browserApi, assistantId, filters, question: text }),
-    // The answer can take a while and appears away from focus (WCAG 4.1.3).
-    onSuccess: (text) => {
-      setAnswer(text);
+  async function askQuestion() {
+    if (request.current && !request.current.signal.aborted) return;
+    const text = question.trim();
+    if (!text) {
+      revealProblems(() => setAsked(true), questionRef.current);
+      return;
+    }
+    const controller = new AbortController();
+    request.current = controller;
+    const active = () => request.current === controller && !controller.signal.aborted;
+    setResult({ context, answer: "", status: "streaming" });
+    try {
+      const text = await askAssistantInsightQuestion({
+        api: browserApi,
+        assistantId,
+        filters,
+        question: question.trim(),
+        signal: controller.signal,
+        onAnswer: (part) => {
+          if (active())
+            setResult((previous) =>
+              previous?.context === context
+                ? { ...previous, answer: previous.answer + part }
+                : previous
+            );
+        }
+      });
+      if (!active()) return;
+      setResult({ context, answer: text, status: "complete" });
       announce(t("chat_announce_answer_ready"));
-    },
-    onError: () => announce(t("request_failed"))
-  });
+    } catch (error) {
+      if (!active()) return;
+      setResult((previous) => ({
+        context,
+        answer: previous?.context === context ? previous.answer : "",
+        status: "error",
+        error
+      }));
+      announce(t("request_failed"));
+    } finally {
+      if (request.current === controller) request.current = null;
+    }
+  }
+
+  function stop() {
+    request.current?.abort();
+    setResult((previous) =>
+      previous?.context === context ? { ...previous, status: "stopped" } : previous
+    );
+    announce(t("chat_announce_stopped"));
+  }
 
   return (
     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <Card className="flex min-h-96 flex-col gap-4">
+      <Card className="flex min-h-96 min-w-0 flex-col gap-4">
         <form
           className="flex flex-col gap-3"
           onSubmit={(event) => {
             event.preventDefault();
-            const text = question.trim();
-            if (ask.isPending) return;
-            if (!text) {
-              // An empty question shows at the field, which takes focus.
-              flushSync(() => setAsked(true));
-              questionRef.current?.focus();
-              return;
-            }
-            setAnswer("");
-            ask.mutate(text);
+            void askQuestion();
           }}
         >
           <TextArea
             ref={questionRef}
             label={t("ask_about_insights")}
-            description={t("insights_enter_hint")}
+            description={coarse ? undefined : t("insights_enter_hint")}
             rows={4}
             value={question}
             onChange={setQuestion}
             status={questionProblem ? { type: "error", message: questionProblem } : undefined}
             onKeyDown={(event) => {
-              if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+              if (
+                event.key !== "Enter" ||
+                event.shiftKey ||
+                event.nativeEvent.isComposing ||
+                coarse
+              )
+                return;
               event.preventDefault();
               event.currentTarget.closest("form")?.requestSubmit();
             }}
           />
           <Button
-            type="submit"
+            type={running ? "button" : "submit"}
             variant="primary"
-            label={t("submit_your_question")}
-            icon={<SendHorizontal className="size-4" aria-hidden="true" />}
-            // Stays focusable while the answer is prepared (a second submit is ignored).
-            isLoading={ask.isPending}
-            isInterruptible
+            label={running ? t("stop_generating") : t("submit_your_question")}
+            onClick={running ? stop : undefined}
+            icon={
+              running ? (
+                <Square className="size-4" aria-hidden="true" />
+              ) : (
+                <SendHorizontal className="size-4" aria-hidden="true" />
+              )
+            }
             className="self-end"
           />
         </form>
@@ -203,23 +240,21 @@ function AnalysisTab({
                     <Copy className="size-4" aria-hidden="true" />
                   )
                 }
-                onClick={async () => {
-                  if (!(await copy(answer))) toast.error(t("chat_copy_failed"));
-                }}
+                onClick={() => void copy(answer)}
               />
             ) : null}
           </div>
-          {ask.isPending ? (
+          {running && !answer ? (
             <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
-          ) : ask.isError ? (
-            <p className="text-ax-error text-sm">{t("request_failed")}</p>
-          ) : answer ? (
+          ) : null}
+          {current?.status === "error" ? <ListError error={current.error} compact /> : null}
+          {answer ? (
             <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
-          ) : (
+          ) : !current ? (
             <p className="text-ax-text-secondary text-sm">
               {t("ask_question_about_conversation_history")}
             </p>
-          )}
+          ) : null}
         </div>
       </Card>
 
@@ -278,6 +313,8 @@ function QuestionsTab({
   const t = useTranslations();
   const announce = useAnnounce();
   const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<AssistantInsightQuestion | null>(null);
+  const questionTrigger = useRef<HTMLButtonElement | null>(null);
   const deferredSearch = useDeferredValue(search.trim());
 
   const query = useInfiniteQuery({
@@ -314,7 +351,22 @@ function QuestionsTab({
       renderCell: (item) => <ClientTime value={item.created_at} format="date_time" />
     },
     // Room for whole words: on a phone the table scrolls sideways instead.
-    { key: "question", header: t("question"), width: proportional(1, { minWidth: 240 }) },
+    {
+      key: "question",
+      header: t("question"),
+      width: proportional(1, { minWidth: 240 }),
+      renderCell: (item) => (
+        <Button
+          variant="ghost"
+          label={item.question || t("untitled")}
+          className="max-w-full text-left whitespace-normal"
+          onClick={(event) => {
+            questionTrigger.current = event.currentTarget;
+            setSelected(item);
+          }}
+        />
+      )
+    },
     {
       key: "feedback",
       header: t("feedback_column"),
@@ -338,6 +390,7 @@ function QuestionsTab({
             isLabelHidden
             placeholder={t("assistant_questions_search_placeholder")}
             startIcon={Search}
+            {...KEYBOARD.search}
             value={search}
             onChange={setSearch}
             hasClear
@@ -348,39 +401,38 @@ function QuestionsTab({
         <span className="text-ax-text-secondary text-sm">{countLabel}</span>
       </div>
 
-      {query.isPending ? (
-        <LoadingState rows={5} />
-      ) : query.isError ? (
-        <p className="text-ax-error text-sm">{t("request_failed")}</p>
-      ) : items.length === 0 ? (
-        <p className="text-ax-text-secondary text-sm">{t("no_questions_found_current_settings")}</p>
-      ) : (
-        <Table
-          aria-label={t("question_history")}
-          data={items}
-          columns={columns}
-          idKey="id"
-          verticalAlign="top"
-        />
-      )}
+      <QueryStateBoundary query={query} rows={5}>
+        {() =>
+          items.length === 0 ? (
+            <p className="text-ax-text-secondary text-sm">
+              {t("no_questions_found_current_settings")}
+            </p>
+          ) : (
+            <Table
+              aria-label={t("question_history")}
+              data={items}
+              columns={columns}
+              idKey="id"
+              verticalAlign="top"
+            />
+          )
+        }
+      </QueryStateBoundary>
 
-      <div className="flex items-center justify-end gap-2">
-        {!query.hasNextPage && items.length > 0 ? (
-          <span className="text-ax-text-secondary text-sm">
-            {t("loaded_all_questions", { total })}
-          </span>
-        ) : null}
-        <Button
-          label={t("load_more_questions")}
-          isDisabled={!query.hasNextPage}
-          // Stays focusable while the next page loads.
-          isLoading={query.isFetchingNextPage}
-          isInterruptible
-          onClick={() => {
-            if (!query.isFetchingNextPage) void query.fetchNextPage();
-          }}
+      {!query.hasNextPage && items.length > 0 ? (
+        <span className="text-ax-text-secondary self-end text-sm">
+          {t("loaded_all_questions", { total })}
+        </span>
+      ) : null}
+      <LoadMore query={query} label={t("load_more_questions")} />
+      {selected ? (
+        <QuestionDetails
+          key={selected.id}
+          question={selected}
+          triggerRef={questionTrigger}
+          onClose={() => setSelected(null)}
         />
-      </div>
+      ) : null}
     </Card>
   );
 }
@@ -388,11 +440,15 @@ function QuestionsTab({
 export function AssistantInsightsPage({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
   const format = useFormatter();
-  const [filters, setFilters] = useState(defaultFilters);
-  const [tab, setTab] = useState<InsightsTab>("analysis");
+  const searchParams = useSearchParams();
+  const view = readAssistantInsightView(searchParams);
+  const { tab } = view;
+  const filters = { ...insightPeriod(view.range), includeFollowups: view.includeFollowups };
+  const changeView = (next: AssistantInsightView) =>
+    replaceUrl(assistantInsightViewSearch(next, searchParams.toString()));
   // Panels stay mounted once opened (hidden when inactive), so a question and
   // its answer survive a look at the history; the history loads on first visit.
-  const [visited, setVisited] = useState<ReadonlySet<InsightsTab>>(() => new Set(["analysis"]));
+  const [visited, setVisited] = useState<ReadonlySet<InsightsTab>>(() => new Set([tab]));
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const stats = useQuery(
     assistantQuestionHistoryQueryOptions({ api: browserApi, assistantId, filters, limit: 1 })
@@ -403,9 +459,10 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
   const tabId = (value: InsightsTab) => `${baseId}-tab-${value}`;
   const panelId = (value: InsightsTab) => `${baseId}-panel-${value}`;
 
+  if (!visited.has(tab)) setVisited(new Set([...visited, tab]));
+
   function selectTab(next: InsightsTab) {
-    setTab(next);
-    setVisited((current) => (current.has(next) ? current : new Set([...current, next])));
+    changeView({ ...view, tab: next });
   }
 
   const panel = (value: InsightsTab, content: React.ReactNode) => (
@@ -421,7 +478,7 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
   );
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full min-w-0 flex-col gap-6">
       <PageHeader
         title={assistant.name}
         actions={
@@ -446,22 +503,22 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
       </dl>
       <AnswerFeedbackSummary assistantId={assistantId} filters={filters} />
 
-      <FilterBar filters={filters} setFilters={setFilters} />
+      <FilterBar view={view} onChange={changeView} />
 
       <div className="flex flex-col">
         <TabList
           role="tablist"
           aria-label={t("legacy_insights_tabs_label")}
           value={tab}
-          onChange={(value) => selectTab(value === "questions" ? "questions" : "analysis")}
+          onChange={(value) => selectTab(value === "questions" ? "questions" : "chat")}
           hasDivider
         >
           <Tab
-            id={tabId("analysis")}
-            value="analysis"
+            id={tabId("chat")}
+            value="chat"
             label={t("analyse")}
             icon={<BarChart3 className="size-4" aria-hidden="true" />}
-            panelId={panelId("analysis")}
+            panelId={panelId("chat")}
           />
           <Tab
             id={tabId("questions")}
@@ -472,7 +529,7 @@ export function AssistantInsightsPage({ assistantId }: { assistantId: string }) 
           />
         </TabList>
         {panel(
-          "analysis",
+          "chat",
           <AnalysisTab assistantId={assistantId} assistantName={assistant.name} filters={filters} />
         )}
         {panel("questions", <QuestionsTab assistantId={assistantId} filters={filters} />)}

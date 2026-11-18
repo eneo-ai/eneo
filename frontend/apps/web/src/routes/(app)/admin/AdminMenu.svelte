@@ -17,6 +17,7 @@
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Landmark from "@lucide/svelte/icons/landmark";
   import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import LogIn from "@lucide/svelte/icons/log-in";
   import Lightbulb from "@lucide/svelte/icons/lightbulb";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Plug from "@lucide/svelte/icons/plug";
@@ -24,6 +25,7 @@
   import Sparkles from "@lucide/svelte/icons/sparkles";
   import UserRound from "@lucide/svelte/icons/user-round";
   import UsersRound from "@lucide/svelte/icons/users-round";
+  import MessageSquareCode from "@lucide/svelte/icons/message-square-code";
   import { page } from "$app/stores";
   import * as Sidebar from "$lib/components/ui/sidebar/index.js";
   import { m } from "$lib/paraglide/messages";
@@ -71,7 +73,7 @@
       items: [
         navItem("/admin/models", Cpu, m.models()),
         ...(settings?.using_templates
-          ? [navItem("/admin/templates", LayoutTemplate, m.templates())]
+          ? [navItem("/admin/templates", LayoutTemplate, m.assistant_and_app_templates())]
           : []),
         navItem("/admin/skills", BookOpenCheck, m.admin_skills_nav_label()),
         navItem("/admin/help-assistants", Sparkles, m.admin_help_assistants_nav_label()),
@@ -80,7 +82,8 @@
         ...(user.hasPermission("modules")
           ? [navItem("/admin/modules", Boxes, m.module_admin_title())]
           : []),
-        navItem("/admin/storage", HardDrive, m.storage_settings_nav())
+        navItem("/admin/storage", HardDrive, m.storage_settings_nav()),
+        navItem("/admin/widgets", MessageSquareCode, m.widget_admin_nav())
       ]
     },
     {
@@ -98,7 +101,8 @@
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
         navItem("/admin/roles", FingerprintPattern, m.roles()),
-        navItem("/admin/api-keys", KeyRound, m.api_keys())
+        navItem("/admin/api-keys", KeyRound, m.api_keys()),
+        navItem("/admin/federation", LogIn, m.federation_admin_nav())
       ]
     }
   ]);

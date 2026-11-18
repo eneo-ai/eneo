@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Optional
 from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import File
+from eneo.main import process_scratch
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure.litellm_provider import (
@@ -58,7 +59,9 @@ class Transcriber:
 
         temp_file_path: Path | None = None
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_file:
+            with tempfile.NamedTemporaryFile(
+                delete=False, suffix=".wav", dir=process_scratch.directory()
+            ) as temp_file:
                 temp_file_path = Path(temp_file.name)
                 temp_file.write(file.blob)
 

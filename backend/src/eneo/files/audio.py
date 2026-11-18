@@ -12,6 +12,7 @@ import soundfile as sf
 from soundfile import SoundFile
 
 from eneo.files.text import MimeTypesBase
+from eneo.main import process_scratch
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,7 +45,9 @@ def _to_wav(filepath: str) -> IO[bytes]:
         # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType] — audioread lacks stubs
         samplerate = int(f.samplerate)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # audioread lacks stubs
         channels = int(f.channels)  # pyright: ignore[reportUnknownMemberType, reportUnknownArgumentType]  # audioread lacks stubs
-        tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
+        tmp_file = tempfile.NamedTemporaryFile(
+            suffix=".wav", dir=process_scratch.directory()
+        )
         with wave.open(tmp_file, "w") as of:
             of.setframerate(samplerate)
             of.setnchannels(channels)
@@ -92,7 +95,9 @@ class AudioFile:
         self, gen: Generator[_FloatArray, None, None], max_size: int
     ) -> tuple[IO[bytes], bool]:
         frames_in_file = 0
-        temp_file = tempfile.NamedTemporaryFile(suffix=".mp3")
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix=".mp3", dir=process_scratch.directory()
+        )
         soundfile = SoundFile(
             temp_file,
             mode="w",

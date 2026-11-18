@@ -71,7 +71,7 @@ function buildMessages(source, extra) {
       continue;
     }
     if (key.includes(".")) {
-      flagged.push(`${key}: key contains "." (next-intl namespace separator)`);
+      flagged.push(`${key}: key contains "." (use-intl namespace separator)`);
     }
     if (/'[{}]/.test(value)) {
       flagged.push(`${key}: apostrophe before "{" or "}" (ICU escape, needs '' doubling)`);

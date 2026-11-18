@@ -1,33 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  areaOf,
+  sideNavKind,
   conversationHref,
   currentNavTarget,
   isAdminRoute,
-  isChatRoute,
   navTarget,
   spaceRouteIdFromPath
 } from "./routes";
-
-describe("isChatRoute", () => {
-  it("matches the chat routes that render their own mobile header", () => {
-    expect(isChatRoute("/spaces/personal/chat")).toBe(true);
-    expect(isChatRoute("/spaces/7f0c/chat")).toBe(true);
-    expect(isChatRoute("/dashboard/assistant-1")).toBe(true);
-    expect(isChatRoute("/dashboard/assistant-1/session-9")).toBe(true);
-  });
-
-  it("leaves every other page to the shell's top bar", () => {
-    expect(isChatRoute("/dashboard")).toBe(false);
-    expect(isChatRoute("/dashboard/app/app-1")).toBe(false);
-    expect(isChatRoute("/dashboard/app/app-1/results/run-1")).toBe(false);
-    expect(isChatRoute("/spaces/list")).toBe(false);
-    expect(isChatRoute("/spaces/7f0c/overview")).toBe(false);
-    expect(isChatRoute("/spaces/7f0c/knowledge")).toBe(false);
-    expect(isChatRoute("/admin/models")).toBe(false);
-    expect(isChatRoute("/account")).toBe(false);
-    expect(isChatRoute("/")).toBe(false);
-  });
-});
 
 describe("isAdminRoute", () => {
   it("is true for /admin and below only", () => {
@@ -35,6 +15,45 @@ describe("isAdminRoute", () => {
     expect(isAdminRoute("/admin/models")).toBe(true);
     expect(isAdminRoute("/administration")).toBe(false);
     expect(isAdminRoute("/spaces/admin/overview")).toBe(false);
+  });
+});
+
+describe("areaOf", () => {
+  // Svelte's top bar: (app)/+layout.svelte isPersonal / isOrganization / isSpacesGeneric.
+  it("marks the top-bar area a route belongs to", () => {
+    expect(areaOf("/spaces/personal/chat")).toBe("personal");
+    expect(areaOf("/spaces/personal/overview")).toBe("personal");
+    expect(areaOf("/spaces/organization/knowledge")).toBe("organization");
+    expect(areaOf("/spaces/list")).toBe("shared");
+    expect(areaOf("/spaces/abc/assistants")).toBe("shared");
+    expect(areaOf("/admin")).toBe("admin");
+    expect(areaOf("/admin/models")).toBe("admin");
+  });
+
+  it("marks no area outside spaces and admin", () => {
+    expect(areaOf("/account")).toBeNull();
+    expect(areaOf("/dashboard")).toBeNull();
+    expect(areaOf("/whats-new")).toBeNull();
+    expect(areaOf("/spacesx")).toBeNull();
+    expect(areaOf("/administration")).toBeNull();
+  });
+});
+
+describe("sideNavKind", () => {
+  // Which sidebar the Svelte app shows beside each page.
+  it.each([
+    ["/spaces/personal/chat", "space"],
+    ["/spaces/s1/knowledge/collections/c1", "space"],
+    ["/spaces/organization/skills", "space"],
+    ["/spaces/list", "spaces-list"],
+    ["/admin/models", "admin"],
+    ["/account/api-keys", "account"],
+    ["/whats-new", "account"],
+    ["/dashboard", null],
+    ["/dashboard/a1", null],
+    ["/somewhere", null]
+  ])("gives %s the %s sidebar", (pathname, kind) => {
+    expect(sideNavKind(pathname)).toBe(kind);
   });
 });
 

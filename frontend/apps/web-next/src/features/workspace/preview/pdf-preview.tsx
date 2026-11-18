@@ -1,8 +1,5 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect } from "react";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 
 /**
  * A PDF in the browser's own viewer, on an object URL of the file's bytes that
@@ -22,8 +19,7 @@ export function PdfPreview({
   onError?: () => void;
 }) {
   const t = useTranslations();
-  const hydrated = useHydrated();
-  const viewerAvailable = hydrated && navigator.pdfViewerEnabled !== false;
+  const viewerAvailable = navigator.pdfViewerEnabled !== false;
 
   const attach = useCallback(
     (frame: HTMLIFrameElement | null) => {
@@ -37,10 +33,9 @@ export function PdfPreview({
 
   // The notice is itself the final preview on these devices.
   useEffect(() => {
-    if (hydrated && !viewerAvailable) onReady?.();
-  }, [hydrated, viewerAvailable, onReady]);
+    if (!viewerAvailable) onReady?.();
+  }, [viewerAvailable, onReady]);
 
-  if (!hydrated) return null;
   if (!viewerAvailable) {
     return (
       <p className="text-ax-text-secondary p-6 text-sm">{t("file_preview_unsupported_here")}</p>

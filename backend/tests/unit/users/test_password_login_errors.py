@@ -9,9 +9,9 @@ import pytest
 from dependency_injector import providers
 from fastapi.testclient import TestClient
 
-from eneo.audit.infrastructure.rate_limiting import RateLimitServiceUnavailableError
 from eneo.authentication.auth_models import AccessToken
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.login_attempts import LoginAttempt
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -21,6 +21,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import OTELJSONFormatter, SimpleLogger
 from eneo.main.models import GeneralError
+from eneo.redis.rate_limit import RateLimitServiceUnavailableError
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
 from eneo.tenants.tenant import TenantState
@@ -32,7 +33,9 @@ from tests.fixtures import TEST_TENANT, TEST_USER
 LOGIN_PATH = "/api/v1/users/login/token/"
 EMAIL = "login@example.com"
 PASSWORD = "LoginCredential-SENTINEL-123!"
-TOKEN = AccessToken(access_token="issued-token", token_type="bearer")
+# What the session store returns: the token the login hands out.
+SESSION_TOKEN = AccessToken(access_token="session-token", token_type="bearer")
+PEER_IP = "10.0.0.1"
 
 
 @dataclass
@@ -41,6 +44,7 @@ class LoginEndpoint:
     service: AsyncMock
     count: AsyncMock
     clear: AsyncMock
+    sessions: AsyncMock
 
 
 @pytest.fixture
@@ -48,15 +52,18 @@ def login_endpoint(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> Iterator[LoginEndpoint]:
     service = AsyncMock(spec=UserService)
-    service.login.return_value = TOKEN
+    service.login.return_value = TEST_USER
     count = AsyncMock(return_value=LoginAttempt(True, 4, 600))
     clear = AsyncMock()
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", clear)
 
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.return_value = SESSION_TOKEN.access_token
     container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
+        browser_session_service=providers.Object(sessions),
     )
     app = get_application()
     route = next(
@@ -75,9 +82,10 @@ def login_endpoint(
     app.dependency_overrides[dependency.call] = login_container
     # SimpleLogger has its own handler; capture its extras, not just log text.
     user_router.logger.addHandler(caplog.handler)
-    client = TestClient(app)
+    # A real peer address: the request context keeps only valid IPs.
+    client = TestClient(app, client=(PEER_IP, 50000))
     try:
-        yield LoginEndpoint(client, service, count, clear)
+        yield LoginEndpoint(client, service, count, clear, sessions)
     finally:
         client.close()
         user_router.logger.removeHandler(caplog.handler)
@@ -333,7 +341,7 @@ def test_account_state_is_only_disclosed_after_password_verification(
         refused = login_log(caplog, "Login refused after credential verification")
         assert refused.levelno == logging.WARNING
         assert refused.email == EMAIL  # type: ignore[attr-defined]
-        assert refused.source_ip  # type: ignore[attr-defined]
+        assert refused.source_ip == PEER_IP  # type: ignore[attr-defined]
         assert refused.error_type in {  # type: ignore[attr-defined]
             "UserInactiveException",
             "TenantSuspendedException",
@@ -459,7 +467,11 @@ def test_success_preserves_the_token_and_recovers_from_limiter_outages(
     )
 
     assert response.status_code == 200
-    assert response.json() == TOKEN.model_dump()
+    # The issued token, carrying the session the login started for it.
+    assert response.json() == SESSION_TOKEN.model_dump()
+    login_endpoint.sessions.start.assert_awaited_once_with(
+        TEST_USER, auth_method="password"
+    )
     assert PASSWORD not in structured_logs(caplog)
     if limiter_failure == "count":
         login_endpoint.clear.assert_not_awaited()
@@ -494,4 +506,27 @@ def test_existing_password_length_boundaries_still_reach_authentication(
     )
 
     assert response.status_code == 200
-    assert response.json() == TOKEN.model_dump()
+    assert response.json() == SESSION_TOKEN.model_dump()
+
+
+def test_client_sent_forwarded_for_never_reaches_the_security_logs(
+    login_endpoint: LoginEndpoint, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Without trusted proxies the peer address is the client IP; a header the
+    caller wrote is not evidence of where a failed login came from."""
+    login_endpoint.service.login.side_effect = AuthenticationException()
+
+    response = login_endpoint.client.post(
+        LOGIN_PATH,
+        data={"username": EMAIL, "password": PASSWORD},
+        headers={"X-Forwarded-For": "6.6.6.6"},
+    )
+
+    assert response.status_code == 401
+    logged_ips = {
+        record.source_ip  # type: ignore[attr-defined]
+        for record in caplog.records
+        if hasattr(record, "source_ip")
+    }
+    assert logged_ips == {PEER_IP}
+    assert login_endpoint.service.login.await_args.args[3] == PEER_IP

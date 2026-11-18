@@ -911,44 +911,13 @@ class ApiKeyLifecycleService:
 
         await self.api_key_repo.delete(key_id=key.id, tenant_id=key.tenant_id)
 
-    async def expire_key(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2 | None:
-        key = await self.api_key_repo.get(key_id=key_id, tenant_id=tenant_id)
-        if key is None:
-            return None
-        if key.revoked_at is not None:
-            return ApiKeyV2.model_validate(key)
-
-        now = datetime.now(timezone.utc)
-        expires_at = key.expires_at or now
-        updated = await self.api_key_repo.update(
-            key_id=key.id,
-            tenant_id=tenant_id,
-            state=ApiKeyState.EXPIRED.value,
-            expires_at=expires_at,
-        )
-
-        updated_key = updated or key
-
-        if self.audit_service is not None:
-            await self.audit_service.log_async(
-                tenant_id=tenant_id,
-                actor_id=None,
-                actor_type=ActorType.SYSTEM,
-                action=ActionType.API_KEY_EXPIRED,
-                entity_type=EntityType.API_KEY,
-                entity_id=updated_key.id,
-                description=f"Expired API key '{updated_key.name}'",
-                metadata=AuditMetadata.system_action(
-                    description="API key expired",
-                    target=updated_key,
-                    extra={"expires_at": expires_at.isoformat()},
-                ),
-            )
-
-        return ApiKeyV2.model_validate(updated_key)
-
     async def _get_key_or_404(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2InDB:
-        key = await self.api_key_repo.get(key_id=key_id, tenant_id=tenant_id)
+        # Every change reads the key through here. The lock makes it validate
+        # and write the row as it is after a concurrent change commits (the
+        # nightly maintenance among them), instead of overwriting that change.
+        key = await self.api_key_repo.get(
+            key_id=key_id, tenant_id=tenant_id, for_update=True
+        )
         if key is None:
             raise ApiKeyValidationError(
                 status_code=404,

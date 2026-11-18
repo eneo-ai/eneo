@@ -1,4 +1,23 @@
 import { useId } from "react";
+import { cn } from "@/lib/utils";
+
+/**
+ * The card's frame and inset give way to the page's gutter in an editor's
+ * section on a phone (SectionedSettings' phone index, `phone:`), whose title is
+ * the page's own: its bar holds only the back link and the save state. A page
+ * pushed from Konto (`data-pushed-section`, below 1024 px, as long as its
+ * PageBar shows) is named by the bar, so there the title stays for assistive
+ * technology and as where focus lands. A description or header actions stay,
+ * above the rows.
+ */
+const IN_PHONE_SECTION = {
+  card: "phone:in-[[data-editor-section]]:rounded-none phone:in-[[data-editor-section]]:border-0 phone:in-[[data-editor-section]]:bg-transparent max-lg:in-[[data-pushed-section]]:rounded-none max-lg:in-[[data-pushed-section]]:border-0 max-lg:in-[[data-pushed-section]]:bg-transparent",
+  header:
+    "phone:in-[[data-editor-section]]:border-b-0 phone:in-[[data-editor-section]]:p-0 phone:in-[[data-editor-section]]:pb-4 max-lg:in-[[data-pushed-section]]:border-b-0 max-lg:in-[[data-pushed-section]]:p-0 max-lg:in-[[data-pushed-section]]:has-[p,[data-settings-group-end]]:pb-4",
+  title:
+    "phone:in-[[data-editor-section]]:text-2xl phone:in-[[data-editor-section]]:leading-tight max-lg:in-[[data-pushed-section]]:sr-only",
+  body: "phone:in-[[data-editor-section]]:p-0 max-lg:in-[[data-pushed-section]]:p-0"
+};
 
 /**
  * A titled card grouping related settings rows. `id` is the scroll anchor used by
@@ -22,19 +41,34 @@ export function SettingsGroup({
   children: React.ReactNode;
 }) {
   return (
-    <section id={id} data-tour={tour} className="bg-card scroll-mt-32 rounded-xl border">
-      <div className="border-b px-5 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+    <section
+      id={id}
+      data-tour={tour}
+      className={cn("bg-card scroll-mt-32 rounded-xl border", IN_PHONE_SECTION.card)}
+    >
+      <div className={cn("border-b px-5 py-4", IN_PHONE_SECTION.header)}>
+        {/* A lone title sits on its action's centre line (a 44 px touch button would leave
+            it 10 px high); beside a title and a description the action stays at the top. */}
+        <div
+          className={cn(
+            "flex flex-wrap justify-between gap-3",
+            description ? "items-start" : "items-center"
+          )}
+        >
           <div className="min-w-0">
-            <h2 className="text-base font-semibold">{title}</h2>
+            <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
             {description ? (
               <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
             ) : null}
           </div>
-          {headerEnd ? <div className="flex shrink-0 flex-wrap gap-1.5">{headerEnd}</div> : null}
+          {headerEnd ? (
+            <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
+              {headerEnd}
+            </div>
+          ) : null}
         </div>
       </div>
-      <div className="flex flex-col gap-6 px-5 py-5">{children}</div>
+      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>{children}</div>
     </section>
   );
 }

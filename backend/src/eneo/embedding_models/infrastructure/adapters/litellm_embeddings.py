@@ -31,6 +31,7 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
+from eneo.observability.error_log import error_facts
 
 if TYPE_CHECKING:
     from eneo.embedding_models.infrastructure.create_embeddings_service import (
@@ -238,13 +239,19 @@ class LiteLLMEmbeddingAdapter(EmbeddingModelAdapter):
             # already logged; neither is a LiteLLM failure.
             raise
         except Exception as e:
-            logger.exception(
-                f"[LiteLLM] {self.litellm_model}: Unknown LiteLLM exception:"
-            )
             provider_type = (
                 self.credential_resolver.provider_type
                 if self.credential_resolver
                 else "unknown"
+            )
+            # A provider's error can echo the texts it was sent.
+            facts = error_facts(e)
+            logger.error(
+                "[LiteLLM] %s: embedding request failed: %s (status %s)",
+                self.litellm_model,
+                facts["error_type"],
+                facts["error_status"],
+                extra={"provider": provider_type, "operation": "embedding", **facts},
             )
             litellm_transport.raise_public_litellm_error(
                 e,

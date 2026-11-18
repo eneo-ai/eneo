@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { pushState } from "$app/navigation";
+  import { pushState, replaceState } from "$app/navigation";
   import { Page } from "$lib/components/layout/index.js";
   import { getAppContext } from "$lib/core/AppContext.js";
   import { initChatService } from "$lib/features/chat/ChatService.svelte";
@@ -15,6 +15,7 @@
   import { page } from "$app/state";
   import { writable } from "svelte/store";
   import { untrack } from "svelte";
+  import { SvelteURL } from "svelte/reactivity";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import ChatDebugPanel from "$lib/features/chat/components/debug/ChatDebugPanel.svelte";
@@ -76,6 +77,21 @@
       if (data.chatPartner.type === "default-assistant") {
         $currentTab = "chat";
       }
+    });
+  });
+
+  // A newly persisted conversation replaces the stale link without reloading
+  // page data or interrupting its stream. An explicit new chat clears the id.
+  $effect(() => {
+    const sessionId = chat.currentConversation.id;
+    if (chat.missingConversation) return;
+    untrack(() => {
+      if ((page.url.searchParams.get("session_id") ?? "") === sessionId) return;
+      const url = new SvelteURL(page.url);
+      if (sessionId) url.searchParams.set("session_id", sessionId);
+      else url.searchParams.delete("session_id");
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- shallow update of the current route's session query
+      replaceState(url, { ...page.state, conversation: undefined });
     });
   });
 

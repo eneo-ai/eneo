@@ -271,7 +271,11 @@ describe("lifecycle and attention", () => {
       [provider({ id: "p1" }), provider({ id: "p3", is_active: false, masked_api_key: null })],
       capabilities
     );
-    expect(modelsAttention(quiet, { today: TODAY })).toEqual({ providers: [], deprecated: [] });
+    expect(modelsAttention(quiet, { today: TODAY })).toEqual({
+      providers: [],
+      deprecated: [],
+      retiring: []
+    });
   });
 
   it("reports active providers whose connection check failed or whose key runs out", () => {
@@ -341,4 +345,22 @@ describe("prices", () => {
     // Rerank models have no cost fields.
     expect(modelPrice(model({}), "rerank")).toEqual({ kind: "unknown" });
   });
+});
+
+it("hides migrated rows and counts while retaining their provider deletion dependencies", () => {
+  const sections = buildProviderSections(
+    {
+      completion_models: [model({ id: "migrated", migrated_to_model_id: "replacement" })],
+      embedding_models: [],
+      transcription_models: [],
+      image_models: []
+    } as ModelsPresentation,
+    [provider({ id: "p1" })],
+    { providers: {}, default_fields: [] }
+  );
+  const visible = filterSections(sections, { search: "", kind: "all", security: "all" });
+  expect(visible).toHaveLength(1);
+  expect(visible[0]?.models).toEqual([]);
+  expect(visible[0]?.section.models.map(({ model }) => model.id)).toEqual(["migrated"]);
+  expect(countByKind(sections, { search: "", security: "all" }).all).toBe(0);
 });

@@ -48,6 +48,8 @@
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { hasPermission } from "$lib/core/hasPermission.js";
   import { m } from "$lib/paraglide/messages";
+  import { docsUrl } from "$lib/core/docs";
+  import { getLocale } from "$lib/paraglide/runtime";
   import { toast } from "svelte-sonner";
   import ByteLimitField from "./ByteLimitField.svelte";
   import StorageConnectionSection from "./StorageConnectionSection.svelte";
@@ -100,6 +102,14 @@
     deploymentPolicy?.capabilities.find((capability) => capability.target === "object_store")
   );
   const objectStoreUnavailable = $derived(objectStoreCapability?.selectable !== true);
+  // New files go to the database: its storage limit sits under the policy.
+  const databaseLimits = $derived(
+    deploymentPolicy?.limits.filter((limit) => limit.storage_target === "postgres_inline") ?? []
+  );
+  const databaseStorageLimit = $derived(databaseLimits[0]?.operator_ceiling_bytes ?? null);
+  const databaseStorageLimitApplies = $derived(
+    databaseLimits.some((limit) => limit.constraining_source === "operator_ceiling")
+  );
   const validMoveLimit = $derived(
     Number.isSafeInteger(moveLimit) && moveLimit >= 1 && moveLimit <= 100
   );
@@ -861,7 +871,7 @@
                         {/if}
                         {#if objectStoreUnavailable}
                           <Button
-                            href="https://docs.eneo.ai/guides/object-content-storage"
+                            href={docsUrl("guides/object-content-storage", getLocale())}
                             target="_blank"
                             rel="noreferrer"
                             variant="link"
@@ -995,6 +1005,20 @@
                     </dd>
                   </div>
                 </dl>
+              {/if}
+
+              {#if databaseStorageLimit !== null}
+                <div class="text-secondary flex flex-col gap-2 text-sm wrap-anywhere">
+                  <p>{m.storage_limits_database_ceiling()}</p>
+                  {#if databaseStorageLimitApplies}
+                    <p>
+                      {m.storage_limits_database_ceiling_applies({
+                        size: policyBytes(databaseStorageLimit)
+                      })}
+                    </p>
+                  {/if}
+                  <p>{m.storage_limits_database_cost()}</p>
+                </div>
               {/if}
 
               <Collapsible.Root bind:open={limitsDetailsOpen}>

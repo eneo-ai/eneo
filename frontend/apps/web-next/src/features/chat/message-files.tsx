@@ -1,9 +1,7 @@
-"use client";
-
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ArrowUpRight, Check, ChevronDown, ChevronUp, Files } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { fileExtension, formatBytes } from "@/lib/format";
@@ -63,7 +61,7 @@ const BUNDLE_SHOWN_CLASS = "border-ax-accent";
 
 /** Opens a message attachment in the shared preview dialog (signs the URL on open). */
 function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () => void }) {
-  const { url, error } = useSignedUrl(file.id);
+  const { url, error, resign } = useSignedUrl(file.id);
   return (
     <AttachmentPreviewDialog
       open
@@ -72,6 +70,7 @@ function MessageFilePreview({ file, onClose }: { file: MessageFile; onClose: () 
       mimetype={file.mimetype}
       url={url}
       error={error}
+      onImageError={resign}
     />
   );
 }
@@ -254,7 +253,9 @@ export function PendingMessageFiles({ uploads }: { uploads: readonly PendingUplo
         <li key={upload.key} className="max-w-full">
           <span className={FILE_CHIP_CLASS} title={upload.name}>
             <FileTypeTile mimetype={upload.mimetype} size="sm" uploading={upload.uploading} />
-            <span className="min-w-0 truncate font-semibold">{upload.name}</span>
+            <span className="min-w-0 truncate font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal">
+              {upload.name}
+            </span>
             <span className="text-ax-text-secondary shrink-0">
               {upload.uploading
                 ? t("chat_attachment_uploading")

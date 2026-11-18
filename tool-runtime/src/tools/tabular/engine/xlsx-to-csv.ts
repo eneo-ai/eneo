@@ -20,6 +20,7 @@
  */
 import ExcelJS from "exceljs";
 import { ToolError } from "../../../errors";
+import { cleanNumber } from "../../../precision";
 import type { SourceSelection } from "../selection";
 import type { CalculationDiagnostics } from "../ports";
 import JSZip from "jszip";
@@ -299,6 +300,9 @@ function cellToText(value: ExcelJS.CellValue): string {
     if ("error" in value) return value.error;
     return JSON.stringify(value);
   }
+  // A saved formula result carries the seventeen digits of its double (1607240.9700000002);
+  // Excel shows fifteen, and so does the sheet here.
+  if (typeof value === "number") return String(cleanNumber(value));
   return String(value);
 }
 

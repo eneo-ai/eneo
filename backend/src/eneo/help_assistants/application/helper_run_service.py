@@ -44,6 +44,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.assistants.assistant import Assistant
 from eneo.assistants.references import ReferencesService
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.help_assistants.domain.factory import HelperAssistantsFactory
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.help_assistants.domain.helper_run import HelperRun
@@ -60,6 +61,12 @@ from eneo.main.exceptions import (
 )
 from eneo.main.logging import get_logger
 from eneo.main.models import ResourcePermission
+from eneo.main.stream_lifecycle import (
+    OwnedAsyncGenerator,
+    aclose_if_possible,
+    closing,
+    finalizing,
+)
 from eneo.questions.question import QuestionAdd
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.sessions.session import SessionAdd, SessionInDB
@@ -302,6 +309,8 @@ class HelperRunService:
             run.session_id, self.user.tenant_id
         )
         if session is None:
+            if await self.session_repo.is_removed_copy(run.session_id):
+                raise DerivedSourceRemovedError()
             raise NotFoundException("Helper run session not found.")
 
         # PRD §6.5: helper runs use ONLY the helper assistant's tools/knowledge.
@@ -527,7 +536,37 @@ class HelperRunService:
         )
         return final_answer
 
-    async def _stream_and_persist(
+    def _stream_and_persist(
+        self,
+        *,
+        response: CompletionModelResponse,
+        session: SessionInDB,
+        question: str,
+        datastore_chunks: list[InfoBlobChunkInDBWithScore],
+        helper_assistant: Assistant,
+    ) -> AsyncGenerator[Completion, None]:
+        """The streamed answer, owning the completion behind it.
+
+        The completion is prepared before the response starts; if the body is
+        never iterated, closing the answer still releases it.
+        """
+
+        async def release_unstarted() -> None:
+            with finalizing("completion stream"):
+                await aclose_if_possible(response.completion)
+
+        return OwnedAsyncGenerator(
+            self._stream_and_persist_chunks(
+                response=response,
+                session=session,
+                question=question,
+                datastore_chunks=datastore_chunks,
+                helper_assistant=helper_assistant,
+            ),
+            release=release_unstarted,
+        )
+
+    async def _stream_and_persist_chunks(
         self,
         *,
         response: CompletionModelResponse,
@@ -562,14 +601,15 @@ class HelperRunService:
         stream_usage: TokenUsage | None = None
         stream_input_token_estimate: int | None = None
 
-        async for chunk in completion:
-            if chunk.usage is not None:
-                stream_usage = chunk.usage
-            if chunk.input_token_estimate is not None:
-                stream_input_token_estimate = chunk.input_token_estimate
-            if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
-                response_string = f"{response_string}{chunk.text}"
-            yield chunk
+        async with closing(completion, "completion stream") as chunks:
+            async for chunk in chunks:
+                if chunk.usage is not None:
+                    stream_usage = chunk.usage
+                if chunk.input_token_estimate is not None:
+                    stream_input_token_estimate = chunk.input_token_estimate
+                if chunk.response_type == ResponseType.TEXT and chunk.text is not None:
+                    response_string = f"{response_string}{chunk.text}"
+                yield chunk
 
         if stream_usage is not None and stream_usage.prompt_tokens is not None:
             num_tokens_question = stream_usage.prompt_tokens

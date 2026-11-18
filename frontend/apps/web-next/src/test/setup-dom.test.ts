@@ -34,6 +34,28 @@ describe("matchMedia", () => {
     expect(matches("(min-width: 1024px), (pointer: coarse)")).toBe(true);
   });
 
+  it("answers for an iPad upright and sideways: touch, below and above the 64rem shell breakpoint", () => {
+    setViewport("tablet-portrait");
+    expect(window.innerWidth).toBe(820);
+    expect(matches("(pointer: coarse)")).toBe(true);
+    expect(matches("(width < 64rem)")).toBe(true);
+    expect(matches("(orientation: portrait)")).toBe(true);
+
+    setViewport("tablet-landscape");
+    expect(window.innerWidth).toBe(1180);
+    expect(matches("(pointer: coarse)")).toBe(true);
+    expect(matches("(width < 64rem)")).toBe(false);
+    expect(matches("(orientation: landscape)")).toBe(true);
+  });
+
+  it("answers for a phone turned sideways: touch, wider than 768 px and under 500 px tall", () => {
+    setViewport("phone-landscape");
+    expect(window.innerWidth).toBe(844);
+    expect(matches("(width < 48rem)")).toBe(false);
+    expect(matches("(pointer: coarse) and (height < 31.25rem) and (width < 64rem)")).toBe(true);
+    expect(matches("(orientation: landscape)")).toBe(true);
+  });
+
   it("is back on the desktop in the next test", () => {
     expect(matches("(pointer: coarse)")).toBe(false);
     expect(window.innerWidth).toBe(1280);

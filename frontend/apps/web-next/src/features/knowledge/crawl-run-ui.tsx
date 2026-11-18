@@ -1,7 +1,5 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 import {
   crawlRunFailureMessageKey,
@@ -42,10 +40,12 @@ export function CrawlRunStatusLabel({ run }: { run: CrawlRun }) {
  */
 export function CrawlFailureActions({
   run,
-  onSelect
+  onSelect,
+  className
 }: {
   run: CrawlRun;
   onSelect: (kind: CrawlFailureKind | null) => void;
+  className?: string;
 }) {
   const t = useTranslations();
   if (!hasCrawlIssues(run)) return null;
@@ -53,7 +53,7 @@ export function CrawlFailureActions({
   const filesFailed = run.files_failed ?? 0;
   const hasFailedItems = pagesFailed > 0 || filesFailed > 0;
   return (
-    <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
+    <span className={cn("flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs", className)}>
       {hasFailedItems ? (
         <span className="text-ax-text-secondary">{t("crawl_not_indexed")}</span>
       ) : null}
@@ -61,7 +61,7 @@ export function CrawlFailureActions({
         <Button
           variant="ghost"
           size="sm"
-          label={t("crawl_view_failed_pages", { count: pagesFailed })}
+          label={t("crawl_view_failed_pages_named", { count: pagesFailed })}
           onClick={() => onSelect("page")}
         >
           {t("crawl_failed_pages_count", { count: pagesFailed })}
@@ -71,7 +71,7 @@ export function CrawlFailureActions({
         <Button
           variant="ghost"
           size="sm"
-          label={t("crawl_view_failed_files", { count: filesFailed })}
+          label={t("crawl_view_failed_files_named", { count: filesFailed })}
           onClick={() => onSelect("file")}
         >
           {t("crawl_failed_files_count", { count: filesFailed })}
@@ -136,7 +136,11 @@ export function CrawlRunCounts({
         <tr>
           <td />
           {columns.map((column) => (
-            <th key={column.key} scope="col" className="ps-3 pb-1 text-end font-normal">
+            <th
+              key={column.key}
+              scope="col"
+              className="ps-3 pb-1 text-end font-normal whitespace-nowrap"
+            >
               {column.label}
             </th>
           ))}
@@ -145,7 +149,7 @@ export function CrawlRunCounts({
       <tbody>
         {rows.map((row) => (
           <tr key={row.kind}>
-            <th scope="row" className="py-0.5 text-start font-normal">
+            <th scope="row" className="py-0.5 text-start font-normal whitespace-nowrap">
               {row.label}
             </th>
             {columns.map((column) => {

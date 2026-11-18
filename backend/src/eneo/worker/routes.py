@@ -30,6 +30,7 @@ from eneo.websites.application.crawl_dispatch import (
     reconcile_crawl_work,
 )
 from eneo.websites.crawl_dependencies.crawl_models import CrawlTask
+from eneo.widgets.application.widget_retention import purge_expired_widget_sessions
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.crawl_tasks import crawl_task, queue_website_crawls
 from eneo.worker.object_content_tasks import (
@@ -250,7 +251,7 @@ async def recalculate_usage_stats(container: Container) -> bool:
     return await recalculate_all_tenants_usage_stats(container=container)
 
 
-@worker.function(with_user=False)
+@worker.function(with_user=False, keep_result=0)
 async def log_audit_event(
     job_id: UUID, params: dict[str, object], container: Container
 ):
@@ -299,7 +300,7 @@ async def export_audit_logs(
     )
 
 
-@worker.function()
+@worker.function(keep_result=0)
 async def analyze_conversation_insights(
     job_id: UUID,
     params: AnalyzeConversationInsightsTask,
@@ -462,6 +463,13 @@ async def api_key_maintenance(container: Container) -> dict[str, object]:
         logger.info("API key maintenance completed", extra=results)
 
     return results
+
+
+@worker.cron_job(hour=3, minute=30, manages_own_session=True)  # Daily at 03:30 UTC
+async def purge_widget_sessions(container: Container) -> dict[str, int]:
+    """Delete widget conversations past each widget's retention window."""
+    del container
+    return await purge_expired_widget_sessions()
 
 
 @worker.cron_job(hour=2, minute=0)  # Daily at 02:00 UTC
@@ -645,68 +653,4 @@ async def purge_old_audit_logs(container: Container) -> AuditPurgeResult:
         "successful_tenants": successful_tenants,
         "total_purged": total_purged,
         "success": len(errors) == 0,
-    }
-
-
-@worker.cron_job(hour=4, minute=0)  # Daily at 04:00 UTC
-async def purge_old_conversations(container: Container) -> dict[str, object]:
-    """
-    Daily cron job to purge old conversation data based on retention policies.
-
-    Runs at 04:00 UTC (5:00 AM Swedish winter, 6:00 AM summer) to minimize user impact.
-    Scheduled 2 hours after audit log purge to ensure no overlap (audit purge may take 1-2 hours).
-
-    Deletes:
-    - Old questions (based on assistant/space/tenant retention hierarchy)
-    - Old app runs (based on app/space/tenant retention hierarchy)
-    - Orphaned sessions (sessions with no questions, older than cleanup threshold)
-
-    Uses hierarchical retention policy resolution:
-    1. Entity-level (Assistant/App) - highest priority
-    2. Space-level
-    3. Tenant-level (if enabled)
-    4. NULL = keep forever (default)
-
-    Returns:
-        Dictionary with deletion statistics
-    """
-    from eneo.data_retention.infrastructure.data_retention_service import (
-        DataRetentionService,
-    )
-    from eneo.main.logging import get_logger
-
-    logger = get_logger(__name__)
-
-    logger.info("Starting conversation data retention purge")
-
-    session = cast(AsyncSession, container.session())
-    retention_service = DataRetentionService(session)
-
-    # Delete old questions based on hierarchical retention policies
-    questions_deleted = await retention_service.delete_old_questions()
-
-    # Delete old app runs based on hierarchical retention policies
-    app_runs_deleted = await retention_service.delete_old_app_runs()
-
-    # Delete orphaned sessions (no questions, past cleanup threshold)
-    sessions_deleted = await retention_service.delete_old_sessions()
-
-    total_deleted = questions_deleted + app_runs_deleted + sessions_deleted
-
-    logger.info(
-        "Conversation data retention purge completed",
-        extra={
-            "questions_deleted": questions_deleted,
-            "app_runs_deleted": app_runs_deleted,
-            "sessions_deleted": sessions_deleted,
-            "total_deleted": total_deleted,
-        },
-    )
-
-    return {
-        "questions_deleted": questions_deleted,
-        "app_runs_deleted": app_runs_deleted,
-        "sessions_deleted": sessions_deleted,
-        "total_deleted": total_deleted,
-        "success": True,
     }

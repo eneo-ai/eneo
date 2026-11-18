@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { cachedText, renderInApp, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -70,11 +70,20 @@ function Opener({ item }: { item: ModelProvider }) {
   );
 }
 
-function renderDialog(item: ModelProvider = provider()) {
+/** The client the last `renderDialog` rendered with. */
+let queryClient = testQueryClient();
+
+function renderDialog(item: ModelProvider = provider(), headerOptions = true) {
   api.PUT.mockImplementation(() => ok(item));
-  const queryClient = testQueryClient();
+  queryClient = testQueryClient();
   queryClient.setQueryData(PROVIDERS_KEY, [item]);
   queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
+  if (headerOptions)
+    queryClient.setQueryData(["admin-model-provider-outbound-header-options"], {
+      dynamic_values: [],
+      supported_provider_types: ["hosted_vllm"],
+      max_headers: 10
+    });
   renderInApp(<Opener item={item} />, { queryClient });
   fireEvent.click(screen.getByRole("button", { name: "Öppna" }));
   return screen.getByRole("dialog", { name: "Redigera leverantör" });
@@ -428,5 +437,230 @@ describe("ProviderEditDialog", () => {
     // Another name: the error goes.
     fireEvent.change(field(/^Leverantörsnamn/), { target: { value: "Azure Sverige" } });
     expect(field(/^Leverantörsnamn/).getAttribute("aria-invalid")).toBeNull();
+  });
+});
+
+describe("provider outbound headers", () => {
+  it("keeps preview search outside the provider save form", () => {
+    renderDialog(provider({ provider_type: "hosted_vllm" }));
+    expect(field(/^Sök på e-post/).form).toBeNull();
+  });
+
+  it("keeps a saved secret without sending its mask and allows a fixed value to change", async () => {
+    const item = provider({
+      provider_type: "hosted_vllm",
+      outbound_headers: [
+        {
+          id: "h-secret",
+          name: "X-Secret",
+          value: "********",
+          secret: true,
+          encoding: "none",
+          on_missing: "omit",
+          fallback: null
+        },
+        {
+          id: "h-region",
+          name: "X-Region",
+          value: "north",
+          secret: false,
+          encoding: "percent",
+          on_missing: "omit",
+          fallback: null
+        }
+      ]
+    });
+    const dialog = renderDialog(item);
+    const header = await within(dialog).findByRole("group", { name: "X-Region" });
+    fireEvent.change(within(header).getByLabelText(/^Värde/), { target: { value: "south" } });
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalled());
+    const body = api.PUT.mock.calls[0]![1].body;
+    expect(body.outbound_headers).toEqual([
+      {
+        id: "h-secret",
+        name: "X-Secret",
+        secret: true,
+        encoding: "none",
+        on_missing: "omit",
+        fallback: null
+      },
+      {
+        id: "h-region",
+        name: "X-Region",
+        value: "south",
+        secret: false,
+        encoding: "percent",
+        on_missing: "omit",
+        fallback: null
+      }
+    ]);
+    expect(JSON.stringify(body)).not.toContain("********");
+  });
+});
+
+describe("ProviderEditDialog secrets", () => {
+  const KEY = "sk-synthetic-new-key-5678";
+  const HEADER_SECRET = "synthetic-header-secret-9012";
+  const item = provider({
+    provider_type: "hosted_vllm",
+    outbound_headers: [
+      {
+        id: "h-secret",
+        name: "X-Secret",
+        value: "********",
+        secret: true,
+        encoding: "none",
+        on_missing: "omit",
+        fallback: null
+      }
+    ]
+  });
+
+  /** A new API key and a new value for the secret header, then Spara. */
+  async function saveSecrets(dialog: HTMLElement) {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ändra API-nyckel" }));
+    fireEvent.change(field(/^API-nyckel/), { target: { value: KEY } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: KEY } });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Ändra värdet för X-Secret" })
+    );
+    fireEvent.change(field(/^Värde/), { target: { value: HEADER_SECRET } });
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    const body = api.PUT.mock.calls[0]![1].body;
+    expect(body.credentials).toEqual({ api_key: KEY });
+    expect(body.outbound_headers[0]).toMatchObject({ value: HEADER_SECRET });
+  }
+
+  it("keeps the new key and header secret out of React Query's cache after a save", async () => {
+    const dialog = renderDialog(item);
+
+    await saveSecrets(dialog);
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Leverantör uppdaterad"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(cachedText(queryClient)).not.toContain(KEY);
+    expect(cachedText(queryClient)).not.toContain(HEADER_SECRET);
+  });
+
+  it("keeps them out after a refused save too, which still shows in the form", async () => {
+    const dialog = renderDialog(item);
+    api.PUT.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Invalid outbound header value", eneo_error_code: 9007 },
+        response: new Response("{}", { status: 400 })
+      })
+    );
+
+    await saveSecrets(dialog);
+
+    await within(dialog).findByText("Invalid outbound header value");
+    expect(screen.getByRole("dialog", { name: "Redigera leverantör" })).toBe(dialog);
+    expect(cachedText(queryClient)).not.toContain(KEY);
+    expect(cachedText(queryClient)).not.toContain(HEADER_SECRET);
+  });
+});
+
+describe("outbound-header save boundaries", () => {
+  const stored = provider({
+    provider_type: "hosted_vllm",
+    masked_api_key: null,
+    config: { endpoint: "https://one.example/v1" },
+    outbound_headers: [
+      {
+        id: "h",
+        name: "X-Secret",
+        value: "********",
+        secret: true,
+        encoding: "none",
+        on_missing: "fallback",
+        fallback: "********"
+      }
+    ]
+  });
+  it("requires secret value and fallback re-entry when the endpoint changes", async () => {
+    const dialog = renderDialog(stored);
+    fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://two.example/v1" } });
+    save(dialog);
+    expect(api.PUT).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/Du ändrade endpointen/)).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ändra värdet för X-Secret" }));
+    fireEvent.change(field(/^Värde/), { target: { value: "new-value" } });
+    save(dialog);
+    expect(api.PUT).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /Ändra reservvärdet för X-Secret/ })
+    );
+    fireEvent.change(field(/^Reservvärde/), { target: { value: "new-fallback" } });
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]![1].body.outbound_headers[0]).toMatchObject({
+      value: "new-value",
+      fallback: "new-fallback"
+    });
+  });
+
+  it("omits saved headers when options fail and keeps the retry control focused", async () => {
+    api.GET.mockRejectedValueOnce(new Error("offline"));
+    const dialog = renderDialog(stored, false);
+    expect(
+      await within(dialog).findByText("Leverantörens sparade headers behålls oförändrade.")
+    ).toBeTruthy();
+    let resolve: ((result: unknown) => void) | undefined;
+    api.GET.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        })
+    );
+    const retry = within(dialog).getByRole("button", { name: "Försök igen" });
+    retry.focus();
+    fireEvent.click(retry);
+    await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
+    expect(document.activeElement).toBe(retry);
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    expect(api.PUT.mock.calls[0]![1].body).not.toHaveProperty("outbound_headers");
+    await act(async () =>
+      resolve?.({
+        data: { dynamic_values: [], supported_provider_types: ["hosted_vllm"], max_headers: 10 },
+        response: new Response("{}")
+      })
+    );
+  });
+
+  it("shows an API refusal in the form and preserves input for retry", async () => {
+    const item = provider({
+      provider_type: "hosted_vllm",
+      outbound_headers: [
+        {
+          id: "h",
+          name: "Bad Header",
+          value: "north",
+          secret: false,
+          encoding: "none",
+          on_missing: "omit",
+          fallback: null
+        }
+      ]
+    });
+    const dialog = renderDialog(item);
+    api.PUT.mockResolvedValueOnce({
+      error: { message: "Invalid outbound header name: Bad Header", eneo_error_code: 9007 },
+      response: new Response("{}", { status: 400 })
+    });
+    save(dialog);
+    const problem = await within(dialog).findByText("Invalid outbound header name: Bad Header");
+    expect(document.activeElement?.getAttribute("aria-describedby")).toContain(problem.id);
+    expect((within(dialog).getByLabelText(/^Headernamn/) as HTMLInputElement).value).toBe(
+      "Bad Header"
+    );
+    fireEvent.change(within(dialog).getByLabelText(/^Headernamn/), {
+      target: { value: "X-Region" }
+    });
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(2));
+    expect(api.PUT.mock.calls[1]![1].body.outbound_headers[0].name).toBe("X-Region");
   });
 });

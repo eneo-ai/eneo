@@ -88,12 +88,50 @@ export type DeprecationStatus =
   | { kind: "retiring"; date: string }
   | { kind: "deprecated"; date: string };
 
-/** Deprecation status + date so callers render "retires on YYYY-MM-DD" directly. */
+const DEPRECATION_WARNING_MONTHS = 6;
+
+/** The same day DEPRECATION_WARNING_MONTHS earlier, or that month's last day. */
+function warningStartDate(deprecationDate: string): string | null {
+  const date = new Date(`${deprecationDate}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return null;
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() - DEPRECATION_WARNING_MONTHS);
+  const lastDay = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * Deprecation status + date so callers render "retires on YYYY-MM-DD" directly.
+ * A coming deprecation reads as retiring only from six months before it.
+ */
 export function getDeprecationStatus(
   model: { deprecation_date?: string | null },
   today: string = new Date().toISOString().slice(0, 10)
 ): DeprecationStatus {
   const date = model.deprecation_date ?? null;
   if (!date) return { kind: "active", date: null };
-  return date <= today ? { kind: "deprecated", date } : { kind: "retiring", date };
+  if (date <= today) return { kind: "deprecated", date };
+  const warningStart = warningStartDate(date);
+  return warningStart && today >= warningStart
+    ? { kind: "retiring", date }
+    : { kind: "active", date: null };
+}
+
+export type ModelLifecycle =
+  | { kind: "active" }
+  | { kind: "retiring"; date: string }
+  | { kind: "deprecated"; date: string | null };
+
+/** Deprecation from the recorded date, or the admin's manual deprecation flag. */
+export function modelLifecycle(
+  model: { deprecation_date?: string | null; is_deprecated?: boolean },
+  today?: string
+): ModelLifecycle {
+  const status = getDeprecationStatus(model, today);
+  if (status.kind === "deprecated") return { kind: "deprecated", date: status.date };
+  if (model.is_deprecated) return { kind: "deprecated", date: null };
+  if (status.kind === "retiring") return { kind: "retiring", date: status.date };
+  return { kind: "active" };
 }

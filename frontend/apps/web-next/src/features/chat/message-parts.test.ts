@@ -40,7 +40,8 @@ describe("message parts", () => {
     const sources = mergeSources(
       [
         documentPart("safe", "https://kommun.se/riktlinje"),
-        documentPart("planted", "javascript:alert(document.cookie)")
+        documentPart("planted", "javascript:alert(document.cookie)"),
+        documentPart("malformed", "https://kommun se/riktlinje")
       ],
       [{ id: "web-2", title: "Planted result", url: "javascript:alert(1)" }]
     );
@@ -48,6 +49,7 @@ describe("message parts", () => {
     expect(sources.map(({ sourceId, url }) => [sourceId, url])).toEqual([
       ["safe", "https://kommun.se/riktlinje"],
       ["planted", undefined],
+      ["malformed", undefined],
       ["web-2", undefined]
     ]);
   });

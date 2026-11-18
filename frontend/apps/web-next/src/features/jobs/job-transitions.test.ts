@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { diffJobs, EMPTY_LEDGER, isJobOver, rememberActiveJob } from "./job-transitions";
+import {
+  diffJobs,
+  EMPTY_LEDGER,
+  isJobOver,
+  rememberActiveJob,
+  isCurrentRead,
+  settleRead
+} from "./job-transitions";
 import type { Job } from "./jobs";
 
 const job = (id: string, status: Job["status"], extra: Partial<Job> = {}): Job =>
@@ -44,6 +51,44 @@ describe("diffJobs", () => {
     const second = diffJobs(first.ledger, [job("stay", "complete")]);
     expect(second.transitions).toEqual([]);
     expect(second.vanished.map((item) => item.id)).toEqual(["gone"]);
+    // Read by id from here on: the next list does not report it again.
+    const third = diffJobs(second.ledger, [job("stay", "complete")]);
+    expect(third.vanished).toEqual([]);
+    // What the read finds is reported as for any job that was running.
+    const found = diffJobs(third.ledger, [job("gone", "complete")]);
+    expect(found.transitions).toEqual([{ job: job("gone", "complete"), outcome: "completed" }]);
+  });
+
+  it("forgets a vanished job that is gone, and finds one it could not read vanished again", () => {
+    const first = diffJobs(EMPTY_LEDGER, [job("deleted", "queued"), job("flaky", "queued")]);
+    const reading = diffJobs(first.ledger, []).ledger;
+    const settled = settleRead(
+      settleRead(reading, reading.get("deleted")!, true),
+      reading.get("flaky")!,
+      false
+    );
+    expect(settled.has("deleted")).toBe(false);
+    expect(diffJobs(settled, []).vanished.map((item) => item.id)).toEqual(["flaky"]);
+  });
+
+  it("ignores a read that a newer list has overtaken", () => {
+    const listed = diffJobs(EMPTY_LEDGER, [job("a", "in progress")]);
+    const firstMiss = diffJobs(listed.ledger, []).ledger;
+    const firstRead = firstMiss.get("a")!;
+    // Shown again, then missed again: a second read begins.
+    const secondMiss = diffJobs(diffJobs(firstMiss, [job("a", "in progress")]).ledger, []).ledger;
+    expect(isCurrentRead(secondMiss, firstRead)).toBe(false);
+    expect(settleRead(secondMiss, firstRead, true)).toBe(secondMiss);
+    expect(isCurrentRead(secondMiss, secondMiss.get("a")!)).toBe(true);
+  });
+
+  it("finds a job the client started gone only by a list begun after it", () => {
+    // One list had started when the job was registered.
+    const seeded = rememberActiveJob(EMPTY_LEDGER, job("new", "queued"), 1);
+    expect(diffJobs(seeded, [], 1).vanished).toEqual([]);
+    const later = diffJobs(seeded, [], 2);
+    expect(later.vanished.map((item) => item.id)).toEqual(["new"]);
+    expect(isJobOver("new", [], later.ledger, true)).toBe(false);
   });
 
   it("seeds a job a poll listed as finished before the client's call returned", () => {
@@ -79,7 +124,11 @@ describe("isJobOver", () => {
     expect(isJobOver("b", [job("b", "failed")], listed.ledger, true)).toBe(true);
 
     const gone = diffJobs(listed.ledger, []);
-    expect(isJobOver("a", [], gone.ledger, true)).toBe(true);
+    // Being read by id: its outcome is still to come.
+    expect(isJobOver("a", [], gone.ledger, true)).toBe(false);
+    expect(isJobOver("a", [], settleRead(gone.ledger, gone.ledger.get("a")!, true), true)).toBe(
+      true
+    );
     // From an earlier page load: never seen here, and not listed now.
     expect(isJobOver("old", [], gone.ledger, true)).toBe(true);
   });

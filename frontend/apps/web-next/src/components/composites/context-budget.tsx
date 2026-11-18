@@ -1,8 +1,6 @@
-"use client";
-
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { TriangleAlert } from "lucide-react";
-import { useFormatter, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";
 
 const PERCENT = 100;
@@ -31,10 +29,13 @@ export type ContextSegment = {
 export function ContextBudget({
   segments,
   maxTokens,
+  variant,
   className
 }: {
   segments: ContextSegment[];
   maxTokens: number | null;
+  /** A domain-specific ceiling can supply its own warning state. */
+  variant?: "neutral" | "warning" | "error";
   className?: string;
 }) {
   const t = useTranslations();
@@ -44,12 +45,14 @@ export function ContextBudget({
   const used = segments.reduce((sum, segment) => sum + segment.tokens, 0);
   const percent = maxTokens ? (used / maxTokens) * PERCENT : 0;
   const showPercent = maxTokens != null && percent >= 1;
-  const showMeter = maxTokens != null && percent >= WARN_AT;
+  const severity =
+    variant ?? (percent >= DANGER_AT ? "error" : percent >= WARN_AT ? "warning" : "neutral");
+  const showMeter = maxTokens != null && severity !== "neutral";
 
   const tone =
-    percent >= DANGER_AT
+    severity === "error"
       ? "text-destructive"
-      : percent >= WARN_AT
+      : severity === "warning"
         ? "text-warning"
         : "text-muted-foreground";
 
@@ -70,7 +73,7 @@ export function ContextBudget({
             tone
           )}
         >
-          {percent >= DANGER_AT ? <TriangleAlert aria-hidden="true" className="size-3.5" /> : null}
+          {severity === "error" ? <TriangleAlert aria-hidden="true" className="size-3.5" /> : null}
           <span>
             {t("context_budget")}: {summary}
           </span>

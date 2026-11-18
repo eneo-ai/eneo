@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { modelSupportsToolCalling, type Capability } from "@/features/capabilities/capabilities";
@@ -30,7 +28,6 @@ const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
  * they make; external views ask for each call regardless.
  */
 export function autoAcceptToolsPreference(): boolean {
-  if (typeof window === "undefined") return true;
   try {
     return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
   } catch {
@@ -45,7 +42,7 @@ export function autoAcceptToolsPreference(): boolean {
  * the user's choices per tenant, user and assistant (mcp-preferences.ts).
  */
 export function useToolChoices(partner: ChatPartner) {
-  const { featureFlags, tenant, user, can } = useAppContext();
+  const { tenant, user, can } = useAppContext();
   // A model without tool calling never receives any tool: the backend drops
   // MCP servers, capabilities and loopback tools alike. Every tool row then
   // reads as unavailable for that reason, unless a more specific one applies.
@@ -53,9 +50,9 @@ export function useToolChoices(partner: ChatPartner) {
   const modelSupportsTools =
     partner.completionModel == null || modelSupportsToolCalling(partner.completionModel);
   const allCapabilities = useMemo(() => chatCapabilities(partner, can), [partner, can]);
-  const capabilities = allCapabilities
-    .filter((capability) => capability.purpose !== "web_search" || featureFlags.showWebSearch)
-    .map((capability) => (modelSupportsTools ? capability : withoutToolCalling(capability)));
+  const capabilities = allCapabilities.map((capability) =>
+    modelSupportsTools ? capability : withoutToolCalling(capability)
+  );
   const mcpServers = useMemo(() => chatPartnerMcpServers(partner), [partner]);
   const preferenceIds = useMemo(
     () => [
@@ -75,11 +72,7 @@ export function useToolChoices(partner: ChatPartner) {
     () => (preferenceContext ? readMcpPreferencesRaw(preferenceContext) : null),
     [preferenceContext]
   );
-  const rawPreferences = useSyncExternalStore(
-    subscribeMcpPreferences,
-    readPreferenceSnapshot,
-    () => null
-  );
+  const rawPreferences = useSyncExternalStore(subscribeMcpPreferences, readPreferenceSnapshot);
   const savedPreferences = useMemo(() => parseMcpPreferences(rawPreferences), [rawPreferences]);
   const defaultDisabledPreferenceIds = useMemo(
     () => [
@@ -171,7 +164,7 @@ export function useToolChoices(partner: ChatPartner) {
   return {
     /** False when the partner's model cannot call tools: every tool is unavailable. */
     modelSupportsTools,
-    /** Capabilities offered in the composer (web search only when the deployment shows it). */
+    /** Capabilities offered in the composer. */
     capabilities,
     disabledCapabilities,
     setDisabledCapabilities: setCapabilitiesDisabled,

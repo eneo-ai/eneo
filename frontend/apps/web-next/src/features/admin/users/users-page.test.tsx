@@ -4,16 +4,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { replaceUrl } from "@/test/navigation";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
 const searchParams = vi.hoisted(() => ({ value: "role_id=custom" }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
-vi.mock("next/navigation", () => ({
-  useSearchParams: () => new URLSearchParams(searchParams.value)
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("./user-editor", () => ({
+  // Stands in for the editor: a dialog named after the user it edits.
+  UserEditorDialog: ({ open, user }: { open: boolean; user?: { email: string } }) =>
+    open && user ? <div role="dialog" aria-label={`Redigera ${user.email}`} /> : null,
+  IssuedPasswordDialog: () => null
 }));
-vi.mock("./user-editor", () => ({ UserEditorDialog: () => null }));
 
 import { AdminUsersPage } from "./users-page";
 
@@ -48,7 +52,7 @@ const users = [
   })
 ];
 
-type Page = { items: unknown[]; totalPages?: number; page?: number };
+type Page = { items: unknown[]; totalPages?: number; page?: number; totalCount?: number };
 
 /** Answers the users endpoint with `pages(query)`, the roles endpoint with one role. */
 function serve(pages: (query: Record<string, unknown>) => Page) {
@@ -64,13 +68,19 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
         return ok({ max_age_days: null });
       }
       const query = init?.params?.query ?? {};
-      const { items, totalPages = 1, page = Number(query.page) } = pages(query);
+      const {
+        items,
+        totalPages = 1,
+        page = Number(query.page),
+        totalCount = items.length
+      } = pages(query);
       return ok({
         items,
         metadata: {
           page,
+          page_size: 100,
           total_pages: totalPages,
-          total_count: items.length,
+          total_count: totalCount,
           counts: { active: 1, inactive: 3 },
           has_next: page < totalPages,
           has_previous: page > 1
@@ -80,9 +90,16 @@ function serve(pages: (query: Record<string, unknown>) => Page) {
   );
 }
 
+function renderUsers() {
+  return renderInApp(<AdminUsersPage />, {
+    appContext,
+    route: `/admin/users${searchParams.value ? `?${searchParams.value}` : ""}`
+  });
+}
+
 function renderPage(items: unknown[] = []) {
   serve(() => ({ items }));
-  return renderInApp(<AdminUsersPage />, { appContext });
+  return renderUsers();
 }
 
 function usersQuery(overrides: Record<string, unknown>) {
@@ -92,6 +109,7 @@ function usersQuery(overrides: Record<string, unknown>) {
         page: 1,
         page_size: 100,
         search_email: undefined,
+        search_name: undefined,
         state_filter: "active",
         role_id: undefined,
         ...overrides
@@ -104,6 +122,13 @@ function liveRegion() {
   return document.querySelector("[data-astryx-live-region='polite']")?.textContent ?? "";
 }
 
+/** Lets a frame pass: Astryx writes an announcement into its region in the next frame. */
+function nextFrame() {
+  return act(
+    () => new Promise<void>((resolve) => requestAnimationFrame(() => setTimeout(resolve)))
+  );
+}
+
 afterEach(() => {
   cleanup();
   // Astryx keeps one live region on <body> (re-created on the next announce):
@@ -114,7 +139,36 @@ afterEach(() => {
 });
 
 describe("AdminUsersPage", () => {
-  it("filters users by the selected role and can return to all users", async () => {
+  it("follows external filters and discards pending search drafts", async () => {
+    serve(() => ({ items: users, totalPages: 8 }));
+    renderUsers();
+    await screen.findByText("anna.lind@kommun.se");
+    const email = screen.getByRole("textbox", { name: "E-post" });
+    const username = screen.getByRole("textbox", { name: "Användarnamn" });
+    vi.useFakeTimers();
+    try {
+      fireEvent.change(email, { target: { value: "old-draft" } });
+      fireEvent.change(username, { target: { value: "other-draft" } });
+      act(() => replaceUrl("/admin/users?tab=inactive&search=restored&search_name=anna&page=3"));
+      expect(email).toHaveProperty("value", "restored");
+      expect(username).toHaveProperty("value", "anna");
+      act(() => vi.advanceTimersByTime(300));
+      expect(window.location.search).toBe("?tab=inactive&search=restored&search_name=anna&page=3");
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({
+          page: 3,
+          state_filter: "inactive",
+          search_email: "restored",
+          search_name: "anna"
+        })
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("filters users by the role a link names and can return to all users", async () => {
     renderPage();
     await waitFor(() =>
       expect(api.GET).toHaveBeenCalledWith(
@@ -122,11 +176,125 @@ describe("AdminUsersPage", () => {
         usersQuery({ role_id: "custom" })
       )
     );
-    expect(await screen.findByText("Manager")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Visa alla användare" }));
+    expect(await screen.findByRole("combobox", { name: "Roll" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("combobox", { name: "Roll" }).textContent).toContain("Manager")
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
     await waitFor(() =>
       expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/users/", usersQuery({}))
     );
+    expect(screen.getByRole("combobox", { name: "Roll" }).textContent).toContain("Alla roller");
+  });
+
+  it("filters by a role chosen from the dropdown", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Roll" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Manager" }));
+
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({ role_id: "custom" })
+      )
+    );
+  });
+
+  it("searches by username and e-mail together, from three characters, and clears both", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+    const email = screen.getByRole("textbox", { name: "E-post" });
+    const username = screen.getByRole("textbox", { name: "Användarnamn" });
+    // Both say what the search needs (at least three characters).
+    expect(email.getAttribute("aria-describedby")).toContain(
+      username.getAttribute("aria-describedby")!.split(" ").at(-1)!
+    );
+
+    fireEvent.change(username, { target: { value: "an" } });
+    fireEvent.change(email, { target: { value: "kommun" } });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_email: "kommun" })
+        ),
+      { timeout: 2000 }
+    );
+    // Two characters are not sent (the backend rejects them).
+    expect(api.GET).not.toHaveBeenCalledWith(
+      "/api/v1/admin/users/",
+      usersQuery({ search_email: "kommun", search_name: "an" })
+    );
+
+    fireEvent.change(username, { target: { value: "anna" } });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_email: "kommun", search_name: "anna" })
+        ),
+      { timeout: 2000 }
+    );
+    expect(window.location.search).toBe("?search=kommun&search_name=anna");
+
+    api.GET.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
+    expect((email as HTMLInputElement).value).toBe("");
+    expect((username as HTMLInputElement).value).toBe("");
+    // The unfiltered list is cached from the first load.
+    await waitFor(() => expect(window.location.search).toBe(""));
+    // Once the old drafts' debounce runs out, the cleared search stays cleared.
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    expect(window.location.search).toBe("");
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/admin/users/", expect.anything());
+  });
+
+  it("offers to clear the filters only while one is set, and keeps focus on the list", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+    // Nothing to clear on an unfiltered list.
+    expect(screen.queryByRole("button", { name: "Rensa filter" })).toBeNull();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
+      target: { value: "an" }
+    });
+    const clear = screen.getByRole("button", { name: "Rensa filter" });
+    act(() => clear.focus());
+    fireEvent.click(clear);
+
+    expect(screen.queryByRole("button", { name: "Rensa filter" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+  });
+
+  it("shows each user's groups", async () => {
+    searchParams.value = "";
+    renderPage([
+      user({
+        user_groups: [
+          { id: "g1", name: "Ekonomi" },
+          { id: "g2", name: "Arkiv" }
+        ]
+      }),
+      user({ id: "u2", email: "per.berg@kommun.se", user_groups: [] })
+    ]);
+    const table = await screen.findByRole("table", { name: "Aktiva användare" });
+    expect(within(table).getByRole("columnheader", { name: "Användargrupper" })).toBeTruthy();
+    const [, anna, per] = within(table).getAllByRole("row");
+    expect(within(anna!).getByTitle("Ekonomi")).toBeTruthy();
+    expect(within(anna!).getByTitle("Arkiv")).toBeTruthy();
+    expect(within(per!).getAllByText("Ingen").length).toBeGreaterThan(0);
+  });
+
+  it("tells the admin to filter when the list runs past the page cap", async () => {
+    searchParams.value = "";
+    serve(() => ({ items: users, totalPages: 100, totalCount: 10_500 }));
+    renderUsers();
+    expect(await screen.findByText(/Listan visar högst 100 sidor/)).toBeTruthy();
   });
 
   it("lists users with avatar, roles, status and a named row menu", async () => {
@@ -144,23 +312,40 @@ describe("AdminUsersPage", () => {
     ).toBeTruthy();
     // Without a username the email is the name.
     expect(within(per!).getByText("per.berg@kommun.se")).toBeTruthy();
-    expect(within(per!).getByText("Inbjuden")).toBeTruthy();
+    expect(within(per!).getAllByText("Inbjuden")).toHaveLength(1);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användare" })).toBeTruthy();
-    // The breadcrumb names the section as the admin navigation does.
-    expect(screen.getByText("Organisation")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Sök användare på e-post" })).toBeTruthy();
+    // No breadcrumb above the title: the admin navigation says where this is.
+    expect(screen.queryByText("Organisation")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "E-post" })).toBeTruthy();
+    expect(screen.queryByText(/Listan visar högst 100 sidor/)).toBeNull();
     expect(screen.getByText("2 användare")).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("holds each user's name in view where the table scrolls sideways (decision 9)", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    const table = await screen.findByRole("table", { name: "Aktiva användare" });
+    // Every column stays; the name is pinned, so a phone scrolls the rest.
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.map((cell) => cell.textContent)).toEqual(["Användare"]);
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(5);
+    // An iPad held upright leaves it 682 px beside the icon rail: it fits whole.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(682);
+    // Its scroll region is named after the table.
+    expect(screen.getByRole("group", { name: "Aktiva användare" })).toBeTruthy();
   });
 
   it("switches between active and inactive users with the tabs", async () => {
     searchParams.value = "";
     renderPage(users);
-    const inactive = await screen.findByRole("tab", { name: "Inaktiva användare 3" });
-    expect(
-      screen.getByRole("tab", { name: "Aktiva användare 1" }).getAttribute("aria-selected")
-    ).toBe("true");
+    const inactive = await screen.findByRole("tab", { name: "Inaktiva 3" });
+    expect(screen.getByRole("tab", { name: "Aktiva 1" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
 
     fireEvent.click(inactive);
 
@@ -177,17 +362,151 @@ describe("AdminUsersPage", () => {
   it("announces the result count of a search once its results are in", async () => {
     searchParams.value = "";
     serve((query) => ({ items: query.search_email ? [users[0]] : users }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("2 användare");
-    // Not on first load.
-    expect(liveRegion()).toBe("");
+    // Not on first load. Astryx's spinner may still say "Läser in" there.
+    await nextFrame();
+    expect(liveRegion()).not.toContain("användare");
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Sök användare på e-post" }), {
+    fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
       target: { value: "anna" }
     });
 
     await waitFor(() => expect(liveRegion()).toBe("1 användare"), { timeout: 2000 });
     expect(screen.getByText("1 användare", { selector: "p" })).toBeTruthy();
+  });
+});
+
+describe("AdminUsersPage on a phone", () => {
+  beforeEach(() => {
+    searchParams.value = "";
+    setViewport("phone");
+  });
+
+  it("shows one e-mail search and the users as rows, the first screen not filled by filters", async () => {
+    renderPage(users);
+    const list = await screen.findByRole("list", { name: "Aktiva användare" });
+    expect(screen.queryByRole("table")).toBeNull();
+    // The username and role filters wait behind the Filter button.
+    expect(within(screen.getByRole("search")).getAllByRole("textbox")).toEqual([
+      screen.getByRole("textbox", { name: "Sök på e-post" })
+    ]);
+    // The rule for this field only; the username's waits in the sheet.
+    const hint = screen
+      .getByRole("textbox", { name: "Sök på e-post" })
+      .getAttribute("aria-describedby")!;
+    expect(document.getElementById(hint)?.textContent).toBe("Ange minst 3 tecken.");
+    expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Filter" })).toBeTruthy();
+    expect(screen.getByText("2 användare")).toBeTruthy();
+
+    const [anna, per] = within(list).getAllByRole("listitem");
+    expect(within(anna!).getByText("anna.lind")).toBeTruthy();
+    expect(within(anna!).getByText("anna.lind@kommun.se")).toBeTruthy();
+    expect(within(anna!).getByText("Roll: Manager")).toBeTruthy();
+    expect(
+      within(anna!).getByRole("button", { name: "Fler åtgärder för anna.lind@kommun.se" })
+    ).toBeTruthy();
+    // Without a username the e-mail is the name, once.
+    expect(within(per!).getAllByText("per.berg@kommun.se")).toHaveLength(1);
+    expect(within(per!).getByText("Inbjuden")).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+  });
+
+  it("filters by username and role in the Filter sheet", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const sheet = await screen.findByRole("dialog", { name: "Filter" });
+    fireEvent.change(within(sheet).getByRole("textbox", { name: "Användarnamn" }), {
+      target: { value: "anna" }
+    });
+    await waitFor(
+      () =>
+        expect(api.GET).toHaveBeenCalledWith(
+          "/api/v1/admin/users/",
+          usersQuery({ search_name: "anna" })
+        ),
+      { timeout: 2000 }
+    );
+    expect(await screen.findByRole("button", { name: "Filter (1)" })).toBeTruthy();
+
+    fireEvent.click(within(sheet).getByRole("combobox", { name: "Roll" }));
+    fireEvent.click(await screen.findByRole("option", { name: "Manager" }));
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/admin/users/",
+        usersQuery({ search_name: "anna", role_id: "custom" })
+      )
+    );
+    expect(await screen.findByRole("button", { name: "Filter (2)" })).toBeTruthy();
+    await expectNoAxeViolations(document.body);
+
+    fireEvent.click(within(sheet).getByRole("button", { name: "Klar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Rensa filter" }));
+    expect(await screen.findByRole("button", { name: "Filter" })).toBeTruthy();
+  });
+
+  it("keeps a typed search and an open editor through a turn across 768 px", async () => {
+    renderPage(users);
+    const list = await screen.findByRole("list", { name: "Aktiva användare" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök på e-post" }), {
+      target: { value: "ann" }
+    });
+    const trigger = within(list).getByRole("button", {
+      name: "Fler åtgärder för anna.lind@kommun.se"
+    });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera användare" }));
+    expect(screen.getByRole("dialog", { name: "Redigera anna.lind@kommun.se" })).toBeTruthy();
+
+    act(() => setViewport("desktop"));
+
+    expect(await screen.findByRole("table", { name: "Aktiva användare" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Redigera anna.lind@kommun.se" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "E-post" })).toHaveProperty("value", "ann");
+  });
+
+  it("keeps the e-mail search focused, with what was typed, through a turn across 768 px and back", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    const phoneField = screen.getByRole("textbox", { name: "Sök på e-post" });
+    phoneField.focus();
+    fireEvent.change(phoneField, { target: { value: "ann" } });
+
+    // The phone held sideways: 844 px wide.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    await screen.findByRole("table", { name: "Aktiva användare" });
+    const wideField = screen.getByRole("textbox", { name: "E-post" });
+    expect(wideField).toHaveProperty("value", "ann");
+    expect(document.activeElement).toBe(wideField);
+
+    act(() => setViewport("phone"));
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    const backField = screen.getByRole("textbox", { name: "Sök på e-post" });
+    expect(backField).toHaveProperty("value", "ann");
+    expect(document.activeElement).toBe(backField);
+  });
+
+  it("does not reopen the Filter sheet on its own after a turn to 768 px and back", async () => {
+    renderPage(users);
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    expect(await screen.findByRole("dialog", { name: "Filter" })).toBeTruthy();
+
+    act(() => setViewport("desktop"));
+    await screen.findByRole("table", { name: "Aktiva användare" });
+    act(() => setViewport("phone"));
+
+    await screen.findByRole("list", { name: "Aktiva användare" });
+    expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Filter" }).getAttribute("aria-expanded")).toBe(
+      "false"
+    );
   });
 });
 
@@ -199,7 +518,7 @@ describe("AdminUsersPage paging", () => {
   it("keeps the pressed page button enabled and focused while the page loads", async () => {
     let release: () => void = () => {};
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 3 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("sida1@kommun.se");
 
     // Page 2 answers only when released: the list is still loading.
@@ -227,7 +546,7 @@ describe("AdminUsersPage paging", () => {
 
   it("moves focus to the list when the next-page button disables at the last page", async () => {
     serve((query) => ({ items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("sida1@kommun.se");
 
     const next = screen.getByRole("button", { name: "Gå till nästa sida" });
@@ -253,7 +572,7 @@ describe("AdminUsersPage paging", () => {
         ? { items: [], totalPages: 2 }
         : { items: [user({ email: `sida${query.page}@kommun.se` })], totalPages: 2 }
     );
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
 
     expect(await screen.findByText("sida2@kommun.se")).toBeTruthy();
     expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/users/", usersQuery({ page: 2 }));
@@ -262,7 +581,7 @@ describe("AdminUsersPage paging", () => {
   it("fits a phone: page x of y instead of page numbers below the sm breakpoint", async () => {
     setViewport("phone");
     serve(() => ({ items: users, totalPages: 12 }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
 
     const pagination = await screen.findByRole("navigation", { name: "Sidnumrering" });
     expect(within(pagination).getByText("Sida 1 av 12")).toBeTruthy();
@@ -288,7 +607,7 @@ describe("AdminUsersPage row actions", () => {
   it("deactivates a user, confirms it and keeps focus in the list", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     list = users.slice(1); // The deactivated user leaves the active tab.
@@ -311,7 +630,7 @@ describe("AdminUsersPage row actions", () => {
 
   it("does not let admins deactivate or delete themselves", async () => {
     serve(() => ({ items: [user({ id: "me" })] }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     const menu = openRowMenu("anna.lind@kommun.se");
@@ -325,7 +644,7 @@ describe("AdminUsersPage row actions", () => {
   it("reactivates an inactive user", async () => {
     searchParams.value = "tab=inactive";
     serve(() => ({ items: [user({ state: "inactive", is_active: false })] }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("anna.lind@kommun.se");
 
     fireEvent.click(
@@ -345,7 +664,7 @@ describe("AdminUsersPage row actions", () => {
   it("deletes a user after confirmation", async () => {
     let list = users;
     serve(() => ({ items: list }));
-    renderInApp(<AdminUsersPage />, { appContext });
+    renderUsers();
     await screen.findByText("per.berg@kommun.se");
 
     fireEvent.click(

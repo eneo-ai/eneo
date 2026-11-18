@@ -1,5 +1,3 @@
-"use client";
-
 import { useSyncExternalStore } from "react";
 import { jobResultInfoBlobId, type Job } from "./jobs";
 
@@ -46,11 +44,9 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
-const EMPTY: ReadonlySet<string> = new Set();
 const getSnapshot = () => snapshot;
-const getServerSnapshot = () => EMPTY;
 
 /** The ids of info-blobs that a job produced within the last few seconds. */
 export function useRecentInfoBlobIds(): ReadonlySet<string> {
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  return useSyncExternalStore(subscribe, getSnapshot);
 }

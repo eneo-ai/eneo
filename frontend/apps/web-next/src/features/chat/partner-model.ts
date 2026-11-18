@@ -2,6 +2,17 @@ import { selectEffectiveModelId } from "@/features/ai-models/select-effective-ch
 import type { Schema } from "@/lib/api/models";
 import type { ChatPartner } from "@/lib/chat/types";
 
+/**
+ * Nobody can answer in this chat: an assistant without a usable completion
+ * model, or a group chat without assistants. A partner whose model or members
+ * are not known (left unset) counts as able to answer.
+ */
+export function partnerCannotAnswer(partner: ChatPartner): boolean {
+  return partner.type === "group-chat"
+    ? partner.assistantCount === 0
+    : partner.completionModel === null;
+}
+
 type SparseModel = Schema<"CompletionModelSparse">;
 type Catalog = { id: string; supports_tool_calling?: boolean | null }[];
 

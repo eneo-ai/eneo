@@ -13,7 +13,6 @@
   function recoveryRoute(error: App.Error): string | undefined {
     if (error.code === 9006) return "/activate";
     if (error.code === 9025) return "/deactivated";
-    if (error.status === 401) return "/logout?message=expired";
     return undefined;
   }
 
@@ -25,6 +24,8 @@
   const message = $derived(getErrorCodeMessage(appError.code) ?? appError.message);
   const heading = $derived(m.error_status_message({ status: appError.status, message }));
   const redirectTo = $derived(recoveryRoute(appError));
+  const expired = $derived(appError.status === 401 && redirectTo === undefined);
+  let expiredLogoutForm: HTMLFormElement | undefined = $state();
 
   const clipboard = createCopyState(4000);
   // The id stays selectable when the clipboard refuses, so the page says so
@@ -38,7 +39,10 @@
   // Effects never run on the server, so the redirect stays a client concern
   // while the markup below still renders without JavaScript.
   $effect(() => {
-    if (redirectTo) {
+    if (expired) {
+      // The actual 401 response initiates recovery. A GET to /logout never does.
+      expiredLogoutForm?.requestSubmit();
+    } else if (redirectTo) {
       // eslint-disable-next-line svelte/no-navigation-without-resolve -- server endpoints, not typed routes
       goto(redirectTo);
     }
@@ -49,7 +53,12 @@
   <title>{heading}</title>
 </svelte:head>
 
-{#if redirectTo === undefined}
+{#if expired}
+  <form method="POST" action={localizeHref("/logout?/logout")} bind:this={expiredLogoutForm}>
+    <input type="hidden" name="message" value="expired" />
+    <Button type="submit">{m.login_again()}</Button>
+  </form>
+{:else if redirectTo === undefined}
   <div
     class="bg-secondary absolute inset-0 flex flex-col items-center justify-center overflow-y-auto px-6 py-8"
   >
@@ -73,14 +82,12 @@
       >
 
       <!-- One sentence, so it wraps as prose instead of breaking at the link. -->
-      <p class="text-lg">
+      <form method="POST" action={localizeHref("/logout?/clearCookies")} class="text-lg">
         {m.if_error_persists()}
-        <Button
-          href={localizeHref("/login?clear_cookies=true")}
-          variant="link"
-          class="h-auto p-0 align-baseline text-lg underline">{m.delete_cookies()}</Button
+        <Button type="submit" variant="link" class="h-auto p-0 align-baseline text-lg underline"
+          >{m.delete_cookies()}</Button
         >
-      </p>
+      </form>
 
       {#if appError.code}
         <p class="text-muted text-sm">{m.error_code({ code: appError.code })}</p>

@@ -202,6 +202,21 @@ describe("ModelSelector", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("gives the caller's classes to the trigger, open or pinned by the policy", () => {
+    const { unmount } = renderSelector({ size: "sm", className: "caller-trigger" });
+    expect(trigger().closest(".caller-trigger")).not.toBeNull();
+    unmount();
+
+    renderSelector({
+      size: "sm",
+      className: "caller-trigger",
+      locked: { id: "gpt-4o", name: "gpt-4o", nickname: "GPT-4o", org: "OpenAI" }
+    });
+    expect(
+      screen.getByRole("combobox", { name: "Chattmodell" }).closest(".caller-trigger")
+    ).not.toBeNull();
+  });
+
   it("is a 44 px target on touch, and its rows are too", async () => {
     setViewport("phone");
     renderSelector({ size: "sm" });

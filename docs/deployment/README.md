@@ -7,7 +7,7 @@ Quick deployment reference for Eneo using Docker Compose.
 ## Files in This Directory
 
 - `docker-compose.yml` - Complete production stack (Traefik, frontend, backend, worker, tools runtime, PostgreSQL, Redis)
-- `docker-compose.web-next.yml` / `env_web_next.template` - Optional Next beta sharing the existing backend; see [parallel frontend deployment](https://docs.eneo.ai/dev/guides/deployment#run-the-next-beta-alongside-the-existing-app)
+- `docker-compose.web-next.yml` - Optional React/Vite beta served by the existing backend; see [parallel frontend deployment](https://docs.eneo.ai/dev/guides/deployment#run-the-react-beta-alongside-the-existing-app)
 - `docker-compose.object-content.yml` - Optional bundled SeaweedFS profile
 - `docker-compose.without-tools.yml` - Optional overlay that omits the tools runtime (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md))
 - `setup.py` - Generates the missing tools runtime token in `.env`, preserving existing settings
@@ -88,10 +88,10 @@ The stack uses five Docker networks:
 
 | Network | Services | Purpose |
 |---|---|---|
-| `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
-| `data_net` (`internal: true`) | db, redis, backend, worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
+| `proxy_tier` (external, created in step 6) | Traefik, frontend, backend, worker, crawler-worker | Ingress and outbound access (LLM APIs, OIDC, crawling) |
+| `data_net` (`internal: true`) | db, redis, backend, worker, crawler-worker, db-init | Data layer — no internet egress, unreachable from Traefik/frontend |
 | `tool_runtime_net` (`internal: true`) | tool-runtime, backend, worker | Bundled tools runtime; no internet, database, or Redis route (see [TOOL_RUNTIME.md](TOOL_RUNTIME.md)) |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker | Private S3-compatible byte plane when enabled; no public route |
+| `object_content_net` (`internal: true`) | optional object-content, backend, worker, crawler-worker | Private S3-compatible byte plane when enabled; no public route |
 | `module_net` | Traefik, backend, optional modules | Module traffic — modules reach the backend only (see [MODULES.md](MODULES.md)) |
 
 The backend is the only service on all five networks. PostgreSQL, Redis, and

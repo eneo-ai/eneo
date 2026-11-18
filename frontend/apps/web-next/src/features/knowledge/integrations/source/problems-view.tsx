@@ -1,8 +1,5 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
-import { useClipboard } from "@astryxdesign/core/hooks";
+import { Collapsible, CollapsibleGroup } from "@/components/astryx/collapsible";
 import { Link } from "@astryxdesign/core/Link";
 import {
   Check,
@@ -19,7 +16,7 @@ import {
   Weight,
   type LucideIcon
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -32,7 +29,8 @@ import type {
   SourceProblems,
   SyncFailure
 } from "../source-problems";
-import { SamePageLink, type InPlaceLink } from "./in-place-link";
+import { SamePageLink, type InPlaceLink } from "@/components/composites/in-place-link";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 const FILES_SHOWN = 10;
 
@@ -114,7 +112,7 @@ function ProblemIcon({ icon: Icon, tone }: { icon: LucideIcon; tone: keyof typeo
 
 function CopyAdminLink({ url }: { url: string }) {
   const t = useTranslations();
-  const { copy, isCopied } = useClipboard({ announce: t("copied") });
+  const { copy, isCopied } = useCopy();
   return (
     <Button
       size="sm"

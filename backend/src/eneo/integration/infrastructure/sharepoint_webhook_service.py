@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, cast
@@ -58,6 +59,7 @@ from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.tenants.tenant import TenantState
 from eneo.users.user import UserInDB
 from eneo.users.user_repo import UsersRepository
@@ -365,10 +367,12 @@ class SharepointWebhookService:
             subscription.mark_webhook_received()
             await self.sharepoint_subscription_repo.update(subscription)
         except Exception as exc:
-            logger.warning(
-                "Could not update SharePoint subscription webhook health for %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not update SharePoint subscription webhook health for %s",
                 subscription.subscription_id,
-                exc,
+                error=exc,
             )
 
     async def _queue_refresh_for_subscription(
@@ -598,10 +602,12 @@ class SharepointWebhookService:
                         f"Using tenant admin {admin_user.id} for tenant_app integration {user_integration_db.id}"
                     )
                 except Exception as exc:
-                    logger.warning(
-                        "Could not load tenant admin for tenant %s: %s",
+                    log_error(
+                        logger,
+                        logging.WARNING,
+                        "Could not load tenant admin for tenant %s",
                         user_integration_db.tenant_id,
-                        exc,
+                        error=exc,
                     )
                     return None
             user_for_job = user_cache[cache_key]
@@ -621,10 +627,12 @@ class SharepointWebhookService:
                         )
                     user_cache[user_id_str] = loaded_user
                 except Exception as exc:
-                    logger.warning(
-                        "Could not load user %s for SharePoint webhook notification: %s",
+                    log_error(
+                        logger,
+                        logging.WARNING,
+                        "Could not load user %s for SharePoint webhook notification",
                         user_integration_db.user_id,
-                        exc,
+                        error=exc,
                     )
                     return None
             user_for_job = user_cache[user_id_str]
@@ -789,11 +797,13 @@ class SharepointWebhookService:
                         context=context,
                         full=states[knowledge_id_str].full_requested,
                     )
-            except Exception:
-                logger.error(
+            except Exception as exc:
+                log_error(
+                    logger,
+                    logging.ERROR,
                     "SharePoint catch-up could not queue a sync for knowledge %s",
                     knowledge_id_str,
-                    exc_info=True,
+                    error=exc,
                 )
                 continue
             if queued is None:

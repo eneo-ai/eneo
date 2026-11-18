@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -14,6 +14,31 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = () => {};
 });
 afterEach(() => vi.clearAllMocks());
+
+it.each(["ctrlKey", "metaKey"])(
+  "submits once with %s+Enter through the existing form",
+  async (modifier) => {
+    api.POST.mockReturnValue(new Promise(() => {}));
+    renderInApp(<JustificationForm />);
+    const reason = screen.getByRole("combobox", { name: "Åtkomstskäl" });
+    const description = screen.getByLabelText("Detaljerad motivering");
+    fireEvent.keyDown(description, { key: "Enter", [modifier]: true });
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(reason);
+    fireEvent.keyDown(reason, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Säkerhetsutredning" }));
+    fireEvent.change(description, { target: { value: "Undersöker en testhändelse" } });
+    fireEvent.keyDown(description, { key: "Enter" });
+    expect(api.POST).not.toHaveBeenCalled();
+    fireEvent.keyDown(description, { key: "Enter", [modifier]: true });
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(description, { key: "Enter", [modifier]: true });
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/audit/access-session", {
+      body: { category: "security_investigation", description: "Undersöker en testhändelse" }
+    });
+  }
+);
 
 const problemOf = (control: HTMLElement) =>
   document.getElementById(control.getAttribute("aria-describedby") ?? "")?.textContent;

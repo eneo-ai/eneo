@@ -9,7 +9,14 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: () =>
       Promise.resolve({
-        data: { items: [{ id: "s2", name: "HR", personal: false, organization: false }] },
+        data: {
+          items: [
+            { id: "space-1", name: "Nuvarande", personal: false, organization: false },
+            { id: "org", name: "Organisation", personal: false, organization: true },
+            { id: "s2", name: "HR", personal: false, organization: false },
+            { id: "personal", name: "Personlig", personal: true, organization: false }
+          ]
+        },
         response: new Response("{}")
       })
   }
@@ -56,4 +63,27 @@ it("shows a missing destination at its picker on move, which takes focus", async
   expect(document.activeElement).toBe(destination);
   expect(onMove).not.toHaveBeenCalled();
   await expectNoAxeViolations(dialog);
+});
+
+it("offers shared and personal destinations while excluding current and organization spaces", async () => {
+  const onMove = vi.fn();
+  renderInApp(
+    <MoveResourceDialog
+      open
+      onOpenChange={() => {}}
+      title="Flytta assistent"
+      confirmLabel="Flytta"
+      pending={false}
+      onMove={onMove}
+    />
+  );
+  const destination = screen.getByRole("combobox", { name: "Destination" });
+  fireEvent.keyDown(destination, { key: "Enter" });
+  expect(await screen.findByRole("option", { name: "HR" })).toBeTruthy();
+  const personal = screen.getByRole("option", { name: "Personlig" });
+  expect(screen.queryByRole("option", { name: "Nuvarande" })).toBeNull();
+  expect(screen.queryByRole("option", { name: "Organisation" })).toBeNull();
+  fireEvent.click(personal);
+  fireEvent.click(screen.getByRole("button", { name: "Flytta" }));
+  expect(onMove).toHaveBeenCalledExactlyOnceWith("personal");
 });

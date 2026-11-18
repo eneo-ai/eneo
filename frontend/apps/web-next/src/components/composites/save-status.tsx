@@ -1,20 +1,21 @@
-"use client";
-
 import { CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { SuccessMark } from "./success-mark";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 
 export type SaveStatus = "dirty" | "saving" | "error";
 
+/** A failed field saving again is not plain "saving": its link stays until the outcome is known. */
+type TrackedStatus = SaveStatus | "retrying";
+
 // Split contexts so callers that only set status don't re-render on every map
 // change. The map drives the header indicator and the unsaved-changes guard.
 const SetStatusContext = createContext<((key: string, status: SaveStatus | null) => void) | null>(
   null
 );
-const StatusMapContext = createContext<Readonly<Record<string, SaveStatus>>>({});
+const StatusMapContext = createContext<Readonly<Record<string, TrackedStatus>>>({});
 
 /**
  * Aggregates the live save status of every autosaving field on the page. Pages
@@ -23,7 +24,7 @@ const StatusMapContext = createContext<Readonly<Record<string, SaveStatus>>>({})
  * while there is dirty local state, an in-flight save, or a failed save.
  */
 export function SaveStatusProvider({ children }: { children: React.ReactNode }) {
-  const [statuses, setStatuses] = useState<Record<string, SaveStatus>>({});
+  const [statuses, setStatuses] = useState<Record<string, TrackedStatus>>({});
 
   const setStatus = useCallback((key: string, status: SaveStatus | null) => {
     setStatuses((current) => {
@@ -33,8 +34,10 @@ export function SaveStatusProvider({ children }: { children: React.ReactNode }) 
         delete next[key];
         return next;
       }
-      if (current[key] === status) return current;
-      return { ...current, [key]: status };
+      const failedBefore = current[key] === "error" || current[key] === "retrying";
+      const next = status === "saving" && failedBefore ? "retrying" : status;
+      if (current[key] === next) return current;
+      return { ...current, [key]: next };
     });
   }, []);
 
@@ -64,16 +67,32 @@ type IndicatorState = "error" | "saving" | "dirty" | "saved";
  * Header chip reflecting the aggregate save state: an error (linking to the
  * field that failed) wins over an in-flight save, which wins over dirty local
  * drafts, which wins over the resting "all saved" state. `aria-live` announces
- * transitions to screen readers. When a save lands, the check mark pops in
- * once (tw-animate-css; the global reduced-motion rule turns it off), so the
- * flip from "Sparar…" to "Alla ändringar sparade" is seen, not just read.
+ * transitions to screen readers. A failed field saving again keeps its link,
+ * with a spinner: leaving the field to press that link is what starts the save,
+ * and the link must not go from under the press or the keyboard's focus. When a
+ * save lands, the check mark pops in once (tw-animate-css; the global
+ * reduced-motion rule turns it off), so the flip from "Sparar…" to "Alla ändringar sparade" is seen, not just read.
+ * A second copy shown where the first is hidden (an editor's phone views
+ * beside its header) passes `isQuiet`, so each change is announced once;
+ * `isCompact` says it in a word or two, for a phone's page bar.
  */
-export function SaveStatusIndicator() {
+export function SaveStatusIndicator({
+  isQuiet = false,
+  isCompact = false,
+  isHiddenWhenSaved = false
+}: {
+  isQuiet?: boolean;
+  isCompact?: boolean;
+  /** Says nothing while nothing is happening: for a place with no field of its own. */
+  isHiddenWhenSaved?: boolean;
+}) {
   const t = useTranslations();
   const statuses = useContext(StatusMapContext);
   const keys = Object.keys(statuses);
   const errorKey = keys.find((key) => statuses[key] === "error");
-  const saving = keys.some((key) => statuses[key] === "saving");
+  const retryingKey = keys.find((key) => statuses[key] === "retrying");
+  const linkKey = errorKey ?? retryingKey;
+  const saving = retryingKey != null || keys.some((key) => statuses[key] === "saving");
   const dirtyCount = keys.filter((key) => statuses[key] === "dirty").length;
   const state: IndicatorState = errorKey
     ? "error"
@@ -101,21 +120,25 @@ export function SaveStatusIndicator() {
   // so "Sparar…" and the unsaved count never chatter.
   const announce = useAnnounce();
   useEffect(() => {
-    if (justSaved) announce(t("all_changes_saved"));
-  }, [justSaved, landings, announce, t]);
+    if (justSaved && !isQuiet) announce(t("all_changes_saved"));
+  }, [justSaved, landings, announce, t, isQuiet]);
   useEffect(() => {
-    if (errorKey) announce(t("save_failed"));
-  }, [errorKey, announce, t]);
+    if (errorKey && !isQuiet) announce(t("save_failed"));
+  }, [errorKey, announce, t, isQuiet]);
 
   let content: React.ReactNode;
-  if (errorKey) {
+  if (linkKey) {
     content = (
       <a
-        href={`#${errorKey}`}
-        className="text-destructive inline-flex items-center gap-1.5 text-sm hover:underline"
+        href={`#${linkKey}`}
+        className="text-destructive inline-flex items-center gap-1.5 text-sm hover:underline pointer-coarse:min-h-11"
       >
-        <OctagonX aria-hidden="true" className="size-3.5" />
-        {t("save_failed")}
+        {errorKey ? (
+          <OctagonX aria-hidden="true" className="size-3.5" />
+        ) : (
+          <Loader2 aria-hidden="true" className="size-3.5 animate-spin" />
+        )}
+        {t(isCompact ? "save_status_failed_short" : "save_failed")}
       </a>
     );
   } else if (saving) {
@@ -129,14 +152,16 @@ export function SaveStatusIndicator() {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
         <CircleAlert aria-hidden="true" className="size-3.5" />
-        {t("unsaved_changes", { count: dirtyCount })}
+        {isCompact ? t("save_status_unsaved_short") : t("unsaved_changes", { count: dirtyCount })}
       </span>
     );
+  } else if (isHiddenWhenSaved) {
+    return null;
   } else {
     content = (
       <span className="text-muted-foreground inline-flex items-center gap-1.5 text-sm">
         <SuccessMark size="sm" replayKey={justSaved ? landings : undefined} />
-        {t("all_changes_saved")}
+        {t(isCompact ? "save_status_saved_short" : "all_changes_saved")}
       </span>
     );
   }

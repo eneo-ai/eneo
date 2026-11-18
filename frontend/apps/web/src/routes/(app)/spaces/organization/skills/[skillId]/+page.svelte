@@ -21,6 +21,7 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Textarea } from "$lib/components/ui/textarea/index.js";
   import SkillForm from "$lib/features/skills/SkillForm.svelte";
+  import { skillReferenceCatalog } from "$lib/features/skills/skillReferenceCatalog";
   import SkillRevisionHistory from "$lib/features/skills/SkillRevisionHistory.svelte";
   import SkillPreview from "$lib/features/skills/SkillPreview.svelte";
   import SkillRemovalDialog from "$lib/features/skills/SkillRemovalDialog.svelte";
@@ -361,12 +362,20 @@
     const contextWindow = chunk.outcomes.filter(
       (outcome) => outcome.outcome === "incompatible" && outcome.reason === "context_window"
     ).length;
+    const attachmentLimit = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "attachment_limit"
+    ).length;
+    const conflictingRevisions = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "conflicting_revisions"
+    ).length;
     rollout = {
       ...rollout,
       advanced: rollout.advanced + chunk.counts.advanced,
       concurrentChange: rollout.concurrentChange + chunk.counts.concurrent_change,
       activationUnavailable: rollout.activationUnavailable + activationUnavailable,
-      contextWindow: rollout.contextWindow + contextWindow
+      contextWindow: rollout.contextWindow + contextWindow,
+      attachmentLimit: rollout.attachmentLimit + attachmentLimit,
+      conflictingRevisions: rollout.conflictingRevisions + conflictingRevisions
     };
   }
 
@@ -375,13 +384,21 @@
     const contextWindow = chunk.outcomes.filter(
       (outcome) => outcome.outcome === "incompatible" && outcome.reason === "context_window"
     ).length;
+    const attachmentLimit = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "attachment_limit"
+    ).length;
+    const conflictingRevisions = chunk.outcomes.filter(
+      (outcome) => outcome.outcome === "incompatible" && outcome.reason === "conflicting_revisions"
+    ).length;
     rollout = {
       ...rollout,
       apps: {
         ...rollout.apps,
         advanced: rollout.apps.advanced + chunk.counts.advanced,
         concurrentChange: rollout.apps.concurrentChange + chunk.counts.concurrent_change,
-        contextWindow: rollout.apps.contextWindow + contextWindow
+        contextWindow: rollout.apps.contextWindow + contextWindow,
+        attachmentLimit: rollout.apps.attachmentLimit + attachmentLimit,
+        conflictingRevisions: rollout.apps.conflictingRevisions + conflictingRevisions
       }
     };
   }
@@ -531,6 +548,8 @@
       advanced: 0,
       concurrentChange: 0,
       activationUnavailable: 0,
+      attachmentLimit: 0,
+      conflictingRevisions: 0,
       contextWindow: 0,
       apps: scope.apps
         ? {
@@ -538,6 +557,8 @@
             provisionalTotal: provisionalAppTotal,
             advanced: 0,
             concurrentChange: 0,
+            attachmentLimit: 0,
+            conflictingRevisions: 0,
             contextWindow: 0
           }
         : null,
@@ -610,6 +631,8 @@
       activationUnavailable:
         prior.assistantStatus === "completed" ? prior.activationUnavailable : 0,
       contextWindow: prior.assistantStatus === "completed" ? prior.contextWindow : 0,
+      attachmentLimit: prior.assistantStatus === "completed" ? prior.attachmentLimit : 0,
+      conflictingRevisions: prior.assistantStatus === "completed" ? prior.conflictingRevisions : 0,
       apps:
         prior.apps === null || prior.apps.status === "completed"
           ? prior.apps
@@ -619,6 +642,8 @@
               provisionalTotal: Math.max(prior.apps.provisionalTotal - prior.apps.advanced, 0),
               advanced: 0,
               concurrentChange: 0,
+              attachmentLimit: 0,
+              conflictingRevisions: 0,
               contextWindow: 0
             }
     };
@@ -979,6 +1004,11 @@
               </Alert.Root>
               {#key data.skill.current_revision_id}
                 <SkillForm
+                  referenceCatalog={skillReferenceCatalog(
+                    data.eneo,
+                    { type: "organization" },
+                    data.skill.id
+                  )}
                   mode="revision"
                   initialValue={{
                     display_name: data.skill.current_revision.display_name,

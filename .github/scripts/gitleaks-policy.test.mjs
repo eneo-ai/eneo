@@ -9,6 +9,7 @@ import test from "node:test";
 const config = fileURLToPath(new URL("../../.gitleaks.toml", import.meta.url));
 // Assemble public examples so this test does not itself introduce key findings.
 const examples = [
+  ["backend/src/eneo/authentication/api_key_rate_limiter.py", ["ApiKey", "V2InDB"]],
   ["docker-compose.e2e.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["docker-compose.e2e.ci.yml", ["yPIAaWTENh5knUuz75NYHbl", "R3672X-7lH-W6AD4F1hs="]],
   ["backend/tests/unittests/model_providers/test_provider_connection_probe.py", ["sk-live-", "secret-1234"]],
@@ -29,6 +30,11 @@ const examples = [
   ["backend/tests/unittests/integration/test_sharepoint_sync_ledger.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/integration/test_sharepoint_failed_items.py", ["integration_knowledge_id=", "ik.id"]],
   ["backend/tests/unittests/observability/test_error_text.py", ["v1.eyJhdWQiOiJ4In0.", "c2lnbmF0dXJl"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "secret-1234"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "other-5678"]],
+  ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "second-2222"]],
+  ["frontend/apps/web-next/src/features/admin/models/provider-edit-dialog.test.tsx", ["synthetic-header-", "secret-9012"]],
+  ["backend/tests/unit/authentication/test_browser_session_router.py", ["replacing=", "None"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
 function repository(t) {
@@ -107,6 +113,39 @@ test("an allowed value on the same line cannot hide a different key or another r
   writeFileSync(join(root, path), `api_key = "${value}"; other_key = "${novel}"\ntoken = "${githubToken}"\n`);
   const rules = scan(root, "dir", [], 2).map((finding) => finding.RuleID).sort();
   assert.deepEqual(rules, ["generic-api-key", "github-pat"]);
+});
+
+// The multi-tenant guide's curl example, as CI reported it.
+const guide = "frontend/apps/docs-site/src/content/guides/oidc-federation/multi-tenant.mdx";
+const placeholder = ["your-super-admin", "-api-key"].join("");
+
+function writeCurl(root, path, key, rest = "") {
+  mkdirSync(dirname(join(root, path)), { recursive: true });
+  writeFileSync(join(root, path), [
+    'curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \\',
+    `  -H "${["X-API", "-Key"].join("")}: ${key}"${rest} \\`,
+    '  -H "Content-Type: application/json" \\',
+    `  -d '{"allowed_endpoint_hosts": ["oauth2.googleapis.com", "www.googleapis.com"]}'`,
+    "",
+  ].join("\n"));
+}
+
+test("the guide's placeholder key is allowed only as itself and only in the guide", (t) => {
+  const allowed = repository(t);
+  writeCurl(allowed, guide, placeholder);
+  scan(allowed);
+  for (const [path, key] of [[guide, `${placeholder}Zq`], [`other/${guide}`, placeholder]]) {
+    const root = repository(t);
+    writeCurl(root, path, key);
+    assert.deepEqual(scan(root, "dir", [], 1).map((finding) => finding.RuleID), ["curl-auth-header"]);
+  }
+});
+
+test("the guide's placeholder cannot hide a different key on its line", (t) => {
+  const root = repository(t);
+  const novel = ["sk-live-", "q8Z2mR7vL4nB6xT9"].join("");
+  writeCurl(root, guide, placeholder, `; other_key = "${novel}"`);
+  assert.deepEqual(scan(root, "dir", [], 1).map((finding) => finding.RuleID), ["generic-api-key"]);
 });
 
 test("Git scans accept reviewed examples after line moves and a squash commit", (t) => {

@@ -1,18 +1,16 @@
-"use client";
-
-import { useMutation } from "@tanstack/react-query";
-import { useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
+import { sessionKeys } from "@/lib/api/session";
 
 export type SettingSwitchOptions = {
   /**
-   * After a save. By default the server layout refreshes, so a tenant setting
-   * reaches the whole app; a setting read through React Query refreshes its
-   * query here instead.
+   * After a save. By default the shared settings query refreshes, so every
+   * app-context reader sees the change. Other resources refresh their own
+   * queries here instead.
    */
-  onSaved?: (enabled: boolean) => void;
+  onSaved?: (enabled: boolean) => void | Promise<void>;
   /** A failed save. By default an error toast. */
   onError?: (error: unknown) => void;
   /**
@@ -21,6 +19,11 @@ export type SettingSwitchOptions = {
    */
   queue?: string;
 };
+
+/** Let other fields sharing a settings endpoint join the same mutation queue. */
+export function settingSwitchScope(id: string) {
+  return { id: `setting-switch:${id}` };
+}
 
 /**
  * An on/off setting behind a switch that saves on toggle. The switch shows the
@@ -45,7 +48,7 @@ export function useSettingSwitch(
   { onSaved, onError, queue }: SettingSwitchOptions = {}
 ): [boolean, (enabled: boolean) => void, boolean] {
   const t = useTranslations();
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [saved, setSaved] = useState(initial);
   // Adjusted during render, not in an effect: the switch never shows a value
   // the server has moved on from.
@@ -56,11 +59,12 @@ export function useSettingSwitch(
   }
   const mutation = useMutation({
     mutationFn: save,
-    scope: { id: `setting-switch:${queue ?? id}` },
+    scope: settingSwitchScope(queue ?? id),
     onSuccess: (_data, enabled) => {
       setSaved(enabled);
-      if (onSaved) onSaved(enabled);
-      else router.refresh();
+      return onSaved
+        ? onSaved(enabled)
+        : queryClient.invalidateQueries({ queryKey: sessionKeys.settings });
     },
     onError: (error) => (onError ? onError(error) : toastApiError(error, t))
   });

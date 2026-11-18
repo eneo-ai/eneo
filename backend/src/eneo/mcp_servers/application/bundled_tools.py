@@ -253,6 +253,7 @@ def merge_live_tools(
                 is_enabled_by_default=(
                     stored.is_enabled_by_default if stored else True
                 ),
+                enabled_override=stored.enabled_override if stored else None,
             )
         )
     return live

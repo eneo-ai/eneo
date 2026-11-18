@@ -1,6 +1,6 @@
 import Image, { type ImageOptions } from "@tiptap/extension-image";
 import { fileHandleId } from "@/features/chat/side-panel/file-reference";
-import { sanitizeImageSrc } from "./image-src";
+import { sanitizeImageSrc } from "@/lib/safe-url";
 
 export type EneoImageOptions = ImageOptions & {
   /** A link the reader may load the file a handle names from; undefined when there is none. */

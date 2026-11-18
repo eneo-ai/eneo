@@ -188,4 +188,38 @@ describe("VersionHistoryDialog", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(opener));
   });
+
+  it("reads a missing history as an empty one", async () => {
+    api.GET.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Not found" },
+        response: new Response(null, { status: 404 })
+      })
+    );
+    renderInApp(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Historik" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Versionshistorik för Sammanfatta ett beslut"
+    });
+    expect(
+      await within(dialog).findByRole("heading", { name: "Inga versioner har sparats ännu." })
+    ).toBeTruthy();
+    expect(within(dialog).queryByRole("alert")).toBeNull();
+  });
+
+  it.each([403, 500])("shows a %s as an error that a retry recovers from", async (status) => {
+    api.GET.mockImplementationOnce(() =>
+      Promise.resolve({ error: { message: "Refused" }, response: new Response(null, { status }) })
+    );
+    renderInApp(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "Historik" }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Versionshistorik för Sammanfatta ett beslut"
+    });
+    const alert = await within(dialog).findByRole("alert");
+    expect(alert.textContent).toContain("Refused");
+
+    fireEvent.click(within(alert).getByRole("button", { name: "Försök igen" }));
+    expect(await within(dialog).findByRole("button", { name: "Visa version 1" })).toBeTruthy();
+  });
 });

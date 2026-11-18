@@ -33,17 +33,26 @@ export const SPACE_ROLE_LABEL_KEYS: Record<SpaceRoleValue, string> = {
   viewer: "space_role_viewer"
 };
 
+/** What each space role may do, for the role sheet on a phone. */
+export const SPACE_ROLE_DESCRIPTION_KEYS: Record<SpaceRoleValue, string> = {
+  admin: "space_role_admin_description",
+  editor: "space_role_editor_description",
+  viewer: "space_role_viewer_description"
+};
+
 const ROLE_ORDER: Record<SpaceRoleValue, number> = { admin: 0, editor: 1, viewer: 2 };
 
 /**
- * Admins first, then editors, then viewers; alphabetical within a role, by
- * `compare` (Astryx `useCollator().compare`).
+ * Admins first, then editors, then viewers; within a role by the name a row
+ * shows (a username, else the e-mail), by `compare` (Astryx
+ * `useCollator().compare`).
  */
-export function sortMembersByRole<T extends Pick<SpaceMember, "email" | "role">>(
+export function sortMembersByRole<T extends Pick<SpaceMember, "email" | "role" | "username">>(
   members: readonly T[],
   compare: (a: string, b: string) => number
 ): T[] {
+  const name = (member: T) => member.username?.trim() || member.email;
   return [...members].sort(
-    (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || compare(a.email, b.email)
+    (a, b) => ROLE_ORDER[a.role] - ROLE_ORDER[b.role] || compare(name(a), name(b))
   );
 }

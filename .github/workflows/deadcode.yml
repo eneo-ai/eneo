@@ -94,6 +94,11 @@ jobs:
         id: knip
         continue-on-error: true
         working-directory: frontend
+        # knip loads web-next's Playwright and Vite configs, which refuse to load
+        # without these. Nothing connects to them.
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8124
+          ENEO_BACKEND_URL: http://127.0.0.1:8123
         run: bun run knip --no-exit-code > "$GITHUB_WORKSPACE/deadcode-knip.txt" 2>&1
 
       - name: Post or update PR comment

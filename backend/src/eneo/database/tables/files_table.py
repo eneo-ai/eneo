@@ -1,7 +1,7 @@
-from typing import Any, Optional
+from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,7 +13,7 @@ from eneo.files.file_models import FileType, FileUsageKind
 FILE_USAGE_INFO_KEY = "file_usage"
 
 
-def file_usage(kind: FileUsageKind | None) -> dict[str, Any]:
+def file_usage(kind: FileUsageKind | None) -> dict[str, FileUsageKind | None]:
     """Column ``info`` for a foreign key to ``files.id``.
 
     Every such column declares, where it is defined, whether it keeps the File
@@ -39,7 +39,6 @@ class Files(BasePublic):
     # PDF attachment); derived files are deleted with their parent.
     parent_file_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("files.id", ondelete="CASCADE"),
-        index=True,
         info=file_usage(None),
     )
 
@@ -85,4 +84,14 @@ class Files(BasePublic):
         Text,
         deferred=True,
         deferred_raiseload=True,
+    )
+
+    __table_args__ = (
+        Index("ix_files_parent_file_id_id", "parent_file_id", "id"),
+        Index(
+            "ix_files_root_created_id",
+            "created_at",
+            "id",
+            postgresql_where=text("parent_file_id IS NULL"),
+        ),
     )

@@ -1,0 +1,120 @@
+name: Prepare and Publish Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Prepare v{0}', inputs.version) || format('Reconcile release after {0}', github.event.workflow_run.name) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Final version without v (for example 2.4.0)
+        required: true
+        type: string
+  workflow_run:
+    workflows: ["CI", "Build and Push Docker Images"]
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  TZ: Europe/Stockholm
+
+jobs:
+  reconcile:
+    # A manual run with RELEASE_MANAGED unset still starts, so the plan step
+    # can explain what to configure instead of silently skipping.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop') ||
+      (github.event_name == 'workflow_run' &&
+       vars.RELEASE_MANAGED == 'true' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Serialize state changes and alias promotion with every other alias writer (image
+    # publication's promote job). Keep pending transitions instead of replacing them.
+    # On the job, so completions this job skips never wait in or fill the lock.
+    concurrency:
+      group: eneo-release-lifecycle
+      queue: max
+      cancel-in-progress: false
+    env:
+      RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout trusted release controller
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        with:
+          ref: develop
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select the managed release transition
+        id: plan
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -m scripts.release_workflow plan
+
+      - name: Check release app configuration
+        if: steps.plan.outputs.operation != 'skip'
+        env:
+          APP_CLIENT_ID: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          if [[ -z "$APP_CLIENT_ID" || -z "$APP_PRIVATE_KEY" ]]; then
+            echo '::error::Configure RELEASE_APP_CLIENT_ID and RELEASE_APP_PRIVATE_KEY as described in docs/DEPLOYMENT_WORKFLOW.md.'
+            exit 1
+          fi
+
+      # An App token lets preparation/port PRs run normal CI and tag creation
+      # trigger the image workflow. GITHUB_TOKEN cannot drive that event chain.
+      - name: Create repository-scoped release app token
+        if: steps.plan.outputs.operation != 'skip'
+        id: app
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write
+          permission-actions: read
+          permission-attestations: read
+
+      - name: Apply the release transition
+        if: steps.plan.outputs.operation != 'skip'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python3 -m scripts.release_workflow run
+
+      - name: Set up Buildx for verified alias promotion
+        if: steps.plan.outputs.operation == 'complete'
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          version: v0.33.0
+
+      - name: Log in for alias promotion
+        if: steps.plan.outputs.operation == 'complete'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Promote only the newest complete final release
+        if: steps.plan.outputs.operation == 'complete'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          RELEASE_VERSION: ${{ steps.plan.outputs.version }}
+          RELEASE_SHA: ${{ steps.plan.outputs.sha }}
+        run: python3 scripts/release_bundle.py promote --ref "refs/tags/v$RELEASE_VERSION" --revision "$RELEASE_SHA" --published-releases
+
+      - name: Open the release history PR
+        if: steps.plan.outputs.operation == 'complete'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: python3 -m scripts.release_workflow port

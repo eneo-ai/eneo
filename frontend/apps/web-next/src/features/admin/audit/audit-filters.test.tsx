@@ -85,17 +85,29 @@ describe("AuditFilterBar", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("pins the per-user view: a user chip, no action filter and the search explains why it waits", () => {
+  it("keeps search, action chips and the action filter available with an actor", async () => {
     const onChange = vi.fn();
     renderInApp(
       <AuditFilterBar
-        filters={{ ...DEFAULT_AUDIT_FILTERS, userId: "u1", userLabel: "anna.lind@example.se" }}
+        filters={{
+          ...filtered,
+          search: "invoice",
+          userId: "u1",
+          userLabel: "anna.lind@example.se"
+        }}
         onChange={onChange}
       />
     );
     const chips = screen.getByRole("list", { name: "Filter" });
     expect(within(chips).getByText("anna.lind@example.se")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Sök" }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("textbox", { name: "Sök" }).getAttribute("aria-disabled")).not.toBe(
+      "true"
+    );
+    expect(within(chips).getByText("Användare skapad")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Filter (4)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    expect(within(dialog).getByRole("button", { name: /Åtgärd/ })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Klar" }));
 
     fireEvent.click(within(chips).getByRole("button", { name: "Ta bort anna.lind@example.se" }));
     expect(onChange).toHaveBeenLastCalledWith({ userId: undefined, userLabel: undefined });
@@ -123,16 +135,51 @@ describe("AuditFilterBar", () => {
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull());
   });
 
-  it("opens the fields in a bottom sheet on a phone", async () => {
+  it("picks an actor without replacing the action, date or text filters", async () => {
+    const onChange = vi.fn();
+    renderInApp(
+      <AuditFilterBar filters={{ ...filtered, search: "invoice" }} onChange={onChange} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter (3)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Användare" }), {
+      target: { value: "anna" }
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "anna.lind@example.se" }));
+    expect(onChange).toHaveBeenLastCalledWith({ userId: "u1", userLabel: "anna.lind@example.se" });
+  });
+
+  it("opens the fields in a bottom sheet on a phone and hands focus back on close", async () => {
     setViewport("phone");
     renderInApp(<AuditFilterBar filters={DEFAULT_AUDIT_FILTERS} onChange={vi.fn()} />);
 
     const button = screen.getByRole("button", { name: "Filter" });
     expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    // A tap focuses the button in Chromium; fireEvent.click alone does not.
+    button.focus();
     fireEvent.click(button);
     const sheet = await screen.findByRole("dialog", { name: "Filter" });
+    expect(sheet.tagName).toBe("DIALOG");
     expect(within(sheet).getByRole("combobox", { name: "Användare" })).toBeTruthy();
+    await expectNoAxeViolations(sheet);
     fireEvent.click(within(sheet).getByRole("button", { name: "Klar" }));
     await waitFor(() => expect(button.getAttribute("aria-expanded")).toBe("false"));
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+
+  // The sheet follows the touch rule of every other menu and selector: a
+  // compact touch screen in either orientation, never a mouse window.
+  it.each([
+    ["a phone turned sideways", "phone-landscape", "DIALOG"],
+    ["an iPad held upright", "tablet-portrait", "DIV"],
+    ["a narrow mouse window", { width: 600, height: 800, pointer: "fine" }, "DIV"]
+  ] as const)("on %s opens the fields in the matching surface", async (_, viewport, tagName) => {
+    setViewport(viewport);
+    renderInApp(<AuditFilterBar filters={DEFAULT_AUDIT_FILTERS} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    expect(dialog.tagName).toBe(tagName);
+    expect(within(dialog).getByRole("combobox", { name: "Användare" })).toBeTruthy();
   });
 });

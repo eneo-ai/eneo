@@ -60,10 +60,11 @@ automatically retried. The selected Ubuntu release is
 explicit rather than following `ubuntu-latest`.
 
 CI image builds import matching Buildx caches with a two-minute timeout. The
-application images import the cache that release publication exports under
-`<image>` on every `develop` push; CI never exports those images again, since
-a second `mode=max` export of the same layers would double cache storage and
-evict other caches. Only the devcontainer image, which has no publication
+backend image imports the cache that release publication exports under
+`backend` on every `develop` push; publication no longer exports the Svelte
+frontend's rarely reused layers. CI never exports the application images
+itself, since a second `mode=max` export of the same layers would double cache
+storage and evict other caches. Only the devcontainer image, which has no publication
 build, exports a CI cache, and only on branch pushes: PR/queue caches cannot
 be shared with later candidates. That export uses the separate
 `ci-devcontainer` scope, a two-minute limit and a non-fatal failure mode. The

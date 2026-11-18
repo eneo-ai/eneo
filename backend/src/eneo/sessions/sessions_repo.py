@@ -10,6 +10,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import QueryableAttribute, aliased, selectinload
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.data_retention.derivations import (
+    copy_session_valid,
+    is_removed_copy,
+    readable_sessions,
+)
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -51,6 +56,17 @@ class OwnedChatPartner(NamedTuple):
     group_chat_id: UUID | None
 
 
+class SessionOwnership(NamedTuple):
+    """Who a conversation belongs to and whom it is with, without its turns."""
+
+    user_id: UUID | None
+    api_key_id: UUID | None
+    widget_id: UUID | None
+    visitor_id: UUID | None
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+
+
 @dataclass(frozen=True, slots=True)
 class ChatPartnerAccess:
     """An assistant or group chat the user has conversations with.
@@ -82,6 +98,25 @@ class RecentSessionRow(NamedTuple):
     group_chat_id: UUID | None
 
 
+def session_turn_options() -> list[Any]:
+    """Load a session's turns with what each of them shows. They come in
+    statements after the session row, so a read hydrating them asks
+    ``readable_sessions`` last."""
+    return [
+        selectinload(Sessions.questions).options(
+            selectinload(Questions.info_blob_references)
+            .selectinload(InfoBlobReferences.info_blob)
+            .options(selectinload(InfoBlobs.group), selectinload(InfoBlobs.website)),
+            selectinload(Questions.logging_details),
+            selectinload(Questions.assistant),
+            selectinload(Questions.completion_model),
+            selectinload(Questions.questions_files).selectinload(QuestionsFiles.file),
+            selectinload(Questions.mcp_tool_references),
+        ),
+        selectinload(Sessions.assistant).selectinload(Assistants.user),
+    ]
+
+
 class SessionRepository:
     def __init__(
         self,
@@ -99,6 +134,16 @@ class SessionRepository:
         self,
         sessions: list[SessionInDB],
     ) -> list[SessionInDB]:
+        """The sessions with what their turns show, without one that became a
+        copy of a removed source, or went, while they were read: the statement
+        that read or changed the session row checked it, later ones did not."""
+        await self._attach_turn_details(sessions)
+        readable = await readable_sessions(
+            self.session, [session.id for session in sessions]
+        )
+        return [session for session in sessions if session.id in readable]
+
+    async def _attach_turn_details(self, sessions: list[SessionInDB]) -> None:
         info_blobs = [
             info_blob
             for session in sessions
@@ -122,12 +167,11 @@ class SessionRepository:
                 for question in session.questions
             ):
                 raise RuntimeError("Session files require FileContentLoader")
-            return sessions
+            return
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
         )
-        return sessions
 
     async def _hydrate_optional(
         self,
@@ -135,31 +179,12 @@ class SessionRepository:
     ) -> SessionInDB | None:
         if session is None:
             return None
-        return (await self._hydrate_sessions([session]))[0]
+        hydrated = await self._hydrate_sessions([session])
+        return hydrated[0] if hydrated else None
 
     @staticmethod
     def _options() -> list[Any]:
-        return [
-            selectinload(Sessions.questions)
-            .selectinload(Questions.info_blob_references)
-            .selectinload(InfoBlobReferences.info_blob)
-            .selectinload(InfoBlobs.group),
-            selectinload(Sessions.questions)
-            .selectinload(Questions.info_blob_references)
-            .selectinload(InfoBlobReferences.info_blob)
-            .selectinload(InfoBlobs.website),
-            selectinload(Sessions.questions).selectinload(Questions.logging_details),
-            selectinload(Sessions.questions).selectinload(Questions.assistant),
-            selectinload(Sessions.questions).selectinload(Questions.completion_model),
-            selectinload(Sessions.questions)
-            .selectinload(Questions.questions_files)
-            .selectinload(QuestionsFiles.file),
-            selectinload(Sessions.questions).selectinload(Questions.questions_files),
-            selectinload(Sessions.questions).selectinload(
-                Questions.mcp_tool_references
-            ),
-            selectinload(Sessions.assistant).selectinload(Assistants.user),
-        ]
+        return session_turn_options()
 
     def _add_options(
         self, stmt: sa.Select[Any] | sa.Insert | sa.Update
@@ -187,7 +212,9 @@ class SessionRepository:
     # IMPORTANT: every method in this repo that returns session or question
     # rows must apply this filter. If you add a new such method, either call
     # this helper or document the explicit exception in a comment on the new
-    # method. See PRD §4.
+    # method. See PRD §4. A method that returns content, a list or a count of
+    # conversations also applies ``_exclude_unreadable_copies``; facts about
+    # ownership and the chat partner do not, so a refusal can be explained.
     @staticmethod
     def _exclude_helper_run_sessions(query: sa.Select[Any]) -> sa.Select[Any]:
         """Exclude sessions referenced by a help_assistant_runs row.
@@ -206,32 +233,113 @@ class SessionRepository:
             )
         )
 
+    @staticmethod
+    def _exclude_unreadable_copies(query: sa.Select[Any]) -> sa.Select[Any]:
+        """Exclude copies whose source was removed, in the reading statement."""
+        return query.where(copy_session_valid(Sessions.id.expression))
+
     async def add(self, session: SessionAdd) -> SessionInDB:
         return await self.delegate.add(session)
 
-    async def update(self, session: SessionUpdate) -> SessionInDB | None:
-        return await self._hydrate_optional(await self.delegate.update(session))
+    async def update(
+        self, session: SessionUpdate, *, title_from_turns_at: int | None = None
+    ) -> SessionInDB | None:
+        """None also for a copy whose source was removed: it stays unchanged.
 
-    async def add_feedback(self, feedback: SessionFeedback, id: UUID) -> SessionInDB:
+        A name the user sets starts its own retention time. A title made from
+        the turns read at history revision `title_from_turns_at` can quote any
+        of them. It is written only while that revision holds: a removal raises
+        it, so a title that may quote a removed turn is dropped and None is
+        returned. A written title keeps the time of the oldest question, so it
+        is due no later than that question.
+        """
+        name_set_at: sa.ColumnElement[datetime] = sa.func.now()
+        written: list[sa.ColumnElement[bool]] = [
+            Sessions.id == session.id,
+            copy_session_valid(Sessions.id.expression),
+        ]
+        if title_from_turns_at is not None:
+            written.append(Sessions.history_revision == title_from_turns_at)
+            oldest_question = (
+                sa.select(sa.func.min(Questions.created_at))
+                .where(Questions.session_id == Sessions.id)
+                .correlate(Sessions)
+                .scalar_subquery()
+            )
+            # least() skips the null of a conversation without questions.
+            name_set_at = sa.func.least(name_set_at, oldest_question)
+        stmt = self._add_options(
+            sa.update(Sessions)
+            .values(
+                **session.model_dump(exclude_unset=True, exclude={"id"}),
+                name_set_at=name_set_at,
+            )
+            .where(*written)
+            .returning(Sessions)
+        )
+        updated = await self.session.scalar(stmt)
+        return await self._hydrate_optional(
+            None if updated is None else SessionInDB.model_validate(updated)
+        )
+
+    async def add_feedback(
+        self,
+        feedback: SessionFeedback,
+        id: UUID,
+        *,
+        keep_existing_text: bool = False,
+    ) -> SessionInDB | None:
+        """Store a vote. ``keep_existing_text`` leaves the stored comment in
+        place when the feedback carries none, instead of clearing it. None,
+        and nothing stored, for a copy whose source was removed."""
+        values: dict[str, object] = {"feedback_value": feedback.value}
+        if feedback.text is not None or not keep_existing_text:
+            values["feedback_text"] = feedback.text
+            # The text's own retention time starts again.
+            values["feedback_set_at"] = sa.func.now()
         stmt = (
             sa.Update(Sessions)
-            .values(feedback_value=feedback.value, feedback_text=feedback.text)
-            .where(Sessions.id == id)
+            .values(values)
+            .where(Sessions.id == id, copy_session_valid(Sessions.id.expression))
             .returning(Sessions)
         )
 
         stmt_with_options = self._add_options(stmt)
         session = await self.session.scalar(stmt_with_options)
 
-        return (await self._hydrate_sessions([SessionInDB.model_validate(session)]))[0]
+        return await self._hydrate_optional(
+            None if session is None else SessionInDB.model_validate(session)
+        )
 
     async def get(self, id: UUID) -> SessionInDB | None:
-        query = self._exclude_helper_run_sessions(
-            sa.select(Sessions).where(Sessions.id == id)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(
+                sa.select(Sessions).where(Sessions.id == id)
+            )
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def is_removed_copy(self, id: UUID) -> bool:
+        """Whether ``get`` misses this existing session because it is a copy
+        whose source was removed. A fact: callers ask only after authorizing."""
+        return await is_removed_copy(self.session, id)
+
+    async def get_ownership(self, id: UUID) -> SessionOwnership | None:
+        """``get`` reduced to the principal and chat partner columns."""
+        query = self._exclude_helper_run_sessions(
+            sa.select(
+                Sessions.user_id,
+                Sessions.api_key_id,
+                Sessions.widget_id,
+                Sessions.visitor_id,
+                Sessions.assistant_id,
+                Sessions.group_chat_id,
+            ).where(Sessions.id == id)
+        )
+        row = (await self.session.execute(query)).one_or_none()
+        return None if row is None else SessionOwnership(*row)
 
     async def get_owned_chat_partner(
         self,
@@ -418,27 +526,29 @@ class SessionRepository:
         last_activity_at = sa.func.coalesce(
             last_question_at, Sessions.created_at
         ).label("last_activity_at")
-        query = self._exclude_helper_run_sessions(
-            sa.select(
-                Sessions.id,
-                Sessions.name,
-                Sessions.created_at,
-                last_activity_at,
-                Sessions.assistant_id,
-                Sessions.group_chat_id,
-            )
-            .where(Sessions.user_id == user_id)
-            .where(
-                sa.or_(
-                    sa.and_(
-                        Sessions.group_chat_id.is_(None),
-                        Sessions.assistant_id.in_(assistant_ids),
-                    ),
-                    Sessions.group_chat_id.in_(group_chat_ids),
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(
+                sa.select(
+                    Sessions.id,
+                    Sessions.name,
+                    Sessions.created_at,
+                    last_activity_at,
+                    Sessions.assistant_id,
+                    Sessions.group_chat_id,
                 )
+                .where(Sessions.user_id == user_id)
+                .where(
+                    sa.or_(
+                        sa.and_(
+                            Sessions.group_chat_id.is_(None),
+                            Sessions.assistant_id.in_(assistant_ids),
+                        ),
+                        Sessions.group_chat_id.in_(group_chat_ids),
+                    )
+                )
+                .order_by(last_activity_at.desc(), Sessions.id.desc())
+                .limit(limit)
             )
-            .order_by(last_activity_at.desc(), Sessions.id.desc())
-            .limit(limit)
         )
         result = await self.session.execute(query)
         return [RecentSessionRow(*row) for row in result.tuples()]
@@ -592,13 +702,16 @@ class SessionRepository:
         Documented exception to ``_exclude_helper_run_sessions``: the
         HelperRunService follow-up-turn path needs the session row that
         ``help_assistant_runs`` points at, so the completion call can rebuild
-        prior conversation context. Tenant-scoped defensively via
+        prior conversation context. A copy whose source was removed is still
+        excluded. Tenant-scoped defensively via
         :meth:`_filter_by_tenant` — the caller already authorized against the
         run's actor, but a stray cross-tenant lookup must still fail. No
         other code path may call this method. See PRD §4 + §6.
         """
-        query = self._filter_by_tenant(
-            sa.select(Sessions).where(Sessions.id == id), tenant_id
+        query = self._exclude_unreadable_copies(
+            self._filter_by_tenant(
+                sa.select(Sessions).where(Sessions.id == id), tenant_id
+            )
         )
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
@@ -609,6 +722,8 @@ class SessionRepository:
         assistant_id: UUID | None = None,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         group_chat_id: UUID | None = None,
         name_filter: str | None = None,
         start_date: datetime | None = None,
@@ -619,7 +734,9 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if assistant_id is not None:
             query = query.where(Sessions.assistant_id == assistant_id)
@@ -632,6 +749,10 @@ class SessionRepository:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -644,79 +765,6 @@ class SessionRepository:
 
         count = await self.session.scalar(query)
         return count if count is not None else 0
-
-    async def get_by_assistant(
-        self,
-        assistant_id: UUID,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.assistant_id == assistant_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
-            assistant_id=assistant_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            name_filter=normalized_name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=tenant_id,
-        )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                items = await self._hydrate_sessions(
-                    await self.delegate.get_models_from_query(query)
-                )
-                items.reverse()
-                return (items, total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        sessions = await self._hydrate_sessions(
-            await self.delegate.get_models_from_query(query)
-        )
-        return sessions, total_count
 
     @staticmethod
     def _to_session_metadata(
@@ -737,6 +785,8 @@ class SessionRepository:
         assistant_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -752,12 +802,18 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -772,6 +828,8 @@ class SessionRepository:
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -805,84 +863,13 @@ class SessionRepository:
         items = list(result.tuples())
         return self._to_session_metadata(items), total_count
 
-    async def get_by_group_chat(
-        self,
-        group_chat_id: UUID,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        limit: int | None = None,
-        cursor: datetime | None = None,
-        previous: bool = False,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> tuple[list[SessionInDB], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(Sessions).where(Sessions.group_chat_id == group_chat_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
-            group_chat_id=group_chat_id,
-            user_id=user_id,
-            api_key_id=api_key_id,
-            name_filter=normalized_name_filter,
-            start_date=start_date,
-            end_date=end_date,
-            tenant_id=tenant_id,
-        )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                items = await self._hydrate_sessions(
-                    await self.delegate.get_models_from_query(query)
-                )
-                items.reverse()
-                return (items, total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        sessions = await self._hydrate_sessions(
-            await self.delegate.get_models_from_query(query)
-        )
-        return sessions, total_count
-
     async def get_metadata_by_group_chat(
         self,
         group_chat_id: UUID,
         user_id: UUID | None = None,
         api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
         limit: int | None = None,
         cursor: datetime | None = None,
         previous: bool = False,
@@ -898,12 +885,18 @@ class SessionRepository:
 
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if user_id is not None:
             query = query.where(Sessions.user_id == user_id)
         if api_key_id is not None:
             query = query.where(Sessions.api_key_id == api_key_id)
+        if widget_id is not None:
+            query = query.where(
+                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
+            )
 
         if normalized_name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
@@ -918,6 +911,8 @@ class SessionRepository:
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
+            widget_id=widget_id,
+            visitor_id=visitor_id,
             name_filter=normalized_name_filter,
             start_date=start_date,
             end_date=end_date,
@@ -958,7 +953,9 @@ class SessionRepository:
         end_date: datetime | None = None,
     ) -> list[SessionInDB]:
         query = self._filter_by_tenant(sa.select(Sessions), tenant_id)
-        query = self._exclude_helper_run_sessions(query)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(query)
+        )
 
         if start_date is not None:
             query = query.filter(Sessions.created_at >= start_date)
@@ -977,7 +974,9 @@ class SessionRepository:
         Questions and their file links cascade with the session, but the
         ``files`` rows do not. Uploads and tool-generated images that only
         this conversation used are deleted with it; a File still used by
-        another conversation, Assistant, App or App run is kept.
+        another conversation, Assistant, App or App run is kept. A copy of
+        removed content comes back without its name and feedback, which no
+        read returns either.
         """
         file_ids = list(
             await self.session.scalars(
@@ -989,4 +988,12 @@ class SessionRepository:
         )
         deleted = await self.delegate.delete(id)
         await delete_unused_root_files(self.session, file_ids)
-        return await self._hydrate_optional(deleted)
+        if deleted is None:
+            return None
+        # Gone now, so no longer readable; its turns went with it.
+        await self._attach_turn_details([deleted])
+        if await is_removed_copy(self.session, id):
+            return deleted.model_copy(
+                update={"name": "", "feedback_value": None, "feedback_text": None}
+            )
+        return deleted

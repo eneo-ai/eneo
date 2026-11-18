@@ -166,6 +166,7 @@ class SkillRepo(Protocol):
         tenant_id: UUID,
         skill_id: UUID,
         expected_published_revision_id: UUID,
+        expected_runtime_policy_version: str,
         targets: Sequence[AppPinAdvanceTarget],
     ) -> list[AppPinAdvanceTargetResult]: ...
 
@@ -209,6 +210,7 @@ class SkillRepo(Protocol):
         content_digest: str,
         created_by_user_id: UUID,
         expected_current_revision_id: UUID | None = None,
+        restore_reference_revision_id: UUID | None = None,
     ) -> SkillRevisionChange | None: ...
 
     async def set_active(
@@ -254,6 +256,10 @@ class SkillRepo(Protocol):
         blocked_by_user_id: UUID,
         reason: str,
     ) -> SkillExecutionBlockChange | None: ...
+
+    async def personal_defaults_fit_snapshot(
+        self, *, tenant_id: UUID, lock_runtime_policy: bool
+    ) -> PersonalDefaultsSnapshot: ...
 
     async def stage_personal_chat_skill_pin_advance(
         self,

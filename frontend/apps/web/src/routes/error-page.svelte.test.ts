@@ -52,6 +52,22 @@ describe("error page", () => {
     });
   });
 
+  test("session expiry submits recovery as a POST with a no-JavaScript fallback", async () => {
+    const submit = vi.fn((event: SubmitEvent) => event.preventDefault());
+    document.addEventListener("submit", submit);
+    try {
+      showError({ status: 401, message: "Unauthorized", code: 0 });
+      await expect.element(page.getByRole("button", { name: "login_again" })).toBeVisible();
+      expect(submit).toHaveBeenCalledOnce();
+      const form = document.querySelector("form");
+      expect(form?.method).toBe("post");
+      expect(form?.getAttribute("action")).toBe("/logout?/logout");
+      expect(form && new FormData(form).get("message")).toBe("expired");
+    } finally {
+      document.removeEventListener("submit", submit);
+    }
+  });
+
   test("announces the failure through a heading inside an alert", async () => {
     showError({ status: 500, message: "Upstream server error", code: 0 });
 

@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { Bot, Inbox } from "lucide-react";
-import { NextIntlClientProvider } from "next-intl";
+import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
 import { ENTITY_TONES, entityAccent, entityTone } from "@/lib/entity-accent";
 import { expectNoAxeViolations } from "@/test/axe";
+import { flushAnnouncements, recordAnnouncements } from "@/test/render";
 import { EmptyState } from "./empty-state";
 import { EntityAvatar, entityInitials } from "./entity-avatar";
 import { AREA_HUES, IconTile } from "./icon-tile";
@@ -33,6 +34,10 @@ describe("PageHeader", () => {
     expect(within(trail).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe("/spaces");
     expect(within(trail).getByText("Min yta").closest("[aria-current='page']")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till" })).toBeTruthy();
+    // jsdom applies no CSS: the actions stand on the title's line, not centred on the paragraph.
+    const row = screen.getByRole("button", { name: "Lägg till" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-start");
+    expect(row?.className.split(" ")).not.toContain("items-center");
   });
 
   it("keeps a section label without a link out of aria-current", () => {
@@ -64,6 +69,24 @@ describe("PageHeader", () => {
     expect(screen.getByRole("table", { name: "Promptbibliotek" })).toBeTruthy();
   });
 
+  it("keeps the title for screen readers only on a phone, its actions in view", () => {
+    render(
+      <PageHeader
+        title="Appar"
+        description="Alla appar i ytan"
+        headingLevel={2}
+        isTitleHiddenOnPhone
+        actions={<button type="button">Skapa app</button>}
+      />
+    );
+    const title = screen.getByRole("heading", { level: 2, name: "Appar" });
+    const hidden = title.closest(".phone\\:sr-only");
+    expect(hidden).toBeTruthy();
+    expect(screen.getByText("Alla appar i ytan").closest(".phone\\:sr-only")).toBe(hidden);
+    const create = screen.getByRole("button", { name: "Skapa app" });
+    expect(create.closest(".phone\\:sr-only")).toBeNull();
+  });
+
   it("keeps the legacy children actions slot", () => {
     render(
       <PageHeader title="Appar">
@@ -71,6 +94,9 @@ describe("PageHeader", () => {
       </PageHeader>
     );
     expect(screen.getByRole("button", { name: "Skapa" })).toBeTruthy();
+    // A title alone is centred on its actions' line.
+    const row = screen.getByRole("button", { name: "Skapa" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-center");
     expect(screen.queryByRole("navigation")).toBeNull();
   });
 });
@@ -83,8 +109,24 @@ describe("EmptyState", () => {
       </EmptyState>
     );
     expect(screen.getByRole("heading", { level: 2, name: "Inga appar ännu" })).toBeTruthy();
-    expect(screen.getByRole("status")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Skapa app" })).toBeTruthy();
+  });
+
+  it("is announced when it appears, unless something else says it", async () => {
+    const said = recordAnnouncements();
+
+    const { rerender } = render(<EmptyState title="Inga appar ännu" description="Skapa en app" />);
+    await flushAnnouncements();
+    expect(said).toEqual(["Inga appar ännu Skapa en app"]);
+
+    // A filter's result count says it (ResourceFilterInput): the message, changed, stays quiet.
+    rerender(<EmptyState title="Inga resultat hittades" isAnnounced={false} />);
+    await flushAnnouncements();
+    cleanup();
+    render(<EmptyState title="Inga träffar" isAnnounced={false} />);
+    await flushAnnouncements();
+    expect(said).toEqual(["Inga appar ännu Skapa en app"]);
+    expect(screen.getByRole("heading", { name: "Inga träffar" })).toBeTruthy();
   });
 
   it("skips the actions row for a falsy permission-gated slot", () => {
@@ -120,13 +162,12 @@ describe("IconTile", () => {
 describe("LoadingState", () => {
   it("is a busy status region with a translated label", () => {
     render(
-      <NextIntlClientProvider locale="sv" messages={{ loading: "Laddar..." }}>
+      <IntlProvider locale="sv" messages={{ loading: "Laddar..." }}>
         <LoadingState rows={2} />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
-    const region = screen.getByRole("status");
-    expect(region.getAttribute("aria-busy")).toBe("true");
-    expect(within(region).getByText("Laddar...")).toBeTruthy();
+    const region = screen.getByText("Laddar...").closest('[role="status"]');
+    expect(region?.getAttribute("aria-busy")).toBe("true");
   });
 });
 
@@ -145,7 +186,9 @@ describe("EntityAvatar", () => {
       expect(tile.classList.contains(cls)).toBe(true);
     }
     expect(tile.getAttribute("aria-hidden")).toBe("true");
-    expect(tile.textContent).toBe("MY");
+    // Drawn, not text: a control's visible label, as axe reads it, never starts with them (WCAG 2.5.3).
+    expect(tile.getAttribute("data-initials")).toBe("MY");
+    expect(tile.textContent).toBe("");
   });
 
   it("is an image with an accessible name when labelled", () => {
@@ -198,10 +241,10 @@ describe("accessibility", () => {
 
   it("LoadingState in both variants", async () => {
     const { container } = render(
-      <NextIntlClientProvider locale="sv" messages={{ loading: "Laddar..." }}>
+      <IntlProvider locale="sv" messages={{ loading: "Laddar..." }}>
         <LoadingState rows={2} />
         <LoadingState variant="text" label="Laddar svar" />
-      </NextIntlClientProvider>
+      </IntlProvider>
     );
     await expectNoAxeViolations(container);
   });

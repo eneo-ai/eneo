@@ -1,10 +1,11 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,7 +27,7 @@ import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * Move an assistant or service to another accessible space. The hint warns
+ * Move an assistant to another accessible space. The hint warns
  * about what the move breaks; the transfer itself fails if the target lacks
  * matching models. A missing destination shows at its picker on move, which
  * takes focus.
@@ -57,14 +58,14 @@ export function MoveResourceDialog({
   const destinationProblem = submitted && !targetId ? t("select_a_space") : null;
 
   const { data: spaces } = useQuery({ ...spacesListQueryOptions(browserApi), enabled: open });
-  const targets = (spaces ?? []).filter((candidate) => candidate.id !== space.id);
+  const targets = (spaces ?? []).filter(
+    (candidate) => candidate.id !== space.id && !candidate.organization
+  );
 
   function move() {
     if (pending) return;
     if (!targetId) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      destinationRef.current?.focus();
+      revealProblems(() => setSubmitted(true), destinationRef.current);
       return;
     }
     onMove(targetId);

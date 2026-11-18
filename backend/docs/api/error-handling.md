@@ -2,7 +2,7 @@
 
 ## Standard error shape
 
-Most API errors return:
+Every error except a `422` validation error returns this envelope:
 
 ```json
 {
@@ -20,10 +20,21 @@ Most API errors return:
 
 Fields:
 - `message`: human-readable explanation.
-- `eneo_error_code`: legacy numeric code used by existing SDKs.
+- `eneo_error_code` (optional): legacy numeric code used by existing SDKs.
+  Absent when the route refused with a plain message and no code.
 - `code` (optional): stable string code for programmatic handling.
 - `context` (optional): safe, non-sensitive metadata.
+- `details` (optional): structured data about the failure.
 - `request_id` (optional): request correlation ID for support/debugging.
+- `detail` (deprecated): on a refusal raised as an HTTP exception, its raw
+  value, a string or an object, kept for one release so clients reading
+  `detail` keep working. Read the top-level fields instead; `detail` will be
+  removed. An object without a `code` (such as the `/api/healthz` report) is
+  also in `details`.
+
+A route may add operation-specific fields next to `code`, such as
+`retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown
+routes (`404`) and unsupported methods (`405`) answer in the same envelope.
 
 ## Request validation errors
 

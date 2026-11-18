@@ -1,15 +1,64 @@
-"use client";
-
 import { ExternalLink, FileText, Globe2 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useEffect, useRef } from "react";
+import { useTranslations } from "use-intl";
+import { useState } from "react";
+import { BlobPreviewDialog } from "@/features/knowledge/blobs";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
-import { McpSnippetButton } from "./message-parts";
+import { McpSnippetButton, type SourceChip } from "./message-parts";
+
+/**
+ * A cited knowledge document: its title opens the document's text in the
+ * knowledge tab's viewer, with the text to download and the original where
+ * the document keeps one (the viewer asks the backend).
+ */
+function DocumentSourceButton({
+  title,
+  blob,
+  className
+}: {
+  title: string;
+  blob: NonNullable<SourceChip["infoBlob"]>;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className={className}
+      >
+        {title}
+      </button>
+      {open && (
+        <BlobPreviewDialog
+          blob={{ id: blob.id, metadata: { title } }}
+          properties={blob.properties}
+          open={open}
+          onOpenChange={setOpen}
+        />
+      )}
+    </>
+  );
+}
 
 /** Id of the source entry that inline citation N (1-based) opens. */
 export function sourceAnchorId(messageId: string, number: number): string {
   return `${messageId}-source-${number}`;
+}
+
+/** Where a source comes from, one line: "Utdrag 2 · Upphandling · s. 4–6". */
+export function sourceMeta(source: ActivitySource, t: ReturnType<typeof useTranslations>): string {
+  return [
+    source.mcpSnippet?.excerptNumber
+      ? t("chat_source_excerpt", { number: source.mcpSnippet.excerptNumber })
+      : null,
+    source.origin,
+    source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }
 
 function excerptPreview(source: ActivitySource): string | null {
@@ -24,37 +73,17 @@ function excerptPreview(source: ActivitySource): string | null {
 
 /**
  * The Aktivitet panel's Källor tab: an answer's numbered sources with where
- * they come from. A citation that opened the panel focuses its source.
+ * they come from. Each source can take focus (`sourceAnchorId`): the panel
+ * moves it to the source a citation opened it on.
  */
 export function SourceList({
   messageId,
-  sources,
-  focusIndex
+  sources
 }: {
   messageId: string;
   sources: ActivitySource[];
-  focusIndex: number | null;
 }) {
   const t = useTranslations();
-  const itemRefs = useRef<Map<number, HTMLLIElement>>(new Map());
-
-  // A citation opened the panel: move focus to that source (WCAG 2.4.3). In
-  // the bottom sheet this runs before the sheet's dialog opens, and nothing in
-  // a closed dialog takes focus; opening it then focuses the sheet's panel
-  // (browsers focus a dialog's first focusable element), so the sheet would
-  // skip a data-autofocus item. The sheet opens in its own effect, which runs
-  // after this one in the same task: focus the source right after that.
-  useEffect(() => {
-    if (focusIndex === null) return;
-    const item = itemRefs.current.get(focusIndex);
-    if (!item) return;
-    const focus = () => {
-      item.focus();
-      item.scrollIntoView({ block: "nearest" });
-    };
-    if (item.closest("dialog:not([open])")) queueMicrotask(focus);
-    else focus();
-  }, [focusIndex, messageId]);
 
   if (sources.length === 0) {
     return (
@@ -67,16 +96,7 @@ export function SourceList({
       {sources.map((source, index) => {
         const number = index + 1;
         const Icon = source.url ? Globe2 : FileText;
-        const excerpt = source.mcpSnippet?.excerptNumber
-          ? t("chat_source_excerpt", { number: source.mcpSnippet.excerptNumber })
-          : null;
-        const meta = [
-          excerpt,
-          source.origin,
-          source.pageRange ? t("mcp_resource_page_range", { pageRange: source.pageRange }) : null
-        ]
-          .filter(Boolean)
-          .join(" · ");
+        const meta = sourceMeta(source, t);
         const preview = excerptPreview(source);
         const titleClass =
           "focus-visible:outline-ring rounded-ax-inner min-h-6 text-left text-[13px] leading-snug font-medium break-words focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11";
@@ -84,10 +104,6 @@ export function SourceList({
           <li
             key={source.key}
             id={sourceAnchorId(messageId, number)}
-            ref={(element) => {
-              if (element) itemRefs.current.set(index, element);
-              else itemRefs.current.delete(index);
-            }}
             tabIndex={-1}
             className="bg-ax-card border-ax-border focus-visible:outline-ring rounded-ax-container focus:bg-ax-selected flex gap-3 border p-3 focus-visible:outline-2 focus-visible:outline-offset-2"
           >
@@ -116,6 +132,12 @@ export function SourceList({
                   <McpSnippetButton
                     source={source}
                     snippet={source.mcpSnippet}
+                    className={cn(titleClass, "hover:underline")}
+                  />
+                ) : source.infoBlob ? (
+                  <DocumentSourceButton
+                    title={source.title}
+                    blob={source.infoBlob}
                     className={cn(titleClass, "hover:underline")}
                   />
                 ) : (

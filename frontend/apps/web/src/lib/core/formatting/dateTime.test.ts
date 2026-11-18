@@ -4,6 +4,7 @@ const locale = vi.hoisted(() => ({ current: "en" }));
 vi.mock("$lib/paraglide/runtime", () => ({ getLocale: () => locale.current }));
 
 import {
+  calendarDayFormat,
   formatDate,
   formatDateMedium,
   formatDateTime,
@@ -15,6 +16,18 @@ import {
 
 afterEach(() => {
   locale.current = "en";
+});
+
+describe("calendarDayFormat", () => {
+  it("names the day the API sent, west of UTC too", () => {
+    const previous = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      expect(calendarDayFormat("en-US").format(new Date("2026-11-04"))).toBe("Wed, Nov 4");
+    } finally {
+      process.env.TZ = previous;
+    }
+  });
 });
 
 describe("dateTime", () => {

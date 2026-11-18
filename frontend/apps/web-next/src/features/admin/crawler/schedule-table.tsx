@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import {
   pixel,
@@ -9,7 +7,7 @@ import {
   type TableSortState
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
@@ -58,7 +56,7 @@ function WebsiteCell({
   );
 }
 
-/** The schedule state as a status dot; a backoff says until when (after hydration). */
+/** The schedule state as a status dot; a backoff says until when in the viewer's time zone. */
 function ScheduleStateCell({ item }: { item: CrawlerScheduledWebsite }) {
   const t = useTranslations();
   const state = SCHEDULE_STATE[item.schedule_state];
@@ -203,7 +201,8 @@ export function ScheduleTable({
       idKey="website_id"
       aria-label={t("admin_crawler_schedule_caption")}
       plugins={{ sort: sortPlugin }}
-      className="min-w-[1100px]"
+      pinnedColumn="url"
+      className="min-w-[1100px] [--table-sticky-background:var(--color-ax-surface)]"
     />
   );
 }

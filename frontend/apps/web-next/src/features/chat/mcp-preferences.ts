@@ -27,10 +27,10 @@ export function subscribeMcpPreferences(listener: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
     if (event.key?.startsWith(STORAGE_PREFIX)) listener();
   };
-  if (typeof window !== "undefined") window.addEventListener("storage", onStorage);
+  window.addEventListener("storage", onStorage);
   return () => {
     listeners.delete(listener);
-    if (typeof window !== "undefined") window.removeEventListener("storage", onStorage);
+    window.removeEventListener("storage", onStorage);
   };
 }
 

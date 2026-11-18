@@ -179,6 +179,10 @@ def init_observability() -> None:
     _initialized = True
 
 
+# Health probes and hashed static assets are not worth a trace each.
+_EXCLUDED_URLS = r"/api/healthz.*,://[^/]+/healthz$,://[^/]+/assets/"
+
+
 def instrument_fastapi(app: Any) -> None:
     """Instrument a specific FastAPI app instance.
 
@@ -192,5 +196,5 @@ def instrument_fastapi(app: Any) -> None:
     FastAPIInstrumentor.instrument_app(
         app,
         server_request_hook=_server_request_hook,
-        excluded_urls=r"/api/healthz.*",
+        excluded_urls=_EXCLUDED_URLS,
     )

@@ -4,12 +4,14 @@ import {
   Dialog as AstryxDialog,
   DialogHeader as AstryxDialogHeader
 } from "@astryxdesign/core/Dialog";
+import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import { renderInApp } from "@/test/render";
 import {
   AlertDialog,
@@ -31,12 +33,6 @@ import {
   DialogTitle,
   DialogTrigger
 } from "./dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "./dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select";
 import { Toaster } from "./sonner";
 
@@ -205,21 +201,13 @@ describe("Dialog", () => {
     expect(document.activeElement).toBe(opener);
   });
 
-  it("returns focus to the menu button when a menu item opened it", async () => {
+  it("returns focus to the menu button when a tapped menu item opened it", async () => {
     function MenuDialog() {
       const [open, setOpen] = useState(false);
       return (
         <>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button>Åtgärder</Button>
-            </DropdownMenuTrigger>
-            {/* Radix refocuses its trigger after the dialog opened; a browser
-                refuses (the page behind a modal is inert), jsdom does not.
-                Switched off so the test sees what the browser does. */}
-            <DropdownMenuContent onCloseAutoFocus={(event) => event.preventDefault()}>
-              <DropdownMenuItem onSelect={() => setOpen(true)}>Byt namn</DropdownMenuItem>
-            </DropdownMenuContent>
+          <DropdownMenu button={{ label: "Åtgärder" }}>
+            <DropdownMenuItem label="Byt namn" onClick={() => setOpen(true)} />
           </DropdownMenu>
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogContent>
@@ -231,11 +219,11 @@ describe("Dialog", () => {
     }
     renderInApp(<MenuDialog />);
     const menuButton = screen.getByRole("button", { name: "Åtgärder" });
-    menuButton.focus();
-    fireEvent.keyDown(menuButton, { key: "Enter" });
-    const item = await screen.findByRole("menuitem", { name: "Byt namn" });
-    item.focus();
-    fireEvent.click(item);
+    const menu = await openMenuOnRelease(menuButton);
+    // A tap: the menu closes and leaves focus nowhere (Astryx blurs its button
+    // after a pointer), so only the tapped item says what opened the dialog.
+    const item = within(menu).getByRole("menuitem", { name: "Byt namn" });
+    tap(item);
     const dialog = await screen.findByRole("dialog", { name: "Byt namn på samlingen" });
 
     fireEvent.keyDown(dialog, { key: "Escape" });

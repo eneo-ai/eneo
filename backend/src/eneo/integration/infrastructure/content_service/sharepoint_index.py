@@ -6,6 +6,7 @@ not decide folder membership, advance delta tokens or commit transactions.
 """
 
 import hashlib
+import logging
 from contextlib import AbstractAsyncContextManager, nullcontext
 from typing import TYPE_CHECKING, Optional, cast
 from uuid import UUID
@@ -56,6 +57,7 @@ from eneo.integration.infrastructure.content_service.utils import (
 from eneo.integration.infrastructure.graph_errors import ITEM_LEVEL_HTTP_STATUSES
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 if TYPE_CHECKING:
@@ -132,7 +134,12 @@ class SharePointIndex:
                 async with self._savepoint():
                     indexed = await self.list_items(knowledge_id)
             except Exception as exc:
-                logger.warning("Could not read the indexed SharePoint items: %s", exc)
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not read the indexed SharePoint items",
+                    error=exc,
+                )
                 return True
             known = self._maybe_indexed[knowledge_id] = {
                 indexed_id for _, indexed_id in indexed
@@ -157,11 +164,12 @@ class SharePointIndex:
             definitions = await client.get_list_columns(drive_id)
             catalog = SharePointColumnCatalog.from_graph(definitions)
         except Exception as e:  # noqa: BLE001 - enrichment must never fail a sync
-            logger.warning(
-                "Could not read library columns for drive %s; keeping existing "
-                "source metadata: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not read library columns for drive %s; keeping existing source metadata",
                 drive_id,
-                e,
+                error=e,
             )
             catalog = None
         self._column_catalogs[drive_id] = catalog
@@ -187,10 +195,12 @@ class SharePointIndex:
         try:
             return extract_source_metadata(cast(dict[str, object], item), catalog)
         except Exception as e:  # noqa: BLE001 - malformed payload must not fail a sync
-            logger.warning(
-                "Could not extract source metadata for item %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not extract source metadata for item %s",
                 item.get("id"),
-                e,
+                error=e,
             )
             return None
 
@@ -490,11 +500,13 @@ class SharePointIndex:
             return deleted_count
 
         except Exception as e:
-            logger.warning(
-                "Could not delete %s SharePoint info_blob for %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not delete %s SharePoint info_blob for %s",
                 reason,
                 item_name,
-                e,
+                error=e,
             )
             sync_results.count_failure(
                 stats,
@@ -727,7 +739,9 @@ class SharePointIndex:
                         )
                     )
         except Exception as e:
-            logger.error(f"Error processing file {item_name}: {e}", exc_info=True)
+            log_error(
+                logger, logging.ERROR, "Error processing file %s", item_name, error=e
+            )
             detail = error_skipped(item_name, e)
             sync_results.count_failure(stats, detail, item_id=item_id)
             sync_results.item_failed_in_a_row(stats, detail)
@@ -765,8 +779,12 @@ class SharePointIndex:
                 return None, file_too_large_reason(
                     get_settings().sharepoint_max_download_bytes
                 )
-            logger.error(
-                f"Error getting file content for {item_name}: {e}", exc_info=True
+            log_error(
+                logger,
+                logging.ERROR,
+                "Error getting file content for %s",
+                item_name,
+                error=e,
             )
             return None, error_reason(e)
         except aiohttp.ClientResponseError as e:
@@ -776,11 +794,13 @@ class SharePointIndex:
                 sync_results.count_refused_download(stats, item_id, item_name)
             else:
                 sync_results.count_hidden_download(stats)
-            logger.warning(
-                "File %s (item_id=%s) is gone or not accessible: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "File %s (item_id=%s) is gone or not accessible",
                 item_name,
                 item_id,
-                user_visible_error(e),
+                error=e,
             )
             return None, error_reason(e)
 

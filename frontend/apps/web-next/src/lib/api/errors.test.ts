@@ -1,12 +1,15 @@
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import en from "@/lib/i18n/messages/en.json";
 import sv from "@/lib/i18n/messages/sv.json";
 import {
   apiErrorFromResponse,
   EneoApiError,
+  errorReference,
+  errorReferenceLines,
   extractTraceId,
   getErrorMessage,
+  orOn404,
   unwrap
 } from "./errors";
 
@@ -121,6 +124,24 @@ describe("unwrap", () => {
   });
 });
 
+describe("orOn404", () => {
+  it("reads a missing resource as the fallback", async () => {
+    const missing = Promise.reject(new EneoApiError("Not found", { status: 404 }));
+    await expect(orOn404(missing, [])).resolves.toEqual([]);
+    await expect(orOn404(Promise.resolve(["entry"]), [])).resolves.toEqual(["entry"]);
+  });
+
+  it.each([403, 500])("passes on a %s, which is no missing resource", async (status) => {
+    const error = new EneoApiError("Refused", { status });
+    await expect(orOn404(Promise.reject(error), [])).rejects.toBe(error);
+  });
+
+  it("passes on a network failure", async () => {
+    const error = new TypeError("Failed to fetch");
+    await expect(orOn404(Promise.reject(error), null)).rejects.toBe(error);
+  });
+});
+
 /** The app's real catalog, looked up by any key as the error mapping does. */
 const translator = (locale: string, messages: Record<string, string>) =>
   createTranslator({ locale, messages });
@@ -131,6 +152,76 @@ describe("getErrorMessage", () => {
   it("maps known backend error codes to localized messages", () => {
     const error = new EneoApiError("Quota exceeded", { status: 403, code: 9008 });
     expect(getErrorMessage(error, t)).toBe("t(eneo_error_9008)");
+  });
+
+  it.each([9042, 9043, 9053, 9054, 9055, 9056, 9057, 9062, 9063, 9064])(
+    "localizes backend refusal %i in both supported languages",
+    (code) => {
+      const error = apiErrorFromResponse(errorResponse(409), {
+        message: "Backend English refusal",
+        eneo_error_code: code
+      });
+      for (const [locale, messages] of [
+        ["sv", sv],
+        ["en", en]
+      ] as const) {
+        const t = translator(locale, messages);
+        expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
+      }
+    }
+  );
+
+  it.each([
+    ["provider_unavailable", "provider_failure_unavailable"],
+    ["provider_timeout", "provider_failure_timeout"],
+    ["provider_unreachable", "provider_failure_unreachable"],
+    ["provider_connection_lost", "provider_failure_connection_lost"],
+    ["provider_rate_limited", "provider_failure_rate_limited"],
+    ["provider_model_not_found", "provider_failure_model_not_found"],
+    ["provider_rejected_request", "provider_failure_rejected_request"],
+    ["provider_error", "eneo_error_9010"],
+    ["stream_error", "chat_answer_failed_internal"],
+    ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
+    ["user_quota_exceeded", "job_failure_user_quota_exceeded"]
+  ])("describes %s before its less specific numeric code", (reason, key) => {
+    const error = apiErrorFromResponse(errorResponse(503), {
+      message: "Refused",
+      eneo_error_code: 9008,
+      code: reason
+    });
+    for (const [locale, messages] of [
+      ["sv", sv],
+      ["en", en]
+    ] as const) {
+      const t = translator(locale, messages);
+      expect(getErrorMessage(error, t)).toBe(t(key));
+    }
+  });
+
+  it("asks to wait on a rate-limit refusal, not to contact an administrator about a quota", () => {
+    // The shared limiter's flat 429 body; the envelope fills 9008 as the 429 default.
+    const limited = apiErrorFromResponse(errorResponse(429, { "Retry-After": "12" }), {
+      code: "rate_limit_exceeded",
+      message: "Too many requests",
+      retry_after_seconds: 12,
+      eneo_error_code: 9008,
+      request_id: "req-1",
+      detail: { code: "rate_limit_exceeded", message: "Too many requests", retry_after_seconds: 12 }
+    });
+    expect(getErrorMessage(limited, translator("sv", sv))).toBe(
+      "För många förfrågningar just nu. Vänta en stund och försök igen."
+    );
+    expect(getErrorMessage(limited, translator("en", en))).toBe(
+      "Too many requests right now. Wait a moment and try again."
+    );
+
+    // Genuine quota exhaustion keeps its quota sentence.
+    const quota = apiErrorFromResponse(errorResponse(403), {
+      message: "Quota exceeded",
+      eneo_error_code: 9008
+    });
+    expect(getErrorMessage(quota, translator("sv", sv))).toBe(sv.eneo_error_9008);
+    expect(getErrorMessage(quota, translator("en", en))).toBe(en.eneo_error_9008);
   });
 
   it("falls back to the backend message for unmapped codes", () => {
@@ -198,6 +289,20 @@ describe("getErrorMessage", () => {
     expect(refused(9061)).toBe("Det nuvarande lösenordet är felaktigt.");
   });
 
+  it("words an unexpected failure in the user's language instead of the backend's English", () => {
+    // The 500 body: `{ error, error_id, message }` with no eneo_error_code.
+    const error = apiErrorFromResponse(errorResponse(500), {
+      error: "Internal server error",
+      error_id: "8bc91e0a",
+      message:
+        "An unexpected error occurred. Please try again or contact support with the error_id."
+    });
+
+    expect(getErrorMessage(error, translator("sv", sv))).toBe(
+      "Vi upplever vissa svårigheter, försök igen senare."
+    );
+  });
+
   it("words a taken name for every resource that answers with it, not only models", () => {
     // Providers, MCP servers, templates, files, modules and models all send 9017.
     const error = new EneoApiError("An MCP server with this name already exists.", {
@@ -211,5 +316,38 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, translator("en", en))).toBe(
       "This name is already in use. Choose a different one."
     );
+  });
+});
+
+describe("errorReference", () => {
+  const failure = (ids: { errorId?: string; traceId?: string }) =>
+    new EneoApiError("Failed", { status: 500, ...ids });
+
+  it("returns both the backend error id and the trace id", () => {
+    expect(errorReference(failure({ errorId: "8bc91e0a", traceId: "trace-1" }))).toEqual({
+      errorId: "8bc91e0a",
+      traceId: "trace-1"
+    });
+  });
+
+  it("returns whichever id the error carries", () => {
+    expect(errorReference(failure({ errorId: "8bc91e0a" }))).toEqual({ errorId: "8bc91e0a" });
+    expect(errorReference(failure({ traceId: "trace-1" }))).toEqual({ traceId: "trace-1" });
+  });
+
+  it("returns no ids for an error without them or a non-API error", () => {
+    expect(errorReference(failure({}))).toEqual({});
+    expect(errorReference(new Error("boom"))).toEqual({});
+    expect(errorReference(null)).toEqual({});
+  });
+
+  it("labels the ids in the user's language", () => {
+    expect(
+      errorReferenceLines(
+        failure({ errorId: "8bc91e0a", traceId: "trace-1" }),
+        translator("sv", sv)
+      )
+    ).toEqual(["Fel-ID: 8bc91e0a", "Spårnings-ID: trace-1"]);
+    expect(errorReferenceLines(new Error("boom"), translator("sv", sv))).toEqual([]);
   });
 });

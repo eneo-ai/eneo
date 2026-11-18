@@ -58,23 +58,27 @@ export function EntityAvatar({
   className
 }: EntityAvatarProps) {
   const toneClasses = tone ? ENTITY_TONE_CLASSES[tone] : entityAccent(id ?? name);
+  const content = src ? null : (icon ?? entityInitials(name));
+  // Initials are drawn by CSS, not written as text: axe reads hidden text as part of the visible
+  // label of a control around the tile, which its name then has to repeat (WCAG 2.5.3).
+  const initials = typeof content === "string" ? content : undefined;
 
   return (
     <span
       {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}
+      data-initials={initials}
       className={cn(
         "inline-flex shrink-0 items-center justify-center overflow-hidden leading-none font-semibold select-none",
+        initials && "before:content-[attr(data-initials)]",
         toneClasses,
         SIZE_CLASSES[size],
         className
       )}
     >
       {src ? (
-        // Backend-served upload behind the auth proxy; next/image cannot optimize it.
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" className="size-full object-cover" />
-      ) : (
-        (icon ?? entityInitials(name))
+      ) : initials ? null : (
+        content
       )}
     </span>
   );

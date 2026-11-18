@@ -23,6 +23,8 @@ from eneo.integration.presentation.sharepoint_webhook_router import (
     MAX_WEBHOOK_BODY_BYTES,
     router,
 )
+from eneo.main.models import GeneralError
+from eneo.server.exception_handlers import add_exception_handlers
 
 CLIENT_STATE = "webhook-secret"
 WEBHOOK = "/integrations/sharepoint/webhook/"
@@ -79,6 +81,7 @@ async def api():
     container.session.return_value = session
     container.sharepoint_webhook_service.return_value = service
     app = FastAPI()
+    add_exception_handlers(app)
     app.include_router(router, prefix="/integrations")
     for route in router.routes:
         if isinstance(route, APIRoute):
@@ -188,6 +191,9 @@ async def test_an_overlong_validation_token_is_not_echoed(api, method):
 
     assert response.status_code == 400
     assert token not in response.text
+    assert GeneralError.model_validate(response.json()).message == (
+        "validationToken is too long"
+    )
 
 
 @pytest.mark.parametrize("method", ["GET", "POST"])
@@ -235,7 +241,10 @@ async def test_bad_bodies_are_refused_before_any_lookup(api, body, headers):
     response = await api.client.post(WEBHOOK, content=body, headers=headers)
 
     assert response.status_code == 400
-    assert "detail" in response.json()
+    # The documented envelope, like every other refusal.
+    assert GeneralError.model_validate(response.json()).message.startswith(
+        "Request body"
+    )
     api.subscription_repo.get_by_subscription_id.assert_not_called()
     api.session.begin.assert_not_called()
     api.session.execute.assert_not_called()

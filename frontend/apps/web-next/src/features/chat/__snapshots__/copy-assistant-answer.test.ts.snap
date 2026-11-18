@@ -1,0 +1,57 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`assistantRichTextClipboardPayload > preserves the complete clipboard representation of **Answer** <inref id="aaaaaaaa"/> <script>alert(1)</script> [link](javascript:alert(1)) 1`] = `
+{
+  "html": "<p><strong>Answer</strong>   <span title="Blocked URL: undefined" class="text-gray-500">link [blocked]</span></p>",
+  "plainText": "Answer  link [blocked]",
+}
+`;
+
+exports[`assistantRichTextClipboardPayload > preserves the complete clipboard representation of | År | Belopp |
+| --- | ---: |
+| 1 | 100 |
+
+\`\`\`mermaid
+graph LR
+A --> B
+\`\`\` 1`] = `
+{
+  "html": "
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>År</th><th align="right">Belopp</th></tr></thead><tbody><tr><td>1</td><td align="right">100</td></tr></tbody></table>
+<pre><code class="language-mermaid">graph LR
+A --> B
+</code></pre>",
+  "plainText": "År	Belopp1	100
+graph LR
+A --> B",
+}
+`;
+
+exports[`assistantRichTextClipboardPayload > preserves the complete clipboard representation of Start $P$.
+
+\\[A = P(1+r)^n\\]
+
+Priser: $5 och $10. 1`] = `
+{
+  "html": "<p>Start <span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi></mrow><annotation encoding="application/x-tex">P</annotation></semantics></math></span>.</p>
+<span class="katex"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><mi>A</mi><mo>=</mo><mi>P</mi><mo stretchy="false">(</mo><mn>1</mn><mo>+</mo><mi>r</mi><msup><mo stretchy="false">)</mo><mi>n</mi></msup></mrow><annotation encoding="application/x-tex">A = P(1+r)^n</annotation></semantics></math></span>
+<p>Priser: $5 och $10.</p>",
+  "plainText": "Start P.
+
+A = P(1+r)^n
+
+Priser: $5 och $10.",
+}
+`;

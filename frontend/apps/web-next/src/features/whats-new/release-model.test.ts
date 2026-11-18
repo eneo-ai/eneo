@@ -43,6 +43,16 @@ describe("What's new release behavior", () => {
     expect(isReadRelease(release, "2.2.0")).toBe(true);
   });
 
+  it("holds a release back for a Later reminder until it is due, while unread", () => {
+    expect(pendingAnnouncement(true, release, "2.2.0", "waiting", true)).toBeNull();
+    expect(pendingAnnouncement(true, release, "2.2.0", "due", true)).toBe(release);
+    // Reading the release cancels its reminder.
+    expect(pendingAnnouncement(true, release, "2.2.0", "due", false)).toBeNull();
+    expect(pendingAnnouncement(true, release, null, "waiting", true)).toBeNull();
+    expect(pendingAnnouncement(true, release, "2.3.0", "due", true)).toBeNull();
+    expect(pendingAnnouncement(true, release, "2.2.0", null, true)).toBeNull();
+  });
+
   it("does not announce a dated release to a newer account", () => {
     expect(shouldShowAnnouncement(release, "2026-09-02T00:00:00Z")).toBe(false);
     expect(shouldShowAnnouncement(release, "2026-08-31T00:00:00Z")).toBe(true);

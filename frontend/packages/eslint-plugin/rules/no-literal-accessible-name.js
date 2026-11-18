@@ -1,7 +1,7 @@
 /**
  * Flags literal accessible names and descriptions in JSX, so everything a
- * screen reader announces comes from the app's message layer (next-intl `t()`
- * in web-next) and is read in the user's language.
+ * screen reader announces comes from the app's message layer (`t()`) and is
+ * read in the user's language.
  *
  * Checked attributes (on DOM elements and components alike):
  *   aria-label, aria-description, aria-roledescription, aria-valuetext,
@@ -26,13 +26,12 @@
  *  - `alt=""`: the way to mark an image as decorative
  *  - Any expression (t("close"), a prop, a variable), and template literals
  *    whose literal parts are only separators (`${t("file")}: ${name}`)
- *  - Props that are not text on a given component (`ignoreComponents`, by
- *    default next/image's `<Image placeholder="blur">`)
+ *  - Props that are not text on a given component (`ignoreComponents`)
  *
  * Options:
  *  - `attributes`: more attribute or prop names to check.
  *  - `ignoreComponents`: component name → attributes that are not accessible
- *    names on it. Replaces the default `{ Image: ["placeholder"] }`.
+ *    names on it, e.g. `{ Image: ["placeholder"] }`. None by default.
  *
  * Escape hatch, with a reason and an issue link:
  * `// eslint-disable-next-line eneo/no-literal-accessible-name -- <why> <issue>`
@@ -51,9 +50,6 @@ const NAME_ATTRS = [
   "label",
   "tooltip",
 ];
-
-// next/image: placeholder is "blur" | "empty" | a data URL, never text.
-const DEFAULT_IGNORE_COMPONENTS = { Image: ["placeholder"] };
 
 const HAS_LETTER = /\p{L}/u;
 
@@ -127,8 +123,7 @@ const rule = {
   create(context) {
     const options = context.options[0] ?? {};
     const attributes = new Set([...NAME_ATTRS, ...(options.attributes ?? [])]);
-    const ignoreComponents =
-      options.ignoreComponents ?? DEFAULT_IGNORE_COMPONENTS;
+    const ignoreComponents = options.ignoreComponents ?? {};
 
     /** Collects the literal parts of an attribute value that are not allowed. */
     function findLiterals(node, attr, found) {

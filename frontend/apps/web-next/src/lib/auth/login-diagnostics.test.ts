@@ -48,6 +48,24 @@ describe("login diagnostics", () => {
       "oidc_error_unauthorized"
     );
     expect(loginDiagnosticMessageKey({ detailCode: "server_error" })).toBe("oidc_error_generic");
+    expect(loginDiagnosticMessageKey({ detailCode: "invalid_login_attempt" })).toBe(
+      "oidc_error_attempt_rejected"
+    );
+  });
+
+  it("maps the backend's typed sign-in refusals", () => {
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_login_unavailable" })).toBe(
+      "oidc_error_login_unavailable"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_response_not_verified" })).toBe(
+      "oidc_error_unauthorized"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "oidc_transaction_invalid" })).toBe(
+      "oidc_error_attempt_rejected"
+    );
+    expect(loginDiagnosticMessageKey({ detailCode: "identity_conflict" })).toBe(
+      "oidc_error_identity_conflict"
+    );
   });
 
   it("builds bounded diagnostic redirect URLs", () => {

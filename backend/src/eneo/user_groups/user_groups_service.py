@@ -7,6 +7,7 @@ from eneo.user_groups.user_group import (
     UserGroupCreate,
     UserGroupCreateRequest,
     UserGroupInDB,
+    UserGroupPublic,
     UserGroupUpdate,
     UserGroupUpdateRequest,
 )
@@ -85,7 +86,7 @@ class UserGroupsService:
 
         return await self.repo.delete_user_group(user_group_uuid)
 
-    async def get_all_user_groups(self):
+    async def get_all_user_groups(self) -> list[UserGroupPublic]:
         """List tenant user-groups for member/group pickers.
 
         Tenant-scoped at the repo layer. Exposes `UserSparse` per member

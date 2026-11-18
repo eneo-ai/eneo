@@ -1,11 +1,9 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog";
 import { useMergedRefs } from "@astryxdesign/core/hooks";
 import { useControllableState } from "@radix-ui/react-use-controllable-state";
 import { XIcon } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { Portal, Slot } from "radix-ui";
 import * as React from "react";
 
@@ -23,10 +21,13 @@ import { cn } from "@/lib/utils";
  * close. alert-dialog.tsx builds on the same parts, so the whole app has one
  * dialog implementation.
  *
- * The call sites' classes (`sm:max-w-2xl`, `max-h-[90vh] overflow-y-auto`,
+ * The call sites' classes (`sm:max-w-2xl`, `overflow-y-auto`,
  * `p-0`, `flex flex-col`, …) style the <dialog> itself, as they styled
  * shadcn's content box. Astryx wraps the children in one layout div; it is
  * flattened (`display: contents`) so those classes lay the children out.
+ * Height is capped here at the dynamic viewport minus 2rem (dvh follows
+ * Safari's toolbar and Android's keyboard): a call site's own `max-h-[90vh]`
+ * would beat that cap, and eslint rejects vh in class names.
  */
 
 type DialogContextValue = {
@@ -247,7 +248,7 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-start", className)}
+      className={cn("flex flex-col gap-2 text-start", className)}
       {...props}
     />
   );
@@ -263,8 +264,9 @@ function DialogFooter({
   return (
     <div
       data-slot="dialog-footer"
-      // Stacked below sm in DOM order: focus order follows the visual order.
-      className={cn("flex flex-col gap-2 sm:flex-row sm:justify-end", className)}
+      // Below sm the buttons share a row while their labels fit, as DockedActions' do, and wrap
+      // in DOM order at larger text: focus order follows the visual order.
+      className={cn("flex flex-wrap justify-end gap-2 max-sm:[&>*]:flex-[1_1_auto]", className)}
       {...props}
     >
       {children}

@@ -5,7 +5,7 @@ import { NonceProvider } from "@/components/providers/nonce";
 import { renderInApp } from "@/test/render";
 import { DocxPreview } from "./docx-preview";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 // The renderer's output: its stylesheet, and the pages with links of every kind.
 vi.mock("docx-preview", () => ({

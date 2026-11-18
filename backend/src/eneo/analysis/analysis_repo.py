@@ -4,18 +4,16 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.orm import InstrumentedAttribute, aliased, selectinload
 
 from eneo.analysis.analysis import MessageFeedbackCounts
+from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
-from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.questions_table import (
-    InfoBlobReferences,
     QuestionFeedback,
     Questions,
-    QuestionsFiles,
 )
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.users_table import Users
@@ -23,6 +21,19 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.sessions.session import SessionInDB
+from eneo.sessions.sessions_repo import session_turn_options
+
+
+def _hour_bucket(
+    created_at: InstrumentedAttribute[datetime], time_zone: str | None
+) -> sa.Label[datetime]:
+    # Omitted zones retain the database session's bucketing for existing clients.
+    bucket = (
+        sa.func.date_trunc("hour", created_at)
+        if time_zone is None
+        else sa.func.date_trunc("hour", created_at, time_zone)
+    )
+    return bucket.label("created_at")
 
 
 # IMPORTANT: every method in this repo that returns session/question rows or
@@ -103,6 +114,14 @@ class AssistantInsightQuestionRow(NamedTuple):
     feedback_text: str | None
 
 
+# Content and its lists (not the aggregate counts) also leave out copies whose
+# source was removed, read in the same statement.
+def _exclude_unreadable_copies(
+    query: sa.Select[Any], session_id_col: Any
+) -> sa.Select[Any]:
+    return query.where(copy_session_valid(session_id_col))
+
+
 class AnalysisRepository:
     def __init__(
         self,
@@ -128,7 +147,11 @@ class AnalysisRepository:
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
         )
-        return sessions
+        # The turns came after the session rows' check: ask again, last.
+        readable = await readable_sessions(
+            self.session, [session.id for session in sessions]
+        )
+        return [session for session in sessions if session.id in readable]
 
     async def _get_count(
         self, table: type, tenant_id: UUID | None = None
@@ -215,6 +238,7 @@ class AnalysisRepository:
             Users.tenant_id == tenant_id
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        stmt = _exclude_unreadable_copies(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -222,46 +246,7 @@ class AnalysisRepository:
         if to_date is not None:
             stmt = stmt.where(Sessions.created_at <= to_date)
 
-        stmt = (
-            stmt.order_by(Sessions.created_at)
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.group)
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.website)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(Questions.logging_details)
-            )
-            .options(selectinload(Sessions.questions).selectinload(Questions.assistant))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.questions_files)
-                .selectinload(QuestionsFiles.file)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(selectinload(Sessions.assistant).selectinload(Assistants.user))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.mcp_tool_references
-                )
-            )
-        )
+        stmt = stmt.order_by(Sessions.created_at).options(*session_turn_options())
 
         sessions = await self.session.scalars(stmt)
         return await self._hydrate_sessions(
@@ -284,6 +269,7 @@ class AnalysisRepository:
             Users.tenant_id == tenant_id
         )
         stmt = _exclude_helper_run_sessions(stmt, Sessions.id)
+        stmt = _exclude_unreadable_copies(stmt, Sessions.id)
 
         if from_date is not None:
             stmt = stmt.where(Sessions.created_at >= from_date)
@@ -291,40 +277,8 @@ class AnalysisRepository:
         if to_date is not None:
             stmt = stmt.where(Sessions.created_at <= to_date)
 
-        stmt = (
-            stmt.order_by(Sessions.created_at)
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.group)
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.info_blob_references)
-                .selectinload(InfoBlobReferences.info_blob)
-                .selectinload(InfoBlobs.website)
-            )
-            .options(
-                selectinload(Sessions.questions).selectinload(Questions.logging_details)
-            )
-            .options(selectinload(Sessions.questions).selectinload(Questions.assistant))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.completion_model
-                )
-            )
-            .options(
-                selectinload(Sessions.questions)
-                .selectinload(Questions.questions_files)
-                .selectinload(QuestionsFiles.file)
-            )
-            .options(selectinload(Sessions.group_chat))
-            .options(
-                selectinload(Sessions.questions).selectinload(
-                    Questions.mcp_tool_references
-                )
-            )
+        stmt = stmt.order_by(Sessions.created_at).options(
+            *session_turn_options(), selectinload(Sessions.group_chat)
         )
 
         sessions = await self.session.scalars(stmt)
@@ -409,6 +363,7 @@ class AnalysisRepository:
             .where(Questions.question.isnot(None))
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
+        base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
 
         if assistant_id is not None:
             base_stmt = base_stmt.where(Sessions.assistant_id == assistant_id)
@@ -483,6 +438,7 @@ class AnalysisRepository:
             .where(Questions.question.isnot(None))
         )
         base_stmt = _exclude_helper_run_sessions(base_stmt, Sessions.id)
+        base_stmt = _exclude_unreadable_copies(base_stmt, Sessions.id)
         if query:
             normalized_query = query.strip()
             if normalized_query:
@@ -798,8 +754,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Assistants.created_at).label("created_at")
+        bucket = _hour_bucket(Assistants.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .join(Users, Assistants.user_id == Users.id)
@@ -823,8 +780,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Sessions.created_at).label("created_at")
+        bucket = _hour_bucket(Sessions.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .join(Users, Sessions.user_id == Users.id)
@@ -849,8 +807,9 @@ class AnalysisRepository:
         tenant_id: UUID,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
+        time_zone: str | None = None,
     ) -> list[CountBucketRow]:
-        bucket = sa.func.date_trunc("hour", Questions.created_at).label("created_at")
+        bucket = _hour_bucket(Questions.created_at, time_zone)
         stmt = (
             sa.select(bucket, sa.func.count().label("total"))
             .where(Questions.tenant_id == tenant_id)

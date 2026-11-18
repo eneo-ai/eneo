@@ -8,7 +8,7 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get } }));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: { id: "space", organization: false }, can: () => false })
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 import { SkillBindingsEditor, SkillBindingsSection } from "./skill-bindings-section";
 

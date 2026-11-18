@@ -1,4 +1,5 @@
-import type { Eneo, PublishedSkillPublic } from "@eneo/eneo-js";
+import type { Eneo, PublishedSkillPublic, ResourcePermission, Role } from "@eneo/eneo-js";
+import { hasPermission } from "$lib/core/hasPermission";
 import { SKILL_CATALOG_PAGE_SIZE, type CatalogPage } from "./skillCatalog";
 import {
   getSkillCandidateRevisionId,
@@ -43,6 +44,18 @@ export function skillBindingPreviewTarget(skill: SkillBindingCandidate): SkillBi
     displayName: skill.display_name,
     description: skill.description
   };
+}
+
+/**
+ * Attaching Skills to Assistants and Apps needs Use Skills ("skills").
+ * Own Skills ("personal_skills") opens the personal-space library and the
+ * personal chat only, so library read access alone does not show the picker.
+ */
+export function canAttachSkills(
+  space: { skill_permissions?: ResourcePermission[] | null },
+  user: { roles?: Role[]; predefined_roles?: Role[] }
+): boolean {
+  return (space.skill_permissions?.includes("read") ?? false) && hasPermission(user)("skills");
 }
 
 export function emptySkillBindingCatalogPage(): SkillBindingCatalogPage {

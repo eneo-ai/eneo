@@ -1,5 +1,3 @@
-"use client";
-
 import {
   DropdownMenu,
   DropdownMenuDivider,
@@ -8,12 +6,16 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuSubMenu
 } from "@astryxdesign/core/DropdownMenu";
+import { useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { useSideNavCollapse } from "@astryxdesign/core/SideNav";
 import {
   Accessibility,
   ArrowLeft,
   Building2,
+  ChevronRight,
   ChevronsUpDown,
+  CircleHelp,
+  ExternalLink,
   Globe,
   KeyRound,
   LogOut,
@@ -21,18 +23,15 @@ import {
   Sparkles,
   User
 } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
-import { useTransition } from "react";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
-import { setLocale } from "@/lib/i18n/actions";
-import { locales } from "@/lib/i18n/locales";
+import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
+import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
+import { navigateTo } from "@/lib/navigate-to";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 import { ThemeSubMenu } from "./theme-switcher";
-
-// Each language is named in its own language (and marked with `lang`, WCAG 3.1.2).
-const LOCALE_LABELS: Record<string, string> = { sv: "Svenska", en: "English" };
 
 /** The name the shell shows for the signed-in user (the API has no display name). */
 export function profileDisplayName(user: { username?: string | null; email: string }): string {
@@ -51,9 +50,53 @@ export function profileInitials(name: string): string {
   return initials || "?";
 }
 
-/** Full-page navigation for routes that are not React pages (logout, SSO, external). */
-function navigateTo(href: string) {
-  window.location.assign(href);
+/** Who is signed in, as the profile button and link show and name it. */
+function useProfile() {
+  const t = useTranslations();
+  const { user, tenant } = useAppContext();
+  const name = profileDisplayName(user);
+  const organisation = tenant.display_name?.trim() || tenant.name;
+  return {
+    name,
+    organisation,
+    // Starts with the visible name and organisation (WCAG 2.5.3); the space between their
+    // spans keeps them apart for axe, which joins text with no separator.
+    label: t("shell_profile_button_label", { name, organisation }),
+    avatar: (
+      <EntityAvatar
+        id={user.id}
+        name={name}
+        icon={profileInitials(name)}
+        size="md"
+        className="rounded-full"
+      />
+    )
+  };
+}
+
+/**
+ * The profile in the drawer (decision 22): a link to Konto, which holds what
+ * the menu holds, so no menu opens on the drawer. It closes the drawer as the
+ * nav items do, Konto already open too.
+ */
+export function ProfileLink() {
+  const { name, organisation, label, avatar } = useProfile();
+  const { closeMobileNav } = useAppShellMobile();
+  return (
+    <Link
+      href="/account"
+      aria-label={label}
+      onClick={closeMobileNav}
+      className="hover:bg-ax-hover active:bg-ax-pressed focus-visible:outline-ring rounded-ax-element flex h-14 w-full items-center gap-2.5 px-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+    >
+      {avatar}
+      <span className="flex min-w-0 flex-1 flex-col leading-tight">
+        <span className="truncate font-semibold">{name}</span>{" "}
+        <span className="text-ax-text-secondary truncate text-xs">{organisation}</span>
+      </span>
+      <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
+    </Link>
+  );
 }
 
 /**
@@ -62,36 +105,22 @@ function navigateTo(href: string) {
  * deployment configures one, WCAG 3.2.6 keeps it here on every page),
  * organisation switch, versions and logout.
  */
-export function ProfileMenu() {
+export function ProfileMenu({
+  inTopBar = false,
+  withHelpCenter = false
+}: {
+  inTopBar?: boolean;
+  /** A page without a SideNav: the help centre has no foot (nav-footer.tsx) to sit at. */
+  withHelpCenter?: boolean;
+}) {
   const t = useTranslations();
-  const { user, tenant, federationStatus, links, versions } = useAppContext();
+  const { user, federationStatus, links, versions } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
-  const locale = useLocale();
-  const router = useRouter();
-  const [, startTransition] = useTransition();
-  const { isCollapsed } = useSideNavCollapse();
+  const { locale, switchLocale } = useLocaleSwitch();
+  // In the top bar only the avatar shows, as in the Svelte app, and the menu opens below it.
+  const isCollapsed = useSideNavCollapse().isCollapsed || inTopBar;
 
-  const name = profileDisplayName(user);
-  const organisation = tenant.display_name?.trim() || tenant.name;
-  // Starts with the visible name and organisation (WCAG 2.5.3).
-  const buttonLabel = t("shell_profile_button_label", { name, organisation });
-
-  function switchLocale(next: string) {
-    startTransition(async () => {
-      await setLocale(next);
-      router.refresh();
-    });
-  }
-
-  const avatar = (
-    <EntityAvatar
-      id={user.id}
-      name={name}
-      icon={profileInitials(name)}
-      size="md"
-      className="rounded-full"
-    />
-  );
+  const { name, organisation, label: buttonLabel, avatar } = useProfile();
 
   return (
     <DropdownMenu
@@ -113,7 +142,7 @@ export function ProfileMenu() {
           <span className="flex min-w-0 items-center gap-2.5">
             {avatar}
             <span className="flex min-w-0 flex-col leading-tight">
-              <span className="truncate font-semibold">{name}</span>
+              <span className="truncate font-semibold">{name}</span>{" "}
               <span className="text-ax-text-secondary truncate text-xs font-normal">
                 {organisation}
               </span>
@@ -122,25 +151,21 @@ export function ProfileMenu() {
         )
       }}
       hasChevron={false}
-      placement={isCollapsed ? "end" : "above"}
+      placement={inTopBar ? "below" : isCollapsed ? "end" : "above"}
       alignment={isCollapsed ? "end" : "start"}
       menuWidth={272}
+      // Every row fits, Logga ut and the versions too; Astryx's default 300 px
+      // cap scrolls them out of a menu with room to spare. The viewport still bounds it.
+      menuMaxHeight={560}
     >
       <div className="flex flex-col px-2 py-1.5 text-sm">
         <span className="truncate font-semibold">{name}</span>
         <span className="text-ax-text-secondary truncate">{user.email}</span>
       </div>
       <DropdownMenuDivider />
-      <DropdownMenuItem
-        icon={User}
-        label={t("my_account")}
-        onClick={() => router.push("/account")}
-      />
-      <DropdownMenuItem
-        icon={KeyRound}
-        label={t("my_api_keys")}
-        onClick={() => router.push("/account/api-keys")}
-      />
+      {/* Pages are links: a modified or middle click opens them in a new tab. */}
+      <DropdownMenuItem icon={User} label={t("my_account")} href="/account" />
+      <DropdownMenuItem icon={KeyRound} label={t("my_api_keys")} href="/account/api-keys" />
       {whatsNewEnabled && (
         <DropdownMenuItem
           icon={Sparkles}
@@ -153,14 +178,10 @@ export function ProfileMenu() {
               </>
             ) : undefined
           }
-          onClick={() => router.push("/whats-new")}
+          href="/whats-new"
         />
       )}
-      <DropdownMenuItem
-        icon={Plug}
-        label={t("integrations")}
-        onClick={() => router.push("/account/integrations")}
-      />
+      <DropdownMenuItem icon={Plug} label={t("integrations")} href="/account/integrations" />
       <DropdownMenuDivider />
       <DropdownMenuSubMenu icon={Globe} label={t("language")}>
         <DropdownMenuRadioGroup label={t("language")} value={locale} onChange={switchLocale}>
@@ -168,6 +189,7 @@ export function ProfileMenu() {
             <DropdownMenuRadioItem
               key={value}
               value={value}
+              // Each in its own language, marked with `lang` (WCAG 3.1.2).
               label={<span lang={value}>{LOCALE_LABELS[value] ?? value}</span>}
             />
           ))}
@@ -178,17 +200,29 @@ export function ProfileMenu() {
         <DropdownMenuItem
           icon={ArrowLeft}
           label={t("beta_return_to_legacy")}
-          onClick={() => navigateTo(links.legacyApp!)}
+          href={links.legacyApp}
         />
       )}
       {links.accessibilityStatement && (
         <DropdownMenuItem
           icon={Accessibility}
           label={t("a11y_statement_link")}
-          onClick={() => navigateTo(links.accessibilityStatement!)}
+          href={links.accessibilityStatement}
+        />
+      )}
+      {withHelpCenter && links.helpCenter && (
+        <DropdownMenuItem
+          icon={CircleHelp}
+          label={t("have_a_question")}
+          aria-label={`${t("have_a_question")} ${t("chat_opens_in_new_tab")}`}
+          href={links.helpCenter}
+          target="_blank"
+          rel="noopener noreferrer"
+          endContent={<ExternalLink aria-hidden="true" className="size-3.5" />}
         />
       )}
       <DropdownMenuDivider />
+      {/* Full page loads (navigateTo), not links: a link would preload them on hover. */}
       {federationStatus.has_multi_tenant_federation && (
         <DropdownMenuItem
           icon={Building2}

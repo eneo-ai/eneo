@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from time import perf_counter
@@ -25,6 +26,7 @@ from eneo.assistants.assistant import Assistant
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.group_chat.application.group_chat_service import GroupChatService
 from eneo.main.exceptions import (
     BadRequestException,
@@ -32,6 +34,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
@@ -233,9 +236,12 @@ class AnalysisService:
         summaries: list[str] = []
         for i, result in enumerate(results):
             if isinstance(result, BaseException):
-                logger.warning(
+                log_error(
+                    logger,
+                    logging.WARNING,
                     "analysis_chunk_failed",
-                    extra={"chunk_index": i + 1, "error": str(result)},
+                    error=result,
+                    extra={"chunk_index": i + 1},
                 )
             elif result:
                 summaries.append(result)
@@ -400,7 +406,14 @@ class AnalysisService:
                 "Group chat has no assistants to process the analysis"
             )
 
-        model_to_use: Assistant = group_chat.assistants[0].assistant
+        # A group chat's space carries no attachment content; this assistant
+        # answers with its attachments, so it needs a read of its own.
+        first_assistant_id = group_chat.assistants[0].assistant.id
+        model_to_use: Assistant = (
+            await self.space_service.get_space_by_assistant(
+                assistant_id=first_assistant_id
+            )
+        ).get_assistant(assistant_id=first_assistant_id)
         rows = await self.repo.get_group_chat_question_texts_since(
             group_chat_id=group_chat_id,
             from_date=from_date,
@@ -501,7 +514,7 @@ class AnalysisService:
 
     @validate_permissions(Permission.INSIGHTS)
     async def get_metadata_statistics_aggregated(
-        self, start_date: datetime, end_date: datetime
+        self, start_date: datetime, end_date: datetime, time_zone: str | None = None
     ):
         """Get aggregated metadata statistics for the tenant.
 
@@ -511,16 +524,19 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         sessions = await self.repo.get_session_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
         questions = await self.repo.get_question_counts_by_hour_for_tenant(
             tenant_id=self.user.tenant_id,
             start_date=start_date,
             end_date=end_date,
+            time_zone=time_zone,
         )
 
         return assistants, sessions, questions
@@ -613,6 +629,10 @@ class AnalysisService:
             tenant_id=self.user.tenant_id,
         )
         if question is None:
+            if await self.question_repo.in_removed_copy(
+                id=message_id, tenant_id=self.user.tenant_id
+            ):
+                raise DerivedSourceRemovedError()
             raise NotFoundException("Message not found")
         return question
 
@@ -1029,16 +1049,23 @@ class AnalysisService:
             UnauthorizedException: If the user doesn't have insight access
             BadRequestException: If neither assistant_id nor group_chat_id is provided
         """
-        session = await self.session_repo.get(id=session_id)
-        assert session is not None
-
-        if session.group_chat_id is not None:
-            await self._check_insight_access(group_chat_id=session.group_chat_id)
+        # Authorize on the session's facts before reading its turns, so a turn
+        # read that finds nothing can be explained only to an authorized reader.
+        facts = await self.session_repo.get_ownership(session_id)
+        if facts is None:
+            raise NotFoundException("Session not found")
+        if facts.group_chat_id is not None:
+            await self._check_insight_access(group_chat_id=facts.group_chat_id)
         else:
-            if session.assistant is None:
+            if facts.assistant_id is None:
                 raise NotFoundException("Session assistant not found")
-            await self._check_insight_access(assistant_id=session.assistant.id)
+            await self._check_insight_access(assistant_id=facts.assistant_id)
 
+        session = await self.session_repo.get(id=session_id)
+        if session is None:
+            if await self.session_repo.is_removed_copy(session_id):
+                raise DerivedSourceRemovedError()
+            raise NotFoundException("Session not found")
         return session
 
     async def get_conversation_stats(

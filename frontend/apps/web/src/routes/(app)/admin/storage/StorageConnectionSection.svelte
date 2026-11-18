@@ -27,6 +27,8 @@
   import { getEneo } from "$lib/core/Eneo";
   import PolicySection from "$lib/features/admin/PolicySection.svelte";
   import { m } from "$lib/paraglide/messages";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { docsUrl } from "$lib/core/docs";
 
   type Capability = {
     configured: boolean;
@@ -474,6 +476,8 @@
       return m.storage_connection_error_http_title();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_title();
+    if (code === "object_store_probe_keeps_versions")
+      return m.storage_connection_error_versions_title();
     if (code === "object_store_probe_integrity_failed")
       return m.storage_connection_error_integrity_title();
     if (code === "object_store_credential_encryption_unavailable")
@@ -511,6 +515,8 @@
       return m.storage_connection_error_http_description();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_description();
+    if (code === "object_store_probe_keeps_versions")
+      return m.storage_connection_error_versions_description();
     if (code === "object_store_probe_integrity_failed")
       return m.storage_connection_error_integrity_description();
     if (code === "object_store_credential_encryption_unavailable")
@@ -892,7 +898,11 @@
                   <li>{m.storage_switch_checklist_reversible()}</li>
                 </ul>
                 <Button
-                  href="https://docs.eneo.ai/guides/object-content-storage#move-to-another-s3-compatible-service"
+                  href={docsUrl(
+                    "guides/object-content-storage",
+                    getLocale(),
+                    "move-to-another-s3-compatible-service"
+                  )}
                   target="_blank"
                   rel="noreferrer"
                   variant="link"

@@ -8,7 +8,7 @@ const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 const put = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post, PUT: put } }));
-vi.mock("next-intl", () => ({
+vi.mock("use-intl", () => ({
   useTranslations: () => (key: string) => key,
   useLocale: () => "en"
 }));
@@ -120,4 +120,10 @@ describe("storage move commands", () => {
     expect(put).not.toHaveBeenCalled();
     expect(post).not.toHaveBeenCalled();
   });
+});
+
+it("heads the overview without an intro that repeats the page description", async () => {
+  renderContent();
+  expect(await screen.findByRole("heading", { name: "storage_overview_title" })).toBeTruthy();
+  expect(screen.queryByText("storage_overview_description")).toBeNull();
 });

@@ -2,8 +2,9 @@
 """Deterministic OpenAI-compatible mock model server for E2E tests.
 
 The seeded test models point their provider `endpoint` here, so the backend's
-litellm calls land on this server instead of a real provider. Every chat
-completion returns the same fixed text, and every embedding is a fixed-size
+litellm calls land on this server instead of a real provider. Ordinary chat
+completions return fixed text; an opt-in marker exercises long native streams.
+Every embedding is a fixed-size
 vector derived from its input text alone — fast, free, and fully
 deterministic. Streaming and non-streaming chat are both supported.
 
@@ -13,6 +14,7 @@ Stdlib only (no deps) so it runs on the bare image. Listens on :8200.
 import hashlib
 import json
 import os
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from workflow_model import response as workflow_response
@@ -96,9 +98,15 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
 
-        message = workflow_response(req) or {"role": "assistant", "content": REPLY}
+        workflow_message = workflow_response(req)
+        message = workflow_message or {"role": "assistant", "content": REPLY}
         if req.get("stream"):
-            self._stream(message)
+            slow = not workflow_message and "E2E_NATIVE_LONG_STREAM" in _request_text(req)
+            try:
+                self._stream(message, slow=slow)
+            except (BrokenPipeError, ConnectionResetError):
+                if not slow:
+                    raise
         else:
             self._json(
                 200,
@@ -146,13 +154,22 @@ class Handler(BaseHTTPRequestHandler):
             },
         )
 
-    def _stream(self, message):
+    def _stream(self, message, *, slow=False):
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
         self.wfile.write(_chunk({"role": "assistant"}))
-        if message.get("tool_calls"):
+        if slow:
+            self.wfile.write(_chunk({"content": "Native stream partial 00"}))
+            self.wfile.flush()
+            for index in range(1, 66):
+                time.sleep(1)
+                self.wfile.write(_chunk({"content": f" {index:02d}"}))
+                self.wfile.flush()
+            self.wfile.write(_chunk({"content": " Native stream finished"}))
+            self.wfile.write(_chunk({}, finish_reason="stop"))
+        elif message.get("tool_calls"):
             for index, call in enumerate(message["tool_calls"]):
                 self.wfile.write(_chunk({"tool_calls": [{"index": index, **call}]}))
             self.wfile.write(_chunk({}, finish_reason="tool_calls"))

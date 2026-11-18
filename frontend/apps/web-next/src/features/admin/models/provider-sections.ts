@@ -2,9 +2,10 @@ import {
   formatCostPerImage,
   formatCostPerMillionTokens,
   formatCostPerMinute,
-  getDeprecationStatus
+  modelLifecycle
 } from "@/features/ai-models/format-model-stats";
 import { modelDisplayName } from "@/lib/models/model-display-name";
+import { matchesSearch } from "@/lib/search";
 import { type KeyExpiry, keyExpiry } from "./key-expiry";
 import { isApiKeyRequired, type ModelProvider, type ProviderCapabilities } from "./model-providers";
 import type { AdminModel, ModelKind, ModelsPresentation } from "./models";
@@ -34,7 +35,7 @@ export interface ProviderSection {
   models: KindedModel[];
 }
 
-function flatten(presentation: ModelsPresentation): KindedModel[] {
+export function modelEntries(presentation: ModelsPresentation): KindedModel[] {
   return [
     ...presentation.completion_models.map((model) => ({ model, kind: "completion" as const })),
     ...presentation.embedding_models.map((model) => ({ model, kind: "embedding" as const })),
@@ -76,7 +77,7 @@ export function buildProviderSections(
   capabilities: ProviderCapabilities
 ): ProviderSection[] {
   const byProvider = new Map<string, KindedModel[]>();
-  for (const entry of flatten(presentation)) {
+  for (const entry of modelEntries(presentation)) {
     const providerId = (entry.model as { provider_id?: string | null }).provider_id;
     if (!providerId) continue;
     const list = byProvider.get(providerId) ?? [];
@@ -143,20 +144,16 @@ function matchesSecurity(model: AdminModel, security: string): boolean {
   return security === UNCLASSIFIED ? id === null : id === security;
 }
 
-function matchesSearch(model: AdminModel, query: string): boolean {
-  return `${modelDisplayName(model)} ${model.name}`.toLowerCase().includes(query);
-}
-
 function sectionModels(
   section: ProviderSection,
   { search, kind, security }: ModelFilters
 ): KindedModel[] {
-  const query = search.trim().toLowerCase();
-  const nameMatches = query !== "" && section.name.toLowerCase().includes(query);
+  const nameMatches = matchesSearch([section.name], search);
   return section.models.filter(({ model, kind: modelKind }) => {
+    if ("migrated_to_model_id" in model && model.migrated_to_model_id) return false;
     if (kind !== "all" && modelKind !== kind) return false;
     if (!matchesSecurity(model, security)) return false;
-    return !query || nameMatches || matchesSearch(model, query);
+    return nameMatches || matchesSearch([modelDisplayName(model), model.name], search);
   });
 }
 
@@ -170,12 +167,14 @@ export function filterSections(
   sections: ProviderSection[],
   filters: ModelFilters
 ): { section: ProviderSection; models: KindedModel[] }[] {
-  const query = filters.search.trim().toLowerCase();
   const showsEmpty = (section: ProviderSection) =>
-    section.models.length === 0 &&
+    // Historical models still block provider deletion but are not usable rows.
+    section.models.every(
+      ({ model }) => "migrated_to_model_id" in model && model.migrated_to_model_id
+    ) &&
     filters.kind === "all" &&
     filters.security === "all" &&
-    (query === "" || section.name.toLowerCase().includes(query));
+    matchesSearch([section.name], filters.search);
   return sections
     .map((section) => ({ section, models: sectionModels(section, filters) }))
     .filter((entry) => entry.models.length > 0 || showsEmpty(entry.section));
@@ -203,19 +202,7 @@ export function countByKind(
   return counts;
 }
 
-export type ModelLifecycle =
-  | { kind: "active" }
-  | { kind: "retiring"; date: string }
-  | { kind: "deprecated"; date: string | null };
-
-/** Deprecation from the recorded date, or the admin's manual deprecation flag. */
-export function modelLifecycle(model: AdminModel, today?: string): ModelLifecycle {
-  const status = getDeprecationStatus(model, today);
-  if (status.kind === "deprecated") return { kind: "deprecated", date: status.date };
-  if (model.is_deprecated) return { kind: "deprecated", date: null };
-  if (status.kind === "retiring") return { kind: "retiring", date: status.date };
-  return { kind: "active" };
-}
+export { modelLifecycle, type ModelLifecycle } from "@/features/ai-models/format-model-stats";
 
 /** An active provider with something to fix. */
 export interface ProviderAttention {
@@ -235,12 +222,14 @@ export interface ModelsAttention {
   providers: ProviderAttention[];
   /** Deprecated models that are still enabled and not yet migrated. */
   deprecated: KindedModel[];
+  /** Completion models scheduled for retirement and not yet migrated. */
+  retiring: KindedModel[];
 }
 
 /**
  * Real problems the provider and model data expose, for the page banner.
  * `today` dates model deprecation; key expiry is against `viewerToday`, the
- * viewer's own date, and left out while that is unknown (before hydration).
+ * viewer's own date, when provided.
  */
 export function modelsAttention(
   sections: ProviderSection[],
@@ -262,7 +251,15 @@ export function modelsAttention(
         modelLifecycle(model, today).kind === "deprecated"
     )
   );
-  return { providers, deprecated };
+  const retiring = sections.flatMap((section) =>
+    section.models.filter(
+      ({ model, kind }) =>
+        kind === "completion" &&
+        !("migrated_to_model_id" in model && model.migrated_to_model_id) &&
+        modelLifecycle(model, today).kind === "retiring"
+    )
+  );
+  return { providers, deprecated, retiring };
 }
 
 export type ModelPrice =

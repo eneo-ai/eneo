@@ -2,31 +2,28 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { cleanup, fireEvent, screen } from "@testing-library/react";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { buildSourceProblems } from "../source-problems";
-import { inPlaceLink, SamePageLink } from "./in-place-link";
+import { inPlaceLink, SamePageLink } from "@/components/composites/in-place-link";
 import { ProblemsView } from "./problems-view";
 
-/** The props next/link gets, Astryx's links included (the app's LinkProvider uses next/link). */
+/** The props the app link gets, Astryx's links included (the app's LinkProvider uses the app link). */
 const rendered = vi.hoisted(() => [] as Record<string, unknown>[]);
-vi.mock("next/link", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("next/link")>();
+vi.mock("@/lib/link", async () => {
+  const { Link } = await import("@/test/navigation");
   const { createElement } = await import("react");
   return {
     default: (props: Record<string, unknown>) => {
       rendered.push(props);
-      return createElement(
-        actual.default,
-        props as unknown as Parameters<typeof actual.default>[0]
-      );
+      return createElement(Link, props as unknown as Parameters<typeof Link>[0]);
     }
   };
 });
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();
@@ -68,7 +65,7 @@ describe("inPlaceLink", () => {
 });
 
 describe("SamePageLink", () => {
-  it("renders Astryx's links and buttons through next/link without prefetching", () => {
+  it("renders Astryx's links and buttons through the app link without prefetching", () => {
     renderInApp(
       <>
         <Link href={HREF} as={SamePageLink}>
@@ -80,7 +77,7 @@ describe("SamePageLink", () => {
     );
 
     expect(propsFor(HREF).map((props) => props.prefetch)).toEqual([false, false]);
-    // An ordinary link keeps next/link's default.
+    // An ordinary link keeps the app link's default.
     expect(propsFor("/spaces/space-1/overview").map((props) => props.prefetch)).toEqual([
       undefined
     ]);

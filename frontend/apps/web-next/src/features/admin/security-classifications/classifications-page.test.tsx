@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease } from "@/test/menus";
 import { renderInApp } from "@/test/render";
 
 const post = vi.hoisted(() => vi.fn());
@@ -38,6 +39,29 @@ describe("SecurityClassificationsPage", () => {
     expect(screen.getByRole("button", { name: "Fler åtgärder för Klass 1 · Öppen" })).toBeTruthy();
   });
 
+  it("opens a classification's menu on release, not on press (2.5.2)", async () => {
+    renderInApp(<SecurityClassificationsPage />);
+    const menu = await openMenuOnRelease(
+      await screen.findByRole("button", { name: "Fler åtgärder för Klass 2 · Intern" })
+    );
+
+    // The highest classification cannot move up; deleting it asks first.
+    expect(
+      within(menu).getByRole("menuitem", { name: "Flytta upp" }).getAttribute("aria-disabled")
+    ).toBe("true");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+    expect(
+      await screen.findByRole("alertdialog", { name: "Ta bort säkerhetsklassificering" })
+    ).toBeTruthy();
+  });
+
+  it("names the create button short enough to stay one line on a 320 px phone", async () => {
+    // "Skapa en ny säkerhetsklassificering" wrapped to two lines and filled the card at
+    // 320 px while it sat at the end at 390; the short name fits both, like "Ny prompt".
+    renderInApp(<SecurityClassificationsPage />);
+    expect(await screen.findByRole("button", { name: "Ny säkerhetsklassificering" })).toBeTruthy();
+  });
+
   it("keeps focus on a busy Inaktivera and switches off once", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<SecurityClassificationsPage />);
@@ -57,7 +81,7 @@ describe("SecurityClassificationsPage", () => {
     expect(post).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the switch enabled while the change saves, and ignores a toggle meanwhile", async () => {
+  it("keeps the switch enabled and the confirmation open while the change saves", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<SecurityClassificationsPage />);
     const toggle = await screen.findByRole("switch", { name: /Aktiverad/ });
@@ -69,13 +93,11 @@ describe("SecurityClassificationsPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Inaktivera" }));
     await waitFor(() => expect(toggle.getAttribute("aria-busy")).toBe("true"));
 
-    // Closed while it saves: focus returns to the switch, which stays enabled.
+    // Escape cannot close it while it saves, and a second press is ignored.
     fireEvent.keyDown(dialog, { key: "Escape" });
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByRole("alertdialog")).toBe(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Inaktivera" }));
     expect(toggle.hasAttribute("disabled")).toBe(false);
-    await waitFor(() => expect(document.activeElement).toBe(toggle));
-    fireEvent.click(toggle);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(post).toHaveBeenCalledTimes(1);
   });
 });

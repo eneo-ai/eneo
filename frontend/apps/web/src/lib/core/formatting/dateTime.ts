@@ -41,6 +41,20 @@ export function formatDateTime(value: DateInput, options: { seconds?: boolean } 
   return `${formatDate(value)} ${formatTime(value, options)}`;
 }
 
+/**
+ * A formatter for calendar days the API sends as `YYYY-MM-DD`, e.g. "Wed, Nov 4"
+ * / "ons 4 nov.". Such a string parses as UTC midnight, so the day is read in
+ * UTC too; a local-time formatter would name the day before, west of UTC.
+ */
+export function calendarDayFormat(locale = intlLocale()): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale, {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "UTC"
+  });
+}
+
 /** A date written out for the UI language, e.g. "Sep 23, 2026" / "23 sep. 2026". */
 export function formatDateMedium(value: DateInput): string {
   const date = toDate(value);

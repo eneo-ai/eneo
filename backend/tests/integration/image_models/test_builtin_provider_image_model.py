@@ -14,7 +14,7 @@ from eneo.database.tables.security_classifications_table import (
     SecurityClassification,
 )
 from eneo.mcp_servers.application.capability_resolver import (
-    get_active_capability_servers,
+    active_capability_providers,
 )
 
 
@@ -84,8 +84,8 @@ class TestAskTimeProjection:
             )
             await _internal_row(session, admin_user.tenant_id, image_model_id=model.id)
 
-            providers = await get_active_capability_servers(
-                session, admin_user.tenant_id, "image_generation"
+            providers = await active_capability_providers(
+                session, admin_user.tenant_id, purposes=("image_generation",)
             )
 
             [provider] = providers
@@ -108,8 +108,8 @@ class TestAskTimeProjection:
             model = await image_model_factory(session, "off", is_enabled=False)
             await _internal_row(session, admin_user.tenant_id, image_model_id=model.id)
 
-            [provider] = await get_active_capability_servers(
-                session, admin_user.tenant_id, "image_generation"
+            [provider] = await active_capability_providers(
+                session, admin_user.tenant_id, purposes=("image_generation",)
             )
 
             assert provider.is_backing_model_available is False

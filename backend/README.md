@@ -131,10 +131,11 @@ for view semantics, query bounds and rollback behavior.
 | POSTGRES_DB                      | x        |                                                          |
 | REDIS_HOST                       | x        |                                                          |
 | REDIS_PORT                       | x        |                                                          |
-| MOBILITYGUARD_DISCOVERY_ENDPOINT |          |                                                          |
-| MOBILITYGUARD_CLIENT_ID          |          |                                                          |
-| MOBILITYGUARD_CLIENT_SECRET      |          |                                                          |
-| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
+| OIDC_DISCOVERY_ENDPOINT          |          | Single sign-on: the identity provider's discovery URL    |
+| OIDC_CLIENT_ID                   |          | Single sign-on: the client registered for Eneo           |
+| OIDC_CLIENT_SECRET               |          | Single sign-on: that client's secret                     |
+| OIDC_TENANT_ID                   |          | Resource-server mode: the tenant its users belong to     |
+| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Deprecated; leave unset. A set value still lowers the [storage limit for files stored in PostgreSQL](../docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql) |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |
@@ -144,7 +145,7 @@ for view semantics, query bounds and rollback behavior.
 | API_KEY_HEADER_NAME              | x        | Header name for the api keys                             |
 | JWT_AUDIENCE                     | x        | Example: *                                               |
 | JWT_ISSUER                       | x        |                                                          |
-| JWT_EXPIRY_TIME                  | x        | In minutes (1440 = 24 hours; at most 43200 = 30 days). Determines how long a user should be logged in before they are required to login again |
+| JWT_EXPIRY_TIME                  | x        | In minutes (1440 = 24 hours; at most 43200 = 30 days). Determines how long a user should be logged in before they are required to login again. A browser session (web app) can be renewed for the same time at the user's request, up to 30 days after sign-in |
 | JWT_ALGORITHM                    | x        | Example: HS256                                           |
 | JWT_SECRET                       | x        |                                                          |
 | JWT_TOKEN_PREFIX                 | x        | In the header - eg `Bearer`                              |

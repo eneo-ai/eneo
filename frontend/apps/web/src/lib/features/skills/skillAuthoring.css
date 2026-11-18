@@ -1,0 +1,34 @@
+/* The form and its portalled picker share a solid, theme-aware focus indicator. */
+.skill-authoring
+  :focus-visible:not([tabindex="-1"]):not([data-slot="input-group-control"]):not(
+    [data-slot="command-input"]
+  ),
+.skill-authoring
+  [data-slot="input-group"]:has(
+    :is([data-slot="input-group-control"], [data-slot="command-input"]):focus-visible
+  ) {
+  outline: 2px solid var(--accent-stronger);
+  outline-offset: 2px;
+  box-shadow: none;
+  transition: none;
+}
+
+.skill-authoring [data-slot="command-item"][data-selected] {
+  outline: 2px solid var(--accent-stronger);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skill-authoring,
+  .skill-authoring *,
+  .skill-authoring *::before,
+  .skill-authoring *::after {
+    animation: none;
+    transition: none;
+    scroll-behavior: auto;
+  }
+
+  .skill-authoring [data-slot="button"]:active {
+    translate: none;
+  }
+}

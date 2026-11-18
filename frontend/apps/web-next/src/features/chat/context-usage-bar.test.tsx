@@ -23,6 +23,9 @@ function usage(usedTokens: number, overrides: Partial<ContextUsage> = {}): Conte
     lockedOutputTokens: 0,
     pendingTextTokens: Math.min(200, usedTokens),
     pendingFileTokens: 0,
+    assistantPromptTokens: 0,
+    assistantAttachmentTokens: 0,
+    skillContextTokens: 0,
     usedTokens,
     willExceedContext: false,
     ...overrides
@@ -32,6 +35,7 @@ function usage(usedTokens: number, overrides: Partial<ContextUsage> = {}): Conte
 function renderMeter(value: ContextUsage) {
   return renderInApp(
     <ContextUsageBar
+      pending={false}
       usage={value}
       modelName="Claude Haiku 4.5"
       cumulativeTokens={9_000}
@@ -42,8 +46,38 @@ function renderMeter(value: ContextUsage) {
 
 const meter = () => screen.queryByRole("button", { name: /^Kontextanvändning:/ });
 const rendered = () => screen.queryByText(/Kontextanvändning/) !== null;
+/** What the meter renders, inside the app's theme wrapper. */
+const row = (container: HTMLElement) =>
+  container.querySelector("[data-astryx-theme]")?.firstElementChild ?? null;
 
 describe("ContextUsageBar", () => {
+  it("shows the first question's baseline and the included Skill subset below the usual threshold", async () => {
+    renderInApp(
+      <ContextUsageBar
+        pending={false}
+        usage={usage(800, {
+          lockedInputTokens: 0,
+          pendingTextTokens: 0,
+          assistantPromptTokens: 500,
+          assistantAttachmentTokens: 300,
+          skillContextTokens: 200
+        })}
+        cumulativeTokens={0}
+        turnCount={0}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Kontextanvändning:/ }));
+    const details = await screen.findByRole("dialog", { name: "Beräknad kontextanvändning" });
+    expect(within(details).getByText("Assistentens fasta kontext")).toBeTruthy();
+    expect(within(details).getByText("Assistentinstruktioner")).toBeTruthy();
+    expect(within(details).getByText("Fasta bilagor")).toBeTruthy();
+    expect(within(details).getByText("Varav skillkontext")).toBeTruthy();
+    expect(within(details).getByText("200")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Kontextanvändning:/ }).textContent).toMatch(
+      /800 \/ 10.000/
+    );
+  });
+
   it("renders nothing while the window has room", () => {
     renderMeter(usage(5_900));
     expect(SHOW_FROM_PERCENT).toBe(60);
@@ -57,6 +91,7 @@ describe("ContextUsageBar", () => {
 
     rerender(
       <ContextUsageBar
+        pending={false}
         usage={usage(10_500, { willExceedContext: true })}
         cumulativeTokens={0}
         turnCount={0}
@@ -89,6 +124,54 @@ describe("ContextUsageBar", () => {
     fireEvent.click(within(popover).getByRole("button", { name: "Dölj kontextanvändning" }));
     await waitFor(() => expect(meter()).toBeNull());
     expect(window.localStorage.getItem("contextUsageBarPinned")).toBe("false");
+  });
+
+  it("keeps its place, without numbers, while the estimate for a new draft or model is on its way", () => {
+    const shown = usage(SHOW_FROM_PERCENT * 100 + 500);
+    const { container, rerender } = renderInApp(
+      <ContextUsageBar pending={false} usage={shown} cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(meter()).toBeTruthy();
+    // The new estimate is not there yet: the row stays, with no old figures in it.
+    const waiting = usage(0, { lockedInputTokens: 0, pendingTextTokens: 0 });
+    rerender(<ContextUsageBar usage={waiting} pending cumulativeTokens={9_000} turnCount={2} />);
+    expect(meter()).toBeNull();
+    expect(row(container)).not.toBeNull();
+    expect(container.textContent).toBe("");
+    // The answer came: the meter as before.
+    rerender(
+      <ContextUsageBar pending={false} usage={shown} cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(meter()).toBeTruthy();
+    // No answer (an error, or nothing to estimate): as today, nothing.
+    rerender(
+      <ContextUsageBar pending={false} usage={waiting} cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(row(container)).toBeNull();
+  });
+
+  it("keeps its figures while a new estimate is on its way when the conversation already shows the row", () => {
+    // 70 % of the window is the conversation so far: current, not an old estimate.
+    const conversation = usage(7_000, { lockedInputTokens: 7_000, pendingTextTokens: 0 });
+    const { rerender } = renderInApp(
+      <ContextUsageBar
+        pending={false}
+        usage={conversation}
+        cumulativeTokens={9_000}
+        turnCount={2}
+      />
+    );
+    rerender(
+      <ContextUsageBar usage={conversation} pending cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(meter()?.textContent).toContain("70%");
+  });
+
+  it("does not appear for a new draft's estimate while the row was not shown", () => {
+    const { container } = renderInApp(
+      <ContextUsageBar usage={usage(500)} pending cumulativeTokens={9_000} turnCount={2} />
+    );
+    expect(row(container)).toBeNull();
   });
 
   it("renders nothing without a known window, pinned or not", () => {

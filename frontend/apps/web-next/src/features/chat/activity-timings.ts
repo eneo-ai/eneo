@@ -47,6 +47,8 @@ const FINISHED: ReadonlySet<StepStatus> = new Set(["done", "error", "denied", "s
 
 export class ActivityTimings {
   private turns = new Map<string, TurnTiming>();
+  /** Each turn's durations, kept until the turn changes, so unchanged answers keep their props. */
+  private durationsOf = new Map<string, TurnDurations>();
   private listeners = new Set<() => void>();
   private version = 0;
   private sentAt: number | null = null;
@@ -114,11 +116,13 @@ export class ActivityTimings {
           changed = true;
         }
       }
+      if (changed) this.durationsOf.delete(last.id);
     }
 
     if (!streaming) {
-      for (const turn of this.turns.values()) {
+      for (const [messageId, turn] of this.turns) {
         if (turn.end !== null) continue;
+        this.durationsOf.delete(messageId);
         turn.end = now;
         for (const span of turn.steps.values()) if (span.end === null) span.end = now;
         if (this.pendingTokens !== null && turn.tokens === null) turn.tokens = this.pendingTokens;
@@ -134,15 +138,19 @@ export class ActivityTimings {
   durations(messageId: string): TurnDurations | null {
     const turn = this.turns.get(messageId);
     if (!turn) return null;
+    const kept = this.durationsOf.get(messageId);
+    if (kept) return kept;
     const stepMs: Record<string, number> = {};
     for (const [key, span] of turn.steps) {
       if (span.end !== null) stepMs[key] = span.end - span.start;
     }
-    return {
+    const durations = {
       totalMs: turn.end === null ? null : turn.end - turn.start,
       stepMs,
       tokens: turn.tokens,
       finishedAt: turn.end === null ? null : new Date(turn.end).toISOString()
     };
+    this.durationsOf.set(messageId, durations);
+    return durations;
   }
 }

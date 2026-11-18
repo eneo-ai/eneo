@@ -1,5 +1,3 @@
-"use client";
-
 import {
   DropdownMenu,
   DropdownMenuDivider,
@@ -18,12 +16,15 @@ import {
   Trash2,
   Users
 } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useLocale, useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { sessionKeys } from "@/lib/api/session";
+import { useLocale, useTranslations } from "use-intl";
 import { useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -40,7 +41,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { useAppContext } from "@/components/providers/app-context";
 import {
@@ -71,6 +73,7 @@ const PERMISSION_KEYS: Partial<Record<Permission, string>> = {
   skills: "permission_skills",
   skills_management: "permission_skills_management",
   personal_chat: "permission_personal_chat",
+  personal_skills: "permission_personal_skills",
   group_chats: "permission_group_chats",
   apps: "permission_apps",
   services: "permission_services",
@@ -95,7 +98,6 @@ type PendingAction = { kind: "delete" | "reset" | "default"; role: Role };
 export function RolesPage() {
   const t = useTranslations();
   const locale = useLocale();
-  const router = useRouter();
   const queryClient = useQueryClient();
   const { tenant } = useAppContext();
   const [defaultRoleId, setDefaultRoleId] = useState(tenant.default_role_id ?? null);
@@ -168,9 +170,7 @@ export function RolesPage() {
     event.preventDefault();
     if (!editor || saving) return;
     if (!name.trim()) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      nameRef.current?.focus();
+      revealProblems(() => setSubmitted(true), nameRef.current);
       return;
     }
     // Nothing changed: nothing to send.
@@ -203,7 +203,7 @@ export function RolesPage() {
       setEditor(null);
       await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
     } catch (error) {
-      toast.error(getErrorMessage(error, t));
+      toastApiError(error, t);
     } finally {
       setSaving(false);
     }
@@ -235,13 +235,13 @@ export function RolesPage() {
           })
         );
         setDefaultRoleId(role.id);
-        router.refresh();
+        await queryClient.invalidateQueries({ queryKey: sessionKeys.tenant });
         toast.success(t("roles_default_toast", { name: role.name }));
       }
       setPending(null);
       await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
     } catch (error) {
-      toast.error(getErrorMessage(error, t));
+      toastApiError(error, t);
     } finally {
       setActionBusy(false);
     }
@@ -273,24 +273,27 @@ export function RolesPage() {
     : null;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("roles")} tour="admin-roles">
+    <div className="flex w-full flex-col gap-6 pb-16">
+      <PageHeader
+        title={t("roles")}
+        description={
+          <>
+            {t("roles_page_description")} {t("roles_template_note")}
+          </>
+        }
+        tour="admin-roles"
+      >
         <Button onClick={() => openEditor({ kind: "create" })} disabled={failed || loading}>
           <Plus className="size-4" />
           {t("create_role")}
         </Button>
       </PageHeader>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="text-muted-foreground max-w-3xl space-y-1 text-sm">
-          <p>
-            {t("roles_page_description")} {t("roles_template_note")}
-          </p>
-          <p>
-            {defaultRole
-              ? t("roles_default_role_note", { name: defaultRole.name })
-              : t("roles_no_default_role_note")}
-          </p>
-        </div>
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          {defaultRole
+            ? t("roles_default_role_note", { name: defaultRole.name })
+            : t("roles_no_default_role_note")}
+        </p>
         <div className="relative w-full sm:w-72">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
@@ -522,11 +525,12 @@ function RoleRow({
   const granted = new Set(role.permissions);
   return (
     <article role="listitem" className="space-y-4 p-5">
-      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+      {/* The name and its badges stand on the line of the 44 px actions, not above it. */}
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{role.name}</h2>
           {isDefault && (
-            <Badge title={t("roles_cannot_delete_default")}>
+            <Badge variant="secondary" title={t("roles_cannot_delete_default")}>
               <Star className="size-3" />
               {t("roles_default_badge")}
             </Badge>
@@ -541,7 +545,7 @@ function RoleRow({
             </Badge>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:justify-self-end">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:shrink-0 sm:flex-nowrap sm:justify-self-end">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="size-4" />
             {t("edit")}
@@ -553,51 +557,55 @@ function RoleRow({
               title={t("roles_view_users")}
             >
               <Users className="size-4" />
-              <span className="hidden lg:inline">{t("roles_view_users")}</span>
+              {/* A phone has no tooltip for the icon: a short word beside it (the full text
+                  stays the name, which contains it). */}
+              <span className="md:hidden">{t("roles_view_users_short")}</span>
+              <span className="hidden md:inline">{t("roles_view_users")}</span>
             </Link>
           </Button>
-          {(!isDefault || role.predefined_source) && (
-            <DropdownMenu
-              button={{
-                label: t("ui_more_actions_for", { name: role.name }),
-                tooltip: t("ui_more_actions_for", { name: role.name }),
-                icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-                isIconOnly: true,
-                variant: "ghost",
-                size: "sm",
-                className: "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-              }}
-              hasChevron={false}
-              alignment="end"
-            >
-              {!isDefault && (
-                <DropdownMenuItem
-                  icon={Star}
-                  label={t("set_as_default_role")}
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("default")}
-                />
-              )}
-              {role.predefined_source && (
-                <DropdownMenuItem
-                  icon={RotateCcw}
-                  label={t("reset_to_template")}
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("reset")}
-                />
-              )}
-              {!isDefault && <DropdownMenuDivider />}
-              {!isDefault && (
-                <DropdownMenuItem
-                  icon={Trash2}
-                  label={t("delete_role")}
-                  variant="destructive"
-                  className="pointer-coarse:min-h-11"
-                  onClick={() => onAction("delete")}
-                />
-              )}
-            </DropdownMenu>
-          )}
+          {/* Always there: the default role's menu shows why it cannot be deleted. */}
+          <DropdownMenu
+            button={{
+              label: t("ui_more_actions_for", { name: role.name }),
+              tooltip: t("ui_more_actions_for", { name: role.name }),
+              icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+              isIconOnly: true,
+              variant: "ghost",
+              size: "sm",
+              className: "pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+            }}
+            hasChevron={false}
+            alignment="end"
+          >
+            {!isDefault && (
+              <DropdownMenuItem
+                icon={Star}
+                label={t("set_as_default_role")}
+                className="pointer-coarse:min-h-11"
+                onClick={() => onAction("default")}
+              />
+            )}
+            {role.predefined_source && (
+              <DropdownMenuItem
+                icon={RotateCcw}
+                label={t("reset_to_template")}
+                className="pointer-coarse:min-h-11"
+                onClick={() => onAction("reset")}
+              />
+            )}
+            {(!isDefault || role.predefined_source) && <DropdownMenuDivider />}
+            <DropdownMenuItem
+              icon={Trash2}
+              label={t("delete_role")}
+              // Visible but disabled for the default role, with the reason
+              // (the Svelte app's RoleRow does the same).
+              description={isDefault ? t("roles_cannot_delete_default") : undefined}
+              isDisabled={isDefault}
+              variant="destructive"
+              className="pointer-coarse:min-h-11"
+              onClick={() => onAction("delete")}
+            />
+          </DropdownMenu>
         </div>
       </div>
       <ul className="flex flex-wrap gap-1.5" aria-label={t("roles_group_summary_label")}>

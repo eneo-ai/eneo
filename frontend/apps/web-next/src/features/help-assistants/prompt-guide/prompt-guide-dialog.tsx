@@ -1,6 +1,3 @@
-"use client";
-
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   Check,
@@ -12,7 +9,7 @@ import {
   SendHorizontal,
   Sparkles
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { MessageResponse } from "@/components/ai-elements/message";
@@ -46,7 +43,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { cn } from "@/lib/utils";
 import { extractFinalPrompt } from "./extract-final-prompt";
 import { extractStructuredQuestion, type PromptGuideQuestion } from "./extract-structured-question";
@@ -182,7 +179,11 @@ export function PromptGuideQuestionCard({
   }
 
   function handleTextareaKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submit();
     }
@@ -457,10 +458,10 @@ function PromptGuideFinalCard({
   onApply: (text: string) => void;
 }) {
   const t = useTranslations();
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy, isCopied } = useCopy();
 
   async function copyToClipboard() {
-    if (!(await copy(prompt))) toast.error(t("chat_copy_failed"));
+    await copy(prompt);
   }
 
   return (
@@ -505,7 +506,11 @@ function PromptGuideInput({
   }
 
   function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (
+      event.key === "Enter" &&
+      (event.metaKey || event.ctrlKey) &&
+      !event.nativeEvent.isComposing
+    ) {
       event.preventDefault();
       submit();
     }
@@ -773,7 +778,7 @@ export function PromptGuideDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[85vh] flex-col gap-3 sm:max-w-2xl">
+        <DialogContent className="flex flex-col gap-3 sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Sparkles className="text-primary size-5" aria-hidden="true" />

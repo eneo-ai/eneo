@@ -1,0 +1,497 @@
+"""The composition root's task list, its settings floors and its health cache."""
+
+import asyncio
+import contextlib
+from collections.abc import AsyncGenerator, Callable, Sequence
+from typing import Literal
+
+import pytest
+from pydantic import ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from eneo.data_retention.application.conversation_history_retention_task import (
+    CONVERSATION_HISTORY_TASK,
+)
+from eneo.data_retention.application.derived_copy_retention_task import (
+    DERIVED_COPIES_TASK,
+)
+from eneo.data_retention.application.empty_session_retention_task import (
+    EMPTY_SESSIONS_TASK,
+)
+from eneo.data_retention.application.job_history_retention_task import (
+    JOB_HISTORY_TASK,
+)
+from eneo.data_retention.application.retention_health import (
+    RetentionHealth,
+    RetentionHealthStatus,
+)
+from eneo.data_retention.application.retention_registration import (
+    RetentionTaskRegistration,
+    retention_cadence_violations,
+    retention_registration_violations,
+)
+from eneo.data_retention.application.retention_runner import (
+    RetentionStep,
+    RetentionTask,
+)
+from eneo.data_retention.domain.retention import RetentionBudget, RetentionOverdue
+from eneo.data_retention.domain.rules import (
+    RETENTION_RULES,
+    RetentionRule,
+    RuleExemption,
+)
+from eneo.database import database
+from eneo.database.database import DatabaseSessionManager
+from eneo.files.unused_file_retention_task import UNUSED_FILES_TASK
+from eneo.main.config import Settings, get_settings
+from eneo.main.retention_tasks import (
+    EXISTING_WITHOUT_CHOICE,
+    FOLLOWS_A_REMOVAL,
+    FREQUENT_RUN_SECONDS,
+    OUTSIDE_THE_ENGINE,
+    RetentionHealthCache,
+    _paced,
+    _read_retention_health,
+    retention_task_registrations,
+)
+
+
+def test_retention_cron_is_registered():
+    """Mutant: the general worker does not include the retention cron."""
+    from eneo.worker.arq import worker
+
+    assert "run_retention" in {job.coroutine.__name__ for job in worker.cron_jobs}
+
+
+def test_registered_tasks_replace_the_removal_crons():
+    """Mutants: a cron that deleted conversations, empty sessions or unused files
+    runs again beside the task that replaced it; the widget's own nightly job,
+    which the engine leaves widget conversations to, is dropped."""
+    from eneo.worker.arq import worker
+
+    crons = {job.coroutine.__name__ for job in worker.cron_jobs}
+    registered = {
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+    }
+
+    assert crons.isdisjoint(
+        {"cleanup_old_data", "purge_old_conversations", "delete_unused_files"}
+    )
+    assert "purge_widget_sessions" in crons
+    assert registered == {
+        "conversations.history",
+        "conversations.derived_copies",
+        "sessions.empty",
+        "files.unused",
+        "retention.jobs",
+    }
+
+
+def test_only_listed_removals_run_without_a_choice():
+    """Mutants: a new task is on by default without being listed among the
+    removals that run without a choice or follow a removal; a listed removal
+    loses its operator switch, or its default changes."""
+    defaults = Settings.model_fields
+    on_by_default = {
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+        if registration.enabled
+    }
+
+    # Conversation history removes only what an assistant, app, space or
+    # organisation period selects; with none set it keeps everything.
+    assert on_by_default == {
+        "conversations.history",
+        *EXISTING_WITHOUT_CHOICE,
+        *FOLLOWS_A_REMOVAL,
+    }
+    for task, switch in {**EXISTING_WITHOUT_CHOICE, **FOLLOWS_A_REMOVAL}.items():
+        assert defaults[switch].default is True
+        switched_off = get_settings().model_copy(update={switch: False})
+        assert [
+            registration.enabled
+            for registration in retention_task_registrations(switched_off)
+            if registration.name == task
+        ] == [False]
+
+
+def test_records_outside_the_engine_are_declared_with_how_they_end():
+    """Mutants: an exception is dropped or added without the owner; one loses
+    its reason; the cron a reason names no longer runs."""
+    from eneo.worker.arq import worker
+
+    crons = {job.coroutine.__name__ for job in worker.cron_jobs}
+
+    assert set(OUTSIDE_THE_ENGINE) == {
+        "audit exports",
+        "insights",
+        "browser sessions",
+        "audit logs",
+        "service runs",
+    }
+    for reason in OUTSIDE_THE_ENGINE.values():
+        assert reason and "\n" not in reason
+    named = {
+        cron
+        for reason in OUTSIDE_THE_ENGINE.values()
+        for cron in reason.split()
+        if cron.startswith(("cleanup_", "purge_"))
+    }
+    assert named == {"cleanup_old_exports", "purge_old_audit_logs"}
+    assert named <= crons
+
+
+def _violations(**changes: object) -> list[str]:
+    declared: dict[str, object] = {
+        "vocabulary": tuple(RetentionRule),
+        "rules": RETENTION_RULES,
+        "registered": [
+            registration.name
+            for registration in retention_task_registrations(get_settings())
+        ],
+        "existing_without_choice": EXISTING_WITHOUT_CHOICE,
+        "follows_a_removal": FOLLOWS_A_REMOVAL,
+        "settings": Settings.model_fields,
+    }
+    declared.update(changes)
+    return retention_registration_violations(**declared)  # type: ignore[arg-type]
+
+
+def test_every_rule_and_every_registered_task_is_declared():
+    """The platform's own declaration passes: each rule has a task or an
+    exemption, and each task removes a rule's roots or is listed with its
+    switch."""
+    assert _violations() == []
+
+
+def test_the_registration_check_fails_on_each_omission():
+    """Mutants, one per check: a rule without a disposition; a disposition
+    outside the vocabulary; a rule whose task is not registered; a task that
+    is neither a rule's nor listed; a listed task that is not registered; a
+    listed switch that is no setting, for either list; a rule's task also
+    listed as running without a choice; a task in both lists."""
+    registered = [
+        registration.name
+        for registration in retention_task_registrations(get_settings())
+    ]
+    omissions = {
+        "rule without disposition": {
+            "vocabulary": (*RetentionRule, "unlisted_rule"),
+        },
+        "disposition outside the vocabulary": {
+            "rules": {**RETENTION_RULES, "stray_rule": RuleExemption("stray")},
+        },
+        "rule task not registered": {
+            "registered": [
+                name for name in registered if name != "conversations.history"
+            ],
+        },
+        "task in no list": {"registered": [*registered, "files.everything"]},
+        "listed task that is not registered": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "sessions.gone": "retention_empty_sessions_enabled",
+            },
+        },
+        "switch that is no setting": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "sessions.empty": "retention_no_such_switch",
+            },
+        },
+        "switch of a following removal that is no setting": {
+            "follows_a_removal": {
+                "conversations.derived_copies": "retention_no_such_switch",
+            },
+        },
+        "task in both lists": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                **FOLLOWS_A_REMOVAL,
+            },
+        },
+        "rule task listed as without a choice": {
+            "existing_without_choice": {
+                **EXISTING_WITHOUT_CHOICE,
+                "conversations.history": "retention_conversations_history_enabled",
+            },
+        },
+    }
+    for omission, changes in omissions.items():
+        assert len(_violations(**changes)) == 1, omission
+
+
+def test_a_rule_with_an_exemption_needs_no_task():
+    """Mutant: an exempt rule is required to have a registered task, so a rule
+    removed outside the engine cannot be declared honestly."""
+    assert (
+        _violations(
+            vocabulary=(*RetentionRule, "kept_by_its_owner"),
+            rules={**RETENTION_RULES, "kept_by_its_owner": RuleExemption("owner")},
+        )
+        == []
+    )
+
+
+def test_registrations_match_their_tasks():
+    """Mutant: a registration's name disagrees with its task, so health reads a
+    task that never writes a row (unknown forever)."""
+    for registration in retention_task_registrations(get_settings()):
+        assert registration.name == registration.build(AsyncSession()).name
+
+
+_ROWS = "retention_conversations_max_unit_rows"
+_FILES = "retention_max_files_per_run"
+
+
+@pytest.mark.parametrize(
+    "changes,limits",
+    [
+        pytest.param({}, (_ROWS,), id="defaults"),
+        pytest.param(
+            {_FILES: 50, "retention_max_family_rows": 150, _ROWS: 5000},
+            (_ROWS, _FILES),
+            id="files fund fewer rows than a unit",
+        ),
+        pytest.param(
+            {_FILES: 50, "retention_max_family_rows": 150, _ROWS: 150},
+            (_ROWS,),
+            id="files fund exactly a unit",
+        ),
+    ],
+)
+def test_a_unit_kept_for_its_size_names_the_settings_that_can_hold_it(
+    changes: dict[str, int], limits: tuple[str, ...]
+):
+    """Mutant: health names only the row cap for a unit kept by a file budget
+    that funds fewer rows than that cap, so raising the named setting changes
+    nothing. Each File charges at least three rows."""
+    values = get_settings().model_dump()
+    values.update(changes)
+
+    named = {
+        registration.limited_by["unit_exceeds_budget"]
+        for registration in retention_task_registrations(
+            Settings.model_validate(values)
+        )
+        if "unit_exceeds_budget" in registration.limited_by
+    }
+
+    assert named == {limits}
+
+
+@pytest.mark.parametrize(
+    "setting,value,valid",
+    [
+        ("retention_max_family_rows", 2, False),
+        ("retention_max_family_rows", 3, True),
+        ("retention_chunk_rows", 3, False),
+        ("retention_chunk_rows", 4, True),
+        ("retention_conversations_max_unit_rows", 3, False),
+        ("retention_conversations_max_unit_rows", 4, True),
+        # The default family cap of 5000 rows needs ceil(5000 / 3) files.
+        ("retention_max_files_per_run", 1666, False),
+        ("retention_max_files_per_run", 1667, True),
+    ],
+)
+def test_unit_floors_admit_the_minimum_complete_unit(
+    setting: str, value: int, valid: bool
+):
+    """Mutants: accept a family cap that cannot lock, prove and delete one File,
+    a chunk below four rows, where a step reserving rows // 4 defers forever,
+    a unit cap below a question's four rows with a session and its helper, or
+    a family cap that admits a family larger than the file budget (refused as
+    insufficient_budget every pass instead of family_exceeds_budget)."""
+    values = get_settings().model_dump()
+    values[setting] = value
+    if valid:
+        assert getattr(Settings.model_validate(values), setting) == value
+    else:
+        with pytest.raises(ValidationError):
+            Settings.model_validate(values)
+
+
+async def test_health_cache_reads_once_per_window():
+    """Mutant: the cache or its single flight is dropped, so every public probe
+    reads the job history."""
+    now = [0.0]
+    reads: list[float] = []
+    release = asyncio.Event()
+
+    async def read(settings: Settings) -> RetentionHealth:
+        reads.append(now[0])
+        await release.wait()
+        return RetentionHealth(status=RetentionHealthStatus.HEALTHY)
+
+    health = RetentionHealthCache(read, clock=lambda: now[0])
+    settings = get_settings()
+    waiting = [asyncio.create_task(health(settings)) for _ in range(5)]
+    await asyncio.sleep(0)
+    release.set()
+    assert {result.status for result in await asyncio.gather(*waiting)} == {
+        RetentionHealthStatus.HEALTHY
+    }
+    assert reads == [0.0]
+
+    now[0] = settings.retention_health_cache_seconds - 0.001
+    await health(settings)
+    now[0] = settings.retention_health_cache_seconds
+    await health(settings)
+    assert reads == [0.0, settings.retention_health_cache_seconds]
+
+
+class _RefusedDatabase(DatabaseSessionManager):
+    def __init__(self) -> None:
+        super().__init__()
+        self.attempts = 0
+
+    @contextlib.asynccontextmanager
+    async def session(self) -> AsyncGenerator[AsyncSession]:
+        self.attempts += 1
+        raise OSError("test PostgreSQL outage")
+        yield AsyncSession()
+
+
+async def test_health_reports_a_refused_connection_as_unknown_once_per_window(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Mutants: a refused connection (OSError) escapes the health read and turns
+    /api/healthz into a 500; the outage is not cached, so every probe reconnects."""
+    refused = _RefusedDatabase()
+    monkeypatch.setattr(database, "sessionmanager", refused)
+    health = RetentionHealthCache(_read_retention_health, clock=lambda: 0.0)
+    settings = get_settings()
+
+    first = await health(settings)
+    second = await health(settings)
+
+    assert first.status is second.status is RetentionHealthStatus.UNKNOWN
+    assert refused.attempts == 1
+
+
+class _Task:
+    name = "tests.cadence"
+    count_keys = frozenset({"deleted"})
+    observation_keys: frozenset[str] = frozenset()
+    blocked_keys: frozenset[str] = frozenset()
+    not_due_keys: frozenset[str] = frozenset()
+
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    def steps(self) -> Sequence[RetentionStep]:
+        return ()
+
+
+class _Probed(_Task):
+    async def has_due(self) -> bool:
+        return True
+
+
+class _ProbedAndOverdue(_Probed):
+    async def overdue(self) -> RetentionOverdue:
+        return RetentionOverdue(count=0, complete=True)
+
+
+def _registration(
+    build: Callable[[AsyncSession], RetentionTask],
+    *,
+    every: Literal["daily", "frequent"],
+    seconds: float = 1800,
+) -> RetentionTaskRegistration:
+    return RetentionTaskRegistration(
+        name="tests.cadence",
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=seconds),
+        build=build,
+        every=every,
+    )
+
+
+_CORE_TASKS = (
+    CONVERSATION_HISTORY_TASK,
+    DERIVED_COPIES_TASK,
+    EMPTY_SESSIONS_TASK,
+    UNUSED_FILES_TASK,
+    JOB_HISTORY_TASK,
+)
+
+
+def test_a_registration_runs_daily_unless_it_says_otherwise():
+    """Mutants: the default cadence is frequent; one of the five core tasks
+    runs frequently. Tasks added later may run frequently."""
+    unsaid = RetentionTaskRegistration(
+        name="tests.cadence",
+        enabled=True,
+        budget=RetentionBudget(rows=10, files=10, seconds=60),
+        build=_Probed,
+    )
+    cadences = {
+        registration.name: registration.every
+        for registration in retention_task_registrations(get_settings())
+    }
+
+    assert unsaid.every == "daily"
+    assert {name: cadences[name] for name in _CORE_TASKS} == dict.fromkeys(
+        _CORE_TASKS, "daily"
+    )
+
+
+def test_a_frequent_task_needs_a_due_probe_and_reports_no_overdue_work():
+    """Mutants: a frequent task without a due probe is accepted, so the
+    five-minute run claims it on every tick; a frequent task also reports
+    overdue work, so health reads two answers for it. A daily task needs
+    neither."""
+    session = AsyncSession()
+    assert retention_cadence_violations(
+        [
+            _registration(_Task, every="frequent"),
+            _registration(_ProbedAndOverdue, every="frequent"),
+        ],
+        session,
+    ) == [
+        "Task tests.cadence runs frequently without a due probe.",
+        "Task tests.cadence runs frequently and reports overdue work; health "
+        "asks its due probe instead.",
+    ]
+    assert (
+        retention_cadence_violations(
+            [
+                _registration(_Probed, every="frequent"),
+                _registration(_Task, every="daily"),
+                _registration(_ProbedAndOverdue, every="daily"),
+            ],
+            session,
+        )
+        == []
+    )
+    assert (
+        retention_cadence_violations(
+            retention_task_registrations(get_settings()), session
+        )
+        == []
+    )
+
+
+@pytest.mark.parametrize(
+    "every,seconds,expected",
+    [
+        ("frequent", 1800, 240),
+        ("frequent", 60, 60),
+        ("daily", 1800, 1800),
+    ],
+)
+def test_a_frequent_pass_is_held_to_its_time_limit(
+    every: Literal["daily", "frequent"], seconds: float, expected: float
+):
+    """Mutant: a frequent registration keeps the shared 1800 seconds, so one
+    pass, also the nightly one, holds its task's lease for half an hour and
+    every tick under it loses the claim."""
+    [paced] = _paced([_registration(_Probed, every=every, seconds=seconds)])
+    assert paced.budget.seconds == expected
+    assert all(
+        registration.budget.seconds <= FREQUENT_RUN_SECONDS
+        for registration in retention_task_registrations(get_settings())
+        if registration.every == "frequent"
+    )

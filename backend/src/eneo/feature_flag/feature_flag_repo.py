@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import delete, insert
+from sqlalchemy import and_, delete, insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -119,6 +119,35 @@ class FeatureFlagRepository:
         )
 
         return feature_flag
+
+    async def is_enabled_for_tenant(
+        self, name: str, tenant_id: UUID | None
+    ) -> bool | None:
+        """Whether the named flag is on for ``tenant_id``; None if no such flag.
+
+        One statement reads the global row and that tenant's preference, so a
+        check costs the same however many tenants have preferences. It returns
+        the effective value, not a partial aggregate that could reach ``update``.
+        """
+        query = (
+            select(GlobalFeatureFlag, TenantFeatureFlag)
+            .outerjoin(
+                TenantFeatureFlag,
+                and_(
+                    TenantFeatureFlag.feature_id == GlobalFeatureFlag.id,
+                    TenantFeatureFlag.tenant_id == tenant_id,
+                ),
+            )
+            .where(GlobalFeatureFlag.name == name)
+        )
+        row = (await self.db_session.execute(query)).one_or_none()
+        if row is None:
+            return None
+        global_feature_flag, tenant_feature_flag = row
+        return FeatureFlagFactory.create_domain_feature_flag(
+            global_feature_flag=global_feature_flag,
+            tenant_feature_flags=[tenant_feature_flag] if tenant_feature_flag else [],
+        ).is_enabled(tenant_id=tenant_id)
 
     async def one(self, id: UUID | None = None, **filters: object) -> FeatureFlag:
         feature_flag = await self.one_or_none(id=id, **filters)

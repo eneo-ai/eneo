@@ -26,8 +26,10 @@ from eneo.authentication.auth_models import (
     ApiKeyOwnership,
     ApiKeyPermission,
     ApiKeyScopeType,
+    CredentialFacts,
 )
 from eneo.conversations.conversations_router import _validate_conversation_scope
+from eneo.main.request_context import clear_request_context, set_request_context
 from eneo.roles.permissions import Permission
 from eneo.users.user import UserState
 from tests.unit.api_key_test_utils import (
@@ -1048,7 +1050,7 @@ class TestScopeBodyDriven:
         space_by_assistant: Any = None,
         space_by_group_chat: Any = None,
         space_by_session: Any = None,
-        session_obj: Any = None,
+        owner: Any = None,
         session_not_found: bool = False,
     ) -> MagicMock:
         container = MagicMock()
@@ -1086,16 +1088,16 @@ class TestScopeBodyDriven:
         container.space_repo = MagicMock(return_value=space_repo)
 
         session_service = AsyncMock()
-        if session_obj is not None:
-            session_service.get_session_by_uuid = AsyncMock(return_value=session_obj)
+        if owner is not None:
+            session_service.get_session_ownership = AsyncMock(return_value=owner)
         elif session_not_found:
             from eneo.main.exceptions import NotFoundException
 
-            session_service.get_session_by_uuid = AsyncMock(
+            session_service.get_session_ownership = AsyncMock(
                 side_effect=NotFoundException()
             )
         else:
-            session_service.get_session_by_uuid = AsyncMock(
+            session_service.get_session_ownership = AsyncMock(
                 side_effect=Exception("not found")
             )
         container.session_service = MagicMock(return_value=session_service)
@@ -1171,6 +1173,25 @@ class TestScopeBodyDriven:
         assert exc_info.value.detail["context"]["auth_layer"] == "api_key_scope"
 
     @pytest.mark.asyncio
+    async def test_scope_denial_without_caller_header_carries_the_context_id(self):
+        """The request context's id is the one every log line carries."""
+        request = self._make_http_request(scope_type="app", scope_id=uuid4())
+        set_request_context(correlation_id="ctx-scope-1")
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await _validate_conversation_scope(
+                    http_request=request,
+                    container=self._make_container(),
+                    assistant_id=uuid4(),
+                    group_chat_id=None,
+                    session_id=None,
+                )
+        finally:
+            clear_request_context()
+
+        assert exc_info.value.detail["request_id"] == "ctx-scope-1"
+
+    @pytest.mark.asyncio
     async def test_assistant_scope_matching_assistant_passes(self):
         """Assistant-scoped key + matching assistant_id → pass."""
         assistant_id = uuid4()
@@ -1228,12 +1249,9 @@ class TestScopeBodyDriven:
         """Assistant-scoped key + session_id of own assistant → pass."""
         assistant_id = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=assistant_id),
-            group_chat_id=None,
-        )
+        owner = SimpleNamespace(assistant_id=assistant_id, group_chat_id=None)
         request = self._make_http_request(scope_type="assistant", scope_id=assistant_id)
-        container = self._make_container(session_obj=session_obj)
+        container = self._make_container(owner=owner)
 
         await _validate_conversation_scope(
             http_request=request,
@@ -1249,14 +1267,11 @@ class TestScopeBodyDriven:
         key_assistant = uuid4()
         other_assistant = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=other_assistant),
-            group_chat_id=None,
-        )
+        owner = SimpleNamespace(assistant_id=other_assistant, group_chat_id=None)
         request = self._make_http_request(
             scope_type="assistant", scope_id=key_assistant
         )
-        container = self._make_container(session_obj=session_obj)
+        container = self._make_container(owner=owner)
 
         with pytest.raises(HTTPException) as exc_info:
             await _validate_conversation_scope(
@@ -1342,13 +1357,10 @@ class TestScopeBodyDriven:
         """Space-scoped key + session in own space → pass."""
         space_id = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=uuid4()),
-            group_chat_id=None,
-        )
+        owner = SimpleNamespace(assistant_id=uuid4(), group_chat_id=None)
         request = self._make_http_request(scope_type="space", scope_id=space_id)
         container = self._make_container(
-            session_obj=session_obj,
+            owner=owner,
             space_by_session=_make_space(space_id),
         )
 
@@ -1366,13 +1378,10 @@ class TestScopeBodyDriven:
         key_space = uuid4()
         other_space = uuid4()
         session_id = uuid4()
-        session_obj = SimpleNamespace(
-            assistant=SimpleNamespace(id=uuid4()),
-            group_chat_id=None,
-        )
+        owner = SimpleNamespace(assistant_id=uuid4(), group_chat_id=None)
         request = self._make_http_request(scope_type="space", scope_id=key_space)
         container = self._make_container(
-            session_obj=session_obj,
+            owner=owner,
             space_by_session=_make_space(other_space),
         )
 
@@ -1783,8 +1792,9 @@ class TestFileDeleteScopeEnforcement:
         self._patch_settings(monkeypatch)
         request = self._build_request(marker=True)
 
-        _, returned_key = await svc._resolve_api_key("sk_test", request=request)
+        user, returned_key = await svc._resolve_api_key("sk_test", request=request)
         assert returned_key is key
+        assert user.credential == CredentialFacts(kind="api_key")
         svc._log_api_key_auth_failed.assert_not_awaited()
 
     @pytest.mark.asyncio

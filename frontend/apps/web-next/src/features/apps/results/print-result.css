@@ -1,0 +1,38 @@
+body[data-app-result-printing] > [data-app-result-print-document] {
+  display: none;
+}
+
+@media print {
+  body[data-app-result-printing] {
+    height: auto !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    color: black !important;
+    background: white !important;
+  }
+
+  body[data-app-result-printing] > :not([data-app-result-print-document]) {
+    display: none !important;
+  }
+
+  body[data-app-result-printing] > [data-app-result-print-document] {
+    display: block !important;
+    max-width: none !important;
+    padding: 0 !important;
+  }
+
+  body[data-app-result-printing] [data-app-result-print-document] * {
+    color: black !important;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  body[data-app-result-printing] [data-app-result-print-document] :is(button, audio) {
+    display: none !important;
+  }
+
+  body[data-app-result-printing] [data-app-result-print-document] pre {
+    white-space: pre-wrap !important;
+  }
+}

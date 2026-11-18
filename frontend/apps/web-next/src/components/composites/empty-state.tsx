@@ -27,13 +27,20 @@ export type EmptyStateProps = {
   isCompact?: boolean;
   /** Dashed placeholder frame (default). Turn off inside an already framed surface. */
   framed?: boolean;
+  /**
+   * Off where something else already says this state, such as a filter's
+   * result count (ResourceFilterInput): Astryx announces an empty state that
+   * appears after the page loaded, and both would be read together.
+   */
+  isAnnounced?: boolean;
   className?: string;
 };
 
 /**
  * Placeholder for an empty list, zero search results or a first-time setup,
- * built on Astryx EmptyState (announced politely via role="status"). Not a
- * loading indicator — use LoadingState while data is pending.
+ * built on Astryx EmptyState, which announces its message once when it
+ * appears after the page loaded. Not a loading indicator — use LoadingState
+ * while data is pending.
  *
  * @example
  * <EmptyState
@@ -53,6 +60,7 @@ export function EmptyState({
   headingLevel = 2,
   isCompact = false,
   framed = true,
+  isAnnounced = true,
   className
 }: EmptyStateProps) {
   const actionSlot = actions ?? children;
@@ -68,6 +76,9 @@ export function EmptyState({
       actions={hasActions ? actionSlot : undefined}
       headingLevel={headingLevel}
       isCompact={isCompact}
+      // Astryx leaves an empty state inside a status element to that element
+      // (spec:AST-086 FR4): a status that is not live keeps it silent.
+      {...(isAnnounced ? {} : { role: "status", "aria-live": "off" as const })}
       className={cn(
         framed && "border-ax-border-strong rounded-ax-container border border-dashed",
         className

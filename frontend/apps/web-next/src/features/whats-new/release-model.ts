@@ -3,13 +3,24 @@ import type { PermissionCheck, EntryArea, Release, ReleaseEntry } from "@eneo/wh
 
 export type Marker = string | null | undefined;
 export type ReleaseFilters = { area: EntryArea | null; showMeOnly: boolean };
+/** A "Later" reminder for the latest release, as the app load found it (null: none). */
+export type Reminder = "waiting" | "due" | null;
 
+/**
+ * The release to announce: a new one, or the one a due reminder brings back
+ * while it is unread. A reminder never delays a different release (it is kept
+ * per release), and reading the release cancels it.
+ */
 export function pendingAnnouncement(
   enabled: boolean,
   latest: Release | undefined,
-  announced: Marker
+  announced: Marker,
+  reminder: Reminder = null,
+  unread = false
 ): Release | null {
   if (!enabled || !latest || announced === undefined) return null;
+  if (announced && compareVersions(latest.version, announced) < 0) return null;
+  if (reminder) return reminder === "due" && unread ? latest : null;
   if (announced && compareVersions(latest.version, announced) <= 0) return null;
   return latest;
 }

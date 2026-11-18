@@ -16,6 +16,7 @@ from pydantic import (
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyV2InDB,
+    CredentialFacts,
 )
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
@@ -23,6 +24,7 @@ from eneo.roles.role import RoleInDB, RolePublic
 from eneo.tenants.tenant import TenantInDB, TenantPublic
 from eneo.users.password import LOCAL_PASSWORD_POLICY, LocalPasswordPolicy
 from eneo.users.password_lifecycle import PasswordStatusPublic
+from eneo.widgets.domain.visitor import WidgetVisitorContext
 
 
 class UserState(str, Enum):
@@ -253,6 +255,8 @@ class UserUpdate(BaseModel):
     credential_version: Optional[int] = Field(default=None, ge=0)
     password_changed_at: Optional[datetime] = None
     password_change_required: Optional[bool] = None
+    # Set to None to clear: an administrator reactivating a removed account.
+    deleted_at: Optional[datetime] = None
 
     roles: Optional[list[ModelId]] = None
 
@@ -298,9 +302,14 @@ class UserInDB(UserInDBBase):
     user_groups: list[UserGroupInDBRead] = []
     tenant: TenantInDB
     active_api_key: Optional[ApiKeyV2InDB] = None
-    # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
+    # Set only on the synthetic visitor user built for the anonymous widget
+    # surface; never persisted and never present on a real user.
+    active_widget: Optional[WidgetVisitorContext] = None
+    # How the request authenticated, set where its credential was resolved.
     # Request-scoped like active_api_key; never persisted or returned.
-    session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
+    credential: Optional[CredentialFacts] = Field(
+        default=None, exclude=True, repr=False
+    )
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

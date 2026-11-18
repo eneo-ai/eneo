@@ -153,7 +153,12 @@ The repository uses GitHub security features and CI to prevent regressions:
   On `develop` and tag builds, component images are pushed while the checks
   run; only the completed release bundle waits for them, so deployments must
   consume the bundle. The tool runtime's `bun.lock` is not part of the audit.
-  Reports are retained as CI artifacts.
+  The dependency gate blocks `high` and `critical` findings, including those
+  without a fix; lower severities emit warnings. Exact, unexpired exceptions
+  are retained. Unknown severities, failed scans, invalid reports and expired
+  exceptions still fail the check. Python severity ratings come from the
+  GitHub Advisory Database and are retained alongside the raw audit reports as
+  CI artifacts.
 - Temporary dependency mitigations belong in `frontend/patches/SECURITY.md`, with
   an owner, exact advisory, regression tests and review expiry. The audit retains
   the raw finding and only accepts the named mitigation after its tests pass.
@@ -168,9 +173,9 @@ The repository uses GitHub security features and CI to prevent regressions:
   setup that gives developers useful feedback without high false-positive noise.
   Re-enable code scanning only after the query set and triage process are tuned
   enough that alerts are actionable for maintainers.
-- Release SBOMs are generated from the published backend, Svelte frontend, Next
-  frontend, tool runtime, and bundled SeaweedFS container image digests and
-  attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
+- Release SBOMs are generated from the published backend (including the React web build), Svelte frontend, tools runtime, and bundled
+  SeaweedFS container
+  image digests and attached to GitHub Releases as CycloneDX JSON, SPDX JSON,
   and human-readable table files. The backend release also includes a narrower
   CycloneDX SBOM for the Python runtime installed in `/app/.venv` inside the
   released backend image. The frontend release also includes a source dependency
@@ -178,9 +183,9 @@ The repository uses GitHub security features and CI to prevent regressions:
   checked-out release tag with the frozen Bun lockfile, so JavaScript
   dependencies remain visible even when the runtime image only contains the
   bundled build output. Release SBOM assets are attested through GitHub artifact
-  attestations, and the pushed backend, frontend, web-next, tool runtime, and
+  attestations, and the pushed backend, frontend, tool runtime, and
   SeaweedFS images include provenance attestations in GHCR. Fixable HIGH and
-  CRITICAL image vulnerabilities block the frontend, web-next, and tool runtime
+  CRITICAL image vulnerabilities block the frontend and tool runtime
   images; the backend image has no image scan and relies on the audit of
   its Python lock.
   `SBOM-SHA256SUMS.txt` covers the SBOM files; `IMAGE-DIGESTS.txt` labels the
@@ -264,8 +269,14 @@ on the documentation site.
   merge. Core Maintainers agree on their own changes as a team and may queue
   them without a formal approval.
 - **Releases.** Only Core Maintainers can create, update or delete
-  `release/**` branches and `v*` tags. A `v*` tag starts image publication,
-  so this restriction controls who can publish a release. Every pull request
+  `release/**` branches and control human `v*` tag operations. When configured
+  and enabled with repository variable `RELEASE_MANAGED`,
+  the repository-scoped release App can create final tags after a reviewed
+  preparation PR is merged and push CI succeeds on that exact commit. Its tag
+  creation permission must be separate from update/deletion protections; it
+  cannot merge PRs, move/delete tags or bypass branch checks. A `v*` tag starts
+  image publication, so these restrictions control who can publish a release.
+  Every pull request
   into a release branch needs an approval from a Core Maintainer other than its
   author: the `Release and main review` ruleset requires one approval and
   code-owner review, has no bypass actors, and dismisses an approval when new
@@ -287,6 +298,8 @@ on the documentation site.
   why write access stays with the Core Maintainers and the organisation owners. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
   secret is no longer used, delete it and revoke it at its source.
+  The release controller's privileged `workflow_run` jobs execute only code
+  from `develop`; release checkouts are validated as data, never executed.
 - **Changes to access.** Only organisation owners change team roles, rulesets
   or bypass lists. Record each change in a GitHub issue so the access history
   is reviewable.

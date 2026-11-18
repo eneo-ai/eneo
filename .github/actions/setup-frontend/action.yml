@@ -14,7 +14,12 @@ runs:
     - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
       with:
         bun-version: ${{ steps.bun.outputs.version }}
-    - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+    # Every run restores, but only develop pushes save: about 610 MB per lockfile,
+    # which a pull request or merge-queue ref saved again only for itself.
+    # A pull request that changes the lockfile restores develop's nearest cache.
+    - name: Restore the package download cache
+      id: bun-cache
+      uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
         path: ~/.bun/install/cache
         key: bun-${{ runner.os }}-${{ runner.arch }}-${{ steps.bun.outputs.version }}-${{ hashFiles('frontend/bun.lock') }}
@@ -23,3 +28,9 @@ runs:
       shell: bash
       working-directory: frontend
       run: timeout --kill-after=15s 300s bun install --frozen-lockfile
+    - name: Save the package download cache
+      if: github.event_name == 'push' && github.ref == 'refs/heads/develop' && steps.bun-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: ~/.bun/install/cache
+        key: ${{ steps.bun-cache.outputs.cache-primary-key }}

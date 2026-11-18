@@ -10,7 +10,7 @@ const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: { GET: get, POST: post, PUT: put, DELETE: remove }
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
 
 import { StorageConnectionSection } from "./storage-connection-section";
 

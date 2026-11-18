@@ -34,6 +34,30 @@ afterEach(() => {
 });
 
 describe("RetentionPolicySection", () => {
+  it("shows the cutoff and presets, warning before a shorter period is saved", async () => {
+    renderInApp(<RetentionPolicySection />);
+    await screen.findByText("90 dagar");
+    expect(screen.getByText(/Loggar äldre än/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ändra" }));
+    fireEvent.click(screen.getByRole("button", { name: "1 år" }));
+    expect(screen.getByRole("textbox", { name: "Gallringsperiod" })).toHaveProperty("value", "365");
+    expect(api.PUT).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("textbox", { name: "Gallringsperiod" }), {
+      target: { value: "30" }
+    });
+    expect(screen.getByText("Varning: Kortare gallringsperiod")).toBeTruthy();
+    await waitFor(() => expect(announce).toHaveBeenCalledWith("Varning: Kortare gallringsperiod"));
+    fireEvent.change(screen.getByRole("textbox", { name: "Gallringsperiod" }), {
+      target: { value: "31" }
+    });
+    expect(
+      announce.mock.calls.filter(([message]) => message === "Varning: Kortare gallringsperiod")
+    ).toHaveLength(1);
+    expect(screen.getByText(/Tidigare raderade loggar kan inte återställas/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(screen.queryByText("Varning: Kortare gallringsperiod")).toBeNull();
+    expect(api.PUT).not.toHaveBeenCalled();
+  });
   it("shows the period as text and saves a changed value, then returns focus to Ändra", async () => {
     const { container } = renderInApp(<RetentionPolicySection />);
     expect(screen.getByRole("heading", { level: 2, name: "Gallringspolicy" })).toBeTruthy();

@@ -1,7 +1,5 @@
-"use client";
-
 import { X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { type KeyboardEvent, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -48,13 +46,13 @@ export function TagInput({
       {value.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {value.map((tag, index) => (
-            <Badge key={tag} variant="secondary" className="gap-1 pr-1">
+            <Badge key={tag} variant="secondary" className="gap-1 pr-1 pointer-coarse:min-h-11">
               {tag}
               <button
                 type="button"
                 onClick={() => removeAt(index)}
                 aria-label={t("mcp_remove_tag", { tag })}
-                className="hover:bg-foreground/10 -mr-0.5 rounded-full p-0.5"
+                className="hover:bg-foreground/10 -mr-0.5 rounded-full p-0.5 pointer-coarse:grid pointer-coarse:size-11 pointer-coarse:place-items-center pointer-coarse:p-0"
               >
                 <X className="size-3" aria-hidden="true" />
               </button>

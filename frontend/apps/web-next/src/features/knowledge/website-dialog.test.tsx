@@ -137,6 +137,34 @@ describe("WebsiteDialog", () => {
     expect(api.POST).not.toHaveBeenCalled();
   });
 
+  it("replaces a configured site's credentials only as a pair", async () => {
+    api.POST.mockImplementation(() => ok({ id: "website-1" }));
+    const dialog = renderDialog(makeWebsite({ requires_http_auth: true }) as unknown as Website);
+    const save = within(dialog).getByRole("button", { name: "Spara ändringar" });
+    fireEvent.change(field(dialog, /^Användarnamn/), { target: { value: "crawler" } });
+    fireEvent.submit(save.closest("form")!);
+
+    const password = field(dialog, /^Lösenord/);
+    expect(document.activeElement).toBe(password);
+    expect(password.getAttribute("aria-invalid")).toBe("true");
+    const required = within(dialog).getByText("Detta fält är obligatoriskt");
+    expect(password.getAttribute("aria-describedby")).toContain(required.id);
+    expect(api.POST).not.toHaveBeenCalled();
+
+    fireEvent.change(password, { target: { value: "hemlis-4" } });
+    fireEvent.change(field(dialog, /^Bekräfta lösenord/), { target: { value: "hemlis-4" } });
+    fireEvent.submit(save.closest("form")!);
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/websites/{id}/", {
+        params: { path: { id: "website-1" } },
+        body: expect.objectContaining({
+          http_auth_username: "crawler",
+          http_auth_password: "hemlis-4"
+        })
+      })
+    );
+  });
+
   it("creates once after Skapa ändå, and the form's busy button keeps the focus", async () => {
     api.GET.mockImplementation(() =>
       ok({

@@ -3,6 +3,7 @@ import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination } from "@/lib/api/pagination";
+import type { SpaceResource } from "@/features/spaces/space";
 
 export type Collection = Schema<"CollectionPublic">;
 export type Website = Schema<"WebsitePublic">;
@@ -10,12 +11,38 @@ export type CrawlRun = NonNullable<Website["latest_crawl"]>;
 export type CrawlFailure = Schema<"CrawlResourceFailurePublic">;
 export type CrawlFailurePage = Schema<"CrawlFailurePagePublic">;
 export type InfoBlob = Schema<"InfoBlobPublicNoText">;
+export type WebsiteContentFolder = Schema<"WebsiteContentFolderPublic">;
 export type EmbeddingModel = Schema<"EmbeddingModelPublic">;
 export type IntegrationKnowledge = Schema<"IntegrationKnowledgePublic">;
+
+export type KnowledgeTab = "collections" | "websites" | "integrations";
+
+/** In display order, with the resource permission each tab requires. */
+export const KNOWLEDGE_TABS: { id: KnowledgeTab; resource: SpaceResource }[] = [
+  { id: "collections", resource: "collection" },
+  { id: "websites", resource: "website" },
+  { id: "integrations", resource: "integrationKnowledge" }
+];
+
+export function readKnowledgeTab(
+  search: Pick<URLSearchParams, "get">,
+  available: readonly KnowledgeTab[]
+): KnowledgeTab {
+  return available.find((id) => id === search.get("tab")) ?? available[0] ?? "collections";
+}
 
 export function formatWebsiteName(website: { url: string; name?: string | null }): string {
   if (website.name) return website.name;
   return website.url.split("//")[1] ?? website.url;
+}
+
+/** The same document content serves knowledge previews and copied source references. */
+export function infoBlobQueryOptions(api: EneoClient, blobId: string) {
+  return queryOptions({
+    queryKey: ["info-blobs", blobId],
+    queryFn: ({ signal }) =>
+      unwrap(api.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blobId } }, signal }))
+  });
 }
 
 export function collectionQueryOptions(api: EneoClient, collectionId: string) {
@@ -78,17 +105,33 @@ export function websiteCrawlRunsQueryOptions(api: EneoClient, websiteId: string)
 }
 
 /** What the website has indexed, a page at a time. */
-export function websiteBlobPagesQueryOptions(api: EneoClient, websiteId: string) {
+export function websiteBlobPagesQueryOptions(
+  api: EneoClient,
+  websiteId: string,
+  { prefix = "", q = "" }: { prefix?: string; q?: string } = {}
+) {
   return infiniteQueryOptions({
     ...cursorPagination,
-    queryKey: ["websites", websiteId, "info-blobs", "pages"],
-    queryFn: ({ pageParam }) =>
+    queryKey: [
+      "websites",
+      websiteId,
+      "info-blobs",
+      "pages",
+      ...(prefix || q ? [{ prefix, q }] : [])
+    ],
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         api.GET("/api/v1/websites/{id}/info-blobs/page/", {
           params: {
             path: { id: websiteId },
-            query: { limit: WEBSITE_PAGE_SIZE, cursor: pageParam }
-          }
+            query: {
+              limit: WEBSITE_PAGE_SIZE,
+              cursor: pageParam,
+              ...(prefix ? { prefix } : {}),
+              ...(q ? { q } : {})
+            }
+          },
+          signal
         })
       )
   });
@@ -96,6 +139,23 @@ export function websiteBlobPagesQueryOptions(api: EneoClient, websiteId: string)
 
 /** Failed addresses per page of the failures endpoint. */
 export const CRAWL_FAILURES_PAGE_SIZE = 100;
+
+export function websiteFoldersQueryOptions(api: EneoClient, websiteId: string, prefix: string) {
+  return infiniteQueryOptions({
+    ...cursorPagination,
+    queryKey: ["websites", websiteId, "info-blobs", "folders", prefix],
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        api.GET("/api/v1/websites/{id}/content-folders/", {
+          params: {
+            path: { id: websiteId },
+            query: { prefix, cursor: pageParam, limit: WEBSITE_PAGE_SIZE }
+          },
+          signal
+        })
+      )
+  });
+}
 
 /**
  * A run's recorded page and file failures (optionally one kind), oldest
@@ -110,27 +170,16 @@ export function crawlFailuresQueryOptions(
   return infiniteQueryOptions({
     ...cursorPagination,
     queryKey: ["crawl-runs", runId, "failures", kind],
-    queryFn: ({ pageParam }): Promise<CrawlFailurePage> =>
+    queryFn: ({ pageParam, signal }): Promise<CrawlFailurePage> =>
       unwrap(
         api.GET("/api/v1/crawl-runs/{id}/failures/", {
+          signal,
           params: {
             path: { id: runId },
             query: { limit: CRAWL_FAILURES_PAGE_SIZE, cursor: pageParam, kind }
           }
         })
       )
-  });
-}
-
-export function websiteBlobsQueryOptions(api: EneoClient, websiteId: string) {
-  return queryOptions({
-    queryKey: ["websites", websiteId, "info-blobs"],
-    queryFn: async (): Promise<InfoBlob[]> => {
-      const page = await unwrap(
-        api.GET("/api/v1/websites/{id}/info-blobs/", { params: { path: { id: websiteId } } })
-      );
-      return page.items;
-    }
   });
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filterSpaceResources, matchesSearch } from "./resource-filter";
+import { filterSpaceResources } from "./resource-filter";
 
 const items = [
   { name: "Budget assistant", description: "Drafts budget answers", type: "assistant" },
@@ -24,17 +24,5 @@ describe("filterSpaceResources", () => {
       "Budget assistant"
     ]);
     expect(filterSpaceResources(items, "budget pdfs")).toEqual([]);
-  });
-});
-
-describe("matchesSearch", () => {
-  it("searches numbers and skips empty values", () => {
-    expect(matchesSearch(["Policies", 12, null, undefined, " "], "12 pol")).toBe(true);
-    expect(matchesSearch(["Policies", null], "missing")).toBe(false);
-    expect(matchesSearch([], "")).toBe(true);
-  });
-
-  it("does not match across the gap between two values", () => {
-    expect(matchesSearch(["Budget", "assistant"], "getass")).toBe(false);
   });
 });

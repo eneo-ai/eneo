@@ -1,7 +1,7 @@
 import json
-from typing import Annotated, Optional, cast
+from typing import Annotated, NoReturn, Optional, cast
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from eneo.integration.infrastructure.sharepoint_subscription_worker import (
 )
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import get_container
 
 logger = get_logger(__name__)
@@ -31,10 +32,12 @@ MAX_WEBHOOK_BODY_BYTES = 256 * 1024
 # Graph's validation tokens are a few hundred characters at most. The token is
 # echoed back verbatim to anyone who calls the public URL, so it is bounded.
 MAX_VALIDATION_TOKEN_LENGTH = 1024
+_TOKEN_TOO_LONG = "validationToken is longer than 1024 characters."
+_BAD_BODY = "Body is not a JSON notification object or exceeds 256 KB."
 
 
-def _bad_request(detail: str) -> JSONResponse:
-    return JSONResponse(status_code=400, content={"detail": detail})
+def _bad_request(detail: str) -> NoReturn:
+    raise HTTPException(status_code=400, detail=detail)
 
 
 def _validation_echo(validation_token: str) -> Response:
@@ -44,7 +47,7 @@ def _validation_echo(validation_token: str) -> Response:
             "Rejecting SharePoint webhook validation: token longer than %s characters",
             MAX_VALIDATION_TOKEN_LENGTH,
         )
-        return _bad_request("validationToken is too long")
+        _bad_request("validationToken is too long")
     return PlainTextResponse(
         content=validation_token, headers={"X-Content-Type-Options": "nosniff"}
     )
@@ -77,7 +80,10 @@ async def _read_capped_body(request: Request) -> Optional[bytes]:
 @router.get(
     "/sharepoint/webhook/lifecycle/",
     description="Graph validation handshake for the lifecycle notification URL.",
-    responses={200: {"description": "Validation token echoed as plain text."}},
+    responses={
+        200: {"description": "Validation token echoed as plain text."},
+        400: {"description": _TOKEN_TOO_LONG, "model": GeneralError},
+    },
     response_model=None,
     include_in_schema=False,
 )
@@ -103,6 +109,7 @@ async def _read_capped_body(request: Request) -> Optional[bytes]:
                 },
             },
         },
+        400: {"description": _TOKEN_TOO_LONG, "model": GeneralError},
     },
     response_model=None,
 )
@@ -125,7 +132,10 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
         "the Graph validation token (plain text) during the handshake."
     ),
     response_class=Response,
-    responses={202: {"description": "Lifecycle notifications accepted."}},
+    responses={
+        202: {"description": "Lifecycle notifications accepted."},
+        400: {"description": _BAD_BODY, "model": GeneralError},
+    },
     response_model=None,
     include_in_schema=False,
 )
@@ -142,16 +152,8 @@ async def sharepoint_webhook_validation(validationToken: Optional[str] = None):
             "content": {"text/plain": {"schema": {"type": "string"}}},
         },
         400: {
-            "description": "Body is not a JSON notification object or exceeds 256 KB.",
-            "content": {
-                "application/json": {
-                    "schema": {
-                        "type": "object",
-                        "properties": {"detail": {"type": "string"}},
-                        "required": ["detail"],
-                    }
-                }
-            },
+            "description": _BAD_BODY,
+            "model": GeneralError,
         },
         202: {
             "description": "SharePoint notifications accepted for processing.",
@@ -191,21 +193,21 @@ async def sharepoint_webhook(
             "Rejecting SharePoint webhook: body exceeds %s bytes",
             MAX_WEBHOOK_BODY_BYTES,
         )
-        return _bad_request("Request body too large")
+        _bad_request("Request body too large")
     try:
         decoded = cast(object, json.loads(body))
     except (ValueError, RecursionError):
         # RecursionError: nesting deep enough to exhaust the parser's stack
         # fits well under the size cap.
         logger.warning("Rejecting SharePoint webhook: body is not JSON")
-        return _bad_request("Request body must be a JSON object")
+        _bad_request("Request body must be a JSON object")
     if not isinstance(decoded, dict) or not isinstance(
         cast(dict[str, object], decoded).get("value", []), list
     ):
         logger.warning(
             "Rejecting SharePoint webhook: body is not a notification object"
         )
-        return _bad_request("Request body must be a JSON object with a 'value' list")
+        _bad_request("Request body must be a JSON object with a 'value' list")
 
     # Avoid logging full payload/headers since they may contain sensitive metadata.
     payload = cast(SharePointWebhookPayload, decoded)

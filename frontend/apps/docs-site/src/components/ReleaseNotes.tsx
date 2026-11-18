@@ -1,4 +1,5 @@
 import {
+  isUnreleased,
   releases,
   type EntryType,
   type Release,
@@ -38,16 +39,22 @@ function formatDate(date: string): string {
   );
 }
 
-function Entry({ entry, version }: { entry: ReleaseEntry; version: string }) {
+// Unreleased notes get no version anchor: links to them must not outlive the
+// release they end up in.
+function releaseAnchor(release: Release): string {
+  return isUnreleased(release) ? "upcoming" : `v${release.version}`;
+}
+
+function Entry({ entry, prefix }: { entry: ReleaseEntry; prefix: string }) {
   // Ids are unique within a release only; every release shares this page.
-  const anchor = `v${version}-${entry.id}`;
+  const anchor = `${prefix}-${entry.id}`;
   return (
     <li
       id={anchor}
       className="rounded-lg border border-gray-200 p-4 dark:border-neutral-800"
     >
       {entry.aliases?.map((alias) => (
-        <span key={alias} id={`v${version}-${alias}`} aria-hidden="true" />
+        <span key={alias} id={`${prefix}-${alias}`} aria-hidden="true" />
       ))}
       <div className="flex flex-wrap items-center gap-2 text-xs font-medium">
         <span
@@ -77,22 +84,28 @@ function Entry({ entry, version }: { entry: ReleaseEntry; version: string }) {
 }
 
 function ReleaseSection({ release }: { release: Release }) {
-  const anchor = `v${release.version}`;
+  const anchor = releaseAnchor(release);
   return (
     <section aria-labelledby={anchor} className="mt-10">
       <div className="flex flex-wrap items-baseline gap-x-3">
         <h2 id={anchor} className="text-xl font-semibold">
           <a href={`#${anchor}`} className="no-underline hover:underline">
-            Version {release.version}
+            {isUnreleased(release)
+              ? "Upcoming release"
+              : `Version ${release.version}`}
           </a>
         </h2>
         <span className="text-sm text-gray-500">
-          {release.date ? formatDate(release.date) : "Upcoming"}
+          {isUnreleased(release)
+            ? "Merged changes that are not in a release yet"
+            : release.date
+              ? formatDate(release.date)
+              : "Upcoming"}
         </span>
       </div>
       <ul className="mt-4 flex list-none flex-col gap-4 p-0">
         {release.entries.map((entry) => (
-          <Entry key={entry.id} entry={entry} version={release.version} />
+          <Entry key={entry.id} entry={entry} prefix={anchor} />
         ))}
       </ul>
     </section>

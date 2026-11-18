@@ -8,12 +8,16 @@ matters.
 
 | If you need to…                          | Start with                                                             |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
+| Put an Assistant on a public website     | [Embed an Assistant](/guides/embed-widget)                             |
 | Deploy Eneo                              | [Deploy Eneo](/guides/deployment)                                      |
 | Understand Eneo's security responsibilities and controls | [Security at Eneo](/docs/security) |
+| Upgrade from 2.3 to the next release     | [Upgrade Notes](/guides/upgrade-notes)                                 |
 | Upgrade to 2.2.0 (renamed variables)     | [Upgrading to 2.2.0](/guides/upgrade-2-2-0)                            |
 | Upgrade to 1.7.0 (tenant models)         | [Upgrading to 1.7.0](/guides/upgrade-1-7-0)                            |
 | Upgrade legacy File/Icon storage         | [Upgrade File & Icon Storage](/guides/file-icon-storage-upgrade)       |
+| Free quota after upgrading from 2.2      | [Free Space from Earlier Versions](/guides/free-space-earlier-versions) |
 | Choose where durable bytes live          | [Choose Content Storage](/guides/object-content-storage)               |
+| Decide when content is removed           | [Data Retention](/guides/data-retention)                               |
 | Configure login and access               | [Authentication & OIDC](/guides/oidc-federation)                        |
 | Give each tenant its own IdP             | [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant)   |
 | Provision users and groups from your IdP | [SCIM Provisioning](/guides/scim-provisioning)                         |
@@ -57,6 +61,15 @@ Set up audit logging for compliance and security monitoring:
 - Review access justification flow
 - Retention policy and export guidance
 
+### [Data Retention](/guides/data-retention)
+
+What Eneo removes, when, and what a restore brings back:
+
+- No rule, no removal: where to set retention and how the levels combine
+- Retention by a rule apart from cleanup of leftovers
+- Which copies follow their source, and which Eneo cannot reach
+- After a restore: catch up, what can come back, and backups
+
 ### [Skills](/guides/skills)
 
 Build focused, versioned instruction capabilities:
@@ -92,6 +105,15 @@ Turn on the functions (*Funktioner*) assistants can use, and understand how they
 - Scope sources by user group, role permission and security classification
 - Edit and vary images with reference images, including follow-up edits
 
+### [Embed an Assistant on Your Website](/guides/embed-widget)
+
+Publish an assistant as a chat widget on the organisation's public website:
+
+- Configure, preview and activate a widget, then install its snippet
+- Understand what anonymous visitors can reach and what they never get
+- Set the tenant policy and house-style templates as an administrator
+- Operator settings, retention, security properties and a DPIA checklist
+
 ### [Deploy Eneo](/guides/deployment)
 
 Deploy Eneo in production environments:
@@ -101,6 +123,14 @@ Deploy Eneo in production environments:
 - Network isolation between proxy, data, and module tiers
 - Using nginx instead of Traefik
 - Object content storage options
+
+### [Upgrade Notes](/guides/upgrade-notes)
+
+What an upgrade from 2.3 to the next release asks of operators, administrators and API consumers:
+
+- The checks that can stop startup or sign-in, or lose data
+- What every OIDC setup must check
+- Per change: who acts, before, during and after, how to check and how to roll back
 
 ### [Upgrading to 2.2.0](/guides/upgrade-2-2-0)
 
@@ -128,6 +158,14 @@ Run the one-time legacy content adoption safely:
 - Estimate PostgreSQL disk, WAL headroom, and wall time
 - Pause or restore when capacity runs low
 - Record a release-candidate result and verify completion before cleanup
+
+### [Free Space Held by Earlier Versions](/guides/free-space-earlier-versions)
+
+Remove the search data that 2.2 kept for replaced versions, once:
+
+- What went wrong, what is fixed and who needs the cleanup
+- Run, follow, stop and verify the cleanup while Eneo keeps running
+- Results, vacuum, and what changes for quota and disk
 
 ### [Choose Content Storage](/guides/object-content-storage)
 

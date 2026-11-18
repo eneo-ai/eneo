@@ -19,6 +19,7 @@ export type PanelContents = {
   views: PanelView[];
   documents: ConversationDocument[];
   uploads: PreviewFile[];
+  uploadGroups?: UploadGroup[];
 };
 
 export function panelContentsCount(contents: PanelContents | null | undefined): number {
@@ -46,4 +47,31 @@ export function conversationUploads(messages: readonly EneoUIMessage[]): Preview
     }
   }
   return [...uploads.values()];
+}
+
+export type UploadGroup = { key: string; ordinal: number | null; files: PreviewFile[] };
+
+/** Only a question's explicit metadata establishes ownership; session-wide files do not. */
+export function conversationUploadGroups(
+  messages: readonly EneoUIMessage[],
+  uploads: PreviewFile[]
+): UploadGroup[] {
+  const remaining = new Map(uploads.map((file) => [file.id, file]));
+  const groups: UploadGroup[] = [];
+  let ordinal = 0;
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    ordinal++;
+    const files: PreviewFile[] = [];
+    for (const { id } of message.metadata?.files ?? []) {
+      const file = remaining.get(id);
+      if (!file) continue;
+      files.push(file);
+      remaining.delete(id);
+    }
+    if (files.length > 0) groups.push({ key: message.id, ordinal, files });
+  }
+  if (remaining.size > 0)
+    groups.push({ key: "unassigned", ordinal: null, files: [...remaining.values()] });
+  return groups;
 }

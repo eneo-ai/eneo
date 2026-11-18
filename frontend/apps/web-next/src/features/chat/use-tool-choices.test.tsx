@@ -2,6 +2,7 @@
 import { act, cleanup } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import type { Permission } from "@/lib/auth/permissions";
 import type { ChatPartner } from "@/lib/chat/types";
 import { renderHookInApp, testAppContext } from "@/test/render";
 import { useToolChoices } from "./use-tool-choices";
@@ -38,11 +39,11 @@ const personal: ChatPartner = {
   mcpServers: [server("diarium"), server("kalender")]
 };
 
-function renderChoices(partner: ChatPartner, showWebSearch = true) {
-  const appContext = testAppContext({
-    permissions: ["web_search", "image_generation"],
-    featureFlags: { showWebSearch }
-  });
+function renderChoices(
+  partner: ChatPartner,
+  permissions: Permission[] = ["web_search", "image_generation"]
+) {
+  const appContext = testAppContext({ permissions });
   return renderHookInApp(() => useToolChoices(partner), { appContext });
 }
 
@@ -68,8 +69,16 @@ describe("useToolChoices", () => {
     expect(renderChoices(assistant).result.current.disabledCapabilities.size).toBe(0);
   });
 
-  it("hides web search when the deployment does not offer it", () => {
-    const { result } = renderChoices(personal, false);
+  it("offers the personal assistant web search when enabled, permitted and provided", () => {
+    const { result } = renderChoices(personal);
+    expect(result.current.capabilities).toEqual([
+      { purpose: "web_search", available: true, reason: null },
+      { purpose: "image_generation", available: true, reason: null }
+    ]);
+  });
+
+  it("hides web search when the user's role may not use it", () => {
+    const { result } = renderChoices(personal, ["image_generation"]);
     expect(result.current.capabilities.map((capability) => capability.purpose)).toEqual([
       "image_generation"
     ]);

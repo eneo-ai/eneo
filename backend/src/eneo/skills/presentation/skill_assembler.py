@@ -27,6 +27,7 @@ from eneo.skills.presentation.skill_models import (
     AssistantSkillRuntimeSummary,
     OrganizationSkillPublic,
     OrganizationSkillSummaryPublic,
+    PersonalChatSkillLayerPublic,
     PublishedSkillPublic,
     PublishedSkillRevisionPublic,
     PublishedSkillSummaryPublic,
@@ -37,6 +38,7 @@ from eneo.skills.presentation.skill_models import (
     SkillAdoptionSummaryPublic,
     SkillBindingReferenceInput,
     SkillBindingSummary,
+    SkillDependencySummary,
     SkillPublic,
     SkillRevisionPublic,
     SkillRevisionSummaryPublic,
@@ -353,6 +355,15 @@ class SkillAssembler:
             is_active=binding.is_active,
             source=binding.source,
             execution_blocked=projection.execution_blocked,
+            dependencies=[
+                SkillDependencySummary(
+                    skill_id=dependency.skill_id,
+                    skill_revision_id=dependency.skill_revision_id,
+                    revision_number=dependency.revision_number,
+                    display_name=dependency.display_name,
+                )
+                for dependency in binding.dependencies
+            ],
         )
 
     @classmethod
@@ -384,6 +395,19 @@ class SkillAssembler:
                     token_count_source=runtime.snapshot.measurement.source,
                 )
                 if runtime is not None
+                else None
+            ),
+            organisation_bindings=[
+                cls.assistant_binding_to_summary(binding)
+                for binding in projection.organisation_bindings
+            ],
+            personal_layer=(
+                PersonalChatSkillLayerPublic(
+                    status=projection.personal_layer.status,
+                    reason=projection.personal_layer.reason,
+                    detail=projection.personal_layer.detail,
+                )
+                if projection.personal_layer is not None
                 else None
             ),
         )

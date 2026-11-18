@@ -22,12 +22,11 @@ Pull requests into `develop` run the following security and quality gates:
 
 ### CI
 
-`CI / CI` is the main app check. Pull requests and merge-queue candidates run
-the checks selected by `.github/scripts/ci-change-scope.mjs`. In the merge
-queue, the checks for each candidate are chosen from its diff against the
-candidate ahead of it; the whole tree is still built and tested. Missing history, an empty diff,
-unknown runtime paths, and changes to CI workflows or local actions select full
-validation.
+`CI / CI` is the main app check. Pull requests run the checks that
+`.github/scripts/ci-change-scope.mjs` selects from their diff. Missing history,
+an empty diff, unknown runtime paths, and changes to CI workflows or local
+actions select full validation. Merge-queue candidates always run the full
+suite: the candidate is exactly what lands on `develop`.
 
 Backend changes require backend quality checks, all six test shards, schema
 checks, and both frontend E2E suites. Each frontend's changes require that
@@ -46,9 +45,13 @@ The Svelte production build runs in E2E and Docker; there is no additional
 standalone build of the same app. The web-next E2E and accessibility checks are
 part of the required aggregate when selected.
 
-Pushes to `develop` run the full suite once, through **Build and Push Docker
-Images**, before the completed release bundle can be published. Release-branch
-pushes, tags and manual publication always run the full suite.
+Pushes to `develop` publish through **Build and Push Docker Images**. When the
+merge queue's run on that exact commit passed the full suite, its CI job left a
+validation receipt (commit, workflow, run, attempt and scope), and publication
+reuses that result instead of running the suite again. It still runs a fresh
+security scan, scans the published images and smoke tests the bundle. Without a
+valid receipt the full suite runs in publication. Release-branch pushes run
+full CI directly; tag and manual publication always run the full suite.
 
 See the [CI operations guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CODE_QUALITY.md#ci-execution-and-recovery)
 for time limits, build diagnostics, validation commands, and recovery.
@@ -67,6 +70,13 @@ The reusable `Security` workflow is part of the CI aggregate. It audits the
 backend's runtime Python lock and the frontend lock, runs Semgrep's
 security-audit and GitHub Actions rules, and runs Gitleaks on added Git
 history.
+The dependency audit blocks `high` and `critical` findings, including those
+without a fixed version. `low` and `moderate` findings produce warning
+annotations and remain in the reports. Python audit severities come from the
+GitHub Advisory Database; the fetched ratings are retained with the raw audit
+report. Unknown severity, failed scans and invalid reports still fail CI.
+Existing exact, unexpired exceptions remain valid; expired exceptions still
+require review and fail the check.
 Temporary dependency mitigations require a documented owner, targeted tests and
 an expiry; see `frontend/patches/SECURITY.md`.
 

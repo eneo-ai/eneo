@@ -100,6 +100,8 @@ describe("Skill adoption projection", () => {
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
+        attachmentLimit: 1,
+        conflictingRevisions: 1,
         contextWindow: 1,
         personalChat: "failed",
         apps: null
@@ -113,7 +115,7 @@ describe("Skill adoption projection", () => {
         page.getByText(
           m.organization_skills_rollout_progress({
             updated: "3",
-            total: "6"
+            total: "8"
           })
         )
       )
@@ -132,6 +134,12 @@ describe("Skill adoption projection", () => {
       .toBeVisible();
     await expect
       .element(page.getByText(m.organization_skills_rollout_context_window()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_attachment_limit()).last())
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.organization_skills_rollout_conflicting_revisions()).last())
       .toBeVisible();
     await expect
       .element(page.getByText(m.organization_skills_rollout_personal_chat_failed()))
@@ -153,6 +161,8 @@ describe("Skill adoption projection", () => {
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
+        attachmentLimit: 0,
+        conflictingRevisions: 0,
         contextWindow: 1,
         personalChat: "failed",
         apps: null
@@ -181,6 +191,8 @@ describe("Skill adoption projection", () => {
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
+        attachmentLimit: 0,
+        conflictingRevisions: 0,
         contextWindow: 1,
         personalChat: "not_applicable",
         apps: null
@@ -213,6 +225,8 @@ describe("Skill adoption projection", () => {
         advanced: 3,
         concurrentChange: 1,
         activationUnavailable: 1,
+        attachmentLimit: 0,
+        conflictingRevisions: 0,
         contextWindow: 1,
         personalChat: "advanced",
         apps: null
@@ -256,6 +270,8 @@ describe("Skill adoption projection", () => {
         advanced: 0,
         concurrentChange: 0,
         activationUnavailable: 0,
+        attachmentLimit: 0,
+        conflictingRevisions: 0,
         contextWindow: 0,
         personalChat: "not_applicable",
         apps: {
@@ -263,6 +279,8 @@ describe("Skill adoption projection", () => {
           provisionalTotal: 2,
           advanced: 1,
           concurrentChange: 0,
+          attachmentLimit: 0,
+          conflictingRevisions: 0,
           contextWindow: 1
         }
       }

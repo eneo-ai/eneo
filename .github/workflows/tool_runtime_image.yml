@@ -3,7 +3,7 @@ name: Tool Runtime Image
 
 on:
   pull_request:
-    paths: ['tool-runtime/**', '.github/workflows/tool_runtime_image.yml']
+    paths: ['tool-runtime/**', '.github/workflows/tool_runtime_image.yml', '.github/scripts/ci-apt-install.sh']
   workflow_call:
     inputs:
       version:
@@ -15,6 +15,10 @@ on:
       publish:
         default: false
         type: boolean
+    outputs:
+      digest:
+        description: The published image's digest, built or reused
+        value: ${{ jobs.image.outputs.digest }}
 
 env:
   REGISTRY: ghcr.io
@@ -62,8 +66,7 @@ jobs:
       # The PDF tests need the WeasyPrint sidecar as the image installs it.
       - name: Install PDF sidecar
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
+          "$GITHUB_WORKSPACE/.github/scripts/ci-apt-install.sh" \
             libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b libharfbuzz-subset0 fontconfig \
             fonts-dejavu-core fonts-liberation fonts-crosextra-carlito fonts-crosextra-caladea
           sudo fc-cache -f
@@ -84,10 +87,15 @@ jobs:
     name: Build ${{ needs.test.outputs.publish == 'true' && 'and publish ' || '' }}image
     needs: test
     runs-on: ubuntu-latest
-    # One publisher at a time so the version-tag check below cannot race.
+    # One publisher per version so the version-tag check below cannot race; other
+    # versions and pull-request builds (which publish nothing) wait for none of them,
+    # and a waiting publisher is never replaced by a later one.
     concurrency:
-      group: tool-runtime-image-${{ needs.test.outputs.publish }}
+      group: eneo-image-tool-runtime-${{ needs.test.outputs.publish == 'true' && needs.test.outputs.version || github.run_id }}
+      queue: max
       cancel-in-progress: false
+    outputs:
+      digest: ${{ steps.reuse.outputs.digest || steps.push.outputs.digest }}
     permissions:
       contents: read
       packages: write

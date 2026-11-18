@@ -1,19 +1,28 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, type Ref } from "react";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+
+/** A phone shows a list's filter from this many items: with fewer, it only takes room from the list. */
+export const PHONE_FILTER_FROM = 7;
+
+/** Whether a list of `count` items shows its filter: always but on a phone, which needs many items. */
+export function useFilterShown(count: number): boolean {
+  const phone = usePhoneScreen();
+  return !phone || count >= PHONE_FILTER_FROM;
+}
 
 /**
  * Filter field above a resource grid or table: Astryx TextInput with a search
  * icon and a clear button. The label names what is filtered ("Filtrera
  * samlingar") and is visually hidden. While a query is typed, the number of
- * matches is announced politely (WCAG 4.1.3): the list changes silently, and
- * an empty-result message that appears with its text is not announced
- * reliably.
+ * matches is announced politely (WCAG 4.1.3): the list changes silently. The
+ * count also says when nothing matches, so the empty state shown for it takes
+ * `isAnnounced={false}`, or both are read together.
  */
 export function ResourceFilterInput({
   value,
@@ -52,7 +61,7 @@ export function ResourceFilterInput({
   }, [announce, query, resultCount, t]);
 
   return (
-    <div className={cn("w-full max-w-sm", className)}>
+    <div className={cn("phone:max-w-none w-full max-w-sm", className)}>
       <TextInput
         ref={inputRef}
         label={label}
@@ -61,6 +70,7 @@ export function ResourceFilterInput({
         onChange={(next) => onChange(next)}
         placeholder={placeholder}
         startIcon={Search}
+        {...KEYBOARD.search}
         hasClear
         width="100%"
       />

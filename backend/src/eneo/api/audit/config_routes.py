@@ -5,6 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from eneo.audit.application.audit_config_service import settable_action_updates
 from eneo.audit.schemas.audit_config_schemas import (
     ActionConfigResponse,
     ActionConfigUpdateRequest,
@@ -204,19 +205,20 @@ async def update_action_config(
         user.tenant_id, request.updates
     )
 
-    # Create audit log for configuration change
-    if request.updates:
+    # Audit what was stored: an always-audited action is never overridden.
+    applied = settable_action_updates(request.updates)
+    if applied:
         await audit_service.log_async(
             tenant_id=user.tenant_id,
             user=user,
             action=ActionType.TENANT_SETTINGS_UPDATED,
             entity_type=EntityType.TENANT_SETTINGS,
             entity_id=user.tenant_id,
-            description=f"Updated {len(request.updates)} audit action configurations",
+            description=f"Updated {len(applied)} audit action configurations",
             metadata={
                 "setting": "audit_action_config",
                 "updates": [
-                    {"action": u.action, "enabled": u.enabled} for u in request.updates
+                    {"action": u.action, "enabled": u.enabled} for u in applied
                 ],
             },
         )

@@ -24,7 +24,7 @@ afterEach(async () => {
 
 describe("toast", () => {
   it("keeps errors and warnings until they are closed, and closes the rest after a while", async () => {
-    toast.error("Namnet kunde inte sparas", { description: "Trace ID: 1234" });
+    toast.error("Namnet kunde inte sparas", { description: "Spårnings-ID: 1234" });
     toast.warning("Fyll i alla obligatoriska fält");
     toast.success("Sparat");
     toast.info("Inget nytt att visa");
@@ -36,7 +36,7 @@ describe("toast", () => {
     expect(screen.queryByText("Sparat")).toBeNull();
     expect(screen.queryByText("Inget nytt att visa")).toBeNull();
     expect(screen.getByText("Namnet kunde inte sparas")).toBeTruthy();
-    expect(screen.getByText("Trace ID: 1234")).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: 1234")).toBeTruthy();
     expect(screen.getByText("Fyll i alla obligatoriska fält")).toBeTruthy();
   });
 

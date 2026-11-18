@@ -1,0 +1,21 @@
+# Migration round trips that no CI step ran, and that fail now: each downgrades
+# from head through a later migration that refuses to downgrade. Paths are
+# relative to backend/; tests/integration/conftest.py skips them and CI does not
+# start them. Remove a line once its module tests its own revision window.
+tests/integration/migrations/test_durable_job_dispatch.py
+tests/integration/migrations/test_global_to_tenant_models_migration.py
+tests/integration/migrations/test_grant_api_keys_permission_round_trip.py
+tests/integration/migrations/test_info_blob_versions.py
+tests/integration/migrations/test_job_failure_codes.py
+tests/integration/migrations/test_object_content_backend_split.py
+tests/integration/migrations/test_object_content_deployment_policy.py
+tests/integration/migrations/test_object_content_foundation.py
+tests/integration/migrations/test_remove_legacy_module_feature_flags.py
+tests/integration/migrations/test_rerank_models_round_trip.py
+tests/integration/migrations/test_restart_safe_knowledge_jobs.py
+tests/integration/migrations/test_skills_schema_round_trip.py
+tests/integration/migrations/test_storage_admin_actor_rename.py
+tests/integration/migrations/test_unify_roles_collision.py
+tests/integration/migrations/test_unify_roles_round_trip.py
+tests/integration/migrations/test_verified_object_adoption.py
+tests/integration/object_content/test_file_icon_pause_migration.py

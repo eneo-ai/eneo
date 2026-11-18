@@ -123,7 +123,10 @@ function isConfigured(value: unknown): boolean {
   return value.trim().length > 0;
 }
 
-export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
+export async function getFeatureFlags(
+  fetchFn: typeof fetch = fetch,
+  options: { checkFederation?: boolean } = {}
+) {
   const showHelpCenter = getFlagFromEnv("SHOW_HELP_CENTER", false);
 
   // Auth
@@ -141,26 +144,28 @@ export async function getFeatureFlags(fetchFn: typeof fetch = fetch) {
     tenant_count: 0
   };
 
-  try {
-    const backendUrl = getBackendUrl() || "http://localhost:8123";
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
+  if (options.checkFederation !== false) {
+    try {
+      const backendUrl = getBackendUrl() || "http://localhost:8123";
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000); // 3 second timeout
 
-    const response = await fetchFn(`${backendUrl}/api/v1/auth/federation-status`, {
-      signal: controller.signal
-    });
-    clearTimeout(timeoutId);
+      const response = await fetchFn(`${backendUrl}/api/v1/auth/federation-status`, {
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
 
-    if (response.ok) {
-      federationStatus = await response.json();
+      if (response.ok) {
+        federationStatus = await response.json();
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") {
+        console.warn("[FeatureFlags] Federation status check timed out after 3s");
+      } else {
+        console.error("[FeatureFlags] Failed to check federation status:", error);
+      }
+      // Fail gracefully - fall back to username/password
     }
-  } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      console.warn("[FeatureFlags] Federation status check timed out after 3s");
-    } else {
-      console.error("[FeatureFlags] Failed to check federation status:", error);
-    }
-    // Fail gracefully - fall back to username/password
   }
 
   return Object.freeze({

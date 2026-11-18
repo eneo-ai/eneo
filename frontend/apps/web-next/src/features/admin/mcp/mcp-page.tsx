@@ -1,11 +1,9 @@
-"use client";
-
-import { DropdownMenu as AxDropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   ChevronRight,
   Lock,
-  MoreHorizontal,
   Plus,
   Search,
   Settings2,
@@ -13,44 +11,44 @@ import {
   Trash2,
   Wrench
 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { ListError } from "@/components/composites/query-state";
+import { invalidateSpaces } from "@/features/spaces/space";
+import { getCapability } from "@/features/capabilities/capabilities";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Switch as AxSwitch } from "@/components/astryx/switch";
+import { Switch as AxSwitch } from "@astryxdesign/core/Switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
-import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
+import {
+  BUNDLED_SERVERS,
+  OUTLINE_BUTTON_CLASS,
+  SOURCE_KINDS
+} from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
-import { hostFromUrl, initials, pendingTools } from "./mcp-helpers";
+import { activationState, hostFromUrl, initials, pendingTools } from "./mcp-helpers";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
   MCP_KEY,
   mcpServersQueryOptions,
-  setMcpOrgEnabled,
+  setServerActivation,
   type McpServer
 } from "./mcp";
 
@@ -112,6 +110,18 @@ function McpServerCard({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [showDelete, setShowDelete] = useState(false);
+  const [activationError, setActivationError] = useState<unknown>(null);
+  const capability = getCapability(server.purpose);
+  const authLabel =
+    server.http_auth_type === "bundled" || server.http_auth_type === "internal"
+      ? t(SOURCE_KINDS[server.http_auth_type].label)
+      : server.http_auth_type === "api_key_header"
+        ? t("api_key_header_auth")
+        : server.http_auth_type === "bearer"
+          ? t("mcp_auth_bearer")
+          : server.http_auth_type === "none"
+            ? t("mcp_auth_none")
+            : server.http_auth_type || t("unknown");
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: MCP_KEY });
   const tools = server.tools ?? [];
@@ -122,9 +132,14 @@ function McpServerCard({
   // Saves on toggle and keeps focus while it saves (see useSettingSwitch).
   const [enabled, setEnabled, saving] = useSettingSwitch(
     `mcp-server:${server.id}`,
-    server.is_org_enabled,
-    (next) => setMcpOrgEnabled(browserApi, server.id, next),
-    { onSaved: () => void invalidate() }
+    activationState(server).active,
+    (next) => setServerActivation(browserApi, server, next),
+    {
+      onSaved: async () => {
+        await Promise.all([invalidate(), invalidateSpaces(queryClient)]);
+      },
+      onError: setActivationError
+    }
   );
 
   const remove = useMutation({
@@ -160,7 +175,29 @@ function McpServerCard({
                 {server.security_classification.name}
               </Badge>
             )}
+            <Badge variant="outline" aria-label={t("mcp_auth_type_aria", { label: authLabel })}>
+              {authLabel}
+            </Badge>
+            {capability && (
+              <>
+                <Badge variant="outline">{t(capability.purpose)}</Badge>
+                <Badge variant="outline" className="max-w-full break-words whitespace-normal">
+                  {server.audience === "groups"
+                    ? (server.user_groups ?? []).map((group) => group.name).join(", ") ||
+                      t("mcp_audience_groups")
+                    : t("mcp_audience_everyone")}
+                </Badge>
+              </>
+            )}
           </div>
+          {server.description && (
+            <p className="text-muted-foreground mt-1 text-sm">{server.description}</p>
+          )}
+          {server.forward_identity && (
+            <p className="text-warning mt-1 text-sm">
+              {t("capability_identity_forwarded_warning")}
+            </p>
+          )}
           <div className="text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs">
             <Link
               href={`${detailHref}?tab=tools`}
@@ -180,7 +217,10 @@ function McpServerCard({
                 checked={enabled}
                 aria-busy={saving || undefined}
                 aria-label={t("mcp_toggle_server", { name: server.name })}
-                onCheckedChange={setEnabled}
+                onCheckedChange={(next) => {
+                  setActivationError(null);
+                  setEnabled(next);
+                }}
               />
             </span>
           </TooltipTrigger>
@@ -193,6 +233,7 @@ function McpServerCard({
           asChild
           variant="ghost"
           size="icon"
+          className="max-sm:hidden"
           aria-label={t("mcp_manage_server", { name: server.name })}
         >
           <Link href={detailHref}>
@@ -200,34 +241,33 @@ function McpServerCard({
           </Link>
         </Button>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label={t("ui_more_actions_for", { name: server.name })}
-            >
-              <MoreHorizontal className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem asChild>
-              <Link href={detailHref}>
-                <Settings2 className="size-4" /> {t("mcp_manage")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem asChild>
-              <Link href={`${detailHref}?tab=tools`}>
-                <Wrench className="size-4" /> {t("mcp_server_tools")}
-              </Link>
-            </DropdownMenuItem>
-            <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-              <Trash2 className="size-4" /> {t("delete")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <MoreMenu
+          label={t("ui_more_actions_for", { name: server.name })}
+          alignment="end"
+          items={[
+            {
+              label: t("mcp_manage"),
+              icon: <Settings2 aria-hidden="true" />,
+              href: detailHref
+            },
+            {
+              label: t("mcp_server_tools"),
+              icon: <Wrench aria-hidden="true" />,
+              href: `${detailHref}?tab=tools`
+            },
+            {
+              label: t("delete"),
+              icon: <Trash2 aria-hidden="true" />,
+              variant: "destructive",
+              onClick: () => setShowDelete(true)
+            }
+          ]}
+        />
       </div>
 
+      {activationError != null && (
+        <ListError error={activationError} compact className="mx-4 mb-3" />
+      )}
       {pending > 0 && (
         <Link
           href={`${detailHref}?tab=tools`}
@@ -284,16 +324,9 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
     mutationFn: (tool: string) => createBundledMcpServer(browserApi, tool, false),
     onSuccess: async (_, tool) => {
       toast.success(t("tools_bundled_added", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) }));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-        queryClient.invalidateQueries({ queryKey: BUNDLED_KEY })
-      ]);
+      await queryClient.invalidateQueries({ queryKey: MCP_KEY });
     },
-    onError: (cause, tool) =>
-      toast.error(
-        getErrorMessage(cause, t) ||
-          t("tools_bundled_add_failed", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) })
-      )
+    onError: (cause) => toastApiError(cause, t)
   });
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security.security_enabled;
@@ -301,14 +334,12 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
 
-  const needsAttention = (server: McpServer) => pendingTools(server.tools ?? []).length > 0;
-
   const totals = useMemo(() => {
     let enabled = 0;
     let tools = 0;
     let pending = 0;
     for (const server of servers) {
-      if (server.is_org_enabled) enabled += 1;
+      if (activationState(server).active) enabled += 1;
       tools += server.tools_count;
       pending += pendingTools(server.tools ?? []).length;
     }
@@ -316,27 +347,39 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
   }, [servers]);
 
   const visible = useMemo(() => {
-    const query = search.trim().toLowerCase();
     return servers.filter((server) => {
-      if (filter === "enabled" && !server.is_org_enabled) return false;
-      if (filter === "disabled" && server.is_org_enabled) return false;
-      if (filter === "attention" && !needsAttention(server)) return false;
-      if (!query) return true;
-      const haystack = [server.name, server.http_url, ...(server.tags ?? [])]
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
+      const active = activationState(server).active;
+      if (filter === "enabled" && !active) return false;
+      if (filter === "disabled" && active) return false;
+      if (filter === "attention" && pendingTools(server.tools ?? []).length === 0) return false;
+      const capability = getCapability(server.purpose);
+      return matchesSearch(
+        [
+          server.name,
+          server.description,
+          server.http_url,
+          server.image_model?.nickname,
+          server.image_model?.name,
+          server.security_classification?.name,
+          capability ? t(capability.purpose) : t("mcp_purpose_general_tools"),
+          ...(server.user_groups ?? []).map((group) => group.name),
+          ...(server.tags ?? [])
+        ],
+        search
+      );
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [servers, search, filter, securityEnabled]);
+  }, [servers, search, filter, t]);
 
   // One entry point: the servers built into Eneo first, then an external one.
   const addControl =
     bundledToAdd.length > 0 ? (
-      <AxDropdownMenu
+      <DropdownMenu
         button={{
           label: t("add_mcp_server"),
-          variant: "primary",
+          // An outline, like every button on the Verktyg page: none is its one main
+          // action.
+          variant: "ghost",
+          className: OUTLINE_BUTTON_CLASS,
           icon: <Plus className="size-4" />,
           isDisabled: addBundled.isPending
         }}
@@ -368,13 +411,13 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
         ]}
       />
     ) : (
-      <Button onClick={() => setShowAdd(true)}>
+      <Button variant="outline" onClick={() => setShowAdd(true)}>
         <Plus className="size-4" /> {t("add_mcp_server")}
       </Button>
     );
 
   return (
-    <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl")}>
+    <div className={"flex w-full flex-col gap-6"}>
       {embedded ? (
         <div className="flex flex-wrap items-start justify-between gap-3">
           <p className="text-muted-foreground max-w-2xl text-sm">
@@ -386,9 +429,15 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
         <PageHeader title={t("mcp_servers")}>{addControl}</PageHeader>
       )}
 
+      <AxSwitch
+        label={t("tools_show_function_servers")}
+        size="sm"
+        value={showFunctionServers}
+        onChange={setShowFunctionServers}
+      />
       {servers.length === 0 ? (
         <EmptyState
-          title={t("no_mcp_servers_available")}
+          title={t("admin_mcp_servers_empty_title")}
           description={t("add_mcp_server_to_get_started")}
         />
       ) : (
@@ -447,12 +496,6 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
                 </button>
               ))}
             </div>
-            <AxSwitch
-              label={t("tools_show_function_servers")}
-              size="sm"
-              value={showFunctionServers}
-              onChange={setShowFunctionServers}
-            />
           </div>
 
           {visible.length === 0 ? (

@@ -1,7 +1,7 @@
 """drop legacy widgets table
 
 Revision ID: 202609171000
-Revises: 202608271000
+Revises: 202609101000
 Create Date: 2026-09-17 10:00:00.000000
 """
 

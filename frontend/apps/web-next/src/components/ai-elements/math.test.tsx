@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, screen, waitFor } from "@testing-library/react";
 import { useMemo } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import katex from "katex";
 import { cases } from "@eneo/markdown-math/cases.json";
 import remarkMath from "remark-math";
@@ -10,8 +10,14 @@ import { unified } from "unified";
 import { resolveInrefs } from "@/lib/chat/inref";
 import { renderInApp } from "@/test/render";
 import { CitationSourcesProvider, citationComponents, remarkCitations } from "./citation";
-import { mathPlugin } from "./math";
+import { katexStore, remarkLlmMath } from "./math";
 import { MessageResponse } from "./message";
+
+// Answers load KaTeX with the first formula (math-load.test.tsx covers that);
+// load it once up front so these cases test typesetting, not the import.
+beforeAll(async () => {
+  await katexStore.load();
+});
 
 afterEach(cleanup);
 
@@ -149,7 +155,7 @@ describe("math parsing time", () => {
   const remarkMathOnly = unified()
     .use(remarkParse)
     .use(remarkMath, { singleDollarTextMath: false });
-  const llmMath = unified().use(remarkParse).use([mathPlugin.remarkPlugin]);
+  const llmMath = unified().use(remarkParse).use(remarkLlmMath);
 
   function fastest(processor: typeof llmMath, source: string) {
     let best = Infinity;

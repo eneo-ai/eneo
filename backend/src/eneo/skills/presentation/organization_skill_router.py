@@ -65,7 +65,10 @@ _ORGANIZATION_SKILL_ADMIN_ACCESS_REASON = (
     "Organization Skill service enforces tenant scope and administrator access."
 )
 
-_ContainerWithUser = Annotated[Container, Depends(get_container(with_user=True))]
+# A successful save or publication must be visible to the next request.
+_ContainerWithUser = Annotated[
+    Container, Depends(get_container(with_user=True, transaction_scope="function"))
+]
 _DEFAULT_PAGE_LIMIT = 25
 _MAX_PAGE_LIMIT = 100
 

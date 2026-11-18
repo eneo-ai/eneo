@@ -14,7 +14,7 @@ afterEach(() => vi.clearAllMocks());
 it("shows a missing name at the field on save, which takes focus, then creates", async () => {
   api.POST.mockReturnValue(new Promise(() => {}));
   renderInApp(<ClassificationDialog open onOpenChange={() => {}} />);
-  const dialog = screen.getByRole("dialog", { name: "Skapa en ny säkerhetsklassificering" });
+  const dialog = screen.getByRole("dialog", { name: "Ny säkerhetsklassificering" });
   const save = within(dialog).getByRole("button", { name: "Spara" }) as HTMLButtonElement;
   // Never disabled: a disabled button says nothing about what is missing.
   expect(save.disabled).toBe(false);

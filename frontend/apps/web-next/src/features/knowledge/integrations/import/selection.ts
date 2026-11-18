@@ -49,7 +49,7 @@ export function buildSelectionKey(item: {
   return `${item.type}:${identity}:${normalizedPath}:${normalizedName}`;
 }
 
-function isDescendantPath(path: string, ancestorPath: string): boolean {
+export function isDescendantPath(path: string, ancestorPath: string): boolean {
   const normalizedPath = normalizeSharePointPath(path);
   const normalizedAncestor = normalizeSharePointPath(ancestorPath);
   if (normalizedAncestor === "/") {
@@ -60,8 +60,7 @@ function isDescendantPath(path: string, ancestorPath: string): boolean {
 
 /**
  * Drops selections already covered by a selected ancestor folder (or the
- * site root): importing the parent includes them. Excluded entries stay in
- * the UI list, flagged via `excludedKeys`.
+ * site root): importing the parent includes them.
  */
 export function dedupeNestedSelection(entries: SelectedImportItem[]): {
   effectiveEntries: SelectedImportItem[];
@@ -90,6 +89,21 @@ export function dedupeNestedSelection(entries: SelectedImportItem[]): {
   }
 
   return { effectiveEntries, excludedKeys };
+}
+
+/** One selection owner for individual picks and all search matches. */
+export function selectImportItems(
+  current: SelectedImportItem[],
+  items: readonly SelectedTreeItem[]
+): SelectedImportItem[] {
+  const entries = new Map(current.map((entry) => [entry.selectionKey, entry]));
+  for (const item of items) {
+    const selectionKey = buildSelectionKey(item);
+    if (!entries.has(selectionKey)) {
+      entries.set(selectionKey, { selectionKey, item, importName: item.name });
+    }
+  }
+  return dedupeNestedSelection([...entries.values()]).effectiveEntries;
 }
 
 export type ImportSite = {

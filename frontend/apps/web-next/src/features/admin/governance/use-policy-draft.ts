@@ -1,11 +1,10 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { reasoningEffortLabel } from "@/features/chat/reasoning-effort";
 import type { Binding } from "@/features/skills/skill-bindings";
 import { type Capability } from "@/features/capabilities/capabilities";
 import { GOVERNANCE_POLICY_KEY, type GovernancePolicy } from "./governance";
@@ -148,10 +147,10 @@ export function usePolicyDraft(input: PolicyDraftInput) {
 
   const mcpSummary = useMemo(() => {
     if (!state.mcpEnabled) return t("governance_mcp_summary_inactive");
-    const selected = Object.keys(state.mcpSelections).length;
+    const selected = display.filter((server) => Boolean(state.mcpSelections[server.id])).length;
     if (selected === 0) return t("governance_mcp_summary_none");
-    return t("governance_mcp_summary_count", { selected, total: available.length });
-  }, [state.mcpEnabled, state.mcpSelections, available.length, t]);
+    return t("governance_mcp_summary_count", { selected, total: display.length });
+  }, [state.mcpEnabled, state.mcpSelections, display, t]);
 
   const promptSummary = useMemo(() => {
     if (!state.promptEnabled) return t("governance_prompt_summary_inactive");
@@ -171,7 +170,12 @@ export function usePolicyDraft(input: PolicyDraftInput) {
         state.allowUserReasoningEffort
           ? "governance_reasoning_summary_user_choice"
           : "governance_reasoning_summary_fixed",
-        { effort: state.defaultReasoningEffort ?? t("default_behavior") }
+        {
+          effort:
+            state.defaultReasoningEffort === null
+              ? t("default_behavior")
+              : reasoningEffortLabel(state.defaultReasoningEffort, t)
+        }
       );
   const filesSummary = !(policy.file_policy.configured || fDirty)
     ? t("governance_files_summary_inactive")
@@ -191,7 +195,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
 
   // ---- Save lifecycle ------------------------------------------------------
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const announce = useAnnounce();
   const [pendingConfirm, setPendingConfirm] = useState<ConfirmKey[] | null>(null);
 
@@ -216,7 +220,7 @@ export function usePolicyDraft(input: PolicyDraftInput) {
       setPendingConfirm(null);
       announce(t("governance_save_success"));
     } catch (error) {
-      setSaveError((error as { message?: string }).message ?? t("governance_save_error"));
+      setSaveError(error);
       announce(t("governance_save_failure"));
     } finally {
       setSaving(false);

@@ -116,9 +116,10 @@ changes within the team are our own procedures; the list says which is which.
   `main` needs an approval from a Core Maintainer other than its author.
   `.github/CODEOWNERS` makes the Core Maintainers the required reviewers, and
   new commits dismiss an earlier approval.
-- **Tested before and after merging.** CI runs on the pull request and again in
-  the merge queue against the latest `develop`. After the merge, the same
-  checks must pass before the `develop` images are promoted.
+- **Tested before and after merging.** Required checks run on the pull request
+  and, as the full suite, in the merge queue. Publishing `develop` reuses that
+  full run for the exact commit and still runs a fresh security scan and scans
+  the published images.
 - **Isolated CI for contributions.** Pull requests from forks run with a
   read-only token and without secrets, and no pull request workflow publishes
   anything. The project-board workflow, which needs a token, runs the base
@@ -157,7 +158,7 @@ directly to an individual outside collaborator.
 | `develop`    | Changes only through pull requests that a Core Maintainer adds to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed. |
 | `release/**` | Only Core Maintainers can create, update or delete release branches. Every pull request needs an approval from a Core Maintainer other than its author and must pass the PR label check.         |
 | `main`       | Every pull request needs an approval from a Core Maintainer other than its author and must pass the PR label check. Cannot be deleted or force-pushed.                                           |
-| `v*` tags    | Only Core Maintainers can create, move or delete version tags.                                                                                                                                   |
+| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.    |
 
 ## Releases
 
@@ -166,10 +167,18 @@ tag starts **Build and Push Docker Images**, which builds, tests, scans and
 attests the release images that deployments consume. Restricting who can create
 those tags is how Eneo controls what is released.
 
+For managed final releases, Core Maintainers approve and merge the preparation
+PR. A dedicated release App then creates the exact verified tag and publishes
+the release after the image, smoke-test and SBOM gates succeed. Its creation
+permission is separate from tag update/deletion protections; it never merges
+PRs or bypasses branch checks. The
+[release procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release)
+describes the required App configuration. RCs remain maintainer-tagged.
+
 ```mermaid
 flowchart LR
   D["develop"] -->|"Core Maintainers cut"| R["release/vX.Y"]
-  R -->|"Core Maintainers tag"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
+  R -->|"Core Maintainers authorise"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
   T --> B["Build and Push<br/>Docker Images"]
   B --> I["Release images<br/>in GHCR"]
   I --> E["Test and production<br/>deployments"]

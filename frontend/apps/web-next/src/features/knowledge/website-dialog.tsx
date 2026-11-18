@@ -1,14 +1,15 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
-import { flushSync } from "react-dom";
 import {
   ConfirmedSecretInput,
   confirmedSecretProblem
 } from "@/components/composites/confirmed-secret-input";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -180,9 +181,9 @@ export function WebsiteDialog({
           update_interval: updateInterval,
           download_files: downloadFiles
         };
-        if (httpAuthEnabled && httpAuthUsername) {
+        if (httpAuthEnabled && httpAuthUsername && httpAuthPassword) {
           body.http_auth_username = httpAuthUsername;
-          if (httpAuthPassword) body.http_auth_password = httpAuthPassword;
+          body.http_auth_password = httpAuthPassword;
         } else if (!httpAuthEnabled && website.requires_http_auth) {
           body.http_auth_username = null;
           body.http_auth_password = null;
@@ -236,8 +237,10 @@ export function WebsiteDialog({
 
   const httpAuthPasswordTouched =
     httpAuthPassword.length > 0 || httpAuthPasswordConfirmation.length > 0;
+  // Saved credentials are kept or replaced as a pair: typing either half asks for the other.
   const httpAuthNeedsNewCredentials =
-    httpAuthEnabled && (!website?.requires_http_auth || httpAuthPasswordTouched);
+    httpAuthEnabled &&
+    (!website?.requires_http_auth || httpAuthUsername.trim().length > 0 || httpAuthPasswordTouched);
   const urlProblem = !url.trim()
     ? t("required_field")
     : isSupportedWebsiteUrl(url.trim())
@@ -272,9 +275,7 @@ export function WebsiteDialog({
               ? httpAuthPasswordConfirmationRef
               : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     if (website || space.organization) save.mutate();
@@ -291,7 +292,7 @@ export function WebsiteDialog({
           onOpenChange(next);
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogContent className="overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {website ? t("edit_website_integration") : t("create_website_integration")}
@@ -402,7 +403,7 @@ export function WebsiteDialog({
                   description={
                     website?.requires_http_auth ? t("leave_blank_keep_password") : undefined
                   }
-                  isRequired={!website?.requires_http_auth}
+                  isRequired={httpAuthNeedsNewCredentials}
                   requiredMessage={t("required_field")}
                   showErrors={submitted}
                   valueRef={httpAuthPasswordRef}
@@ -547,7 +548,6 @@ export function WebsiteDialog({
             <Button
               aria-busy={save.isPending || undefined}
               onClick={() => {
-                if (save.isPending) return;
                 setExistingOnOrg(null);
                 save.mutate();
               }}

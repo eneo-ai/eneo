@@ -1,15 +1,9 @@
-import asyncio
-import contextlib
-from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
-from fastapi import FastAPI
-from httpx import ASGITransport, AsyncClient, Response
-from sqlalchemy.ext.asyncio import AsyncSession
-from starlette.types import Message, Receive, Scope, Send
+import sqlalchemy as sa
 
 from eneo.authentication.auth_models import (
     ApiKeyHashVersion,
@@ -19,81 +13,19 @@ from eneo.authentication.auth_models import (
     ApiKeyState,
     ApiKeyType,
 )
-from eneo.database.database import get_session_with_transaction
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.tenant_table import Tenants
 from eneo.modules.module import ModuleCreate
 from eneo.tenants.tenant import TenantBase
 from eneo.users.user import UserAdd, UserState
+from tests.integration.fixtures.transaction_boundary import (
+    request_at_transaction_boundary,
+)
 
 pytestmark = pytest.mark.integration
 
 REDIRECT_URI = "https://module.example.com/auth/callback"
 UPDATED_REDIRECT_URI = "https://module.example.com/login/callback"
-
-
-async def _request_at_transaction_boundary(
-    app: FastAPI,
-    *,
-    method: str,
-    path: str,
-    payload: dict[str, object],
-    headers: dict[str, str],
-) -> Response:
-    """Run a real route while holding transaction teardown at the ASGI edge."""
-    response_started = asyncio.Event()
-    teardown_started = asyncio.Event()
-    release_teardown = asyncio.Event()
-
-    async def blocked_transaction_teardown() -> AsyncIterator[AsyncSession]:
-        async for session in get_session_with_transaction():
-            try:
-                yield session
-            finally:
-                teardown_started.set()
-                await release_teardown.wait()
-
-    async def record_response_start(
-        scope: Scope,
-        receive: Receive,
-        send: Send,
-    ) -> None:
-        async def recording_send(message: Message) -> None:
-            if message["type"] == "http.response.start":
-                response_started.set()
-            await send(message)
-
-        await app(scope, receive, recording_send)
-
-    assert get_session_with_transaction not in app.dependency_overrides
-    app.dependency_overrides[get_session_with_transaction] = (
-        blocked_transaction_teardown
-    )
-    request_task: asyncio.Task[Response] | None = None
-    try:
-        async with AsyncClient(
-            transport=ASGITransport(app=record_response_start),
-            base_url="http://test.local",
-        ) as boundary_client:
-            request_task = asyncio.create_task(
-                boundary_client.request(
-                    method,
-                    path,
-                    json=payload,
-                    headers=headers,
-                )
-            )
-            try:
-                await asyncio.wait_for(teardown_started.wait(), timeout=10)
-                assert not response_started.is_set()
-            finally:
-                release_teardown.set()
-
-            return await asyncio.wait_for(request_task, timeout=10)
-    finally:
-        release_teardown.set()
-        if request_task is not None and not request_task.done():
-            with contextlib.suppress(Exception):
-                await request_task
-        app.dependency_overrides.pop(get_session_with_transaction, None)
 
 
 @pytest.fixture
@@ -239,7 +171,7 @@ async def test_complete_reconfiguration_and_full_handoff_succeeds(
     )
     assert initial.status_code == 200, initial.text
 
-    partial = await _request_at_transaction_boundary(
+    partial = await request_at_transaction_boundary(
         app,
         method="PUT",
         path=config_path,
@@ -254,7 +186,7 @@ async def test_complete_reconfiguration_and_full_handoff_succeeds(
 
     # This is a new HTTP request and therefore a separate database session. It
     # must observe the PUT commit immediately, before any response is exposed.
-    ticket_response = await _request_at_transaction_boundary(
+    ticket_response = await request_at_transaction_boundary(
         app,
         method="POST",
         path="/api/v1/module-auth/tickets/",
@@ -275,7 +207,7 @@ async def test_complete_reconfiguration_and_full_handoff_succeeds(
     assert redirect_target.endswith("&state=module-csrf-binding-123")
     ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
 
-    exchange = await _request_at_transaction_boundary(
+    exchange = await request_at_transaction_boundary(
         app,
         method="POST",
         path="/api/v1/module-auth/token/",
@@ -639,3 +571,106 @@ async def test_incomplete_module_installation_is_rejected(
     )
 
     assert response.status_code == 422, response.text
+
+
+async def exchange_ticket(client, *, token: str, module_key: str, secret: str) -> None:
+    ticket_response = await client.post(
+        "/api/v1/module-auth/tickets/",
+        json={"module_key": module_key, "redirect_uri": REDIRECT_URI},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert ticket_response.status_code == 201, ticket_response.text
+    redirect_target = ticket_response.json()["redirect_target"]
+    ticket = parse_qs(urlparse(redirect_target).query)["ticket"][0]
+    exchange = await client.post(
+        "/api/v1/module-auth/token/",
+        json={"ticket": ticket},
+        headers={"X-API-Key": secret},
+    )
+    assert exchange.status_code == 200, exchange.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "last_used_seconds_ago",
+    [
+        # Older than the one-day policy below, so without the exchange the
+        # key would be selected.
+        pytest.param(2 * 24 * 3600, id="older-than-the-policy"),
+        # Inside the policy, so never a candidate: this case only shows that
+        # the last use is not written again inside the 900 s interval. 870 s
+        # leaves room for the requests.
+        pytest.param(870, id="inside-the-write-interval"),
+    ],
+)
+async def test_a_module_signing_in_within_the_policy_keeps_its_service_key(
+    client,
+    db_container,
+    admin_token,
+    admin_user,
+    enabled_module,
+    last_used_seconds_ago,
+):
+    """The unused-key policy also covers modules' service keys. A ticket
+    exchange is a use: within the policy's interval the key does not expire,
+    also when the stored time was too recent to be written again (the last
+    use is stored at most once per interval)."""
+    service_key = await create_api_key(
+        client,
+        token=admin_token,
+        ownership=ApiKeyOwnership.SERVICE,
+        permission=ApiKeyPermission.WRITE,
+    )
+    key_id = UUID(service_key["api_key"]["id"])
+    configured = await client.put(
+        module_installation_path(enabled_module.name),
+        json={"redirect_uris": [REDIRECT_URI], "service_key_id": str(key_id)},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert configured.status_code == 200, configured.text
+    stored = datetime.now(timezone.utc) - timedelta(seconds=last_used_seconds_ago)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(ApiKeysV2)
+            .where(ApiKeysV2.id == key_id)
+            .values(created_at=stored - timedelta(days=30), last_used_at=stored)
+        )
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(api_key_policy={"auto_expire_unused_days": 1})
+        )
+
+    await exchange_ticket(
+        client,
+        token=admin_token,
+        module_key=enabled_module.name,
+        secret=service_key["secret"],
+    )
+
+    async with db_container() as container:
+        last_used_at = await container.session().scalar(
+            sa.select(ApiKeysV2.last_used_at).where(ApiKeysV2.id == key_id)
+        )
+    assert last_used_at is not None
+    if last_used_seconds_ago > 900:
+        assert last_used_at > datetime.now(timezone.utc) - timedelta(minutes=1)
+    else:
+        assert last_used_at == stored
+
+    async with db_container() as container:
+        result = await container.api_key_maintenance_service().run_daily_maintenance()
+
+    assert result["auto_expired"] == 0
+    async with db_container() as container:
+        state = await container.session().scalar(
+            sa.select(ApiKeysV2.state).where(ApiKeysV2.id == key_id)
+        )
+    assert state == ApiKeyState.ACTIVE.value
+    await exchange_ticket(
+        client,
+        token=admin_token,
+        module_key=enabled_module.name,
+        secret=service_key["secret"],
+    )

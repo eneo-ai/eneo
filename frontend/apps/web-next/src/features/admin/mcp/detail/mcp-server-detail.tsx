@@ -1,29 +1,13 @@
-"use client";
-
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  ChevronLeft,
-  KeyRound,
-  ListChecks,
-  MoreHorizontal,
-  Settings2,
-  Shield,
-  Trash2
-} from "lucide-react";
-import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
-import { useTranslations } from "next-intl";
+import { KeyRound, ListChecks, Settings2, Shield, Trash2 } from "lucide-react";
+import { usePathname, useRouter } from "@/lib/navigation";
+import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -49,7 +33,7 @@ function resolveTab(value: string | undefined): Tab {
 
 export function McpServerDetail({
   serverId,
-  initialTab
+  initialTab: requestedTab
 }: {
   serverId: string;
   initialTab?: string;
@@ -63,7 +47,7 @@ export function McpServerDetail({
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const server = servers.find((entry) => entry.id === serverId);
 
-  const [tab, setTab] = useState<Tab>(resolveTab(initialTab));
+  const tab = resolveTab(requestedTab);
   const [showDelete, setShowDelete] = useState(false);
 
   // The server can vanish if deleted in another tab; bounce back to the list.
@@ -112,21 +96,16 @@ export function McpServerDetail({
 
   function selectTab(next: string) {
     const value = resolveTab(next);
-    setTab(value);
     router.replace(value === "overview" ? pathname : `${pathname}?tab=${value}`, { scroll: false });
   }
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+      <div className="flex w-full max-w-4xl flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <Link
-            href={listHref}
-            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-          >
-            <ChevronLeft className="size-4" />
+          <BackLink href={listHref}>
             {t(listHref === "/admin/tools" ? "tools" : "mcp_servers")}
-          </Link>
+          </BackLink>
           <PageHeader title={server.name}>
             <SaveStatusIndicator />
             <Tooltip>
@@ -149,22 +128,18 @@ export function McpServerDetail({
                     : t("mcp_toggle_to_enable")}
               </TooltipContent>
             </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("ui_more_actions_for", { name: server.name })}
-                >
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-                  <Trash2 className="size-4" /> {t("delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <MoreMenu
+              label={t("ui_more_actions_for", { name: server.name })}
+              alignment="end"
+              items={[
+                {
+                  label: t("delete"),
+                  icon: <Trash2 aria-hidden="true" />,
+                  variant: "destructive",
+                  onClick: () => setShowDelete(true)
+                }
+              ]}
+            />
           </PageHeader>
         </div>
 
@@ -190,7 +165,7 @@ export function McpServerDetail({
             <OverviewTab server={server} />
           </TabsContent>
           <TabsContent value="tools" className="pt-4">
-            <ToolsTab serverId={server.id} />
+            <ToolsTab server={server} />
           </TabsContent>
           {securityEnabled && (
             <TabsContent value="security" className="pt-4">

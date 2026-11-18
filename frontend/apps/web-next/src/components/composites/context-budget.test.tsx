@@ -16,7 +16,7 @@ describe("ContextBudget", () => {
   it("is a keyboard stop whose description is the per-input breakdown", async () => {
     const { container } = renderInApp(<ContextBudget segments={segments} maxTokens={1000} />);
 
-    // Swedish number format (next-intl): "1,5 tn" with a no-break space.
+    // Swedish number format (use-intl): "1,5 tn" with a no-break space.
     const trigger = screen.getByRole("button", { name: /^Kontextbudget: ~1,5\stn/ });
     expect(trigger.getAttribute("type")).toBe("button");
     trigger.focus();

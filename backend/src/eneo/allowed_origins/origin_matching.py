@@ -1,4 +1,16 @@
-from urllib.parse import ParseResult, urlparse
+import ipaddress
+import re
+from urllib.parse import ParseResult, urlparse, urlsplit
+
+from eneo.main.config import serialize_origin
+
+# A DNS label sequence with an optional leading `*.` wildcard, ASCII only
+# (IDNs must be given in their punycode form, which is what browsers send).
+_HOST_RE = re.compile(
+    r"^(\*\.)?[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$",
+    re.IGNORECASE,
+)
+_IPV6_HOST_RE = re.compile(r"^[0-9a-f:.]+$", re.IGNORECASE)
 
 
 def _safe_port(parsed: ParseResult) -> int | None:
@@ -24,21 +36,43 @@ def _has_port_wildcard(parsed: ParseResult) -> bool:
     return host_and_port.endswith(":*")
 
 
+def _canonical_host(host: str) -> str | None:
+    """A pattern host in the form ``serialize_origin`` gives the Origin's.
+
+    An IPv6 literal is compressed, so any written form of an address matches
+    the one a browser sends; any other host is returned as is. None when the
+    host has a colon but is no IPv6 address, which matches nothing.
+    """
+    if ":" not in host:
+        return host
+    try:
+        return ipaddress.IPv6Address(host).compressed
+    except ValueError:
+        return None
+
+
 def origin_matches_pattern(origin: str, pattern: str) -> bool:
-    origin_parsed = urlparse(origin)
-    if not origin_parsed.scheme or not origin_parsed.hostname:
+    """Whether a request's Origin matches one allowlist pattern.
+
+    The Origin is client input and a pattern may be a stored typo, so a value
+    that does not parse matches nothing rather than raising, which would turn a
+    refused origin into a 500. ``serialize_origin`` is the one parser of the
+    Origin: anything but an http(s) origin is refused.
+    """
+    origin_url = serialize_origin(origin)
+    if origin_url is None:
         return False
 
-    origin_scheme = origin_parsed.scheme.lower()
-    origin_host = origin_parsed.hostname.lower()
-    origin_port_raw = _safe_port(origin_parsed)
-    if origin_port_raw is None and ":" in origin_parsed.netloc.rsplit("@", 1)[-1]:
-        # Inbound Origin had a malformed port — fail closed.
-        return False
-    origin_port = origin_port_raw or (443 if origin_scheme == "https" else 80)
+    # Lowercase, IPv6 compressed and a valid port: this parse cannot fail.
+    origin_parsed = urlsplit(origin_url)
+    origin_scheme = origin_parsed.scheme
+    origin_host = origin_parsed.hostname or ""
+    origin_port = origin_parsed.port or (443 if origin_scheme == "https" else 80)
 
     if "://" not in pattern:
-        pattern_host = pattern.lower()
+        pattern_host = _canonical_host(pattern.lower())
+        if pattern_host is None:
+            return False
         if pattern_host.startswith("*."):
             base = pattern_host[2:]
             if not origin_host.endswith(f".{base}"):
@@ -48,12 +82,17 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
             return len(origin_labels) == len(base_labels) + 1
         return origin_host == pattern_host
 
-    pattern_parsed = urlparse(pattern)
+    try:
+        pattern_parsed = urlparse(pattern)
+    except ValueError:
+        return False
     if not pattern_parsed.scheme or not pattern_parsed.hostname:
         return False
 
     pattern_scheme = pattern_parsed.scheme.lower()
-    pattern_host = pattern_parsed.hostname.lower()
+    pattern_host = _canonical_host(pattern_parsed.hostname.lower())
+    if pattern_host is None:
+        return False
 
     if pattern_scheme != origin_scheme:
         return False
@@ -76,3 +115,56 @@ def origin_matches_pattern(origin: str, pattern: str) -> bool:
         return len(origin_labels) == len(base_labels) + 1
 
     return origin_host == pattern_host
+
+
+def normalize_origin_pattern(pattern: str) -> str:
+    """Validate and canonicalise one allowed-origin entry.
+
+    Accepts ``<scheme>://<host>[:port]`` with an http(s) scheme, where the host
+    may carry a leading ``*.`` wildcard and the port may be ``*``; anything
+    beyond the authority (path, query, fragment, userinfo) is rejected so a
+    pasted page URL cannot silently become a pattern that never matches.
+    """
+    value = pattern.strip().rstrip("/")
+    parsed = urlparse(value)
+    if parsed.scheme.lower() not in ("http", "https") or not parsed.hostname:
+        raise ValueError(
+            f"Invalid origin '{pattern}': must include scheme (http:// or https://) and host."
+        )
+    # urlparse reports an empty query, fragment or userinfo ("https://h?",
+    # "https://@h") as absent, so the delimiters are checked in the raw text.
+    if (
+        parsed.path
+        or parsed.query
+        or parsed.fragment
+        or parsed.username
+        or "@" in parsed.netloc
+        or "?" in value
+        or "#" in value
+    ):
+        raise ValueError(
+            f"Invalid origin '{pattern}': only scheme, host and optional port are allowed."
+        )
+    if not _has_port_wildcard(parsed):
+        _safe_port(parsed)
+        # The colons inside a bracketed IPv6 literal are not a port separator.
+        host_and_port = parsed.netloc.rsplit("@", 1)[-1]
+        after_host = host_and_port.rsplit("]", 1)[-1]
+        if parsed.port is None and ":" in after_host:
+            raise ValueError(f"Invalid origin '{pattern}': malformed port.")
+    # The pattern ends up verbatim in a CSP frame-ancestors header, so the
+    # host must be a plain DNS name (IDNA-encoded), an IP literal or a `*.`
+    # wildcard of one: no spaces, semicolons or other directive syntax.
+    # urlparse also drops tabs and newlines silently, so check the raw text.
+    if value != "".join(value.split()):
+        raise ValueError(f"Invalid origin '{pattern}': whitespace is not allowed.")
+    host = parsed.hostname
+    if "[" in parsed.netloc:
+        if not _IPV6_HOST_RE.match(host):
+            raise ValueError(f"Invalid origin '{pattern}': malformed host.")
+    elif not _HOST_RE.match(host):
+        raise ValueError(
+            f"Invalid origin '{pattern}': host may only contain letters, digits,"
+            " '.', '-' and a leading '*.' wildcard."
+        )
+    return f"{parsed.scheme.lower()}://{parsed.netloc.lower()}"

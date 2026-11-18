@@ -4,6 +4,7 @@
  */
 import { Chat } from "@ai-sdk/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHAT_API } from "@/lib/api/base";
 import { EneoApiError } from "@/lib/api/errors";
 import { sseResponse, toSseBody } from "./contract-fixtures";
 import { createChatTransport, enforceStreamContract } from "./transport";
@@ -12,8 +13,22 @@ import type { EneoUIMessage } from "./types";
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 
+// The selected transport may inspect an error without consuming the body.
+const transportFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async (input, init) => {
+    const response = await fetch(input, init);
+    if (!response.ok) await response.clone().text();
+    return response;
+  })
+);
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: transportFetch
+}));
+
 afterEach(() => {
   fetchMock.mockReset();
+  transportFetch.mockClear();
 });
 
 const start = { type: "start", messageId: "q-1" };
@@ -90,6 +105,25 @@ describe("a refused response", () => {
     expect(error.message).toBe("Not authenticated");
     expect(error.traceId).toBe("trace-1");
   });
+
+  it.each([
+    [401, 9001],
+    [403, 9070]
+  ])(
+    "reports a %i through the shared transport once, then fails with its own error",
+    async (status, code) => {
+      const result = await run(
+        Response.json({ message: "Refused", eneo_error_code: code }, { status })
+      );
+      expect(transportFetch).toHaveBeenCalledTimes(1);
+      expect(transportFetch).toHaveBeenCalledWith(CHAT_API, expect.anything());
+      expectFailed(result);
+      const error = result.chat.error as EneoApiError;
+      expect(error.status).toBe(status);
+      expect(error.code).toBe(code);
+      expect(error.message).toBe("Refused");
+    }
+  );
 
   it("keeps the status when the refused body is not JSON", async () => {
     const result = await run(new Response("<html>Bad gateway</html>", { status: 502 }));

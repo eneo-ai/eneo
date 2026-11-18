@@ -112,6 +112,10 @@ describe("news uses actual feature permissions on every surface", () => {
     expect(ids(["admin", "modules"])).toContain("modules-admin");
     expect(ids(["skills"])).not.toContain("skills");
     expect(ids(["skills", "skills_management"])).toContain("skills");
+    expect(ids(["widgets"])).toContain("web-widgets");
+    expect(ids(["admin"])).toContain("web-widgets");
+    expect(ids(["assistants"])).not.toContain("web-widgets");
+    expect(ids([])).not.toContain("web-widgets");
     expect(ids(["personal_chat"])).not.toContain("file-creation-progress");
     expect(ids(["personal_chat", "file_creation"])).toContain("file-creation-progress");
     expect(ids([])).toEqual(

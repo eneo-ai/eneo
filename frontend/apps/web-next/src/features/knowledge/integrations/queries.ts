@@ -1,8 +1,9 @@
 import { createSyncDetailsLoader } from "@eneo/eneo-js/integrations/sync-details";
 import { queryOptions, type Query, type QueryClient, type QueryKey } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { isFinalError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { pollWhile } from "@/lib/api/query";
 import type { IntegrationKnowledge } from "../knowledge";
 import type { SkippedDocuments } from "./source-problems";
 import { continueWindow, mergeFirstPage } from "./sync-activity";
@@ -83,9 +84,10 @@ export function sharepointTreeQueryOptions(
 ) {
   return queryOptions({
     queryKey: ["integrations", "sharepoint-tree", args],
-    queryFn: (): Promise<SharePointTree> =>
+    queryFn: ({ signal }): Promise<SharePointTree> =>
       unwrap(
         api.GET("/api/v1/integrations/{user_integration_id}/sharepoint/tree/", {
+          signal,
           params: {
             path: { user_integration_id: args.userIntegrationId },
             query: {
@@ -94,6 +96,38 @@ export function sharepointTreeQueryOptions(
               drive_id: args.driveId,
               folder_id: args.folderId,
               folder_path: args.folderPath
+            }
+          }
+        })
+      )
+  });
+}
+
+export function sharepointSearchQueryOptions(
+  api: EneoClient,
+  args: {
+    userIntegrationId: string;
+    spaceId: string;
+    siteId?: string;
+    driveId?: string;
+    q: string;
+    filters: string[];
+  }
+) {
+  return queryOptions({
+    queryKey: ["integrations", "sharepoint-search", args],
+    queryFn: ({ signal }) =>
+      unwrap(
+        api.GET("/api/v1/integrations/{user_integration_id}/sharepoint/search/", {
+          signal,
+          params: {
+            path: { user_integration_id: args.userIntegrationId },
+            query: {
+              space_id: args.spaceId,
+              site_id: args.siteId,
+              drive_id: args.driveId,
+              q: args.q,
+              filter: args.filters
             }
           }
         })
@@ -278,20 +312,13 @@ export function syncLogWindowQueryOptions(
 const PROGRESS_ACTIVE_MS = 2_000;
 const PROGRESS_IDLE_MS = 15_000;
 
-/** No endpoint (an older backend), or no access to the space any more: asking again won't help. */
-function isUnavailable(error: unknown): boolean {
-  return (
-    error instanceof EneoApiError &&
-    (error.status === 404 || error.status === 403 || error.status === 401)
-  );
-}
-
 /**
  * The running syncs of a space, keyed by item. Polls every 2 s while one runs
  * or an item of `awaiting` (a sync queued from here) has not reported yet, and
  * every 15 s otherwise, but not while the browser tab is hidden; stops for
- * good on a 404 (a backend without the endpoint) or a refusal (401, 403). Structural sharing keeps the
- * data stable between identical polls.
+ * good on a final error (`isFinalError`: a 404 from a backend without the
+ * endpoint, or a refusal). Structural sharing keeps the data stable between
+ * identical polls.
  */
 export function syncProgressQueryOptions(
   api: EneoClient,
@@ -308,13 +335,13 @@ export function syncProgressQueryOptions(
       );
       return Object.fromEntries(list.items.map((entry) => [entry.integration_knowledge_id, entry]));
     },
-    retry: (failures, error) => !isUnavailable(error) && failures < 2,
-    refetchInterval: (query) => {
-      if (isUnavailable(query.state.error)) return false;
-      const progress = query.state.data ?? {};
-      const busy = Object.keys(progress).length > 0 || awaiting.some((id) => !(id in progress));
-      return busy ? PROGRESS_ACTIVE_MS : PROGRESS_IDLE_MS;
-    },
+    retry: (failures, error) => !isFinalError(error) && failures < 2,
+    refetchInterval: pollWhile(
+      (progress = {}) =>
+        Object.keys(progress).length > 0 || awaiting.some((id) => !(id in progress)),
+      PROGRESS_ACTIVE_MS,
+      PROGRESS_IDLE_MS
+    ),
     refetchIntervalInBackground: false
   });
 }

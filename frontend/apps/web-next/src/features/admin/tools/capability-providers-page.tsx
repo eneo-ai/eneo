@@ -1,10 +1,10 @@
-"use client";
+import { invalidateSpaces } from "@/features/spaces/space";
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { CheckCircle2, CircleDashed, Plus, ShieldCheck, TriangleAlert } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
@@ -17,12 +17,9 @@ import {
   type CapabilityDescriptor
 } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
@@ -31,8 +28,15 @@ import {
   setCapabilityProviderActive,
   type McpServer
 } from "../mcp/mcp";
-import { bundledIdentity, SOURCE_KINDS, sourceKindOf, type BundledTool } from "./bundled";
+import {
+  bundledIdentity,
+  OUTLINE_BUTTON_CLASS,
+  SOURCE_KINDS,
+  sourceKindOf,
+  type BundledTool
+} from "./bundled";
 import { CapabilitySourceDialog } from "./capability-source-dialog";
+import { DocumentTemplatesSection } from "./document-templates-section";
 import { RuntimeStatusCard } from "./runtime-status";
 import { TOOLS_TAB_HREF } from "./tools-tabs";
 
@@ -116,17 +120,25 @@ function BundledOffer({
             )}
           </p>
         </div>
-        {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-        <Button disabled={!bundled.available} aria-busy={busy || undefined} onClick={onTurnOn}>
+        {/* Busy, it stays enabled so it keeps focus; a second press is ignored. An outline,
+            like every button on this page: none is the one main action. */}
+        <Button
+          variant="outline"
+          disabled={!bundled.available}
+          aria-busy={busy || undefined}
+          onClick={onTurnOn}
+        >
           {t("tools_builtin_turn_on")}
         </Button>
       </div>
-      <p className="text-ax-text-secondary text-sm">
+      {/* A flex row, so on a touch screen the button gets a 44 px row of its own
+          height and wraps under the question on a narrow phone. */}
+      <p className="text-ax-text-secondary flex flex-wrap items-center gap-x-1 text-sm">
         {t("tools_prefer_own_service")}{" "}
         <button
           type="button"
           onClick={onConnectExternal}
-          className="text-ax-text focus-visible:outline-ring rounded-ax-inner font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="text-ax-text focus-visible:outline-ring rounded-ax-inner text-left font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         >
           {t("tools_connect_external")}
         </button>
@@ -186,8 +198,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-      queryClient.invalidateQueries({ queryKey: BUNDLED_KEY }),
-      queryClient.invalidateQueries({ queryKey: ["spaces"] })
+      invalidateSpaces(queryClient)
     ]);
   };
   const activate = useMutation({
@@ -229,10 +240,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
       });
       void invalidate().catch((cause) => toastApiError(cause, t));
     },
-    onError: (cause) =>
-      toast.error(
-        getErrorMessage(cause, t) || t("tools_bundled_add_failed", { name: t("mcp_auth_bundled") })
-      )
+    onError: (cause) => toastApiError(cause, t)
   });
 
   // Servers built into Eneo that this tenant has not added yet. A function
@@ -243,7 +251,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
     bundledToAdd.find((tool) => tool.purpose === purpose);
 
   return (
-    <div className={cn("flex w-full flex-col gap-6", !embedded && "mx-auto max-w-5xl pb-16")}>
+    <div className={cn("flex w-full flex-col gap-6", !embedded && "pb-16")}>
       {!embedded && (
         <PageHeader title={t("tools")} tour="admin-tools">
           <Button asChild variant="outline">
@@ -251,7 +259,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
           </Button>
         </PageHeader>
       )}
-      <RuntimeStatusCard status={bundledTools.data?.runtime} />
+      {!embedded && <RuntimeStatusCard status={bundledTools.data?.runtime} />}
       <p className="text-muted-foreground max-w-2xl text-sm">{t("tools_functions_description")}</p>
       {notice && notice.purpose === null && (
         <p role="status" className="text-sm">
@@ -282,7 +290,9 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
             className="overflow-hidden rounded-xl border"
             aria-labelledby={`capability-${capability.purpose}`}
           >
-            <header className="flex flex-wrap items-start justify-between gap-3 border-b p-5">
+            {/* Alone in the card (no source, offer or notice yet), its line would double the
+                card's bottom edge. */}
+            <header className="flex flex-wrap items-start justify-between gap-3 border-b p-5 last:border-b-0">
               <div className="flex items-start gap-3">
                 <capability.icon className="text-primary mt-0.5 size-5" aria-hidden="true" />
                 <div>
@@ -299,7 +309,9 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                 <DropdownMenu
                   button={{
                     label: t("tools_add_source"),
-                    variant: "secondary",
+                    // An outline, like the shadcn ones beside it.
+                    variant: "ghost",
+                    className: OUTLINE_BUTTON_CLASS,
                     size: "sm",
                     icon: <Plus className="size-4" />,
                     isDisabled: addBundled.isPending
@@ -328,7 +340,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                   ]}
                 />
               ) : (
-                <Button size="sm" onClick={() => configure()}>
+                <Button size="sm" variant="outline" onClick={() => configure()}>
                   <Plus className="size-4" />
                   {sources.length
                     ? t("tools_add_source")
@@ -437,6 +449,9 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                 })}
               </ul>
             )}
+            {capability.purpose === "file_creation" && sources.length > 0 && (
+              <DocumentTemplatesSection />
+            )}
             {capability.guide && sources.length > 0 && (
               // Usage guidance lives here and in the docs, not in assistant settings.
               <p className="text-muted-foreground border-t p-5 text-sm">
@@ -459,6 +474,14 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
           key={`${editing.purpose}:${editing.server?.id ?? "new"}`}
           purpose={editing.purpose}
           server={editing.server}
+          replacesDefault={
+            servers.find(
+              (source) =>
+                source.purpose === editing.purpose &&
+                source.is_enabled &&
+                source.audience !== "groups"
+            )?.name
+          }
           onClose={() => setEditing(null)}
           onSaved={(inactive) => {
             setEditing(null);

@@ -12,6 +12,7 @@ from eneo.assistants.api.assistant_models import (
     AssistantCreatePublic,
     AssistantPublic,
     AssistantUpdatePublic,
+    AssistantWidgetStatus,
 )
 
 # Audit logging - module level imports for consistency
@@ -38,7 +39,7 @@ from eneo.authentication.endpoint_access import (
 from eneo.database.database import AsyncSession
 from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import (
     NOT_PROVIDED,
     CursorPaginatedResponse,
@@ -56,8 +57,8 @@ from eneo.sessions.session import (
     SessionPublic,
 )
 from eneo.sessions.session_protocol import (
+    to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 from eneo.skills.presentation.skill_assembler import (
     assistant_skill_binding_intents_from_input,
@@ -277,6 +278,36 @@ async def get_assistant(
     return await _assistant_response(container, id)
 
 
+@router.get(
+    "/{id}/widget-status/",
+    response_model=AssistantWidgetStatus,
+    description=(
+        "Whether an active web widget publishes the assistant, for anyone who "
+        "can read it. Says nothing else about the widget. Requires a session token."
+    ),
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=(
+        "Assistant readers learn whether a widget publishes the assistant;"
+        " AssistantService enforces read access, and the session-only policy"
+        " keeps widgets invisible to API keys."
+    ),
+)
+async def get_assistant_widget_status(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    assistant, _ = await container.assistant_service().get_assistant(id)
+    return AssistantWidgetStatus(
+        serves_active_widget=await container.widget_repo().serves_target(
+            tenant_id=container.user().tenant_id, target_id=assistant.id
+        )
+    )
+
+
 def _build_assistant_update_changes(
     *,
     assistant: AssistantUpdatePublic,
@@ -427,18 +458,14 @@ def _build_assistant_update_changes(
 
         def extract_item_info(
             item: object, assistant_space_id: UUID | None
-        ) -> tuple[str, str, str | None]:
+        ) -> tuple[str, str | None, str | None]:
             """Extract ID, name, and scope from an item, handling attachments specially."""
             item_id = str(getattr(item, "id", item))
 
-            # Special handling for FileAttachment objects
+            # A file is recorded by its id alone: retention removes its name.
+            item_name: str | None
             if is_attachment:
-                # For attachments, extract just the filename and optionally blob ID
-                item_name = str(getattr(item, "name", "unknown_file"))
-                # Add blob ID if it exists and is not None
-                blob = getattr(item, "blob", None)
-                if blob:
-                    item_name = f"{item_name} (blob: {blob})"
+                item_name = None
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
@@ -468,10 +495,9 @@ def _build_assistant_update_changes(
         added: list[dict[str, str | None]] = []
         for k in new_items:
             if k not in old_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": new_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if new_items[k]["name"] is not None:
+                    item_data["name"] = new_items[k]["name"]
                 if new_items[k]["scope"]:
                     item_data["scope"] = new_items[k]["scope"]
                 added.append(item_data)
@@ -479,10 +505,9 @@ def _build_assistant_update_changes(
         removed: list[dict[str, str | None]] = []
         for k in old_items:
             if k not in new_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": old_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if old_items[k]["name"] is not None:
+                    item_data["name"] = old_items[k]["name"]
                 if old_items[k]["scope"]:
                     item_data["scope"] = old_items[k]["scope"]
                 removed.append(item_data)
@@ -530,7 +555,6 @@ def _build_assistant_update_changes(
     attachment_modes_changed: list[dict[str, str | None]] = [
         {
             "id": str(file.id),
-            "name": file.name,
             "mode": (
                 "inline"
                 if updated_assistant.attachment_inline_text.get(file.id, True)
@@ -1038,7 +1062,7 @@ async def get_assistant_sessions(
         previous=previous,
     )
 
-    return to_sessions_paginated_response(
+    return to_session_metadata_paginated_response(
         sessions=sessions,
         limit=limit,
         cursor=cursor,
@@ -1050,7 +1074,7 @@ async def get_assistant_sessions(
 @router.get(
     "/{id}/sessions/{session_id}/",
     response_model=SessionPublic,
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1067,7 +1091,13 @@ async def get_assistant_session(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    try:
+        session = await session_service.get_session_by_uuid(session_id, assistant_id=id)
+    except NotFoundException:
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
+        await session_service.refuse_removed_copy(session_id)
+        raise
     return to_session_public(session)
 
 
@@ -1186,7 +1216,7 @@ async def ask_followup(
     "/{id}/sessions/{session_id}/feedback/",
     response_model=SessionPublic,
     description="Leave feedback on a session.",
-    responses=responses.get_responses([400, 403, 404]),
+    responses=responses.get_responses([400, 403, 404, 410]),
     dependencies=[Depends(require_resource_permission_for_method("conversations"))],
 )
 @endpoint_access(
@@ -1207,9 +1237,15 @@ async def leave_feedback(
     session_service = container.session_service()
 
     await assistant_service.get_assistant(id)
-    session = await session_service.leave_feedback(
-        session_id=session_id, assistant_id=id, feedback=feedback
-    )
+    try:
+        session = await session_service.leave_feedback(
+            session_id=session_id, assistant_id=id, feedback=feedback
+        )
+    except NotFoundException:
+        # The partner was authorized above; the owner check comes first.
+        await session_service.get_session_ownership(session_id, assistant_id=id)
+        await session_service.refuse_removed_copy(session_id)
+        raise
 
     return to_session_public(session)
 
@@ -1217,8 +1253,11 @@ async def leave_feedback(
 @router.post(
     "/{id}/transfer/",
     status_code=204,
-    description="Transfer an assistant to another space.",
-    responses=responses.get_responses([403, 404]),
+    description=(
+        "Transfer an assistant to another space. Refused with 400 while the "
+        "assistant has Skill bindings or a web widget that is not archived."
+    ),
+    responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.USER,

@@ -1,20 +1,20 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Activity, AppWindow, Check, Download, Search } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { FileTypeTile } from "@/features/chat/attachments";
+import { saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { browserApi } from "@/lib/api/browser";
 import { fileExtension, formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
 import type { SidePanelStore } from "./side-panel-store";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** The activity of an answer, as one more thing the panel can show. */
 export type ActivityEntry = {
@@ -47,7 +47,7 @@ export const FILTER_FROM = 8;
 const ALL_TYPES = "__all__";
 
 const ROW_CLASS =
-  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
+  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 pointer-coarse:h-11 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
 const CURRENT_CLASS = "bg-ax-accent-muted hover:bg-ax-accent-muted";
 
 function Row({
@@ -122,10 +122,9 @@ export function PanelContentsList({
   async function download(file: PreviewFile) {
     setDownloading(file.id);
     try {
-      const url = await signedOriginalUrl(browserApi, file.id);
-      Object.assign(document.createElement("a"), { href: url, download: file.name }).click();
-    } catch {
-      toast.error(t("attachment_error_loading_content"));
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    } catch (error) {
+      toastDownloadError(error, t);
     } finally {
       setDownloading(null);
     }
@@ -193,14 +192,15 @@ export function PanelContentsList({
   const types = [...typeCounts]
     .map(([name, count]) => ({ name, count }))
     .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  const needle = query.trim().toLowerCase();
   const shownUploads = filterable
     ? contents.uploads.filter(
         (file) =>
           (selectedType === null || typeOf(file) === selectedType) &&
-          (!needle || displayFileName(file).toLowerCase().includes(needle))
+          matchesSearch([displayFileName(file)], query)
       )
     : contents.uploads;
+
+  const shownUploadIds = new Set(shownUploads.map((file) => file.id));
 
   return (
     <div className="flex flex-col p-1">
@@ -265,6 +265,7 @@ export function PanelContentsList({
                 size="sm"
                 hasClear
                 autoComplete="off"
+                {...KEYBOARD.search}
               />
               {/* One type at a time; the "all" pill stands for no type filter. */}
               <ToggleButtonGroup
@@ -290,7 +291,27 @@ export function PanelContentsList({
             </div>
           )}
           {shownUploads.length > 0 ? (
-            <ul className="flex flex-col">{shownUploads.map((file) => entry(file, [file]))}</ul>
+            contents.uploadGroups ? (
+              contents.uploadGroups.map((group) => {
+                const files = group.files.filter((file) => shownUploadIds.has(file.id));
+                if (files.length === 0) return null;
+                const rows = (
+                  <ul className="flex flex-col">{files.map((file) => entry(file, [file]))}</ul>
+                );
+                if (group.ordinal === null) return <div key={group.key}>{rows}</div>;
+                const title = t("conversation_uploads_group", { ordinal: group.ordinal });
+                return (
+                  <section key={group.key} aria-label={title}>
+                    <h4 className="text-ax-text-secondary px-2 pt-2 pb-1 text-xs font-medium">
+                      {title}
+                    </h4>
+                    {rows}
+                  </section>
+                );
+              })
+            ) : (
+              <ul className="flex flex-col">{shownUploads.map((file) => entry(file, [file]))}</ul>
+            )
           ) : (
             <p className="text-ax-text-secondary px-2 py-1.5 text-xs">
               {t("conversation_uploads_filter_empty")}

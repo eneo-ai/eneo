@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -10,9 +11,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.job_table import Jobs
 from eneo.jobs.job_models import JobFailureCode, Task
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.task_models import TaskParams, validate_dispatch_envelope
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -70,7 +73,7 @@ async def redispatch_stale_jobs(
     await session.flush()
 
     enqueued = 0
-    failed = 0
+    failed: list[UUID] = []
     for job in jobs:
         try:
             envelope = validate_dispatch_envelope(job.dispatch_envelope)
@@ -80,19 +83,21 @@ async def redispatch_stale_jobs(
             if envelope.params.user_id != job.user_id:
                 raise ValueError("user does not match the persisted job")
         except (ValidationError, ValueError) as exc:
-            reason = f"Invalid dispatch envelope: {exc}"
             job.status = Status.FAILED.value
             job.finished_at = attempted_at
             job.result_location = None
             job.failure_code = JobFailureCode.INVALID_JOB_PAYLOAD.value
-            failed += 1
-            logger.warning(
+            failed.append(job.id)
+            # The refusal quotes the invalid input, which can name a file.
+            log_error(
+                logger,
+                logging.WARNING,
                 "Durable job dispatch envelope is invalid",
+                error=exc,
                 extra={
                     "job_id": str(job.id),
                     "task": job.task,
                     "failure_code": JobFailureCode.INVALID_JOB_PAYLOAD.value,
-                    "reason": reason,
                 },
             )
             continue
@@ -102,4 +107,5 @@ async def redispatch_stale_jobs(
             enqueued += 1
 
     await session.flush()
-    return RedispatchResult(claimed=len(jobs), enqueued=enqueued, failed=failed)
+    await JobRepository(session).announce(*failed)
+    return RedispatchResult(claimed=len(jobs), enqueued=enqueued, failed=len(failed))

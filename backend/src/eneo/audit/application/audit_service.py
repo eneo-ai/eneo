@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from eneo.audit.application.audit_config_service import AuditConfigService
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
 from eneo.audit.domain.entity_types import EntityType
@@ -72,7 +72,8 @@ class AuditService:
         """
         Check if an action should be logged based on audit configuration.
 
-        Implements 2-stage filtering:
+        Implements 2-stage filtering, after ALWAYS_AUDITED_ACTIONS which no
+        tenant setting can switch off:
         1. Global audit_logging_enabled feature flag (kill switch)
         2. Action-level configuration (3-level: global → category → action override)
 
@@ -83,6 +84,9 @@ class AuditService:
         Returns:
             True if action should be logged, False otherwise
         """
+        if action in ALWAYS_AUDITED_ACTIONS:
+            return True
+
         # Stage 1: Check global feature flag
         if self.feature_flag_service:
             try:
@@ -118,6 +122,7 @@ class AuditService:
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
+        required: bool = False,
         # Pass `user` to derive actor_id/actor_type via audit_actor_for so
         # service-key callers don't FK-violate audit_log.actor_id (their
         # synthetic UUID has no users row). Sysadmin paths that act without
@@ -130,6 +135,8 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        record_client: bool = True,
+        audit_id: Optional[UUID] = None,
     ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
@@ -142,12 +149,20 @@ class AuditService:
             entity_id: ID of affected entity
             description: Human-readable description
             metadata: Additional context (actor/target snapshots, changes)
+            required: Persist even when audit configuration disables the action;
+                persistence errors propagate to the caller's transaction.
             outcome: Success or failure
             actor_type: Type of actor (user, system, api_key)
             ip_address: Client IP address
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            record_client: Fill a missing IP address and user agent from the
+                request. False for a system event raised inside a request
+                whose client is not the actor (an anonymous widget visitor),
+                so their address never enters the tenant's audit trail.
+            audit_id: Deterministic id chosen by the caller; a second write with
+                the same id fails instead of being dropped.
 
         Returns:
             Created audit log (or None if action is disabled)
@@ -155,10 +170,10 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if action should be logged based on configuration
-        should_log = await self._should_log_action(tenant_id, action)
-        if not should_log:
-            return None
+        if not required:
+            should_log = await self._should_log_action(tenant_id, action)
+            if not should_log:
+                return None
 
         if user is not None:
             from eneo.authentication.auth_models import audit_actor_for
@@ -168,12 +183,14 @@ class AuditService:
         if actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
-        ip_address, user_agent, request_id = _fill_request_context(
+        filled_ip, filled_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
         )
+        if record_client:
+            ip_address, user_agent = filled_ip, filled_agent
 
         audit_log = AuditLog(
-            id=uuid4(),
+            id=audit_id or uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
             actor_type=actor_type,
@@ -284,6 +301,7 @@ class AuditService:
         user_agent: Optional[str] = None,
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
+        record_client: bool = True,
     ) -> Optional[UUID]:
         """
         Asynchronously create an audit log entry via ARQ worker.
@@ -309,6 +327,8 @@ class AuditService:
             user_agent: Client user agent
             request_id: Request correlation ID
             error_message: Error details if outcome is failure
+            record_client: See `log()`; False keeps a bystander's address and
+                browser out of a system event raised inside their request.
 
         Returns:
             Job ID for tracking the async operation, or None if action disabled
@@ -333,9 +353,11 @@ class AuditService:
         if outcome == Outcome.FAILURE and not error_message:
             raise ValueError("error_message required when outcome is failure")
 
-        ip_address, user_agent, request_id = _fill_request_context(
+        filled_ip, filled_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
         )
+        if record_client:
+            ip_address, user_agent = filled_ip, filled_agent
 
         # Create job ID
         job_id = uuid4()

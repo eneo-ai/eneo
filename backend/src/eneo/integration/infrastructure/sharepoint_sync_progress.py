@@ -7,6 +7,7 @@ reads it.
 """
 
 import asyncio
+import logging
 import time
 from collections import deque
 from collections.abc import Callable, Coroutine, Sequence
@@ -27,6 +28,7 @@ from eneo.integration.domain.sync_progress import (
 )
 from eneo.integration.infrastructure.content_service.types import SyncStats
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -121,7 +123,12 @@ class SharePointSyncProgressStore:
         try:
             values: list[bytes | str | None] = await self.redis_client.mget(keys)
         except RedisError as exc:
-            logger.warning("Could not read SharePoint sync progress: %s", exc)
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not read SharePoint sync progress",
+                error=exc,
+            )
             return []
         progress: list[IntegrationSyncProgress] = []
         for value in values:
@@ -279,20 +286,24 @@ class SyncProgressReporter:
                 deferred_clear
             )
         except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
-            logger.warning(
-                "Could not wait for the transaction of integration knowledge %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not wait for the transaction of integration knowledge %s",
                 item_id,
-                exc,
+                error=exc,
             )
             deferred = False
         if deferred:
             try:
                 await store.expire(item_id, FINISHED_TTL_SECONDS)
             except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
-                logger.warning(
-                    "Could not shorten sync progress of integration knowledge %s: %s",
+                log_error(
+                    logger,
+                    logging.WARNING,
+                    "Could not shorten sync progress of integration knowledge %s",
                     item_id,
-                    exc,
+                    error=exc,
                 )
             return
         await self._clear(item_id, started_at=run.started_at)
@@ -305,10 +316,12 @@ class SyncProgressReporter:
         try:
             await self._store.clear(integration_knowledge_id, started_at=started_at)
         except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
-            logger.warning(
-                "Could not clear sync progress of integration knowledge %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not clear sync progress of integration knowledge %s",
                 integration_knowledge_id,
-                exc,
+                error=exc,
             )
 
     async def _beat(self, interval: float) -> None:
@@ -381,8 +394,10 @@ class SyncProgressReporter:
             )
             await self._store.save(progress)
         except Exception as exc:  # noqa: BLE001 - progress must never fail a sync
-            logger.warning(
-                "Could not write sync progress of integration knowledge %s: %s",
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not write sync progress of integration knowledge %s",
                 run.integration_knowledge_id,
-                exc,
+                error=exc,
             )

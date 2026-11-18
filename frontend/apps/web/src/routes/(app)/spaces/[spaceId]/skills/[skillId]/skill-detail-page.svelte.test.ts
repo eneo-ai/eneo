@@ -1,10 +1,23 @@
-import type { SkillPublic, SkillRevisionPublic, SkillRevisionSummaryPage } from "@eneo/eneo-js";
+import {
+  EneoError,
+  type AssistantSkillConfiguration,
+  type SkillPublic,
+  type SkillRevisionPublic,
+  type SkillRevisionSummaryPage
+} from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { m } from "$lib/paraglide/messages";
 
 const invalidate = vi.hoisted(() => vi.fn(async () => {}));
+const updateDefaultAssistantSkills = vi.hoisted(() =>
+  vi.fn(async (_assistant: { id: string }, _bindings: () => Promise<unknown>) => {})
+);
+
+vi.mock("$lib/features/spaces/SpacesManager", () => ({
+  getSpacesManager: () => ({ updateDefaultAssistantSkills })
+}));
 
 vi.mock("$app/navigation", () => ({
   afterNavigate: vi.fn(),
@@ -78,6 +91,136 @@ function skill(currentRevision: SkillRevisionPublic): SkillPublic {
 describe("Skill detail page", () => {
   beforeEach(() => {
     invalidate.mockClear();
+    updateDefaultAssistantSkills.mockReset();
+  });
+
+  const OTHER_SKILL = {
+    skill_id: "skill-2",
+    skill_revision_id: "skill-2-revision-1",
+    attachable_revision_id: "skill-2-revision-1",
+    slug: "minutes",
+    revision_number: 1,
+    attachable_revision_number: 1,
+    display_name: "Minutes",
+    description: "",
+    content_digest: "digest",
+    position: 1,
+    is_active: true,
+    source: "space" as const,
+    execution_blocked: false,
+    activation_mode: "always" as const
+  };
+
+  function personalChatOn(
+    pinned: SkillRevisionPublic,
+    latest: SkillRevisionPublic,
+    others: AssistantSkillConfiguration["bindings"] = []
+  ) {
+    return {
+      bindings: [
+        {
+          skill_id: pinned.skill_id,
+          skill_revision_id: pinned.id,
+          attachable_revision_id: latest.id,
+          slug: "hr-guidance",
+          revision_number: pinned.revision_number,
+          attachable_revision_number: latest.revision_number,
+          display_name: pinned.display_name,
+          description: pinned.description,
+          content_digest: pinned.content_digest,
+          position: 0,
+          is_active: true,
+          source: "space",
+          execution_blocked: false,
+          activation_mode: "on_demand"
+        },
+        ...others
+      ],
+      organisation_bindings: [],
+      runtime: null,
+      personal_layer: { status: "applied", reason: null, detail: null }
+    } satisfies AssistantSkillConfiguration;
+  }
+
+  /** The page was loaded with `loaded`; the server holds `saved` by the time the save runs. */
+  function renderPersonalSkill({
+    loaded = personalChatOn(revision(1), revision(2)),
+    saved = loaded
+  }: { loaded?: AssistantSkillConfiguration; saved?: AssistantSkillConfiguration } = {}) {
+    const pinned = revision(1);
+    const current = revision(2);
+    const getAssistantConfiguration = vi.fn(async () => saved);
+    render(SkillDetailPage, {
+      data: {
+        currentSpace: {
+          id: "personal-space",
+          personal: true,
+          organization: false,
+          skill_permissions: ["read", "edit"],
+          default_assistant: { id: "default-assistant" }
+        },
+        skill: skill(current),
+        revisionPage: revisionPage(current, pinned),
+        personalChatSkills: loaded,
+        eneo: {
+          skills: {
+            createRevision: vi.fn(),
+            getAssistantConfiguration,
+            getRevision: vi.fn(),
+            listRevisionSummaries: vi.fn(),
+            restoreRevision: vi.fn(),
+            setActive: vi.fn()
+          }
+        }
+      } as never
+    });
+    return { getAssistantConfiguration };
+  }
+
+  test("moves only this Skill to its latest version, on top of what is saved when the move runs", async () => {
+    // Loaded with another Skill that an earlier queued save then switched off.
+    const { getAssistantConfiguration } = renderPersonalSkill({
+      loaded: personalChatOn(revision(1), revision(2), [OTHER_SKILL]),
+      saved: personalChatOn(revision(1), revision(2))
+    });
+
+    await expect
+      .element(page.getByText(m.personal_chat_skills_version_notice({ version: "1" })))
+      .toBeVisible();
+    expect(updateDefaultAssistantSkills).not.toHaveBeenCalled();
+    await page.getByRole("button", { name: m.personal_chat_skills_use_latest() }).click();
+
+    const [assistant, bindings] = updateDefaultAssistantSkills.mock.calls[0];
+    expect(assistant).toEqual({ id: "default-assistant" });
+    await expect(bindings()).resolves.toEqual([
+      { skill_id: "skill-1", skill_revision_id: "revision-2", activation_mode: "on_demand" }
+    ]);
+    expect(getAssistantConfiguration).toHaveBeenCalledWith({
+      spaceId: "personal-space",
+      assistantId: "default-assistant"
+    });
+    await vi.waitFor(() => expect(invalidate).toHaveBeenCalledWith("space:skills"));
+  });
+
+  test("keeps the personal chat on its version and says why when the move is refused", async () => {
+    updateDefaultAssistantSkills.mockRejectedValue(
+      new EneoError("Refused", "RESPONSE", 400, 9080, {
+        eneo_error_code: 9080,
+        details: { reason: "personal_skill_does_not_fit", detail: "context_limit_exceeded" }
+      })
+    );
+    renderPersonalSkill();
+
+    await page.getByRole("button", { name: m.personal_chat_skills_use_latest() }).click();
+
+    await expect
+      .element(
+        page
+          .getByRole("alert")
+          .getByText(m.personal_chat_skills_reason_personal_skill_does_not_fit())
+      )
+      .toBeVisible();
+    expect(invalidate).not.toHaveBeenCalled();
   });
 
   test("keeps dirty form content and reloads the comparison after a restore conflict", async () => {

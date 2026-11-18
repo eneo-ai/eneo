@@ -8,6 +8,7 @@ from eneo.actors import SpaceActor
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
 )
+from eneo.analysis import analysis_service as service_module
 from eneo.analysis.analysis import (
     AnalysisJobStatus,
     AnalysisProcessingMode,
@@ -29,6 +30,7 @@ from eneo.main.exceptions import (
 from eneo.questions.questions_repo import QuestionSessionPartner
 from eneo.roles.permissions import Permission
 from tests.fixtures import TEST_UUID
+from tests.log_capture import chained_error, emitted, logged_errors
 
 
 def _make_completion_model() -> CompletionModel:
@@ -962,3 +964,51 @@ async def test_chunk_partial_failure(service: AnalysisService):
 
     assert len(summaries) >= 1
     assert all("Summary" in s for s in summaries)
+
+
+async def test_a_failed_chunk_logs_the_kind_of_error_not_its_text(
+    service: AnalysisService,
+):
+    """A provider's error can echo the questions of the chunk. Mutant: the
+    failed chunk is logged with the error's message."""
+
+    async def failing_response(*, question, completion_service, prompt, stream):
+        raise chained_error()
+
+    model = AsyncMock()
+    model.get_response = failing_response
+
+    with emitted(service_module.logger) as records:
+        summaries = await service._summarize_question_chunks(
+            model=model, questions=["Question"], days=30
+        )
+
+    assert summaries == []
+    assert logged_errors(records), [record.getMessage() for record in records]
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+async def test_hourly_metadata_retains_insights_permission(
+    service: AnalysisService, allowed: bool
+):
+    service.user.permissions = [Permission.INSIGHTS] if allowed else []
+    readers = [
+        service.repo.get_assistant_counts_by_hour_for_tenant,
+        service.repo.get_session_counts_by_hour_for_tenant,
+        service.repo.get_question_counts_by_hour_for_tenant,
+    ]
+    for reader in readers:
+        reader.return_value = []
+    start = datetime(2026, 4, 10, tzinfo=timezone.utc)
+    end = datetime(2026, 4, 11, tzinfo=timezone.utc)
+    if allowed:
+        assert await service.get_metadata_statistics_aggregated(
+            start, end, time_zone="Asia/Kolkata"
+        ) == ([], [], [])
+    else:
+        with pytest.raises(UnauthorizedException, match="Need permission"):
+            await service.get_metadata_statistics_aggregated(
+                start, end, time_zone="Asia/Kolkata"
+            )
+        for reader in readers:
+            reader.assert_not_awaited()

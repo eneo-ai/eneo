@@ -1,7 +1,7 @@
 # Release SBOMs and Attestations
 
 The current publication workflow attaches Software Bill of Materials (SBOM)
-files for the published backend, frontend, web-next, tool runtime and bundled
+files for the published backend, frontend, tool runtime and bundled
 object-store container images to the GitHub Release, with attestations that
 show where they were built. A separate job attaches them after the release
 bundle when it succeeds, and older releases may have fewer files, so check that
@@ -32,7 +32,6 @@ The release workflow covers:
 
 - `ghcr.io/eneo-ai/eneo-backend:<version>`
 - `ghcr.io/eneo-ai/eneo-frontend:<version>`
-- `ghcr.io/eneo-ai/eneo-web-next:<version>`
 - `ghcr.io/eneo-ai/eneo-tool-runtime:<version>`
 - `ghcr.io/eneo-ai/eneo-seaweedfs:<bundled store version>`
 
@@ -45,13 +44,20 @@ a tag such as `v2.0.0-rc.2` gets SBOM files for that prerelease.
 
 ## How the release flow works
 
+Managed final releases remain GitHub release drafts while the images, bundle
+and SBOMs are prepared. Only a successful complete image workflow and a
+verified bundle allow publication and promotion of the latest release. The
+maintainer's [release procedure](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release)
+describes preparation, approval and recovery. Already published releases and
+RC tags retain their existing workflow.
+
 When the image publication workflow (`build_and_push_images.yml`) attaches a
 completed release bundle, it starts the release SBOM workflow:
 
 1. The workflow reads the release tag and downloads and verifies its completed bundle.
 2. It checks out the release tag for source-based dependency inventory and
    reads the bundled store version from `docker/seaweedfs/VERSION`.
-3. It reads the backend, frontend, web-next and tool runtime digests from the bundle and
+3. It reads the backend, frontend and tool runtime digests from the bundle and
    resolves the already-published Eneo SeaweedFS version tag.
 4. It resolves immutable `linux/amd64` digests and the tool runtime and SeaweedFS `linux/arm64`
    digests.
@@ -66,18 +72,33 @@ completed release bundle, it starts the release SBOM workflow:
 9. It uploads the generated files to the same GitHub Release page.
 
 Each release with SBOMs keeps its own files. Older release pages keep their original
-assets, so you can compare one version with the next. The backend, frontend,
-web-next and tool runtime container images also get provenance attestations
+assets, so you can compare one version with the next. The backend, frontend
+and tool runtime container images also get provenance attestations
 when they are built and pushed to GitHub Container Registry.
 
-The application publication workflow checks the actual Node runtime in both
-frontend images and blocks fixable HIGH or CRITICAL image vulnerabilities
+The backend image also includes the React/Vite assets and their build dependency
+inventory. It has no Node runtime or separate React frontend image.
+
+The application publication workflow checks the actual Node runtime in the
+Svelte frontend image and blocks fixable HIGH or CRITICAL image vulnerabilities
 before completing the release bundle. These checks use the exact image digest
 and also run when a previously published image is reused. The tool runtime
 candidate similarly verifies its Bun runtime and Python Brotli version before
 its image scan. Updating a base-image tag does not update existing Eneo images
 or running containers; runtime fixes require a new application release and
 deployment.
+
+Application image provenance is attested immediately after the build, before
+runtime and vulnerability checks. An attestation proves build provenance; it
+does not mean those checks passed or that a completed release bundle exists.
+Retries reuse an image only when its version, source revision, platforms, and
+attestation verify. If provenance verification fails for an otherwise matching
+image, the workflow rebuilds it from the checked-out source and attests the new
+build. A version, source, or platform mismatch still stops publication. Frontend
+build cache and temporary build swap are released before verification to leave
+room for the vulnerability database. Every frontend image, including reused
+images, must pass the runtime and vulnerability checks before the bundle can
+be published.
 
 The SeaweedFS image is built and attested by Eneo from a pinned upstream source
 commit by its own workflow, which runs only when the image inputs change and
@@ -122,7 +143,7 @@ flowchart TD
   tag["Verify bundle<br/>and source revision"]
   digests["Resolve immutable<br/>GHCR platform digests"]
 
-  syft["Syft scans full images<br/>backend, frontend, web-next, tool runtime, SeaweedFS"]
+  syft["Syft scans full images<br/>backend, frontend, tool runtime, SeaweedFS"]
   python["CycloneDX Python scans<br/>backend /app/.venv"]
   source["CycloneDX Generator scans frontend source<br/>installed from frozen lockfile"]
 
@@ -167,7 +188,7 @@ flowchart TD
 Eneo publishes a small set of files because each file answers a different
 question.
 
-The backend, frontend, web-next, tool runtime and SeaweedFS image SBOMs are the main release inventory. They are
+The backend, frontend, tool runtime and SeaweedFS image SBOMs are the main release inventory. They are
 generated with [Syft](https://github.com/anchore/syft), which scans container
 images and filesystems and can export several SBOM formats. For Eneo, Syft
 scans the released image digests and creates:
@@ -209,8 +230,6 @@ A release built by the current publication workflow publishes these files:
 | `eneo-frontend-<release-tag>-linux-amd64.spdx.json` | Frontend image SBOM in SPDX JSON |
 | `eneo-frontend-<release-tag>-linux-amd64.table.txt` | Frontend image package list for human review |
 | `eneo-frontend-source-<release-tag>.cyclonedx.json` | Frontend source dependency SBOM in CycloneDX JSON |
-| `eneo-web-next-<release-tag>-linux-amd64.{cyclonedx,spdx}.json` | Next beta (web-next) image SBOMs |
-| `eneo-web-next-<release-tag>-linux-amd64.table.txt` | Next beta (web-next) image package list for human review |
 | `eneo-tool-runtime-<release-tag>-linux-amd64.{cyclonedx,spdx}.json` | Tool runtime amd64 image SBOMs |
 | `eneo-tool-runtime-<release-tag>-linux-arm64.{cyclonedx,spdx}.json` | Tool runtime arm64 image SBOMs |
 | `eneo-tool-runtime-<release-tag>-linux-{amd64,arm64}.table.txt` | Tool runtime package lists for human review |
@@ -354,7 +373,7 @@ These references explain the formats and tools used by Eneo:
 - [OWASP SCVS SBOM requirements](https://scvs.owasp.org/scvs/v2-software-bill-of-materials/)
   describe maturity expectations such as automated SBOM creation,
   machine-readable formats, metadata, and component inventory.
-- [Syft](https://github.com/anchore/syft) is used for the backend, frontend, web-next, tool runtime and
+- [Syft](https://github.com/anchore/syft) is used for the backend, frontend, tool runtime and
   SeaweedFS image SBOMs.
 - [CycloneDX Python](https://github.com/CycloneDX/cyclonedx-python) is used for
   the backend Python runtime SBOM.
@@ -392,7 +411,7 @@ additions, removals, and version changes show what changed between the images.
 ## Application bundle
 
 The image publication workflow (`build_and_push_images.yml`) publishes `release.json` and `release.env` only
-after all four application images (backend, frontend, web-next and tool runtime) pass their checks and a combined smoke test.
+after all three application images (backend, frontend and tool runtime) pass their checks and a combined smoke test.
 They record a shared version, source revision and immutable digests. The runtime
 no longer has an independent version file. SeaweedFS keeps its existing separate
 upstream-based versioning. External deployment systems should consume the

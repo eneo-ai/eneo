@@ -18,10 +18,37 @@ const partner: ChatPartner = {
 };
 
 describe("chat capability controls", () => {
-  it("shows configured functions with availability and respects role permissions", () => {
+  it("lists only the capabilities the partner enables", () => {
+    expect(
+      chatCapabilities({ ...partner, enabledCapabilities: ["web_search"] }, () => true)
+    ).toEqual([{ purpose: "web_search", available: true, reason: null }]);
+    expect(chatCapabilities({ ...partner, enabledCapabilities: undefined }, () => true)).toEqual(
+      []
+    );
+  });
+
+  it("omits a capability the user's role may not use", () => {
     expect(chatCapabilities(partner, (purpose) => purpose === "image_generation")).toEqual([
       { purpose: "image_generation", available: false, reason: "no_active_provider" }
     ]);
+  });
+
+  it("marks a capability without an active provider unavailable, with the reason", () => {
+    const withoutProvider: ChatPartner = {
+      ...partner,
+      availableCapabilities: [
+        { purpose: "image_generation", available: false, reason: "classification" }
+      ]
+    };
+    expect(chatCapabilities(withoutProvider, () => true)).toEqual([
+      { purpose: "web_search", available: false, reason: "no_active_provider" },
+      { purpose: "image_generation", available: false, reason: "classification" }
+    ]);
+  });
+
+  it("applies the same rule to the personal assistant as to any other assistant", () => {
+    const personal: ChatPartner = { ...partner, type: "default-assistant" };
+    expect(chatCapabilities(personal, () => true)).toEqual(chatCapabilities(partner, () => true));
   });
 
   it("uses enforced policy and its default-off settings instead of assistant choices", () => {
@@ -72,17 +99,10 @@ describe("chat capability controls", () => {
     ]);
   });
 
-  it("sends each disabled function by purpose and keeps the web search feature gate", () => {
-    expect(disabledCapabilitiesForRequest(partner, new Set(["image_generation"]), true)).toEqual([
+  it("sends exactly the capabilities the user turned off, by purpose", () => {
+    expect(disabledCapabilitiesForRequest(new Set(["image_generation"]))).toEqual([
       "image_generation"
     ]);
-    expect(
-      disabledCapabilitiesForRequest(
-        { ...partner, type: "default-assistant" },
-        new Set(["image_generation"]),
-        false
-      )
-    ).toEqual(["image_generation", "web_search"]);
-    expect(disabledCapabilitiesForRequest(partner, new Set(), true)).toBeUndefined();
+    expect(disabledCapabilitiesForRequest(new Set())).toBeUndefined();
   });
 });

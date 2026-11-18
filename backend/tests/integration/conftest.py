@@ -22,6 +22,17 @@ class _DeploymentPolicySeed:
     transcription_audio_limit_bytes: int
 
 
+# Migration round trips that are known to fail; the file says why. CI does not
+# start them, and a pytest run that asks for migration_isolation skips them.
+QUARANTINED_MIGRATION_FILES = frozenset(
+    line
+    for line in (Path(__file__).parent / "quarantined-migration-tests.txt")
+    .read_text()
+    .splitlines()
+    if line and not line.startswith("#")
+)
+
+
 def pytest_collection_modifyitems(config, items):
     """Mark integration tests and auto-skip migration_isolation unless requested.
 
@@ -46,6 +57,25 @@ def pytest_collection_modifyitems(config, items):
         and "not migration_isolation" not in marker_expr
     ):
         # User explicitly requested migration_isolation tests, don't skip
+        backend_root = integration_root.parents[1]
+        stale = [
+            f for f in QUARANTINED_MIGRATION_FILES if not (backend_root / f).is_file()
+        ]
+        if stale:
+            raise pytest.UsageError(
+                f"Quarantined migration tests not found: {sorted(stale)}"
+            )
+        quarantine = pytest.mark.skip(
+            reason="Quarantined: fails downgrading through a later irreversible migration"
+        )
+        for item in items:
+            path = Path(item.path).resolve()
+            if (
+                path.is_relative_to(backend_root)
+                and path.relative_to(backend_root).as_posix()
+                in QUARANTINED_MIGRATION_FILES
+            ):
+                item.add_marker(quarantine)
         return
 
     # Skip all tests with migration_isolation marker
@@ -117,7 +147,7 @@ if not os.getenv("CRAWL_MAX_LENGTH"):
     os.environ["CRAWL_MAX_LENGTH"] = "1800"  # 30 minutes
 
 import contextlib
-from typing import AsyncGenerator, Generator
+from typing import Any, AsyncGenerator, Generator
 from unittest.mock import patch
 
 import psycopg2
@@ -138,6 +168,7 @@ from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.database_reset import reset_populated_tables
 from tests.fixtures import mint_v2_api_key
+from tests.integration import safe_method_tripwire
 
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
@@ -656,6 +687,12 @@ async def app(setup_database):
     # We DON'T use lifespan_context because it would close the sessionmanager
     # on exit, which we need for cleanup_database fixture.
     application = get_application()
+    # Every GET the tests send must be side-effect free or declare its effect.
+    get_violations: list[str] = []
+    application.add_middleware(
+        safe_method_tripwire.SafeMethodTripwire, violations=get_violations
+    )
+    stop_recording = safe_method_tripwire.install()
 
     # Manually trigger startup only (not shutdown)
     # Import here because it needs to be after settings are configured
@@ -678,7 +715,10 @@ async def app(setup_database):
         # Full shutdown closes the session manager needed by cleanup_database.
         # Release the new process-owned byte-plane clients independently so
         # every function-scoped application gets a fresh runtime without leaks.
+        stop_recording()
         await object_content_runtime.stop()
+    if get_violations:
+        pytest.fail("\n".join(get_violations), pytrace=False)
 
 
 @pytest.fixture
@@ -692,6 +732,16 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
     """
     async with AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test.local"
+    ) as client:
+        yield client
+
+
+@pytest.fixture
+async def raw_client(app) -> AsyncGenerator[AsyncClient, None]:
+    """A client that receives the 500 instead of the server's exception."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test.local",
     ) as client:
         yield client
 
@@ -847,6 +897,15 @@ async def async_session(setup_database):
             yield session
 
 
+@pytest.fixture
+async def retention_session(setup_database):
+    # Retention commits must release real transactions rather than a fixture savepoint.
+    async with sessionmanager.session() as session:
+        session.sync_session.expire_on_commit = False
+        await session.begin()
+        yield session
+
+
 @pytest.fixture(autouse=True)
 def clear_api_keys_for_all_tests(request, monkeypatch):
     """Auto-use fixture to ensure API keys are cleared for integration tests ONLY.
@@ -983,6 +1042,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
         auth_method=None,
+        derived_from=None,
     ) -> str:
         return original_create_token(
             self,
@@ -994,6 +1054,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             else test_settings.jwt_expiry_time,
             extra_claims=extra_claims,
             auth_method=auth_method,
+            derived_from=derived_from,
         )
 
     def patched_get_jwt_payload(
@@ -1018,45 +1079,22 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
 
 
 @pytest.fixture
-def jwks_mock(monkeypatch):
-    """Stub out PyJWKClient so tests never fetch real JWKS documents.
+def fake_idp(monkeypatch):
+    """Start providers that sign real ID tokens (tests/fake_oidc_provider.py).
 
-    Patches both jwt.PyJWKClient and the federation_router's JWKClient alias
-    to ensure the mock is used even though the module has already imported and bound the name.
+    Each call adds one; all of them answer from then on.
     """
-    import jwt as jwt_lib
+    from tests.fake_oidc_provider import FakeOidcProvider, install
 
-    def _configure(
-        signing_keys: dict[str, str] | None = None,
-        default_key: str = "test-signing-key",
-    ):
-        keys = signing_keys or {}
+    started: list[FakeOidcProvider] = []
 
-        class _Key:
-            def __init__(self, key: str):
-                self.key = key
+    def _start(**settings: Any) -> FakeOidcProvider:
+        provider = FakeOidcProvider(**settings)
+        started.append(provider)
+        install(monkeypatch, *started)
+        return provider
 
-        class _FakePyJWKClient:
-            def __init__(self, jwks_uri: str):  # noqa: D401 - signature matches real class
-                self.jwks_uri = jwks_uri
-
-            def get_signing_key_from_jwt(self, token: str):
-                return _Key(keys.get(token, default_key))
-
-        # Patch the jwt module's PyJWKClient
-        monkeypatch.setattr(jwt_lib, "PyJWKClient", _FakePyJWKClient)
-
-        # CRITICAL: Also patch the federation_router's module-level JWKClient alias
-        # The router does: from jwt import PyJWKClient as _PyJWKClient; JWKClient = _PyJWKClient
-        # Since it's already bound at import time, we must patch the alias directly
-        monkeypatch.setattr(
-            "eneo.authentication.federation_router.JWKClient",
-            _FakePyJWKClient,
-        )
-
-        return _FakePyJWKClient
-
-    return _configure
+    return _start
 
 
 @pytest.fixture
@@ -1067,7 +1105,10 @@ def oidc_mock(monkeypatch):
         *,
         discovery: dict[str, tuple[dict, int] | dict] | None = None,
         tokens: dict[tuple[str, str | None], tuple[dict, int] | dict] | None = None,
-    ) -> Callable[[], dict[str, list[tuple[str, str]]]]:
+        clients: dict[str, str] | None = None,
+    ) -> Callable[[], dict[str, list[Any]]]:
+        """``clients`` maps client_id to secret: a token request with other
+        credentials gets the IdP's 401 invalid_client, as a real IdP answers."""
         discovery_map: dict[str, tuple[dict, int]] = {}
         for url, payload in (discovery or {}).items():
             if isinstance(payload, tuple):
@@ -1082,11 +1123,19 @@ def oidc_mock(monkeypatch):
             else:
                 token_map[key] = (payload, 200)
         request_log: list[tuple[str, str]] = []
+        token_clients: list[str | None] = []
+
+        from tests.fake_oidc_provider import _Body
 
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.content_length = None
+
+            @property
+            def content(self) -> _Body:
+                return _Body(json.dumps(self._payload).encode())
 
             async def __aenter__(self):
                 return self
@@ -1115,32 +1164,26 @@ def oidc_mock(monkeypatch):
                 code = None
                 if isinstance(data, dict):
                     code = data.get("code") or data.get("authorization_code")
+                    if clients is not None:
+                        client_id = data.get("client_id")
+                        token_clients.append(client_id)
+                        if clients.get(client_id) != data.get("client_secret"):
+                            return _FakeResponse({"error": "invalid_client"}, 401)
                 key = (url, code)
                 if key not in token_map:
                     raise AssertionError(f"Unmocked token request: {url} code={code}")
                 payload, status = token_map[key]
                 return _FakeResponse(payload, status)
 
-        fake_client = _FakeClient()
+        from eneo.authentication.oidc import profile
+        from eneo.main.aiohttp_client import aiohttp_client
 
-        def _client_factory():
-            return fake_client
+        # Every module calls the one shared client, so its session is the seam.
+        monkeypatch.setattr(aiohttp_client, "session", _FakeClient())
+        monkeypatch.setattr(profile, "_discovery_cache", {})
 
-        import eneo.main.aiohttp_client as aiohttp_client_module
-
-        monkeypatch.setattr(aiohttp_client_module, "aiohttp_client", _client_factory)
-        monkeypatch.setattr(
-            "eneo.authentication.federation_router.aiohttp_client",
-            _client_factory,
-        )
-        monkeypatch.setattr(
-            "eneo.users.user_router.aiohttp_client",
-            _client_factory,
-            raising=False,
-        )
-
-        def _summary() -> dict[str, list[tuple[str, str]]]:
-            return {"requests": request_log}
+        def _summary() -> dict[str, list[Any]]:
+            return {"requests": request_log, "token_clients": token_clients}
 
         return _summary
 

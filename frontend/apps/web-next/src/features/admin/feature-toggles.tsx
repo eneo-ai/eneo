@@ -1,7 +1,6 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
-import { Switch } from "@/components/astryx/switch";
+import { useQueryClient } from "@tanstack/react-query";
+import { Switch } from "@astryxdesign/core/Switch";
 import {
   LayoutTemplate,
   PartyPopper,
@@ -9,11 +8,12 @@ import {
   UserRoundPlus,
   type LucideIcon
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { sessionKeys } from "@/lib/api/session";
 import { useSettingSwitch } from "./use-setting-switch";
 
 type ToggleKey = "templates" | "audit-logging" | "provisioning" | "whats-new";
@@ -42,13 +42,28 @@ function SettingRow({
   icon: LucideIcon;
   tone: string;
 }) {
-  const [value, setValue] = useSettingSwitch(setting, initial, (enabled) =>
-    unwrap(patchSetting(setting, enabled))
+  const queryClient = useQueryClient();
+  const [value, setValue] = useSettingSwitch(
+    setting,
+    initial,
+    (enabled) => unwrap(patchSetting(setting, enabled)),
+    setting === "provisioning"
+      ? {
+          onSaved: async () => {
+            await Promise.all([
+              queryClient.invalidateQueries({ queryKey: sessionKeys.settings }),
+              queryClient.invalidateQueries({ queryKey: sessionKeys.tenant })
+            ]);
+          }
+        }
+      : undefined
   );
   return (
     <div className="flex min-w-0 items-start gap-3">
+      {/* Decorative. On a phone its 52 px go to the label and description, which beside the
+          switch otherwise wrap to four lines at 320 px. */}
       <span
-        className={`rounded-ax-element flex size-10 shrink-0 items-center justify-center ${tone}`}
+        className={`rounded-ax-element flex size-10 shrink-0 items-center justify-center max-md:hidden ${tone}`}
         aria-hidden="true"
       >
         <Icon className="size-5" />

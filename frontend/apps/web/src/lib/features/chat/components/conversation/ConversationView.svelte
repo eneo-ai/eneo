@@ -311,6 +311,17 @@
         isDragging = true;
       }}
     >
+      {#if chat.missingConversation}
+        <!-- The URL named a conversation that no longer exists. The partner is
+             still here, so this stays a notice inside a usable chat, not an
+             error page. -->
+        <p
+          role="status"
+          class="border-default bg-secondary text-primary mx-4 mt-4 shrink-0 rounded-lg border p-4 text-sm md:mx-8 md:mt-8"
+        >
+          {m.conversation_missing()}
+        </p>
+      {/if}
       {#if chat.currentConversation.messages && chat.currentConversation.messages.length > 0}
         <div
           class="flex flex-grow flex-col gap-2 p-4 md:p-8"

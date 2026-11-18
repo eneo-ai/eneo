@@ -12,10 +12,6 @@ from eneo.assistants.api.assistant_models import AskAssistant
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
-from eneo.audit.infrastructure.rate_limiting import (
-    RateLimitExceededError,
-    RateLimitResult,
-)
 from eneo.conversations.conversations_router import (
     approve_tools,
     call_tool_from_app_view,
@@ -23,6 +19,7 @@ from eneo.conversations.conversations_router import (
     get_tool_call_result,
 )
 from eneo.conversations.document_export import DocumentExportUnavailable
+from eneo.files.file_models import File
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
@@ -31,6 +28,10 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalSubmitResult,
 )
 from eneo.questions.question import ToolCallInfo
+from eneo.redis.rate_limit import (
+    RateLimitExceededError,
+    RateLimitResult,
+)
 from eneo.sessions.session import DocumentExportRequest, ViewToolCallRequest
 
 
@@ -318,6 +319,7 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
         current_count=21,
         max_requests=20,
         window_seconds=60,
+        retry_after_seconds=37,
     )
 
     with patch(
@@ -334,10 +336,10 @@ async def test_approve_tools_returns_429_payload_shape_with_retry_after():
 
     assert exc_info.value.status_code == 429
     assert exc_info.value.headers is not None
-    assert exc_info.value.headers["Retry-After"] == "60"
+    assert exc_info.value.headers["Retry-After"] == "37"
     detail = exc_info.value.detail
     assert detail["code"] == "rate_limit_exceeded"
-    assert detail["retry_after_seconds"] == 60
+    assert detail["retry_after_seconds"] == 37
 
 
 @pytest.mark.asyncio
@@ -732,7 +734,8 @@ async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
     container.session = lambda: None
     container.tenant = lambda: None
     server_id = uuid4()
-    file = SimpleNamespace(id=uuid4(), name="kostnader.csv")
+    name = "Utredning Anna Svensson.pdf"
+    file = File.model_construct(id=uuid4(), name=name)
     result = SimpleNamespace(
         mcp_server_id=server_id,
         tool_name="query_table",
@@ -770,3 +773,5 @@ async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
     assert minted.kwargs["entity_type"] == EntityType.FILE
     assert minted.kwargs["entity_id"] == file.id
     assert "mcp_app_view" in str(minted.kwargs["metadata"])
+    assert name not in minted.kwargs["description"]
+    assert name not in str(minted.kwargs["metadata"])

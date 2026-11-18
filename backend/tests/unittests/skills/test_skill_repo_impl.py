@@ -79,6 +79,7 @@ async def test_delete_translates_a_binding_created_during_deletion():
     delete_error = IntegrityError("delete", {}, Exception("foreign key violation"))
     session = AsyncMock()
     session.execute.side_effect = [locked_result, delete_error]
+    session.scalar.return_value = False
     repo = SkillRepoImpl(session)
     repo._is_bound = AsyncMock(return_value=False)
     repo._has_nonterminal_app_run = AsyncMock(return_value=False)

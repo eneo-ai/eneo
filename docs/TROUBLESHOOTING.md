@@ -104,11 +104,13 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 ### Browser calls from another origin are refused with `disallowed_cors_origin`
 
 The backend accepts a request that carries an `Origin` header only when that
-origin is registered in the `allowed_origins` table (or is `localhost`, the
-API's own origin, or the request authenticates with an active secret API
-key). Anything else is answered with `400` and the code
-`disallowed_cors_origin` before routing, so the backend log shows no attempt
-for the endpoint and the response has no trace id.
+origin is registered in the `allowed_origins` table (or is the API's own
+origin, or the request authenticates with an active secret API key). A page on
+`localhost`, `127.0.0.1` or `[::1]` passes without an entry only with
+`ENVIRONMENT=development`; elsewhere register it, for example
+`http://localhost:*` for any port. Anything else is answered with `400` and the
+code `disallowed_cors_origin` before routing, so the backend log shows no
+attempt for the endpoint and the response has no trace id.
 
 Up to Eneo 2.2 the web app's own server-side calls carried the browser
 `Origin` as well, so an unregistered public URL also broke username/password
@@ -226,7 +228,7 @@ be reached rather than that the password was wrong.
 2. **Python version check**:
    ```bash
    # Check Python version
-   python3 --version  # Should be 3.11+
+   python3 --version  # Should be 3.11.5 or a later 3.11 release
 
    # uv uses system Python - ensure correct version is installed
    ```
@@ -756,8 +758,8 @@ be reached rather than that the password was wrong.
      effective values in **Admin > File storage**. Policy changes apply without
      restarting backend or worker.
    - For PostgreSQL-inline session uploads, the effective limit is the smaller
-     of the admin policy and the operator-owned
-     `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+     of the admin policy and the
+     [storage limit for files stored in PostgreSQL](deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql).
    - For object-store session uploads, the effective limit is the smaller of
      the admin policy and the configured portable multipart envelope. The
      constraining source is visible in **Admin > File storage**.

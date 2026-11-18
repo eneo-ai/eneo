@@ -4,15 +4,20 @@ import { expect, test } from "./csp";
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
 
-test("activate landing renders", async ({ page }) => {
-  await page.goto("/activate");
-  await expect(page.getByText(/nästan klar/i)).toBeVisible();
-});
-
-test("account shows the change-password card", async ({ page }) => {
-  await page.goto("/account");
-  await expect(page.getByText(/byt lösenord/i).first()).toBeVisible();
-  await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
+test("starts a styled tour on first use and closes it with Escape", async ({ page }) => {
+  await page.goto("/whats-new");
+  await page.getByRole("button", { name: /^2\.2\.0/ }).click();
+  await page
+    .locator("#copy-rich-text")
+    .getByRole("button", { name: /visa mig|show me/i })
+    .click();
+  await expect(page).toHaveURL(/\/account$/);
+  const popover = page.locator(".driver-popover.eneo-spotlight");
+  await expect(popover).toBeVisible();
+  await expect(popover).toHaveCSS("position", "fixed");
+  await expect(popover).toContainText(/kopiera svar|copy answers/i);
+  await page.keyboard.press("Escape");
+  await expect(popover).not.toBeVisible();
 });
 
 test("admin usage has a per-user tab", async ({ page }) => {
@@ -20,28 +25,77 @@ test("admin usage has a per-user tab", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();
 });
 
-test("admin insights has a compare toggle + date inputs", async ({ page }) => {
-  await page.goto("/admin/insights");
-  await expect(page.getByRole("button", { name: /^jämför$/i })).toBeVisible();
-  await expect(page.locator('input[type="date"]').first()).toBeVisible();
-});
-
-test("admin models has a migration-history tab", async ({ page }) => {
-  await page.goto("/admin/models");
-  await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
-});
-
 test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
   await page.goto("/admin/api-keys");
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
 
+// The route walks open /admin/storage in their own contexts, which the CSP fixture does not watch.
+test("admin storage loads under the production CSP", async ({ page }) => {
+  await page.goto("/admin/storage");
+  await expect(page.getByText("Flytta befintligt innehåll", { exact: true })).toBeVisible();
+});
+
+// Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
+
+test("preloads only Figtree and renders with it", async ({ page }) => {
+  await page.goto("/spaces/list");
+  const preloads = await page
+    .locator('link[rel="preload"][as="font"]')
+    .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
+  // Vite serves the source during development and hashes it in the build.
+  expect(preloads).toEqual([
+    expect.stringMatching(
+      /^\/(?:assets\/figtree-latin-wght-normal-[\w-]+|src\/assets\/fonts\/figtree-latin-wght-normal)\.woff2$/
+    )
+  ]);
+  expect((await page.request.get(preloads[0]!)).status()).toBe(200);
+
+  await expect
+    .poll(() =>
+      page.evaluate(async () => {
+        await document.fonts.ready;
+        return document.fonts.check("16px Figtree");
+      })
+    )
+    .toBe(true);
+  // The UI text picks it (Tailwind's base font, via the theme's --font-figtree).
+  expect(await page.evaluate(() => getComputedStyle(document.body).fontFamily)).toMatch(
+    /^"?Figtree"?,/
+  );
+});
+
 // App shell (SideNav, ⌘K palette, phone drawer).
 
-test("the side navigation reaches the assistant catalog", async ({ page }) => {
+test("profile language selection reloads the document in either language", async ({ page }) => {
   await page.goto("/spaces/list");
-  const navigation = page.getByRole("navigation", { name: /huvudmeny|main menu/i });
-  await navigation.getByRole("link", { name: /^(assistenter|assistants)$/i }).click();
+  for (const selection of [
+    { profile: /: konto och inställningar$/, menu: "Språk", label: "English", locale: "en" },
+    { profile: /: account and settings$/, menu: "Language", label: "Svenska", locale: "sv" }
+  ]) {
+    await page.evaluate(() => Reflect.set(window, "__localeSmokeDocument", true));
+    await page.getByRole("button", { name: selection.profile }).click();
+    await page.getByRole("menuitem", { name: selection.menu, exact: true }).click();
+    await page.getByRole("menuitemradio", { name: selection.label, exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("lang", selection.locale);
+    await expect
+      .poll(() => page.evaluate(() => Reflect.get(window, "__localeSmokeDocument")))
+      .toBeUndefined();
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("lang", selection.locale);
+  }
+  await expect(page.getByRole("button", { name: /: konto och inställningar$/ })).toBeVisible();
+});
+
+// As in the Svelte app no sidebar links the catalogue; the palette does.
+test("the command palette reaches the assistant catalog", async ({ page }) => {
+  await page.goto("/spaces/list");
+  await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+  await page.keyboard.press("ControlOrMeta+k");
+  const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
+  await palette
+    .getByRole("option", { name: /^(Alla assistenter och appar|All assistants and apps)/ })
+    .click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(
     page.getByRole("heading", { level: 1, name: /assistenter|assistants/i })
@@ -74,5 +128,16 @@ test.describe("on a phone", () => {
     await expect(drawer.getByRole("navigation", { name: /huvudmeny|main menu/i })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(drawer).toBeHidden();
+  });
+});
+
+test.describe("signed out", () => {
+  test.use({ storageState: { cookies: [], origins: [] } });
+
+  // Public assets skip the session check (src/proxy.ts matcher), the same as in Vite.
+  test("serves the integration logos without a session", async ({ request }) => {
+    const response = await request.get("/integration-logos/sharepoint.png", { maxRedirects: 0 });
+    expect(response.status()).toBe(200);
+    expect(response.headers()["content-type"]).toBe("image/png");
   });
 });

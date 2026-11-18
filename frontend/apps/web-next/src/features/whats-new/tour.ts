@@ -1,4 +1,3 @@
-import { driver } from "driver.js";
 import type { Locale, ReleaseEntry } from "@eneo/whats-new";
 
 export type TourOutcome = "completed" | "cancelled" | "unavailable";
@@ -67,7 +66,7 @@ export async function runTour(
   }
 }
 
-/** Next navigation is asynchronous; observe only the intended route and anchor. */
+/** Navigation is asynchronous; observe only the intended route and anchor. */
 function waitForAnchor(
   href: string,
   anchor: string,
@@ -104,7 +103,7 @@ function waitForAnchor(
   });
 }
 
-function spotlight(
+async function spotlight(
   element: HTMLElement,
   entry: ReleaseEntry,
   locale: Locale,
@@ -112,6 +111,11 @@ function spotlight(
   progress: { index: number; total: number },
   signal: AbortSignal
 ): Promise<SpotlightOutcome> {
+  const [{ driver }] = await Promise.all([
+    import("driver.js"),
+    import("driver.js/dist/driver.css")
+  ]);
+  if (signal.aborted) return "closed";
   return new Promise((resolve, reject) => {
     let finished = false;
     const isFirst = progress.index === 0;
@@ -150,6 +154,9 @@ function spotlight(
       nextBtnText: labels.next,
       prevBtnText: labels.previous,
       doneBtnText: isLast ? labels.done : labels.next,
+      // A tap beside the popover must not throw the tour away (a finger is not a mouse):
+      // the close button, Escape and the abort signal still end it.
+      overlayClickBehavior: "none",
       popoverClass: "eneo-spotlight",
       steps: [
         {
@@ -187,7 +194,7 @@ function spotlight(
     signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("keyup", navigate);
     try {
-      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      element.scrollIntoView({ block: "center" });
       tour.drive();
     } catch (error) {
       reject(error);

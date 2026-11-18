@@ -1,7 +1,10 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import tseslint from "typescript-eslint";
+import react from "eslint-plugin-react";
+import reactHooks from "eslint-plugin-react-hooks";
+import importPlugin from "eslint-plugin-import";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import globals from "globals";
 import eneo from "@eneo/eslint-plugin";
 
 const generatedAndVendored = [
@@ -9,7 +12,6 @@ const generatedAndVendored = [
   "src/lib/i18n/**",
   "src/components/ai-elements/**",
   "src/components/ui/**",
-  "src/app/global-error.tsx",
   "src/**/*.test.{ts,tsx}"
 ];
 
@@ -17,21 +19,128 @@ const generatedAndVendored = [
 // Vendored primitives DO ship, so the accessibility rules cover them too.
 const notShippedUi = ["src/**/*.test.tsx"];
 
+// Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse before
+// you build).
+const astryxWrappedImports = [
+  {
+    name: "@astryxdesign/core/Table",
+    importNames: ["Table"],
+    message:
+      'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
+  },
+  {
+    name: "@astryxdesign/core/Typeahead",
+    importNames: ["Typeahead"],
+    message:
+      'Use `Typeahead` from "@/components/astryx/typeahead": Astryx does not set aria-invalid on an error status.'
+  },
+  {
+    name: "@astryxdesign/core/Tokenizer",
+    importNames: ["Tokenizer"],
+    message:
+      'Use `Tokenizer` from "@/components/astryx/tokenizer": Astryx does not set aria-invalid on an error status.'
+  },
+  {
+    name: "@astryxdesign/core/TextInput",
+    message:
+      'Use `TextInput` from "@/components/astryx/text-input": its search key puts the phone keyboard away.'
+  },
+  {
+    name: "@astryxdesign/core/Collapsible",
+    message:
+      'Use `Collapsible` and `CollapsibleGroup` from "@/components/astryx/collapsible": it glides what follows it in the page or the chat.'
+  }
+];
+
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  react.configs.flat.recommended,
+  reactHooks.configs.flat.recommended,
+  ...tseslint.configs.recommended,
+  {
+    plugins: { import: importPlugin, "jsx-a11y": jsxA11y },
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node }
+    },
+    settings: { react: { version: "detect" } },
+    // Preserve the existing React/TypeScript policy while changing the preset owner.
+    // Source TSX receives the stricter accessibility policy below.
+    rules: {
+      "import/no-anonymous-default-export": "warn",
+      "react/no-unknown-property": "off",
+      "react/react-in-jsx-scope": "off",
+      "react/prop-types": "off",
+      "react/jsx-no-target-blank": "off",
+      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-unused-expressions": "warn",
+      "jsx-a11y/alt-text": ["warn", { elements: ["img"], img: ["Image"] }],
+      "jsx-a11y/aria-props": "warn",
+      "jsx-a11y/aria-proptypes": "warn",
+      "jsx-a11y/aria-unsupported-elements": "warn",
+      "jsx-a11y/role-has-required-aria-props": "warn",
+      "jsx-a11y/role-supports-aria-props": "warn"
+    }
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/lib/navigation.ts", "src/**/*.test.{ts,tsx}", "src/test/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.property.name='history'][callee.property.name='replaceState'][arguments.0.raw='null']",
+          message: "Use replaceUrl from @/lib/navigation: the router owns silent URL updates."
+        },
+        {
+          // vh is the tallest the viewport gets (Safari's toolbar included), and a
+          // utility beats the dialog's own dvh cap, so a footer falls under it.
+          selector:
+            "Literal[value=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/], TemplateElement[value.raw=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/]",
+          message: "Use dvh (h-[60dvh]): vh ignores Safari's toolbar."
+        },
+        {
+          // 100vh: the tallest the viewport gets, toolbar and keyboard not counted.
+          selector:
+            "Literal[value=/(^|[\\s:])(min-|max-)?h-screen($|[\\s])/], TemplateElement[value.raw=/(^|[\\s:])(min-|max-)?h-screen($|[\\s])/]",
+          message: "Use h-dvh (an app frame) or min-h-svh (a page): h-screen is 100vh."
+        },
+        {
+          // A phone turned sideways has 280 to 300 px: a 3xx px floor cannot be met.
+          selector:
+            "Literal[value=/(^|[\\s:])min-h-\\[[3-9][0-9]{2}px\\]/], TemplateElement[value.raw=/(^|[\\s:])min-h-\\[[3-9][0-9]{2}px\\]/]",
+          message:
+            "A min-height of 300 px or more cannot hold on a phone turned sideways (280 to 300 px): use a clamp or key it on min-height: 40rem."
+        },
+        {
+          // Hidden until hovered: a finger has no hover (motion-touch: nothing behind hover).
+          selector:
+            'Literal[value=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/], TemplateElement[value.raw=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/]',
+          message:
+            "Do not reveal anything on hover only: touch has no hover. Show it, or put it in a menu."
+        },
+        {
+          // Astryx puts a menu's className on the menu, not on its button: a
+          // size meant for the button squeezed the answer's menu to 44 px.
+          selector:
+            "JSXOpeningElement[name.name=/^(MoreMenu|DropdownMenu)$/] > JSXAttribute[name.name='className']",
+          message:
+            "MoreMenu and DropdownMenu put className on the menu, not the button, which the theme already sizes for touch. Style the button through DropdownMenu's `button`."
+        }
+      ]
+    }
+  },
   {
     plugins: {
       eneo
     }
   },
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
-    ".next/**",
+    // Frozen Next output remains until its routes and build are removed.
     "out/**",
     "build/**",
-    "next-env.d.ts",
+    // Vite build output and the TanStack Router route tree it generates.
+    "dist/**",
+    "src/routeTree.gen.ts",
     // Generated by `bun run theme:build` from src/theme/eneo-theme.ts.
     "src/theme/eneo.js",
     "src/theme/eneo.d.ts",
@@ -59,13 +168,15 @@ const eslintConfig = defineConfig([
   },
   {
     // Block hardcoded human-facing JSX text in app code; route copy through
-    // next-intl messages instead. Accessible names and descriptions in
+    // use-intl messages instead. Accessible names and descriptions in
     // attributes (aria-label, title, alt, placeholder, label, tooltip, …)
     // belong to eneo/no-literal-accessible-name below, so each literal is
     // reported once; this rule checks the text between tags and the other
     // display props.
     files: ["src/**/*.tsx"],
-    ignores: generatedAndVendored,
+    // The last-resort boundary must render when the intl provider itself fails
+    // (migration task eneo-web-next-vite-ded5.6.2, like app/global-error.tsx).
+    ignores: [...generatedAndVendored, "src/components/shell/root-error-boundary.tsx"],
     rules: {
       "eneo/no-hardcoded-text": [
         "error",
@@ -86,10 +197,8 @@ const eslintConfig = defineConfig([
   },
   {
     // Accessibility: WCAG 2.2 AA, see ACCESSIBILITY.md. eslint-plugin-jsx-a11y's
-    // strict set plus two rules it leaves out. eslint-config-next already
-    // registers the `jsx-a11y` plugin (same package, pinned in package.json);
-    // registering it again is a "Cannot redefine plugin" error, so only the
-    // rules are taken from the plugin's config.
+    // strict set plus two rules it leaves out. Plugin registration is shared
+    // above; this block owns the stricter policy for shipped UI.
     //
     // Existing violations are baselined in eslint-suppressions.json and new ones
     // fail `bun run lint`. Fix, don't suppress; after fixing a baselined
@@ -98,7 +207,7 @@ const eslintConfig = defineConfig([
     ignores: notShippedUi,
     settings: {
       "jsx-a11y": {
-        // Astryx `as="…"` renders that element; next/image and next/link are
+        // Astryx `as="…"` renders that element; Image and Link wrappers are
         // checked like <img> and <a>.
         polymorphicPropName: "as",
         components: { Image: "img", Link: "a" }
@@ -133,14 +242,15 @@ const eslintConfig = defineConfig([
       // keyboard (2.1.1), so tabIndex={0} is allowed on role="region" (with an
       // accessible name) and on role="tabpanel" (WAI-ARIA tabs pattern).
       "jsx-a11y/no-noninteractive-tabindex": ["error", { roles: ["tabpanel", "region"], tags: [] }],
-      // Accessible names and descriptions come from next-intl, never literals.
+      // Accessible names and descriptions come from use-intl, never literals.
       "eneo/no-literal-accessible-name": "error"
     }
   },
   {
     // Toasts (2.2.1): errors and warnings stay until the user closes them.
     // src/lib/toast.ts owns that policy, so it and the Toaster are the only
-    // shipped code that talks to sonner.
+    // shipped code that talks to sonner. Loading placeholders (4.1.3):
+    // LoadingState is the only one, a status region with a translated label.
     files: ["src/**/*.{ts,tsx}"],
     ignores: [
       "src/lib/toast.ts",
@@ -157,6 +267,11 @@ const eslintConfig = defineConfig([
               name: "sonner",
               message:
                 "Use `toast` from @/lib/toast: it keeps errors and warnings up until they are closed."
+            },
+            {
+              name: "@/components/ui/skeleton",
+              message:
+                "Use `LoadingState` from @/components/composites/loading-state: it tells screen readers the content is loading."
             }
           ]
         }
@@ -198,9 +313,11 @@ const eslintConfig = defineConfig([
     }
   },
   {
-    // Astryx parts we wrap to work around their gaps (AGENTS.md → Reuse
-    // before you build). A separate rule from no-restricted-imports above, so
-    // neither block replaces the other's options.
+    // Astryx parts we wrap (astryxWrappedImports), and server code. A separate
+    // rule from no-restricted-imports above, so neither block replaces the
+    // other's options. Flat config replaces a rule's options per file instead
+    // of merging them: later restrictions extend this block's `paths`; never
+    // add a competing block with the same rule.
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/components/astryx/**"],
     rules: {
@@ -208,22 +325,8 @@ const eslintConfig = defineConfig([
         "error",
         {
           paths: [
-            {
-              name: "@astryxdesign/core/Switch",
-              message:
-                'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
-            },
-            {
-              name: "@astryxdesign/core/Table",
-              importNames: ["Table"],
-              message:
-                'Use `Table` from "@/components/astryx/table": it must be named, and names its scroll region.'
-            },
-            {
-              name: "@astryxdesign/core/TextInput",
-              message:
-                'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
-            }
+            ...astryxWrappedImports,
+            { name: "server-only", message: "Server behavior belongs to FastAPI." }
           ]
         }
       ]

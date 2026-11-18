@@ -31,12 +31,19 @@ jobs:
         run: |
           uv export --frozen --no-dev --no-emit-project --format requirements-txt --output-file "$RUNNER_TEMP/requirements.txt" >/dev/null
           uvx --from pip-audit==2.10.1 pip-audit --no-deps --disable-pip -r "$RUNNER_TEMP/requirements.txt" --format json -o "$RUNNER_TEMP/backend-audit.json" || echo "pip-audit exited with $?; the report is evaluated next."
+      - name: Load backend advisory severities
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node .github/scripts/fetch-backend-audit-severities.mjs "$RUNNER_TEMP/backend-audit.json" "$RUNNER_TEMP/backend-severities.json"
       - name: Evaluate backend audit
-        run: node .github/scripts/evaluate-backend-audit.mjs "$RUNNER_TEMP/backend-audit.json"
+        run: node .github/scripts/evaluate-backend-audit.mjs "$RUNNER_TEMP/backend-audit.json" "$RUNNER_TEMP/backend-severities.json"
       - name: Install frontend lock without lifecycle scripts
+        id: frontend-install
+        if: ${{ !cancelled() }}
         working-directory: frontend
         run: bun install --frozen-lockfile --ignore-scripts
       - name: Audit frontend dependencies and verify the temporary mitigation
+        if: ${{ !cancelled() && steps.frontend-install.outcome == 'success' }}
         working-directory: frontend
         run: node scripts/audit-dependencies.mjs "$RUNNER_TEMP/frontend-audit.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -45,6 +52,7 @@ jobs:
           name: dependency-security-reports
           path: |
             ${{ runner.temp }}/backend-audit.json
+            ${{ runner.temp }}/backend-severities.json
             ${{ runner.temp }}/frontend-audit.json
           retention-days: 14
 

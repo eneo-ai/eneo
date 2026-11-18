@@ -1,19 +1,21 @@
 // @vitest-environment jsdom
-import { screen } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { fireEvent, screen } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import { KEYBOARD } from "./keyboard-hints";
 import { TextInput } from "./text-input";
 
-function Field({ error }: { error?: string }) {
+function Field({ error, help }: { error?: string; help?: string }) {
   return (
     <>
-      <p id="extra">Kraven</p>
+      <p id="old-help">Kraven</p>
+      <p id="new-help">Nya kraven</p>
       <TextInput
         label="Nytt lösenord"
         description="Minst 12 tecken"
         value=""
         onChange={() => {}}
-        aria-describedby="extra"
+        aria-describedby={help}
         status={error ? { type: "error", message: error } : undefined}
       />
     </>
@@ -25,18 +27,34 @@ const describedBy = () =>
     .split(" ")
     .map((id) => document.getElementById(id)?.textContent);
 
-// Astryx 0.6.4 sets aria-describedby from its own description and status
-// only, over any the caller passes; the wrapper adds the caller's after them.
-// When Astryx keeps the caller's ids, drop the wrapper, its lint rule and this
-// test.
-it("adds the caller's aria-describedby after Astryx's own description and status", () => {
-  const { rerender } = renderInApp(<Field />);
-  expect(describedBy()).toEqual(["Minst 12 tecken", "Kraven"]);
+it("is described by the caller's ids and Astryx's own description and status, never stale ones", () => {
+  const { rerender } = renderInApp(<Field help="old-help" />);
+  expect(describedBy()).toEqual(["Kraven", "Minst 12 tecken"]);
 
-  // Astryx rewrites the attribute when the status appears.
-  rerender(<Field error="Använd minst 12 tecken" />);
-  expect(describedBy()).toEqual(["Minst 12 tecken", "Använd minst 12 tecken", "Kraven"]);
+  rerender(<Field help="old-help" error="Använd minst 12 tecken" />);
+  expect(describedBy()).toEqual(["Kraven", "Minst 12 tecken", "Använd minst 12 tecken"]);
+
+  rerender(<Field help="new-help" />);
+  expect(describedBy()).toEqual(["Nya kraven", "Minst 12 tecken"]);
 
   rerender(<Field />);
-  expect(describedBy()).toEqual(["Minst 12 tecken", "Kraven"]);
+  expect(describedBy()).toEqual(["Minst 12 tecken"]);
+});
+
+it("lets the search key put the keyboard away after running Enter", () => {
+  const onEnter = vi.fn();
+  renderInApp(
+    <TextInput
+      label="Filtrera"
+      value=""
+      onChange={() => {}}
+      onEnter={onEnter}
+      {...KEYBOARD.search}
+    />
+  );
+  const input = screen.getByRole("textbox", { name: "Filtrera" });
+  input.focus();
+  fireEvent.keyDown(input, { key: "Enter" });
+  expect(onEnter).toHaveBeenCalledTimes(1);
+  expect(document.activeElement).not.toBe(input);
 });

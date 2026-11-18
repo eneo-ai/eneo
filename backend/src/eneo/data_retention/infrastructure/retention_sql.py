@@ -1,0 +1,63 @@
+"""SQL building blocks the retention repositories share."""
+
+from __future__ import annotations
+
+from collections.abc import Collection
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql import SQLColumnExpression
+
+from eneo.audit.domain.constants import DEFAULT_RETENTION_DAYS
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.tenant_table import Tenants
+
+
+def uuid_in(
+    column: SQLColumnExpression[UUID] | SQLColumnExpression[UUID | None],
+    values: Collection[UUID],
+) -> sa.ColumnElement[bool]:
+    """`column = ANY(:ids)` with one array bind, whatever the number of ids."""
+    return column == sa.any_(
+        sa.literal(list(values), type_=postgresql.ARRAY(postgresql.UUID(as_uuid=True)))
+    )
+
+
+def outside_widgets() -> sa.ColumnElement[bool]:
+    """A session no widget owns.
+
+    Widget conversations follow their widget's retention, held to the tenant's
+    widget policy, and only widget retention removes them: an assistant, space
+    or tenant rule, or the empty-session grace, would cut them short.
+    """
+    return Sessions.widget_id.is_(None)
+
+
+def question_in_widget() -> sa.ColumnElement[bool]:
+    """A question of a widget conversation; one without a session is not."""
+    return sa.exists().where(Sessions.id == Questions.session_id, ~outside_widgets())
+
+
+def deployment_tenant_id() -> sa.ScalarSelect[UUID]:
+    """The deployment's tenant (docs/adr/single-tenant-assumption.md); a legacy
+    deployment with several uses its first."""
+    return (
+        sa.select(Tenants.id)
+        .order_by(Tenants.created_at, Tenants.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+
+
+def deployment_audit_retention_days() -> sa.ColumnElement[int]:
+    """The deployment's audit retention in days (the default when unset);
+    evaluated once."""
+    return sa.func.coalesce(
+        sa.select(AuditRetentionPolicy.retention_days)
+        .where(AuditRetentionPolicy.tenant_id == deployment_tenant_id())
+        .scalar_subquery(),
+        DEFAULT_RETENTION_DAYS,
+    )

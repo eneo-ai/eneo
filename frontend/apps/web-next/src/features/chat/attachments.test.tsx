@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { API_BASE } from "@/lib/api/base";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { AttachmentPreviewDialog, ComposerAttachments } from "./attachments";
@@ -13,7 +14,7 @@ afterEach(() => {
 
 describe("signed file previews", () => {
   it("shows a proxied PDF through a blob frame and revokes it when closed", async () => {
-    const url = "/api/eneo/api/v1/files/file-1/download/?token=signed-value";
+    const url = `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`;
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(new Response(new Blob(["%PDF"], { type: "application/pdf" })));
@@ -48,7 +49,7 @@ describe("signed file previews", () => {
   });
 
   it("offers a download when the PDF cannot be rendered", async () => {
-    const url = "/api/eneo/api/v1/files/file-1/download/?token=signed-value";
+    const url = `${API_BASE}/api/v1/files/file-1/download/?token=signed-value`;
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 503 }));
     renderInApp(
       <AttachmentPreviewDialog

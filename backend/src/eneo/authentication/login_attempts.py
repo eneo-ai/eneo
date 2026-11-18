@@ -12,7 +12,7 @@ from typing import Any, cast
 import redis.asyncio as aioredis
 import redis.exceptions
 
-from eneo.audit.infrastructure.rate_limiting import (
+from eneo.redis.rate_limit import (
     RateLimitConfig,
     RateLimitServiceUnavailableError,
     check_rate_limit,
@@ -48,16 +48,11 @@ async def count_login_attempt(
     Counting first keeps the limit exact under concurrent requests: an attempt
     that is not allowed never reaches password verification.
     """
-    key = _key(login_name)
-    result = await check_rate_limit(redis_client, key, LOGIN_ATTEMPT_LIMIT)
-    try:
-        ttl = cast(int, await cast(Any, redis_client).ttl(key))
-    except redis.exceptions.RedisError as error:
-        raise RateLimitServiceUnavailableError(error) from error
+    result = await check_rate_limit(redis_client, _key(login_name), LOGIN_ATTEMPT_LIMIT)
     return LoginAttempt(
         allowed=result.allowed,
         remaining=result.remaining,
-        retry_after_seconds=ttl if ttl > 0 else LOGIN_ATTEMPT_LIMIT.window_seconds,
+        retry_after_seconds=result.retry_after_seconds,
     )
 
 

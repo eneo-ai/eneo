@@ -21,8 +21,8 @@ import pytest
 import sqlalchemy as sa
 
 from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.spaces_table import Spaces
-from eneo.database.tables.users_table import Users
 from eneo.help_assistants.domain.helper_kind import HelperKind
 from eneo.main.models import ModelId
 from eneo.roles.role import RoleCreate
@@ -32,8 +32,7 @@ pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
 # ---------------------------------------------------------------------------
-# Helpers — mirror the seed-migration shape so each test gets the system
-# user + assistant prerequisites the router endpoints expect.
+# Helpers — create an existing organization assistant for permission checks.
 # ---------------------------------------------------------------------------
 
 
@@ -49,37 +48,6 @@ async def _get_org_space(
     )
     assert row is not None, "Expected an org-space seeded by add_tenant_user"
     return row
-
-
-async def _insert_system_user(
-    session: sa.ext.asyncio.AsyncSession, *, tenant_id: UUID
-) -> UUID:
-    """Insert a per-tenant system user mirroring the seed migration.
-
-    Uses ``@example.com`` instead of the production ``@eneo.local`` domain
-    because the test-fixture path may surface the row through Pydantic's
-    email validator, which rejects ``.local``. See the precedent set in
-    ``tests/integration/repositories/test_user_repo_system_user_guards.py``.
-    """
-    user_id = uuid4()
-    suffix = user_id.hex[:8]
-    await session.execute(
-        sa.insert(Users).values(
-            id=user_id,
-            email=f"system+{suffix}@example.com",
-            username=f"system+{suffix}",
-            email_verified=False,
-            salt=None,
-            password=None,
-            is_active=False,
-            state=UserState.INACTIVE.value,
-            used_tokens=0,
-            tenant_id=tenant_id,
-            quota_limit=None,
-            is_system_user=True,
-        )
-    )
-    return user_id
 
 
 async def _insert_assistant(
@@ -108,10 +76,9 @@ async def _insert_assistant(
 async def _seed_assistant_in_org_space(
     container, admin_user, *, name: str | None = None
 ) -> UUID:
-    """Insert system user + an assistant in the tenant's org-space."""
+    """Insert an assistant in the tenant's org-space."""
     session = container.session()
     org_space_id = await _get_org_space(session, tenant_id=admin_user.tenant_id)
-    await _insert_system_user(session, tenant_id=admin_user.tenant_id)
     assistant_id = await _insert_assistant(
         session, owner_user_id=admin_user.id, space_id=org_space_id, name=name
     )
@@ -264,3 +231,57 @@ async def test_get_active_returns_null_when_unassigned(
     )
     assert resp.status_code == 200, resp.text
     assert resp.json() is None
+
+
+@pytest.mark.parametrize(
+    "create_tenant", [False, True], ids=["bootstrap", "sysadmin-created"]
+)
+async def test_install_provisions_missing_system_owner(
+    client, db_container, admin_user, admin_token, super_admin_token, create_tenant
+):
+    tenant_id = admin_user.tenant_id
+    token = admin_token
+    if create_tenant:
+        response = await client.post(
+            "/api/v1/sysadmin/tenants/",
+            headers={"X-API-Key": super_admin_token},
+            json={"name": f"helper-owner-{uuid4()}", "state": "active"},
+        )
+        assert response.status_code == 200, response.text
+        tenant_id = UUID(response.json()["id"])
+        async with db_container() as container:
+            owner_role = await container.session().scalar(
+                sa.select(Roles.id).where(
+                    Roles.tenant_id == tenant_id, Roles.predefined_source == "Owner"
+                )
+            )
+            assert owner_role is not None
+            user = await container.user_repo().add(
+                UserAdd(
+                    email=f"helper-admin-{uuid4()}@example.com",
+                    username="Helper admin",
+                    state=UserState.ACTIVE,
+                    tenant_id=tenant_id,
+                    roles=[ModelId(id=owner_role)],
+                )
+            )
+            token = container.auth_service().create_access_token_for_user(user)
+
+    async with db_container() as container:
+        assert (
+            await container.user_repo().get_system_user_id_for_tenant(tenant_id) is None
+        )
+
+    response = await client.post(
+        "/api/v1/admin/help-assistants/roles/prompt_guide/",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 201, response.text
+    async with db_container() as container:
+        owner_id = await container.user_repo().get_system_user_id_for_tenant(tenant_id)
+        assert owner_id is not None
+        assistant = await container.session().get(
+            Assistants, UUID(response.json()["assistant_id"])
+        )
+        assert assistant is not None
+        assert assistant.user_id == owner_id

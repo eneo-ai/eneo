@@ -2,9 +2,10 @@
 
 Runs at stack startup (after init_db). Creates a model provider whose
 `endpoint` points at the in-network mock, and on it a default completion model
-and a default embedding model: the personal chat resolves a working,
-deterministic model, and a new space starts with the embedding model its
-knowledge collections need, as with a real organisation's default. Idempotent:
+a default embedding model and a default transcription model: the personal chat
+resolves a working, deterministic model, and a new space starts with the
+embedding model its knowledge collections need and the transcription model an
+app needs to be created, as with a real organisation's defaults. Idempotent:
 each row is created only when missing, so a rerun also completes a database
 seeded by an older version of this script.
 
@@ -20,7 +21,11 @@ import asyncio
 from sqlalchemy import select
 
 from eneo.database.database import sessionmanager
-from eneo.database.tables.ai_models_table import CompletionModels, EmbeddingModels
+from eneo.database.tables.ai_models_table import (
+    CompletionModels,
+    EmbeddingModels,
+    TranscriptionModels,
+)
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.config import get_settings
@@ -33,6 +38,7 @@ PROVIDER_NAME = "E2E Mock Provider"
 API_KEY = "test-key"
 MODEL_NAME = "e2e-mock"
 EMBEDDING_MODEL_NAME = "e2e-mock-embedding"
+TRANSCRIPTION_MODEL_NAME = "e2e-mock-transcription"
 
 
 async def main() -> None:
@@ -83,7 +89,9 @@ async def main() -> None:
             done.append("encrypted the E2E mock provider's key")
         provider_id = provider.id
 
-        async def add_if_missing(model: CompletionModels | EmbeddingModels, kind: str):
+        async def add_if_missing(
+            model: CompletionModels | EmbeddingModels | TranscriptionModels, kind: str
+        ):
             table = type(model)
             existing = await session.execute(
                 select(table.id).where(
@@ -138,6 +146,26 @@ async def main() -> None:
                 is_default=True,
             ),
             "default embedding model",
+        )
+        # The backend refuses to create an app in a space without one. Runs in
+        # the e2e stack stay queued (no worker), so the mock never transcribes.
+        await add_if_missing(
+            TranscriptionModels(
+                name=TRANSCRIPTION_MODEL_NAME,
+                model_name=TRANSCRIPTION_MODEL_NAME,
+                nickname="E2E Mock Transcription",
+                open_source=False,
+                family="openai",
+                stability="stable",
+                hosting="usa",
+                org="OpenAI",
+                base_url=MOCK_ENDPOINT,
+                tenant_id=tenant_id,
+                provider_id=provider_id,
+                is_enabled=True,
+                is_default=True,
+            ),
+            "default transcription model",
         )
 
     for item in done:

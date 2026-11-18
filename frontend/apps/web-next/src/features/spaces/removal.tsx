@@ -1,7 +1,5 @@
-"use client";
-
 import { useMutation, type MutationKey } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { createContext, use, useMemo, useRef, type RefObject } from "react";
 import { toastApiError } from "@/lib/api/toast";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
@@ -63,7 +61,7 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
   /** For a page that must tell its own removal from the item vanishing otherwise. */
   mutationKey?: MutationKey;
   mutationFn: (variables: TVariables) => Promise<TData>;
-  refresh: () => Promise<unknown>;
+  refresh: (variables: TVariables) => Promise<unknown>;
   onRemoved?: (data: TData, variables: TVariables) => void;
   onError?: (error: Error) => void;
   /** For a list that owns the mutation itself (so no scope is above it). */
@@ -84,7 +82,7 @@ export function useRemovalMutation<TData = unknown, TVariables = void>({
       neighbour.current = focusAfterRemoval(anchor?.current ?? null);
     },
     onSuccess: async (data, variables) => {
-      await refresh();
+      await refresh(variables);
       onRemoved?.(data, variables);
       const next = neighbour.current;
       // Keep the fallback on this page if it unmounts before the delayed checks.

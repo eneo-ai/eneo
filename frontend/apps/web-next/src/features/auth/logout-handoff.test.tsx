@@ -1,0 +1,117 @@
+// @vitest-environment jsdom
+import { StrictMode } from "react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { renderInApp } from "@/test/render";
+import { navigateTo } from "@/lib/navigate-to";
+import { getSessionSnapshot, handleRefusal } from "@/lib/api/refusal";
+import { LogoutHandoff, logoutTarget } from "./logout-handoff";
+
+vi.mock("@/lib/navigate-to", () => ({ navigateTo: vi.fn() }));
+vi.mock("@/lib/api/refusal", () => ({
+  SESSION_GENERATION_HEADER: "Eneo-Session-Generation",
+  getSessionSnapshot: vi.fn(),
+  handleRefusal: vi.fn()
+}));
+const fetchMock = vi.fn<typeof fetch>();
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.stubGlobal("fetch", fetchMock);
+  vi.mocked(getSessionSnapshot).mockReturnValue({ status: "bound", generation: "generation-a" });
+});
+afterEach(() => vi.unstubAllGlobals());
+
+it.each([
+  [{}, "/login?message=logout"],
+  [{ reason: "expired", next: "/admin" }, "/login?message=expired"],
+  [{ reason: "password_changed", next: "/admin" }, "/login?message=password_changed&next=%2Fadmin"],
+  [{ reason: "password_changed", next: "https://evil.example" }, "/login?message=password_changed"]
+])("keeps logout continuation within the app: %j", (search, target) => {
+  expect(logoutTarget(search)).toBe(target);
+});
+
+it.each(["/login", "/login?message=logout"])(
+  "posts once under StrictMode before replacing the document with %s",
+  async (target) => {
+    fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    renderInApp(
+      <StrictMode>
+        <LogoutHandoff target={target} />
+      </StrictMode>
+    );
+    await waitFor(() =>
+      expect(navigateTo).toHaveBeenCalledExactlyOnceWith(target, { replace: true })
+    );
+    expect(fetchMock).toHaveBeenCalledExactlyOnceWith("/api/v1/auth/session/logout/", {
+      method: "POST",
+      credentials: "same-origin",
+      redirect: "error",
+      headers: { "Eneo-Session-Generation": "generation-a" }
+    });
+    expect(handleRefusal).not.toHaveBeenCalled();
+  }
+);
+
+it.each([403, 503, "network"])("keeps a failed logout visible (%s)", async (failure) => {
+  if (failure === "network") fetchMock.mockRejectedValue(new TypeError("Offline"));
+  else fetchMock.mockResolvedValue(new Response(null, { status: Number(failure) }));
+  renderInApp(<LogoutHandoff target="/login" />);
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(navigateTo).not.toHaveBeenCalled();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");
+});
+
+it("keeps the person signed in when the server cannot end the session (503)", async () => {
+  // The real session owner: a 503 must neither expire nor replace the session.
+  const real = await vi.importActual<typeof import("@/lib/api/refusal")>("@/lib/api/refusal");
+  window.history.replaceState({}, "", "/logout");
+  fetchMock.mockResolvedValueOnce(
+    new Response(null, { status: 204, headers: { "Eneo-Session-Generation": "generation-a" } })
+  );
+  await real.initializeBrowserSession();
+  vi.mocked(getSessionSnapshot).mockImplementation(real.getSessionSnapshot);
+  vi.mocked(handleRefusal).mockImplementation(real.handleRefusal);
+  fetchMock.mockResolvedValueOnce(
+    Response.json(
+      { code: "sign_out_unavailable", message: "Sign-out could not be completed. Try again." },
+      { status: 503 }
+    )
+  );
+
+  renderInApp(<LogoutHandoff target="/login" />);
+
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");
+  expect(handleRefusal).toHaveBeenCalledOnce();
+  expect(real.getSessionSnapshot()).toEqual({ status: "bound", generation: "generation-a" });
+  expect(real.getSessionSignal().aborted).toBe(false);
+  expect(navigateTo).not.toHaveBeenCalled();
+});
+
+it("never clears a newer cookie from a stale bound document", async () => {
+  vi.mocked(getSessionSnapshot).mockReturnValue({ status: "stale", destination: "/deactivated" });
+  renderInApp(<LogoutHandoff target="/login" />);
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(navigateTo).not.toHaveBeenCalled();
+});
+
+it("clears what was typed in a chat once the session is over, and keeps it if signing out failed", async () => {
+  sessionStorage.setItem(
+    "eneo:chat-draft:tenant-1.user-1|assistant:a1:new",
+    "en halvskriven fråga"
+  );
+  fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+  renderInApp(<LogoutHandoff target="/login" />);
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(sessionStorage.getItem("eneo:chat-draft:tenant-1.user-1|assistant:a1:new")).toBe(
+    "en halvskriven fråga"
+  );
+
+  cleanup();
+  fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+  renderInApp(<LogoutHandoff target="/login" />);
+  await waitFor(() => expect(navigateTo).toHaveBeenCalledWith("/login", { replace: true }));
+  expect(sessionStorage.getItem("eneo:chat-draft:tenant-1.user-1|assistant:a1:new")).toBeNull();
+});

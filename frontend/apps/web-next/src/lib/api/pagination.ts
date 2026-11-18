@@ -15,13 +15,18 @@ export interface CursorPage<T> {
   previous_cursor?: string | null;
 }
 
-/** `getNextPageParam` for useInfiniteQuery over a cursor-paginated endpoint. */
-export function nextPageCursor(lastPage: CursorPage<unknown>): string | undefined {
+/**
+ * `getNextPageParam` for useInfiniteQuery over a cursor-paginated endpoint
+ * (any page with `next_cursor`, also one without `total_count`).
+ */
+export function nextPageCursor(
+  lastPage: Pick<CursorPage<unknown>, "next_cursor">
+): string | undefined {
   return lastPage.next_cursor ?? undefined;
 }
 
 /** Flattens infinite-query pages into a single item list. */
-export function flattenPages<T>(pages: CursorPage<T>[] | undefined): T[] {
+export function flattenPages<T>(pages: Pick<CursorPage<T>, "items">[] | undefined): T[] {
   return pages?.flatMap((page) => page.items) ?? [];
 }
 

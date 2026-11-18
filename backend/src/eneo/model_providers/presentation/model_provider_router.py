@@ -50,6 +50,10 @@ from eneo.model_providers.domain.outbound_headers import (
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
 )
+from eneo.model_providers.infrastructure.provider_type_support import (
+    bucket_placements,
+    is_supported_provider_type,
+)
 from eneo.model_providers.presentation.model_provider_models import (
     DynamicValuePublic,
     FavoriteProvidersUpdate,
@@ -322,6 +326,9 @@ async def get_provider_capabilities(
 
     # Collect all models per provider per mode with metadata
     model_cost = cast(dict[str, ModelCostInfo], getattr(litellm, "model_cost"))
+    placements = bucket_placements(
+        cast(dict[str, list[str]], getattr(litellm, "models_by_provider"))
+    )
     raw: dict[str, dict[str, dict[str, ModelCapability]]] = defaultdict(
         lambda: defaultdict(dict)
     )
@@ -374,6 +381,10 @@ async def get_provider_capabilities(
 
         # Map to canonical provider type (e.g. "vllm" -> "hosted_vllm")
         provider = get_canonical_provider_type(raw_provider) if raw_provider else ""
+        if provider and not is_supported_provider_type(provider):
+            # A pricing bucket such as "bedrock_converse": offer the row under
+            # the provider that routes it, or not at all.
+            provider = placements.get(model_key, "")
 
         # The route is built as "<provider_type>/<name>" (resolve_model_route),
         # so a name that keeps the provider's own prefix would be sent as
@@ -436,7 +447,7 @@ async def get_provider_capabilities(
     # Ensure providers with custom field definitions are always present
     # (e.g. hosted_vllm, which is self-hosted and has no static models in LiteLLM)
     for provider_type in PROVIDER_FIELD_DEFINITIONS:
-        if provider_type not in providers:
+        if provider_type not in providers and is_supported_provider_type(provider_type):
             providers[provider_type] = {
                 # Self-hosted providers can host any model type
                 "modes": sorted(set(mode_map.values())),

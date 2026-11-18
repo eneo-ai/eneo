@@ -13,19 +13,26 @@ def resolve_client_ip(
     trusted_proxy_count: int,
     trusted_proxy_headers: list[str],
 ) -> str | None:
+    client = request.client
     if trusted_proxy_count > 0:
         forwarded_for = _get_header(request, trusted_proxy_headers, "x-forwarded-for")
         if forwarded_for:
             parts = [part.strip() for part in forwarded_for.split(",") if part.strip()]
-            if len(parts) > trusted_proxy_count:
-                return _validate_ip(parts[-(trusted_proxy_count + 1)])
+            # Each proxy appends the address it accepted the connection from,
+            # so the last `trusted_proxy_count` entries were written by the
+            # trusted hops and the earliest of those names the client. Any
+            # entry before them came with the request and may be forged.
+            if len(parts) >= trusted_proxy_count:
+                return _validate_ip(parts[-trusted_proxy_count])
+            # Fewer entries than trusted hops: the request did not pass through
+            # them all, so only the socket peer is known to be real.
+            return _validate_ip(client.host) if client else None
 
         # x-real-ip is commonly set by reverse proxies to the original client IP.
         real_ip = _get_header(request, trusted_proxy_headers, "x-real-ip")
         if real_ip:
             return _validate_ip(real_ip.strip())
 
-    client = request.client
     return _validate_ip(client.host) if client else None
 
 

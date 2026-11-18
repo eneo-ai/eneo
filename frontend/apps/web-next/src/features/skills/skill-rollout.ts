@@ -4,48 +4,86 @@ import type { Schema } from "@/lib/api/models";
 
 type Adoption = Schema<"SkillAdoptionProjectionPagePublic">;
 export type RolloutScope = { assistants: boolean; apps: boolean };
+export type RolloutReason =
+  Schema<"AssistantPinAdvanceIncompatibleReason"> | Schema<"AppPinAdvanceIncompatibleReason">;
+type PhaseStatus = "pending" | "running" | "completed" | "stopped" | "failed";
+export type RolloutPhase = {
+  status: PhaseStatus;
+  cursor: string | null;
+  updated: number;
+  total: number;
+  concurrent: number;
+  incompatible: number;
+  reasons: Partial<Record<RolloutReason, number>>;
+  error: unknown;
+};
 export type RolloutProgress = {
+  revisionId: string;
   status: "running" | "completed" | "stopped" | "failed";
   stage: "assistants" | "apps" | "done";
-  assistants: number;
-  apps: number;
-  incompatible: number;
-  concurrent: number;
+  assistants: RolloutPhase | null;
+  apps: RolloutPhase | null;
   personalChat: "pending" | "advanced" | "failed" | "not_applicable";
+  stopRequested: boolean;
 };
 
 export function initialRollout(
   scope: RolloutScope,
   adoption: Adoption | null,
-  revisionId: string
+  revisionId: string,
+  previous?: RolloutProgress | null
 ): RolloutProgress {
   const pinned = adoption?.summary?.personal_chat?.revision_id;
+  const personalChat =
+    !scope.assistants || pinned === revisionId
+      ? "not_applicable"
+      : pinned
+        ? "pending"
+        : adoption
+          ? "not_applicable"
+          : "failed";
+  if (previous?.revisionId === revisionId) {
+    return {
+      ...previous,
+      status: "running",
+      stopRequested: false,
+      personalChat: previous.personalChat === "advanced" ? "advanced" : personalChat
+    };
+  }
+  const phase = (kind: "assistant_count" | "app_count"): RolloutPhase => ({
+    status: "pending",
+    cursor: null,
+    updated: 0,
+    concurrent: 0,
+    incompatible: 0,
+    reasons: {},
+    error: null,
+    total:
+      adoption?.summary?.revision_counts.reduce(
+        (sum, revision) => sum + (revision.revision_id === revisionId ? 0 : revision[kind]),
+        0
+      ) ?? 0
+  });
   return {
+    revisionId,
     status: "running",
     stage: scope.assistants ? "assistants" : scope.apps ? "apps" : "done",
-    assistants: 0,
-    apps: 0,
-    incompatible: 0,
-    concurrent: 0,
-    personalChat:
-      !scope.assistants || pinned === revisionId
-        ? "not_applicable"
-        : pinned
-          ? "pending"
-          : adoption
-            ? "not_applicable"
-            : "failed"
+    assistants: scope.assistants ? phase("assistant_count") : null,
+    apps: scope.apps ? phase("app_count") : null,
+    stopRequested: false,
+    personalChat
   };
 }
 
-/** The server processes one bounded page at a time and skips bindings already at the target version. */
+/** Counts describe one committed page. Keep its next cursor and completed phases for explicit resume. */
 export async function advancePublishedBindings({
   skillId,
   revisionId,
   adoption,
   scope,
   stopped,
-  onProgress
+  onProgress,
+  resume
 }: {
   skillId: string;
   revisionId: string;
@@ -53,11 +91,13 @@ export async function advancePublishedBindings({
   scope: RolloutScope;
   stopped: () => boolean;
   onProgress: (update: Partial<RolloutProgress>) => void;
+  resume?: RolloutProgress | null;
 }): Promise<"completed" | "stopped" | "failed"> {
+  const state = initialRollout(scope, adoption, revisionId, resume);
   const path = { skill_id: skillId };
   const pinned = adoption?.summary?.personal_chat?.revision_id;
   const personalChat =
-    scope.assistants && pinned && pinned !== revisionId
+    scope.assistants && pinned && pinned !== revisionId && state.personalChat !== "advanced"
       ? unwrap(
           browserApi.POST("/api/v1/skills/organization/{skill_id}/personal-chat/advance/", {
             params: { path },
@@ -72,52 +112,63 @@ export async function advancePublishedBindings({
         )
       : Promise.resolve();
   let outcome: "completed" | "stopped" | "failed" = "completed";
-  try {
-    if (scope.assistants) {
-      let cursor: string | null = null;
+  for (const kind of ["assistants", "apps"] as const) {
+    let phase = state[kind];
+    if (!phase || phase.status === "completed") continue;
+    const report = (next: RolloutPhase) => {
+      phase = next;
+      state[kind] = next;
+      onProgress(
+        kind === "assistants" ? { stage: kind, assistants: next } : { stage: kind, apps: next }
+      );
+    };
+    try {
       do {
         if (stopped()) {
+          report({ ...phase, status: "stopped" });
           outcome = "stopped";
           break;
         }
-        const chunk: Schema<"AssistantFleetAdvancePublic"> = await unwrap(
-          browserApi.POST("/api/v1/skills/organization/{skill_id}/assistants/advance/", {
-            params: { path },
-            body: { expected_published_revision_id: revisionId, cursor }
-          })
-        );
-        onProgress({
-          assistants: chunk.counts.advanced,
-          concurrent: chunk.counts.concurrent_change,
-          incompatible: chunk.counts.incompatible
-        });
-        cursor = chunk.next_cursor ?? null;
-      } while (cursor);
-    }
-    if (outcome === "completed" && scope.apps) {
-      onProgress({ stage: "apps" });
-      let cursor: string | null = null;
-      do {
-        if (stopped()) {
-          outcome = "stopped";
-          break;
+        report({ ...phase, status: "running", error: null });
+        const body = { expected_published_revision_id: revisionId, cursor: phase.cursor };
+        const chunk =
+          kind === "assistants"
+            ? await unwrap(
+                browserApi.POST("/api/v1/skills/organization/{skill_id}/assistants/advance/", {
+                  params: { path },
+                  body
+                })
+              )
+            : await unwrap(
+                browserApi.POST("/api/v1/skills/organization/{skill_id}/apps/advance/", {
+                  params: { path },
+                  body
+                })
+              );
+        const reasons = { ...phase.reasons };
+        for (const item of chunk.outcomes) {
+          if (item.outcome === "incompatible" && item.reason)
+            reasons[item.reason] = (reasons[item.reason] ?? 0) + 1;
         }
-        const chunk: Schema<"AppFleetAdvancePublic"> = await unwrap(
-          browserApi.POST("/api/v1/skills/organization/{skill_id}/apps/advance/", {
-            params: { path },
-            body: { expected_published_revision_id: revisionId, cursor }
-          })
-        );
-        onProgress({
-          apps: chunk.counts.advanced,
-          concurrent: chunk.counts.concurrent_change,
-          incompatible: chunk.counts.incompatible
+        const updated = phase.updated + chunk.counts.advanced;
+        const concurrent = phase.concurrent + chunk.counts.concurrent_change;
+        const incompatible = phase.incompatible + chunk.counts.incompatible;
+        report({
+          ...phase,
+          reasons,
+          updated,
+          concurrent,
+          incompatible,
+          total: Math.max(phase.total, updated + concurrent + incompatible),
+          cursor: chunk.next_cursor ?? null,
+          status: chunk.next_cursor ? "running" : "completed"
         });
-        cursor = chunk.next_cursor ?? null;
-      } while (cursor);
+      } while (phase.cursor);
+    } catch (error) {
+      report({ ...phase, status: "failed", error });
+      outcome = "failed";
     }
-  } catch {
-    outcome = "failed";
+    if (outcome !== "completed") break;
   }
   await personalChat;
   onProgress({ status: outcome, stage: "done" });

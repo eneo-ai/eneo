@@ -37,6 +37,40 @@ describe("PanelContentsList uploads", () => {
     expect(within(section).getAllByRole("listitem")).toHaveLength(2);
   });
 
+  it("keeps question groups, file filtering and preview identity together", () => {
+    const uploads = Array.from({ length: 9 }, (_, index) => file(index + 1, "pdf"));
+    const onFile = vi.fn();
+    renderInApp(
+      <PanelContentsList
+        panel={new SidePanelStore(() => Promise.resolve("/file"))}
+        contents={{
+          views: [],
+          documents: [],
+          uploads,
+          uploadGroups: [
+            { key: "q1", ordinal: 1, files: uploads.slice(0, 4) },
+            { key: "q3", ordinal: 3, files: uploads.slice(4) }
+          ]
+        }}
+        onFile={onFile}
+        onView={vi.fn()}
+        focusSection="uploads"
+      />
+    );
+    const first = screen.getByRole("region", { name: "Fråga 1" });
+    expect(within(first).getAllByRole("listitem")).toHaveLength(4);
+    expect(document.activeElement?.textContent).toContain("Uppladdade filer");
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera filer…" }), {
+      target: { value: "Fil 8" }
+    });
+    expect(screen.queryByRole("region", { name: "Fråga 1" })).toBeNull();
+    const third = screen.getByRole("region", { name: "Fråga 3" });
+    expect(within(third).getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(within(third).getByRole("button", { name: "Förhandsgranska Fil 8.pdf" }));
+    expect(onFile).toHaveBeenCalledWith(uploads[7]);
+    expect(within(third).getByRole("button", { name: /Ladda ner Fil 8.pdf/ })).toBeTruthy();
+  });
+
   it("filters a long upload list by name and by type", async () => {
     const uploads = Array.from({ length: 9 }, (_, index) =>
       file(index + 1, index < 7 ? "pdf" : "txt")

@@ -17,7 +17,10 @@ from eneo.authentication.endpoint_access import (
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
-from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
+from eneo.server.dependencies.auth_definitions import (
+    OAUTH2_SCHEME,
+    is_api_key_request,
+)
 from eneo.server.dependencies.container import get_container
 from eneo.tenants.tenant import TenantState
 from eneo.users.user import UserInDB, UserState
@@ -324,8 +327,7 @@ def require_resource_permission(
         key = getattr(request.state, "api_key", None)
         if key is None:
             # Check if an API key header was provided but auth didn't run
-            header_name = get_settings().api_key_header_name
-            if request.headers.get(header_name):
+            if is_api_key_request(request.headers, get_settings()):
                 logger.error(
                     "API key header present but request.state.api_key missing — "
                     "auth dependency may not have run before resource permission guard",

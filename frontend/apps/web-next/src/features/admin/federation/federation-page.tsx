@@ -1,0 +1,625 @@
+import { Banner } from "@astryxdesign/core/Banner";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { Button } from "@astryxdesign/core/Button";
+import { Heading } from "@astryxdesign/core/Heading";
+import { Link } from "@astryxdesign/core/Link";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
+import { Text } from "@astryxdesign/core/Text";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { KeyRound } from "lucide-react";
+import { useLocale, useTranslations } from "use-intl";
+import { useId, useRef, useState, type SubmitEvent } from "react";
+import { TextInput } from "@/components/astryx/text-input";
+import { useAppContext } from "@/components/providers/app-context";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
+import { EmptyState } from "@/components/composites/empty-state";
+import { revealProblems } from "@/components/composites/field-problem";
+import { PageHeader } from "@/components/composites/page-header";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
+import { browserApi } from "@/lib/api/browser";
+import { EneoApiError } from "@/lib/api/errors";
+import { docsUrl } from "@/lib/docs";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { ClientSecretField } from "./client-secret-field";
+import {
+  FEDERATION_KEY,
+  federationErrorKey,
+  federationQueryOptions,
+  patchFederation,
+  type FederationPatch,
+  type FederationView
+} from "./federation";
+import {
+  changedFields,
+  consequences,
+  domainChange,
+  draftFromView,
+  FEDERATION_FIELDS,
+  parseDomains,
+  RISKY,
+  toPatch,
+  validate,
+  type Consequence,
+  type FederationDraft,
+  type FederationField
+} from "./federation-draft";
+import { RedirectUris } from "./redirect-uris";
+
+const CARD = "bg-ax-card border-ax-border rounded-ax-container border";
+
+/**
+ * The organisation's sign-in (SSO) settings for its admins. The operator
+ * registers the identity provider; here an admin reads it, copies the
+ * redirect URIs and changes the label, client ID, secret and allowed domains
+ * in one confirmed save (no autosave: an IdP change is applied atomically).
+ */
+export function FederationPage() {
+  const t = useTranslations();
+  const query = useQuery(federationQueryOptions(browserApi));
+  const disabled =
+    query.error instanceof EneoApiError && query.error.reason === "federation_disabled";
+
+  return (
+    <div className="flex w-full max-w-3xl flex-col gap-6">
+      <PageHeader
+        title={t("federation_admin_title")}
+        description={t("federation_admin_description")}
+        tour="admin-federation"
+      />
+      {disabled ? (
+        <ManagedByOperator />
+      ) : (
+        <QueryStateBoundary
+          query={query}
+          rows={6}
+          loadingLabel={t("federation_admin_loading")}
+          errorTitle={t("federation_admin_load_error")}
+        >
+          {(view) =>
+            view.configured ? (
+              <FederationForm
+                view={view}
+                reload={async () => {
+                  // A failed refetch keeps the cached (stale) data: no reload.
+                  const result = await query.refetch();
+                  return result.isSuccess ? result.data : undefined;
+                }}
+              />
+            ) : (
+              <NotConfigured />
+            )
+          }
+        </QueryStateBoundary>
+      )}
+    </div>
+  );
+}
+
+function NotConfigured() {
+  const t = useTranslations();
+  return (
+    <EmptyState
+      icon={<KeyRound />}
+      title={t("federation_admin_not_configured_title")}
+      description={t("federation_admin_not_configured_description")}
+      actions={
+        <GuideLink anchor="configure-via-api">
+          {t("federation_admin_register_guide_link")}
+        </GuideLink>
+      }
+    />
+  );
+}
+
+/** Sign-in still set in the server configuration: nothing to change here yet. */
+function ManagedByOperator() {
+  const t = useTranslations();
+  return (
+    <EmptyState
+      icon={<KeyRound />}
+      title={t("federation_admin_disabled_title")}
+      description={t("federation_admin_disabled_description")}
+      actions={
+        <GuideLink anchor="move-the-settings-into-eneo">
+          {t("federation_admin_guide_link")}
+        </GuideLink>
+      }
+    />
+  );
+}
+
+/** Whether newcomers in the allowed domains get an account; the switch is on the settings page. */
+function ProvisioningState({ id, hasDomains }: { id: string; hasDomains: boolean }) {
+  const t = useTranslations();
+  const { settings } = useAppContext();
+  // Account creation also needs domains to match (the sign-in refuses it with an empty list).
+  const state = !settings.provisioning
+    ? "federation_admin_jit_off"
+    : hasDomains
+      ? "federation_admin_jit_on"
+      : "federation_admin_jit_no_domains";
+  return (
+    <Text type="supporting" id={id}>
+      <span>{t(state)}</span>{" "}
+      <Link href="/admin/settings" hasUnderline>
+        {t("federation_admin_jit_link", { setting: t("enable_provisioning") })}
+      </Link>
+    </Text>
+  );
+}
+
+/** A section of the single-tenant sign-in guide, in a new tab. */
+function GuideLink({ anchor, children }: { anchor: string; children: string }) {
+  const t = useTranslations();
+  const locale = useLocale();
+  return (
+    <Link
+      href={docsUrl("guides/oidc-federation/single-tenant", locale, anchor)}
+      isExternalLink
+      hasUnderline
+      newTabLabel={t("chat_opens_in_new_tab")}
+      className="inline-flex min-h-6 items-center self-start pointer-coarse:min-h-11"
+    >
+      {children}
+    </Link>
+  );
+}
+
+function OperatorOwned({ view }: { view: FederationView }) {
+  const t = useTranslations();
+  const headingId = useId();
+  return (
+    <section aria-labelledby={headingId} className={CARD}>
+      <div className="border-ax-border flex flex-col gap-1 border-b px-5 py-4">
+        <Heading level={2} id={headingId} className="text-base">
+          {t("federation_admin_operator_owned")}
+        </Heading>
+        <Text type="supporting">{t("federation_admin_operator_owned_help")}</Text>
+      </div>
+      <div className="px-5 py-4">
+        <MetadataList label={{ position: "top" }}>
+          <MetadataListItem label={t("federation_admin_discovery")}>
+            <span className="break-all">{view.discovery_endpoint ?? "—"}</span>
+          </MetadataListItem>
+          <MetadataListItem label={t("federation_admin_issuer")}>
+            <span className="break-all">{view.issuer ?? "—"}</span>
+          </MetadataListItem>
+          <MetadataListItem label={t("federation_admin_redirects")}>
+            <RedirectUris
+              uris={view.redirect_uris ?? []}
+              unavailable={view.redirect_uris_problem != null}
+            />
+          </MetadataListItem>
+          <MetadataListItem label={t("federation_admin_scopes")}>
+            {(view.scopes ?? []).join(" ") || "—"}
+          </MetadataListItem>
+          <MetadataListItem label={t("federation_admin_token_auth")}>
+            {view.token_endpoint_auth_method ?? "—"}
+          </MetadataListItem>
+        </MetadataList>
+      </div>
+    </section>
+  );
+}
+
+function FederationForm({
+  view,
+  reload
+}: {
+  view: FederationView;
+  /** Reads the settings again: another admin's values after a conflict. */
+  reload: () => Promise<FederationView | undefined>;
+}) {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const queryClient = useQueryClient();
+  const headingId = useId();
+  const provisioningId = useId();
+  // The settings the draft was made from; a background refetch does not
+  // replace what the admin is editing (a stale save answers 409 instead).
+  const [base, setBase] = useState(view);
+  const [draft, setDraft] = useState<FederationDraft>(() => draftFromView(view));
+  const [submitted, setSubmitted] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  // What the open dialog lists, fixed when it opens: a save resets the draft.
+  const [confirmation, setConfirmation] = useState<{
+    lines: string[];
+    effects: string[];
+    risky: boolean;
+  }>({ lines: [], effects: [], risky: false });
+  // A Save with nothing changed says so instead of doing nothing silently.
+  const [nothingToSave, setNothingToSave] = useState(false);
+  // After a save that changed who can sign in: suggest trying it.
+  const [suggestTest, setSuggestTest] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const [reloading, setReloading] = useState(false);
+  const [saveError, setSaveError] = useState<unknown>(null);
+  const [serverProblems, setServerProblems] = useState<Partial<Record<FederationField, string>>>(
+    {}
+  );
+  const providerRef = useRef<HTMLInputElement>(null);
+  const clientIdRef = useRef<HTMLInputElement>(null);
+  const secretRef = useRef<HTMLInputElement>(null);
+  const domainsRef = useRef<HTMLTextAreaElement>(null);
+  const replaceSecretRef = useRef<HTMLButtonElement>(null);
+  const saveRef = useRef<HTMLButtonElement>(null);
+  const rescueFocus = useFocusRescue();
+
+  const changed = changedFields(base, draft);
+  const problems = validate(draft);
+  const problemFor = (field: FederationField) => {
+    const own = submitted ? problems[field] : undefined;
+    if (own) return t(own.key, own.values);
+    return serverProblems[field] ?? null;
+  };
+  const status = (field: FederationField) => {
+    const problem = problemFor(field);
+    return problem ? { type: "error" as const, message: problem } : undefined;
+  };
+  const saveState =
+    changed.length > 0
+      ? t("federation_admin_unsaved", {
+          fields: changed.map((field) => t(FIELD_LABEL_KEYS[field])).join(", ")
+        })
+      : nothingToSave
+        ? t("federation_admin_nothing_to_save")
+        : null;
+  useAnnounceChange(saveState);
+
+  function edit(field: FederationField, changes: Partial<FederationDraft>) {
+    setDraft((current) => ({ ...current, ...changes }));
+    setNothingToSave(false);
+    setSuggestTest(false);
+    setServerProblems((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function startFrom(next: FederationView) {
+    setBase(next);
+    setDraft(draftFromView(next));
+    setSubmitted(false);
+    setServerProblems({});
+    setSaveError(null);
+  }
+
+  // The body holds the secret.
+  const save = useSecretMutation({
+    mutationFn: (body: FederationPatch) => patchFederation(browserApi, body),
+    onSuccess: (saved) => {
+      queryClient.setQueryData(FEDERATION_KEY, saved);
+      void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
+      startFrom(saved);
+      setSuggestTest(confirmation.risky);
+      setConfirming(false);
+      // A save from the secret field removes it; the dialog's focus return
+      // then has nothing to go to. "Byt hemlighet" stands in its place.
+      rescueFocus(() => replaceSecretRef.current);
+      announce(
+        confirmation.risky
+          ? `${t("federation_admin_saved")} ${t("federation_admin_saved_next_step")}`
+          : t("federation_admin_saved")
+      );
+    },
+    onError: (error) => {
+      setConfirming(false);
+      const reason = error instanceof EneoApiError ? error.reason : undefined;
+      if (reason === "federation_config_revision_conflict") {
+        setConflict(true);
+        return;
+      }
+      if (reason === "federation_not_configured") {
+        void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
+        return;
+      }
+      const fieldProblems = serverFieldProblems(error, t);
+      if (fieldProblems) {
+        setServerProblems(fieldProblems);
+        announce(Object.values(fieldProblems).join(" "));
+        return;
+      }
+      setSaveError(error);
+    }
+  });
+
+  function requestSave(event: SubmitEvent<HTMLFormElement>) {
+    event.preventDefault();
+    // Never disabled: the dialog returns focus here after a save, and a
+    // disabled button would drop it to the page. Nothing changed, nothing to do.
+    if (save.isPending) return;
+    if (changed.length === 0) {
+      setNothingToSave(true);
+      return;
+    }
+    const first = FEDERATION_FIELDS.find((field) => problems[field]);
+    if (first) {
+      const fieldRef = {
+        provider: providerRef,
+        client_id: clientIdRef,
+        client_secret: secretRef,
+        allowed_domains: domainsRef
+      }[first];
+      revealProblems(() => setSubmitted(true), fieldRef.current);
+      return;
+    }
+    setSaveError(null);
+    setConfirmation({
+      lines: changed.map((field) => changeLine(field, base, draft, t)),
+      effects: consequences(base, draft).map((effect) => effectText(effect, t)),
+      risky: changed.some((field) => RISKY.has(field))
+    });
+    setConfirming(true);
+  }
+
+  function undo() {
+    startFrom(base);
+    setNothingToSave(false);
+    saveRef.current?.focus();
+  }
+
+  async function reloadAfterConflict() {
+    if (reloading) return;
+    setReloading(true);
+    try {
+      const latest = await reload();
+      if (latest) {
+        startFrom(latest);
+        setConflict(false);
+        providerRef.current?.focus();
+      }
+    } finally {
+      setReloading(false);
+    }
+  }
+
+  return (
+    <>
+      <OperatorOwned view={base} />
+      <section aria-labelledby={headingId} className={CARD}>
+        <div className="border-ax-border flex flex-col gap-1 border-b px-5 py-4">
+          <Heading level={2} id={headingId} className="text-base">
+            {t("federation_admin_editable")}
+          </Heading>
+        </div>
+        <form className="flex flex-col gap-5 px-5 py-4" noValidate onSubmit={requestSave}>
+          {conflict ? (
+            <Banner
+              role="alert"
+              status="warning"
+              title={t("federation_admin_conflict_title")}
+              description={t("federation_admin_conflict_description")}
+              endContent={
+                <Button
+                  size="sm"
+                  label={t("federation_admin_conflict_reload")}
+                  isLoading={reloading}
+                  isInterruptible
+                  onClick={() => void reloadAfterConflict()}
+                />
+              }
+            />
+          ) : null}
+          <TextInput
+            ref={providerRef}
+            label={t("federation_admin_provider_label")}
+            description={t("federation_admin_provider_help")}
+            value={draft.provider}
+            onChange={(provider) => edit("provider", { provider })}
+            autoComplete="off"
+            {...KEYBOARD.identifier}
+            isRequired
+            status={status("provider")}
+          />
+          <TextInput
+            ref={clientIdRef}
+            label={t("client_id")}
+            description={t("federation_admin_client_id_help")}
+            value={draft.clientId}
+            onChange={(clientId) => edit("client_id", { clientId })}
+            autoComplete="off"
+            {...KEYBOARD.identifier}
+            isRequired
+            status={status("client_id")}
+          />
+          <ClientSecretField
+            view={base}
+            secret={draft.secret}
+            onSecretChange={(secret) => edit("client_secret", { secret })}
+            problem={problemFor("client_secret")}
+            inputRef={secretRef}
+            replaceRef={replaceSecretRef}
+          />
+          <TextArea
+            ref={domainsRef}
+            label={t("federation_admin_domains")}
+            description={t("federation_admin_domains_help")}
+            aria-describedby={provisioningId}
+            value={draft.domains}
+            onChange={(domains) => edit("allowed_domains", { domains })}
+            rows={4}
+            hasSpellCheck={false}
+            {...KEYBOARD.identifier}
+            status={status("allowed_domains")}
+          />
+          <ProvisioningState
+            id={provisioningId}
+            hasDomains={parseDomains(draft.domains).length > 0}
+          />
+          {saveError != null ? <SaveError error={saveError} /> : null}
+          {suggestTest ? (
+            <Banner status="success" title={t("federation_admin_saved_next_step")} />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-3">
+            <Button
+              ref={saveRef}
+              type="submit"
+              variant="primary"
+              label={t("save_changes")}
+              isLoading={save.isPending}
+              isInterruptible
+            />
+            {changed.length > 0 ? (
+              <Button variant="ghost" label={t("federation_admin_undo")} onClick={undo} />
+            ) : null}
+            {saveState ? <Text type="supporting">{saveState}</Text> : null}
+          </div>
+        </form>
+      </section>
+      <ConfirmDialogControlled
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={t(
+          confirmation.risky
+            ? "federation_admin_confirm_title"
+            : "federation_admin_confirm_label_title"
+        )}
+        description={t(
+          confirmation.risky
+            ? "federation_admin_confirm_description"
+            : "federation_admin_confirm_label_description"
+        )}
+        confirmLabel={t("federation_admin_confirm_action")}
+        variant={confirmation.risky ? "destructive" : "default"}
+        pending={save.isPending}
+        onConfirm={() => {
+          if (save.isPending) return;
+          save.mutate(toPatch(base, draft));
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <Text weight="semibold">{t("federation_admin_confirm_changes")}</Text>
+          <ul className="list-disc space-y-1 pl-6 text-sm">
+            {confirmation.lines.map((line) => (
+              <li key={line} className="break-words">
+                {line}
+              </li>
+            ))}
+          </ul>
+          {confirmation.effects.map((effect) => (
+            <Text key={effect}>{effect}</Text>
+          ))}
+          {confirmation.risky ? (
+            <Text type="supporting">{t("federation_admin_confirm_recovery")}</Text>
+          ) : null}
+        </div>
+      </ConfirmDialogControlled>
+      {/* Until the save's outcome is known: a failed save keeps the draft to try again.
+          A save already sent finishes either way, so then the dialog says that instead.
+          Staying returns focus to Save: the dialog may have opened from the save
+          dialog's button, which a failed save removes meanwhile. */}
+      <LeaveConfirmation
+        active={changed.length > 0 || save.isPending}
+        onStay={() => rescueFocus(() => saveRef.current)}
+        title={save.isPending ? t("federation_admin_saving_leave_title") : undefined}
+        description={save.isPending ? t("federation_admin_saving_leave_description") : undefined}
+        confirmLabel={save.isPending ? t("federation_admin_saving_leave_confirm") : undefined}
+      />
+    </>
+  );
+}
+
+/** A failed save: the page's own words for a refusal it knows, else the catalog's. */
+function SaveError({ error }: { error: unknown }) {
+  const t = useTranslations();
+  const known = federationErrorKey(error instanceof EneoApiError ? error.reason : undefined);
+  return known ? (
+    <ListError error={null} title={t(known)} />
+  ) : (
+    <ListError error={error} title={t("federation_admin_save_error")} />
+  );
+}
+
+type Translate = ReturnType<typeof useTranslations>;
+
+const FIELD_LABEL_KEYS: Record<FederationField, string> = {
+  provider: "federation_admin_provider_label",
+  client_id: "client_id",
+  client_secret: "client_secret",
+  allowed_domains: "federation_admin_domains"
+};
+
+/** One line of the confirmation: the setting from what to what; never the secret. */
+function changeLine(
+  field: FederationField,
+  base: FederationView,
+  draft: FederationDraft,
+  t: Translate
+): string {
+  if (field === "client_secret") return t("federation_admin_secret_replaced_change");
+  const list = (values: string[]) => values.join(", ") || t("federation_admin_none");
+  if (field === "allowed_domains") {
+    // The domains added and removed, not two whole lists to compare.
+    const { added, removed } = domainChange(base, draft);
+    const changes = [
+      added.length ? t("federation_admin_domains_added", { domains: added.join(", ") }) : null,
+      removed.length ? t("federation_admin_domains_removed", { domains: removed.join(", ") }) : null
+    ].filter((change) => change !== null);
+    // Only the order changed: the whole lists say that.
+    if (changes.length) {
+      return t("federation_admin_change_domains", {
+        field: t(FIELD_LABEL_KEYS[field]),
+        changes: changes.join("; ")
+      });
+    }
+  }
+  const [from, to] =
+    field === "provider"
+      ? [base.provider ?? "", draft.provider.trim()]
+      : field === "client_id"
+        ? [base.client_id ?? "", draft.clientId.trim()]
+        : [list(base.allowed_domains ?? []), list(parseDomains(draft.domains))];
+  return t("federation_admin_change", {
+    field: t(FIELD_LABEL_KEYS[field]),
+    from: from || t("federation_admin_none"),
+    to: to || t("federation_admin_none")
+  });
+}
+
+/** What one change does to the people who sign in. */
+function effectText(effect: Consequence, t: Translate): string {
+  const list = (domains: string[]) => domains.join(", ");
+  switch (effect.code) {
+    case "client_id":
+      return t("federation_admin_confirm_client_id");
+    case "secret":
+      return t("federation_admin_confirm_secret");
+    case "domains_restricted":
+      return t("federation_admin_confirm_domains_restricted", { domains: list(effect.domains) });
+    case "domains_emptied":
+      return t("federation_admin_confirm_domains_emptied");
+    case "domains_removed":
+      return t("federation_admin_confirm_domains_removed", { domains: list(effect.domains) });
+    case "domains_added":
+      return t("federation_admin_confirm_domains_added", { domains: list(effect.domains) });
+  }
+}
+
+/**
+ * A refusal that belongs at a field: the masked-looking secret, or a 422
+ * naming body fields. null for anything else (shown with ListError).
+ */
+function serverFieldProblems(
+  error: unknown,
+  t: Translate
+): Partial<Record<FederationField, string>> | null {
+  if (!(error instanceof EneoApiError)) return null;
+  if (error.reason === "federation_secret_looks_masked") {
+    return { client_secret: t("federation_admin_secret_masked") };
+  }
+  if (error.status !== 422 || !Array.isArray(error.details)) return null;
+  const problems: Partial<Record<FederationField, string>> = {};
+  for (const entry of error.details as { loc?: unknown[] }[]) {
+    const field = entry.loc?.[1];
+    if (typeof field === "string" && (FEDERATION_FIELDS as readonly string[]).includes(field)) {
+      problems[field as FederationField] = t("federation_admin_field_refused");
+    }
+  }
+  return Object.keys(problems).length > 0 ? problems : null;
+}

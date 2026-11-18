@@ -197,3 +197,18 @@ export function listProviderOptions(
     .map((value) => ({ value, label: formatProviderLabel(value) }))
     .sort((a, b) => a.label.localeCompare(b.label));
 }
+
+/**
+ * The favourite provider types the picker can show. A favourite whose type
+ * the catalog no longer offers cannot be created, so it is hidden (not
+ * removed) once a non-empty catalog has loaded.
+ */
+export function offeredFavoriteTypes(
+  favorites: string[],
+  capabilities: ModelProviderCapabilities | null
+): string[] {
+  if (!capabilities || Object.keys(capabilities.providers).length === 0) {
+    return favorites;
+  }
+  return favorites.filter((type) => type in capabilities.providers);
+}

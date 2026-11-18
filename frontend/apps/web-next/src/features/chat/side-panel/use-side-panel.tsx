@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, use, useState, useSyncExternalStore, type ReactNode } from "react";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { browserApi } from "@/lib/api/browser";
@@ -25,12 +23,13 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
  */
 export function useSidePanel(): SidePanelStore | null {
   const store = use(SidePanelContext);
-  useSyncExternalStore(
-    store?.subscribe ?? noSubscription,
-    store?.getVersion ?? zero,
-    store?.getVersion ?? zero
-  );
+  useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getVersion ?? zero);
   return store;
+}
+
+/** The side panel without re-rendering on its changes: for callers that use it only in event handlers. */
+export function useSidePanelStore(): SidePanelStore | null {
+  return use(SidePanelContext);
 }
 
 const noSubscription = () => () => {};

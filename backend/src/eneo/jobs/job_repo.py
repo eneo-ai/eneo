@@ -92,11 +92,12 @@ class JobRepository:
             publish_job_update_after_commit(self.delegate.session, updated)
         return updated
 
-    async def _announce(self, *ids: UUID) -> None:
+    async def announce(self, *ids: UUID) -> None:
         """Publish the current state of these jobs once the transaction commits.
 
-        Every status write goes through this repository, so this is the one
-        place live updates (eneo.jobs.job_events) come from.
+        Every job status write announces through here, including the crawl
+        and durable-dispatch writes outside this repository, so this is the
+        one place live updates (eneo.jobs.job_events) come from.
         """
         for id in ids:
             job = await self.get_job(id)
@@ -156,7 +157,7 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         started = affected_row_count(result) > 0
         if started:
-            await self._announce(id)
+            await self.announce(id)
         return started
 
     async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
@@ -176,7 +177,7 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         completed = affected_row_count(result) > 0
         if completed:
-            await self._announce(id)
+            await self.announce(id)
         return completed
 
     async def mark_knowledge_job_failed_if_running(
@@ -203,7 +204,7 @@ class JobRepository:
         result = await self.delegate.session.execute(stmt)
         failed = affected_row_count(result)
         if failed:
-            await self._announce(id)
+            await self.announce(id)
         return failed
 
     async def mark_stale_jobs_failed(
@@ -253,7 +254,7 @@ class JobRepository:
         )
         result = await self.delegate.session.execute(stmt)
         failed_ids = [row[0] for row in result.all()]
-        await self._announce(*failed_ids)
+        await self.announce(*failed_ids)
         return failed_ids
 
     async def mark_stale_in_progress_jobs_failed(
@@ -264,7 +265,7 @@ class JobRepository:
             stale_in_progress_jobs_statement(stale_before)
         )
         failed = [(row.id, row.task) for row in result.all()]
-        await self._announce(*(id for id, _task in failed))
+        await self.announce(*(id for id, _task in failed))
         return failed
 
     async def get_running_jobs(self, user_id: UUID):

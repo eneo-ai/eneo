@@ -1,5 +1,5 @@
 /**
- * Vitest setup (vitest.config.ts → setupFiles): what jsdom lacks and the app
+ * Vitest setup (vitest.config.mts → setupFiles): what jsdom lacks and the app
  * uses, installed once for every jsdom test file and kept faithful to the
  * browser (Chromium, which the e2e tests drive), so a test passes only when
  * users get the same:
@@ -15,7 +15,7 @@
  *   until a test reports a size with `reportResize`;
  * - scrolling as a no-op.
  *
- * The viewport, the observers and the fake next/navigation route
+ * The viewport, the observers and the fake app navigation route
  * (src/test/navigation.ts) reset after every test. A test can still stub any
  * of these itself (vi.stubGlobal, vi.spyOn). src/test/setup-dom.test.ts
  * checks the fakes against the browser behaviour they copy.
@@ -26,8 +26,15 @@
  */
 import { cleanup } from "@testing-library/react";
 import { toast } from "sonner";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 import { resetNavigation } from "./navigation";
+
+// Component tests use anchors without a router. Navigation/route tests opt into
+// the real TanStack link with vi.unmock("@/lib/link").
+vi.mock("@/lib/link", async () => {
+  const { Link } = await import("./navigation");
+  return { Link, default: Link };
+});
 
 // Viewport and matchMedia
 
@@ -43,6 +50,20 @@ export type Viewport = {
 export const DESKTOP_VIEWPORT: Viewport = { width: 1280, height: 800, pointer: "fine" };
 /** A phone held upright, as in the e2e phone scans (tests/a11y.spec.ts). */
 export const PHONE_VIEWPORT: Viewport = { width: 390, height: 844, pointer: "coarse" };
+/** An iPad held upright (iPad Air 11"), as in the e2e tablet scans. */
+export const TABLET_PORTRAIT_VIEWPORT: Viewport = { width: 820, height: 1180, pointer: "coarse" };
+/** The same iPad turned sideways. */
+export const TABLET_LANDSCAPE_VIEWPORT: Viewport = { width: 1180, height: 820, pointer: "coarse" };
+/** A phone turned sideways (iPhone 14): wider than 768 px, but a phone's layout. */
+export const PHONE_LANDSCAPE_VIEWPORT: Viewport = { width: 844, height: 390, pointer: "coarse" };
+
+const PRESETS = {
+  desktop: DESKTOP_VIEWPORT,
+  phone: PHONE_VIEWPORT,
+  "phone-landscape": PHONE_LANDSCAPE_VIEWPORT,
+  "tablet-portrait": TABLET_PORTRAIT_VIEWPORT,
+  "tablet-landscape": TABLET_LANDSCAPE_VIEWPORT
+} as const;
 
 let viewport = DESKTOP_VIEWPORT;
 
@@ -206,10 +227,12 @@ function applyViewportSize() {
  * already mounted. Resets to the desktop after each test.
  *
  * @example setViewport("phone"); // 390 × 844, touch
+ * @example setViewport("phone-landscape"); // 844 × 390, touch
+ * @example setViewport("tablet-portrait"); // 820 × 1180, touch
  * @example setViewport({ width: 600, height: 800, pointer: "fine" }); // a narrow window
  */
-export function setViewport(next: "desktop" | "phone" | Viewport): void {
-  viewport = next === "desktop" ? DESKTOP_VIEWPORT : next === "phone" ? PHONE_VIEWPORT : next;
+export function setViewport(next: keyof typeof PRESETS | Viewport): void {
+  viewport = typeof next === "string" ? PRESETS[next] : next;
   applyViewportSize();
   for (const list of listening) list.update();
   window.dispatchEvent(new Event("resize"));
@@ -362,7 +385,7 @@ if (typeof window !== "undefined") {
   window.scrollTo = () => {};
   Element.prototype.scrollIntoView ??= () => {};
 
-  afterEach(() => {
+  afterEach(async () => {
     // Unmount what the test rendered, and drop its toasts: sonner's store is
     // module-wide, so a toast left behind (errors never time out) reaches the
     // next test's Toaster after this test has ended.
@@ -373,5 +396,18 @@ if (typeof window !== "undefined") {
     listening.clear();
     observers.clear();
     resetNavigation();
+    // Astryx's live regions are module-wide too, and take a message on the
+    // next animation frame, joined with whatever else was said in it: a
+    // message the test left pending would be read with the next test's first.
+    // A test that stubbed requestAnimationFrame may never call back: at most 50 ms.
+    if (!vi.isFakeTimers()) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+        requestAnimationFrame(() => resolve());
+      });
+    }
+    document.querySelectorAll("[data-astryx-live-region]").forEach((region) => {
+      region.textContent = "";
+    });
   });
 }

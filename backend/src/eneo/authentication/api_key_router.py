@@ -23,7 +23,6 @@ from eneo.authentication.api_key_router_helpers import (
     api_key_cursor_for,
     build_api_key_usage_page,
     build_api_key_usage_summary,
-    error_responses,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -70,6 +69,7 @@ from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
 from eneo.server.dependencies.container import get_container
+from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
 
 router = APIRouter(tags=["API Keys"])
@@ -457,11 +457,11 @@ async def _collect_manageable_keys_for_page(
     summary="Get API key policy constraints",
     description=(
         "Returns tenant policy limits relevant to key UX — applies to creation, "
-        "rotation, and expiration changes (expiration, rate limit, rotation grace)."
+        "rotation, expiration changes, and notification preferences."
     ),
     responses={
         200: {"description": "Policy constraints for the current tenant."},
-        **error_responses([401, 429]),
+        **responses.get_responses([401, 429]),
     },
 )
 @endpoint_access(
@@ -476,6 +476,7 @@ async def get_policy_constraints(
     policy: dict[str, Any] = getattr(user.tenant, "api_key_policy", None) or {}
     settings = get_settings()
     return ApiKeyCreationConstraints(
+        notification_policy=_notification_policy_for_user(user),
         require_expiration=bool(policy.get("require_expiration")),
         max_expiration_days=policy.get("max_expiration_days"),
         max_rate_limit=policy.get("max_rate_limit_override"),
@@ -493,7 +494,7 @@ async def get_policy_constraints(
     description="Get the caller's API key expiry notification preferences.",
     responses={
         200: {"description": "Notification preferences."},
-        **error_responses([401, 429]),
+        **responses.get_responses([401, 429]),
     },
 )
 @endpoint_access(
@@ -523,7 +524,7 @@ async def get_notification_preferences(
     description="Update the caller's API key expiry notification preferences.",
     responses={
         200: {"description": "Updated notification preferences."},
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -586,7 +587,7 @@ async def update_notification_preferences(
     description="List followed targets used for subscribed expiry notification mode.",
     responses={
         200: {"description": "Notification subscriptions."},
-        **error_responses([401, 429]),
+        **responses.get_responses([401, 429]),
     },
 )
 @endpoint_access(
@@ -616,7 +617,7 @@ async def list_notification_subscriptions(
     description="Follow an API key, assistant, app, or space for subscribed expiry notifications.",
     responses={
         200: {"description": "Updated notification subscriptions."},
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -685,7 +686,7 @@ async def upsert_notification_subscription(
     description="Remove a followed API key/assistant/app/space target from subscribed notifications.",
     responses={
         200: {"description": "Updated notification subscriptions."},
-        **error_responses([401, 403, 429]),
+        **responses.get_responses([401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -788,7 +789,7 @@ def _build_expiring_summary(
     description="Returns keys expiring within the specified window, filtered by user visibility.",
     responses={
         200: {"description": "Expiring key summary."},
-        **error_responses([401, 429]),
+        **responses.get_responses([401, 429]),
     },
 )
 @endpoint_access(
@@ -890,7 +891,7 @@ async def get_expiring_keys(
     description="Returns usage and auth-failure audit events for a single API key you manage.",
     responses={
         200: {"description": "API key usage response."},
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -953,7 +954,7 @@ async def get_api_key_usage(
             "description": "API key created successfully. Secret is shown once.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -991,7 +992,7 @@ async def create_api_key(
             "description": "Paginated API key list.",
             "content": {"application/json": {"example": _API_KEY_LIST_EXAMPLE}},
         },
-        **error_responses([400, 401, 429]),
+        **responses.get_responses([400, 401, 429]),
     },
 )
 @endpoint_access(
@@ -1115,7 +1116,7 @@ async def list_api_keys(
             "description": "API key details.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1156,7 +1157,7 @@ async def get_api_key(
             "description": "Updated API key.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1196,7 +1197,7 @@ async def update_api_key(
     summary="Revoke API key (deprecated alias)",
     responses={
         204: {"description": "API key revoked. No response body."},
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
     deprecated=True,
     description="Deprecated. Use POST /api/v1/api-keys/{id}/revoke with reason body.",
@@ -1234,7 +1235,7 @@ async def revoke_api_key_deprecated(
                 "application/json": {"example": _API_KEY_EXAMPLE | {"state": "revoked"}}
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1272,7 +1273,7 @@ async def revoke_api_key(
             "description": "Rotated API key and one-time secret.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1310,7 +1311,7 @@ async def rotate_api_key(
             "description": "Updated API key.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1350,7 +1351,7 @@ async def extend_api_key_expiration(
     ),
     responses={
         204: {"description": "API key permanently deleted."},
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1388,7 +1389,7 @@ async def purge_api_key(
                 }
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1426,7 +1427,7 @@ async def suspend_api_key(
             "description": "Reactivated API key.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(

@@ -1,5 +1,3 @@
-"use client";
-
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { CursorPage } from "@/lib/api/pagination";
@@ -12,11 +10,14 @@ import type { CursorPage } from "@/lib/api/pagination";
 export function usePaginatedQuery<TItem>({
   queryKey,
   fetchPage,
-  limit = 50
+  limit = 50,
+  enabled = true
 }: {
   queryKey: readonly unknown[];
   fetchPage: (params: { cursor?: string; limit: number }) => Promise<CursorPage<TItem>>;
   limit?: number;
+  /** False while the page shows something else in the list's place. */
+  enabled?: boolean;
 }) {
   // The stack is bound to the queryKey: when the key changes (filter change),
   // pagination restarts from the first page.
@@ -31,7 +32,8 @@ export function usePaginatedQuery<TItem>({
   const query = useQuery({
     queryKey: [...queryKey, { cursor, limit }],
     queryFn: () => fetchPage({ cursor, limit }),
-    placeholderData: keepPreviousData
+    placeholderData: keepPreviousData,
+    enabled
   });
 
   const nextCursor = query.data?.next_cursor ?? undefined;

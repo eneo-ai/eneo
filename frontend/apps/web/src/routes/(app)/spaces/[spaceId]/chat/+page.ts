@@ -2,6 +2,10 @@ import { error } from "@sveltejs/kit";
 import type { PageLoad } from "./$types";
 import { PAGINATION } from "$lib/core/constants";
 import { isValidChatPartnerType } from "$lib/features/chat/isValidChatPartnerType";
+import {
+  loadInitialConversation,
+  NO_INITIAL_CONVERSATION
+} from "$lib/features/chat/initialConversation";
 
 export const load: PageLoad = async (event) => {
   const { eneo, currentSpace } = await event.parent();
@@ -49,29 +53,27 @@ export const load: PageLoad = async (event) => {
   };
 
   const loadSession = async () => {
-    if (accessDenied || !selectedSessionId) return null;
-    return eneo.conversations.get({ id: selectedSessionId });
+    if (accessDenied || !selectedSessionId) return NO_INITIAL_CONVERSATION;
+    return loadInitialConversation(() => eneo.conversations.get({ id: selectedSessionId }));
   };
 
   const listSessions = async () => {
     if (accessDenied) {
       return { items: [], total_count: 0, count: 0, next_cursor: null };
     }
-    return (
-      eneo.conversations
-        .list({
-          chatPartner: { id: partnerId, type: partnerType },
-          pagination: { limit: PAGINATION.PAGE_SIZE }
-        })
-        // Need to catch the error here, otherwise the app will crash
-        .catch((error) => error)
-    );
+    return eneo.conversations.list({
+      chatPartner: { id: partnerId, type: partnerType },
+      pagination: { limit: PAGINATION.PAGE_SIZE }
+    });
   };
 
-  const partnerPromise = getPartner();
-  const historyPromise = listSessions();
-  const initialSessionPromise = loadSession();
-  const partner = await partnerPromise;
+  // Keep every request inside SvelteKit's load lifecycle. A rejected nested
+  // promise can otherwise terminate the SSR process, even before rendering.
+  const [partner, initialHistory, session] = await Promise.all([
+    getPartner(),
+    listSessions(),
+    loadSession()
+  ]);
 
   // Help assistants run behind the scenes to support users and must never be
   // opened as a chat (the backend ask-guard also blocks the actual ask). This
@@ -86,7 +88,7 @@ export const load: PageLoad = async (event) => {
   return {
     chatPartner: partner,
     accessDenied,
-    initialHistory: historyPromise,
-    initialConversation: initialSessionPromise
+    initialHistory,
+    ...session
   };
 };

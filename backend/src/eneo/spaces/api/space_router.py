@@ -98,6 +98,23 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_ASSISTANT_ON_GET = (
+    "Creates the space's missing default assistant once, under a row lock. The "
+    "outcome follows from the space, not from the request."
+)
+_PERSONAL_SPACE_ON_GET = (
+    "Creates the caller's own personal space, the tenant hub and their default "
+    "assistants when missing, syncs the hub's admin members, and points the "
+    "personal assistant at a usable model when its model is unusable. A repeat "
+    "read changes nothing further, and the outcome follows from tenant state, not "
+    "from the request."
+)
+_TENANT_HUB_ON_GET = (
+    "Creates the tenant hub and its default assistant when missing and makes its "
+    "members exactly the tenant's admins. Idempotent, and the outcome follows from "
+    "tenant state, not from the request."
+)
+
 router = APIRouter()
 _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
@@ -223,6 +240,7 @@ async def create_space(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason=_SPACE_OPERATION_ACCESS_REASON,
+    effect_on_get=_DEFAULT_ASSISTANT_ON_GET,
 )
 async def get_space(
     id: UUID,
@@ -1908,6 +1926,7 @@ async def remove_space_group_member(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Personal space lookup and creation are scoped to the authenticated user.",
+    effect_on_get=_PERSONAL_SPACE_ON_GET,
 )
 async def get_personal_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -1929,6 +1948,7 @@ async def get_personal_space(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Only tenant administrators may manage the organization space.",
+    effect_on_get=_TENANT_HUB_ON_GET,
 )
 async def get_organization_space(
     container: Annotated[Container, Depends(get_container(with_user=True))],

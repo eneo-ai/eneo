@@ -110,7 +110,7 @@ class MCPServerAssembler:
                     "display_name": tool.display_name,
                     "description": tool.description,
                     "input_schema": tool.input_schema,
-                    "is_enabled": tool.is_enabled_by_default,
+                    "is_enabled": tool.is_enabled,
                 }
                 for tool in sorted_tools
             ],
@@ -182,7 +182,7 @@ class MCPServerSettingsAssembler:
                 input_schema=tool.input_schema,
                 meta=tool.meta,
                 ui_resource_sha256=tool.ui_resource_sha256,
-                is_enabled_by_default=tool.is_enabled_by_default,
+                is_enabled_by_default=tool.is_enabled,
                 pending_description=tool.pending_description,
                 pending_input_schema=tool.pending_input_schema,
                 pending_meta=tool.pending_meta,

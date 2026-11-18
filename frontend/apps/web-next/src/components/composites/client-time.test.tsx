@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { cleanup, screen } from "@testing-library/react";
-import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -12,11 +11,7 @@ afterEach(cleanup);
 const VALUE = "2026-09-25T08:30:00Z";
 
 describe("ClientTime", () => {
-  it("renders nothing on the server, so its markup cannot differ from the client's", () => {
-    expect(renderToString(<ClientTime value={VALUE} format="date_time" />)).toBe("");
-  });
-
-  it("writes the date in the viewer's locale once hydrated", async () => {
+  it("writes the date in the viewer's locale on first render", async () => {
     const { container } = renderInApp(
       <p>
         <ClientTime value={VALUE} format="date_time" />
@@ -32,8 +27,7 @@ describe("useClientTimeText", () => {
     return <span>{useClientTimeText(VALUE, format) ?? "–"}</span>;
   }
 
-  it("is null on the server, like ClientTime, and without a valid value", () => {
-    expect(renderToString(<Label format="date_time" />)).toBe("<span>–</span>");
+  it("is null without a valid value", () => {
     function Missing({ value }: { value: string | null }) {
       return <span>{useClientTimeText(value, "date_time") ?? "–"}</span>;
     }

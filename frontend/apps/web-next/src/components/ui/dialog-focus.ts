@@ -1,5 +1,3 @@
-"use client";
-
 import * as React from "react";
 import { isFocusLost, notifyFocusLost } from "@/lib/focus-rescue";
 
@@ -56,17 +54,13 @@ export function trackFocus() {
   );
 }
 
-/** The button that opens `menu` (Astryx: aria-controls; Radix: aria-labelledby). */
+/** The button that opens `menu` (an Astryx menu button names it in aria-controls). */
 function menuTrigger(menu: Element): HTMLElement | null {
-  const byControls = menu.id
+  return menu.id
     ? document.querySelector<HTMLElement>(
         `[aria-haspopup="menu"][aria-controls="${CSS.escape(menu.id)}"]`
       )
     : null;
-  if (byControls) return byControls;
-  const labelledBy = menu.getAttribute("aria-labelledby");
-  const byLabel = labelledBy ? document.getElementById(labelledBy) : null;
-  return byLabel?.getAttribute("aria-haspopup") === "menu" ? byLabel : null;
 }
 
 /** What opened the dialog: the focused element, else what focus or a press left behind. */
@@ -130,4 +124,8 @@ function returnFocusTo(target: HTMLElement | null) {
   if (!isFocusLost()) return;
   if (target?.isConnected) target.focus();
   if (isFocusLost()) notifyFocusLost();
+  // An opener the layout now hides (the screen became a phone's) takes no focus: the page does.
+  if (isFocusLost() && target?.isConnected && target.getClientRects().length === 0) {
+    document.getElementById("main-content")?.focus();
+  }
 }

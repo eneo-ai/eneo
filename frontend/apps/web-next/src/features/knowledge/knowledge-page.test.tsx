@@ -2,7 +2,9 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
+import { setRoute } from "@/test/navigation";
 import type { Space } from "@/features/spaces/space";
 import {
   makeCollection,
@@ -13,7 +15,6 @@ import {
 
 const state = vi.hoisted(() => ({
   space: null as unknown,
-  tab: null as string | null,
   posted: [] as { path: string; body: unknown }[],
   deleted: [] as string[],
   bulkResult: { total: 0, queued: 0, failed: 0, crawl_runs: [], errors: [] } as unknown,
@@ -22,10 +23,7 @@ const state = vi.hoisted(() => ({
   toasts: [] as { kind: string; message: string; description?: string }[]
 }));
 
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: () => {}, prefetch: () => {} }),
-  useSearchParams: () => new URLSearchParams(state.tab ? { tab: state.tab } : {})
-}));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space as Space) };
@@ -83,17 +81,30 @@ afterEach(() => {
 
 function show(space: Space, tab: string | null = null) {
   state.space = space;
-  state.tab = tab;
-  return renderInApp(<KnowledgePage />, { appContext: testAppContext({ permissions: ["admin"] }) });
+  return renderInApp(<KnowledgePage />, {
+    appContext: testAppContext({ permissions: ["admin"] }),
+    route: `/spaces/space-1/knowledge${tab ? `?tab=${tab}` : ""}`
+  });
 }
 
 const liveRegion = () => document.querySelector("[data-astryx-live-region='polite']");
 
 describe("KnowledgePage", () => {
+  it("follows an external same-route tab change and defaults an unknown tab", () => {
+    const { rerender } = show(makeSpace());
+    expect(screen.getByRole("tabpanel", { name: "Samlingar" })).toBeTruthy();
+    setRoute("/spaces/space-1/knowledge?tab=websites");
+    rerender(<KnowledgePage />);
+    expect(screen.getByRole("tabpanel", { name: "Webbplatser" })).toBeTruthy();
+    setRoute("/spaces/space-1/knowledge?tab=unknown");
+    rerender(<KnowledgePage />);
+    expect(screen.getByRole("tabpanel", { name: "Samlingar" })).toBeTruthy();
+  });
+
   it("keeps the Kunskap heading and tabs, with one create button in an empty space", async () => {
     const { container } = show(makeSpace());
 
-    expect(screen.getByRole("heading", { level: 2, name: "Kunskap" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1, name: "Kunskap" })).toBeTruthy();
     const tablist = screen.getByRole("tablist", { name: "Kunskapskällor" });
     expect(within(tablist).getAllByRole("tab")).toHaveLength(3);
     const collections = within(tablist).getByRole("tab", { name: "Samlingar" });
@@ -135,7 +146,9 @@ describe("KnowledgePage", () => {
     expect(
       within(policy).getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" })
     ).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Filtrera samlingar" })).toBeTruthy();
+    // As wide as the filter on Assistenter and Appar, so it keeps its size across the tabs.
+    const filter = screen.getByRole("textbox", { name: "Filtrera samlingar" });
+    expect(filter.closest(".max-w-sm")!.className).toContain("sm:w-96");
     await expectNoAxeViolations(container);
   });
 
@@ -401,7 +414,12 @@ describe("KnowledgePage", () => {
     expect(screen.getAllByText("2 källor uppdateras inte")).toHaveLength(1);
     expect(screen.getAllByRole("radio", { name: /^Alla/ })).toHaveLength(1);
     expect(screen.getAllByRole("textbox", { name: "Filtrera integrationer" })).toHaveLength(1);
-    const second = screen.getByRole("table", { name: "text-embedding-3" });
+    // Many status segments and the filter wrap instead of pushing the page sideways.
+    const statusRow = screen
+      .getByRole("radiogroup", { name: "Filtrera på status" })
+      .closest(".lg\\:flex-row")!;
+    expect(statusRow.className).toContain("lg:flex-wrap");
+    const second = screen.getByRole("table", { name: "Text Embedding 3" });
     expect(within(second).getByText("2 600")).toBeTruthy();
 
     // "Show them" filters every group and goes away; focus stays on the notice.
@@ -412,14 +430,14 @@ describe("KnowledgePage", () => {
     expect(screen.queryByRole("button", { name: "Visa dem" })).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(notice));
     expect(names(screen.getByRole("table", { name: "multilingual-e5-large" }))).toEqual(["Avtal"]);
-    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+    expect(names(screen.getByRole("table", { name: "Text Embedding 3" }))).toEqual(["Bygglov"]);
 
     // The search spans the groups; a group it empties is left out.
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
       target: { value: "bygg" }
     });
     expect(screen.queryByRole("table", { name: "multilingual-e5-large" })).toBeNull();
-    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+    expect(names(screen.getByRole("table", { name: "Text Embedding 3" }))).toEqual(["Bygglov"]);
     await expectNoAxeViolations(document.body);
   });
 
@@ -580,14 +598,15 @@ describe("KnowledgePage", () => {
       }),
       "integrations"
     );
-    expect(screen.getByRole("heading", { level: 3, name: "text-embedding-3" })).toBeTruthy();
+    // Beside the sidebar the page's "Kunskap" is the h1, so its groups are h2s.
+    expect(screen.getByRole("heading", { level: 2, name: "Text Embedding 3" })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
       target: { value: "ekonomi" }
     });
 
     expect(screen.queryByRole("table")).toBeNull();
-    expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Inga resultat hittades" })).toBeTruthy();
   });
 
   it("announces a refused sign-in politely when it happens, not on every visit", async () => {
@@ -609,9 +628,10 @@ describe("KnowledgePage", () => {
     state.space = makeSpace({
       integrations: [avtal, makeIntegration({ id: "i2", name: "Bygglov", metadata: signInRefused })]
     });
+    const said = recordAnnouncements();
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
 
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("2 källor uppdateras inte"));
+    await waitFor(() => expect(said).toEqual(["2 källor uppdateras inte"]));
   });
 
   it("polls the sync progress only on the integrations tab of a space with its own", async () => {
@@ -641,6 +661,7 @@ describe("KnowledgePage", () => {
   it("offers the next step for integrations in the empty state", () => {
     show(makeSpace(), "integrations");
     expect(screen.getByRole("heading", { name: "Inga integrationer ännu" })).toBeTruthy();
+    expect(screen.getByText(/^Importera innehåll från en ansluten tjänst/)).toBeTruthy();
   });
 
   it("moves focus to the tab panel when a deleted collection's row goes away", async () => {
@@ -682,7 +703,12 @@ describe("KnowledgePage", () => {
   });
 
   it("names each embedding model's table by its heading", () => {
-    const other = { id: "embed-2", name: "text-embedding-3" };
+    const other = {
+      id: "embed-2",
+      name: "text-embedding-3",
+      nickname: "Sökmodell",
+      provider_name: "Berget"
+    };
     show(
       makeSpace({
         websites: [
@@ -692,7 +718,7 @@ describe("KnowledgePage", () => {
         overrides: {
           embedding_models: [
             { id: "embed-1", name: "multilingual-e5-large", nickname: null, is_deprecated: false },
-            { ...other, nickname: null, is_deprecated: false }
+            { ...other, is_deprecated: false }
           ]
         }
       }),
@@ -701,7 +727,7 @@ describe("KnowledgePage", () => {
 
     // Each group's "select all" checkbox is told apart by its table's name.
     const first = screen.getByRole("table", { name: "multilingual-e5-large" });
-    const second = screen.getByRole("table", { name: "text-embedding-3" });
+    const second = screen.getByRole("table", { name: "Sökmodell (Berget)" });
     expect(within(first).getByRole("checkbox", { name: "Markera alla rader" })).toBeTruthy();
     expect(within(second).getByRole("link", { name: "Intranätet" })).toBeTruthy();
   });
@@ -787,45 +813,73 @@ describe("KnowledgePage", () => {
     );
   });
 
-  it("stops every active crawl from the toolbar after a confirmation", async () => {
-    const running = (id: string, name: string) =>
-      makeWebsite({
-        id,
-        name,
-        latest_crawl: {
-          ...(makeWebsite().latest_crawl as object),
-          id: `run-${id}`,
-          status: "in progress",
-          phase: "running",
-          outcome: null
-        }
+  it.each([1, 0])(
+    "reports stopping active crawls, including when they already ended (%s stopped)",
+    async (stopped) => {
+      const running = (id: string, name: string) =>
+        makeWebsite({
+          id,
+          name,
+          latest_crawl: {
+            ...(makeWebsite().latest_crawl as object),
+            id: `run-${id}`,
+            status: "in progress",
+            phase: "running",
+            outcome: null
+          }
+        });
+      show(
+        makeSpace({ websites: [running("w1", "Intranätet"), makeWebsite({ id: "w2" })] }),
+        "websites"
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Stoppa alla aktiva (1)" }));
+      const dialog = await screen.findByRole("alertdialog", {
+        name: "Stoppa aktiva synkroniseringar? (1)"
       });
+      state.bulkResult = {
+        total: 1,
+        stopped,
+        not_running: 1 - stopped,
+        failed: 0,
+        crawl_runs: [],
+        errors: []
+      };
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
+
+      await waitFor(() =>
+        expect(state.posted).toEqual([
+          { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w1"] } }
+        ])
+      );
+      await waitFor(() =>
+        expect(state.toasts).toEqual([
+          stopped
+            ? { kind: "success", message: "Skickade stoppbegäranden: 1." }
+            : { kind: "info", message: "De valda synkroniseringarna hade redan avslutats." }
+        ])
+      );
+    }
+  );
+
+  it("lets a delete-only user select websites and only removes those they may delete", async () => {
     show(
-      makeSpace({ websites: [running("w1", "Intranätet"), makeWebsite({ id: "w2" })] }),
+      makeSpace({
+        resourcePermissions: ["read", "delete"],
+        websites: [makeWebsite(), makeWebsite({ id: "read-only", permissions: ["read"] })]
+      }),
       "websites"
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Stoppa alla aktiva (1)" }));
-    const dialog = await screen.findByRole("alertdialog", {
-      name: "Stoppa aktiva synkroniseringar? (1)"
-    });
-    state.bulkResult = {
-      total: 1,
-      stopped: 1,
-      not_running: 0,
-      failed: 0,
-      crawl_runs: [],
-      errors: []
-    };
-    fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
-
+    fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
+    expect(screen.queryByRole("button", { name: /Synkronisera valda/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort valda (1)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort webbplatskällor? (1)" });
+    state.bulkResult = { total: 1, deleted: 1, not_found: 0, failed: 0, errors: [] };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort källor" }));
     await waitFor(() =>
       expect(state.posted).toEqual([
-        { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w1"] } }
+        { path: "/api/v1/websites/bulk/delete/", body: { website_ids: ["website-1"] } }
       ])
-    );
-    await waitFor(() =>
-      expect(state.toasts).toEqual([{ kind: "success", message: "Skickade stoppbegäranden: 1." }])
     );
   });
 
@@ -904,7 +958,7 @@ describe("KnowledgePage", () => {
     expect(cells("Varningar")[3]!.textContent).toBe("Delvis klarKunde inte indexeras:Sidor: 1");
     expect(
       within(cells("Varningar")[3]!).getByRole("button", {
-        name: "Visa sidor som inte kunde indexeras (1)"
+        name: "Sidor: 1, visa de som inte kunde indexeras"
       })
     ).toBeTruthy();
     expect(cells("Varningar")[5]!.textContent).toMatch(/^Varje dagNästa indexering: \d/);
@@ -923,4 +977,350 @@ describe("KnowledgePage", () => {
       screen.getByText(/Du har inte behörighet att lägga till samlingar/, { selector: "span" })
     ).toBeTruthy();
   });
+});
+
+/*
+ * Decision 9: a knowledge table keeps all its columns where it shows (from
+ * 768 px) and scrolls sideways with its name held in view. Its short columns
+ * are as wide as what they hold, so an iPad shows it whole; held upright, only
+ * the websites table needs more than the room beside the icon rail.
+ */
+describe("knowledge tables on tablets", () => {
+  // What an iPad held upright (820 px) or sideways (1180 px) leaves a space's
+  // table: the shell's 8 px insets and gap, the 64 px icon rail, the page's
+  // 24 px insets and the frame's border.
+  const IPAD_PORTRAIT_WIDTH = 682;
+  const IPAD_LANDSCAPE_WIDTH = 1042;
+  // Headers of the columns held in view (Astryx offsets them from the start).
+  const pinned = (table: HTMLElement) =>
+    within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart)
+      .map((cell) => cell.textContent);
+  const minWidth = (table: HTMLElement) => Number.parseFloat(table.style.minWidth);
+
+  it("holds a collection's name in view and fits an iPad", () => {
+    setViewport("tablet-portrait");
+    show(makeSpace({ collections: [makeCollection()] }));
+    const table = screen.getByRole("table", { name: "Samlingar" });
+    expect(pinned(table)).toEqual(["Namn"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+  });
+
+  it("holds a website's checkbox and name in view where it scrolls, and fits an iPad held sideways", () => {
+    setViewport("tablet-landscape");
+    show(makeSpace({ websites: [makeWebsite()] }), "websites");
+    const table = screen.getByRole("table", { name: "Webbplatser" });
+    expect(pinned(table)).toEqual([expect.stringContaining("Markera alla rader"), "Webbplats"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_LANDSCAPE_WIDTH);
+  });
+
+  it("holds a source's name in view and fits an iPad", async () => {
+    setViewport("tablet-portrait");
+    show(makeSpace({ integrations: [makeIntegration()] }), "integrations");
+    const table = await screen.findByRole("table", { name: "Integrationer" });
+    expect(pinned(table)).toEqual(["Källa"]);
+    expect(minWidth(table)).toBeLessThanOrEqual(IPAD_PORTRAIT_WIDTH);
+  });
+});
+
+/*
+ * The artifact's Kunskap board (decision 9): on a phone the source is a mode
+ * of one list, chosen with a segmented control, and each source lists rows.
+ */
+describe("Kunskap on a phone", () => {
+  const failing = () =>
+    makeWebsite({
+      id: "w2",
+      name: "Intranätet",
+      latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "failed" }
+    });
+
+  it("switches sources with a segmented control and lists each as rows", async () => {
+    setViewport("phone");
+    const { container } = show(
+      makeSpace({ collections: [makeCollection()], websites: [makeWebsite(), failing()] })
+    );
+
+    expect(screen.queryByRole("table")).toBeNull();
+    // A source is a mode of the list on a phone, not a tab: no tabs at all,
+    // so nothing is named by a hidden tab (its width sizer doubled the name).
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("group", { name: "Samlingar" }).id).toBeTruthy();
+    // Still the page's heading for screen readers; the space header shows the page.
+    expect(screen.getByRole("heading", { level: 2, name: "Kunskap" })).toBeTruthy();
+    const sources = screen.getByRole("radiogroup", { name: "Kunskapskällor" });
+    expect(
+      within(sources).getByRole("radio", { name: "Samlingar" }).getAttribute("aria-checked")
+    ).toBe("true");
+
+    const collections = screen.getByRole("list", { name: "Samlingar" });
+    const policy = within(collections).getByRole("link", { name: /^Upphandlingspolicy/ });
+    expect(policy.getAttribute("href")).toBe("/spaces/space-1/knowledge/collections/collection-1");
+    const row = policy.closest("li")!;
+    expect(within(row).getByText(/42 filer/)).toBeTruthy();
+    // The tile is as wide as an assistant's or app's, so names line up across the tabs.
+    const tile = row.querySelector("span[aria-hidden='true'].shrink-0");
+    expect(tile?.className).toContain("size-9");
+    // A healthy row says nothing more; its menu sits beside the link.
+    expect(within(row).queryByText("Indexerad")).toBeNull();
+    const menu = within(row).getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" });
+    expect(policy.contains(menu)).toBe(false);
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(within(sources).getByRole("radio", { name: "Webbplatser" }));
+    const websites = screen.getByRole("list", { name: "Webbplatser" });
+    const healthy = within(websites)
+      .getByRole("link", { name: /^www\.upphandlingsmyndigheten\.se/ })
+      .closest("li")!;
+    expect(within(healthy).getByText(/318 sidor/)).toBeTruthy();
+    const intranet = within(websites)
+      .getByRole("link", { name: /^Intranätet/ })
+      .closest("li")!;
+    expect(within(intranet).getByText("Synkfel")).toBeTruthy();
+    expect(
+      within(intranet).getByRole("link", { name: "Åtgärda Intranätet" }).getAttribute("href")
+    ).toBe("/spaces/space-1/knowledge/websites/w2");
+    expect(
+      within(intranet).getByRole("button", { name: "Fler åtgärder för Intranätet" })
+    ).toBeTruthy();
+    // Selecting websites for bulk actions is a tablet and desktop task.
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("lists integration sources as rows, with a fix for one that needs it", async () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        integrations: [
+          makeIntegration(),
+          makeIntegration({
+            id: "i4",
+            name: "Mallar",
+            metadata: { size: 0, last_sync_status: "error", last_sync_error: "Okänt fel" }
+          })
+        ]
+      }),
+      "integrations"
+    );
+
+    const sources = await screen.findByRole("list", { name: "Integrationer" });
+    const mallar = within(sources)
+      .getByRole("link", { name: /^Mallar/ })
+      .closest("li")!;
+    expect(within(mallar).getByText("Behöver åtgärd")).toBeTruthy();
+    expect(within(mallar).getByRole("link", { name: "Åtgärda Mallar" }).getAttribute("href")).toBe(
+      "/spaces/space-1/knowledge/integrations/i4?tab=problems"
+    );
+    expect(
+      within(sources).getByRole("button", { name: "Fler åtgärder för Avtalsmallar" })
+    ).toBeTruthy();
+
+    // A search that matches nothing says so, as the table does.
+    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
+      target: { value: "xyz" }
+    });
+    expect(screen.getByText("Inga resultat hittades")).toBeTruthy();
+  });
+
+  it("offers the sources in a select where the segmented control does not fit", () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    // CSS shows one of the two by the content's width (a container query).
+    expect(screen.getByRole("combobox", { name: "Kunskapskällor" })).toBeTruthy();
+  });
+
+  it("drops the website bulk toolbar on a phone and keeps the selection for a wider screen", () => {
+    setViewport("tablet-portrait");
+    show(
+      makeSpace({ websites: [makeWebsite(), makeWebsite({ id: "w2", name: "Intranätet" })] }),
+      "websites"
+    );
+    fireEvent.click(screen.getByRole("checkbox", { name: "Markera Intranätet" }));
+    const toolbar = () => screen.queryByRole("toolbar", { name: "Åtgärder för valda webbplatser" });
+    expect(toolbar()).toBeTruthy();
+
+    act(() => setViewport("phone"));
+    expect(toolbar()).toBeNull();
+    act(() => setViewport("tablet-portrait"));
+    expect(toolbar()).toBeTruthy();
+  });
+
+  it("groups rows by embedding model, as the tables do", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        collections: [
+          makeCollection(),
+          makeCollection({
+            id: "c2",
+            name: "Arkiv",
+            embedding_model: {
+              id: "embed-2",
+              name: "text-embedding-3",
+              nickname: "Arkivmodell",
+              provider_name: "Berget",
+              is_org_enabled: false
+            }
+          })
+        ]
+      })
+    );
+    expect(
+      within(screen.getByRole("list", { name: "multilingual-e5-large" })).getByRole("link", {
+        name: /^Upphandlingspolicy/
+      })
+    ).toBeTruthy();
+    expect(
+      within(
+        screen.getByRole("list", { name: "Arkivmodell (Berget) (Inaktiverad av administratör)" })
+      ).getByRole("link", {
+        name: /^Arkiv/
+      })
+    ).toBeTruthy();
+  });
+
+  it("still stops every running crawl", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        websites: [
+          makeWebsite({
+            latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "in progress" }
+          })
+        ]
+      }),
+      "websites"
+    );
+    expect(screen.getByRole("button", { name: /^Stoppa alla aktiva/ })).toBeTruthy();
+  });
+
+  it("docks the create action at the bottom, once, and leaves the empty state without it", () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(within(dock).getByRole("button", { name: "Skapa samling" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Skapa samling" })).toHaveLength(1);
+    // Its wrapper gives way on the same query as the dock (a turned phone too),
+    // so the fixed dock leaves no empty gap behind in the controls row.
+    expect(dock.parentElement?.classList).toContain("phone:contents");
+    cleanup();
+
+    setViewport("phone");
+    show(makeSpace({ collections: [] }));
+    expect(screen.getByRole("heading", { name: "Inga samlingar ännu" })).toBeTruthy();
+    const docked = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(screen.getAllByRole("button", { name: "Skapa samling" })).toEqual([
+      within(docked).getByRole("button", { name: "Skapa samling" })
+    ]);
+  });
+
+  it("keeps an open create dialog and what was typed when a turn moves the action", async () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    fireEvent.click(within(dock).getByRole("button", { name: "Skapa samling" }));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: "Bygglov" } });
+
+    act(() => setViewport("tablet-portrait"));
+    expect(screen.getByRole("dialog")).toBe(dialog);
+    expect((within(dialog).getByLabelText(/Namn/) as HTMLInputElement).value).toBe("Bygglov");
+  });
+
+  it("docks only the primary action: stopping crawls stays with the list", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        websites: [
+          makeWebsite({
+            latest_crawl: { ...(makeWebsite().latest_crawl as object), status: "in progress" }
+          })
+        ]
+      }),
+      "websites"
+    );
+    const dock = screen.getByRole("group", { name: "Kunskap, åtgärder" });
+    expect(within(dock).getByRole("button", { name: "Anslut webbplats" })).toBeTruthy();
+    expect(within(dock).queryByRole("button", { name: /^Stoppa alla aktiva/ })).toBeNull();
+  });
+
+  it("docks nothing for someone who may not add knowledge", () => {
+    setViewport("phone");
+    show(makeSpace({ resourcePermissions: ["read"], collections: [makeCollection()] }));
+    expect(screen.queryByRole("group", { name: "Kunskap, åtgärder" })).toBeNull();
+  });
+
+  it("keeps focus on the same collection when a turn swaps rows for the table", () => {
+    setViewport("phone");
+    show(makeSpace({ collections: [makeCollection()] }));
+    screen.getByRole("link", { name: /^Upphandlingspolicy/ }).focus();
+
+    act(() => setViewport("tablet-portrait"));
+    const table = screen.getByRole("table", { name: "Samlingar" });
+    expect(document.activeElement).toBe(
+      within(table).getByRole("link", { name: "Upphandlingspolicy" })
+    );
+  });
+
+  it.each([
+    {
+      label: "collection",
+      data: { collections: [makeCollection()] },
+      tab: "collections",
+      name: "Upphandlingspolicy",
+      action: "Redigera",
+      field: "Namn"
+    },
+    {
+      label: "website",
+      data: { websites: [makeWebsite({ name: "Webbplatsen" })] },
+      tab: "websites",
+      name: "Webbplatsen",
+      action: "Redigera",
+      field: "Visningsnamn"
+    },
+    {
+      label: "integration",
+      data: { integrations: [makeIntegration()] },
+      tab: "integrations",
+      name: "Avtalsmallar",
+      action: "Byt namn",
+      field: "Namn"
+    },
+    {
+      label: "wrapper",
+      data: {
+        integrations: [makeIntegration({ wrapper_id: "wrapper-1", wrapper_name: "Avtalsgruppen" })]
+      },
+      tab: "integrations",
+      name: "Avtalsgruppen",
+      action: "Byt namn på grupp",
+      field: "Namn"
+    }
+  ])(
+    "preserves a $label draft across phone and tablet layouts",
+    async ({ data, tab, name: resourceName, action, field }) => {
+      setViewport("tablet-portrait");
+      show(makeSpace(data), tab);
+      fireEvent.click(screen.getByRole("button", { name: `Fler åtgärder för ${resourceName}` }));
+      // The menu moves focus into itself on the next frame; let it, as a user would.
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+      fireEvent.click(await screen.findByRole("menuitem", { name: action }));
+      const dialog = await screen.findByRole("dialog");
+      const name = within(dialog).getByLabelText(field);
+      fireEvent.change(name, { target: { value: "Osparat namn" } });
+      name.focus();
+
+      for (const viewport of ["phone", "tablet-portrait"] as const) {
+        act(() => setViewport(viewport));
+        expect(screen.getByRole("dialog")).toBe(dialog);
+        expect((name as HTMLInputElement).value).toBe("Osparat namn");
+        expect(document.activeElement).toBe(name);
+      }
+      fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+    }
+  );
 });

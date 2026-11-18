@@ -2,17 +2,24 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import {
+  blocksOnSeverity,
+  normalizeSeverity,
+} from "../../.github/scripts/dependency-audit-severity.mjs";
 
 const cwd = fileURLToPath(new URL("..", import.meta.url));
 // Accepted advisories, each pinned to its exact advisory and version range
-// and with an expiry: a reviewed reason, not a blanket waiver.
+// and with an expiry: a reviewed reason, not a blanket waiver. A reason that
+// rests on how Eneo is configured names a `check`, a test run on every audit;
+// while it fails, the advisory is not accepted.
 const ACCEPTED = [
   {
     name: "braces",
     url: "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm",
     vulnerable_versions: "<=3.0.3",
-    expires: "2026-11-05",
-    reason: "mitigated by the tested downstream patch",
+    expires: "2026-12-15",
+    reason:
+      "mitigated by the tested downstream patch; GitHub withdrew the advisory on 2026-10-23 and no fixed release exists, so the patch and its regression tests stay",
   },
   {
     name: "@sveltejs/kit",
@@ -30,52 +37,117 @@ const ACCEPTED = [
     reason:
       "affects prerendered pages only; web prerenders none. Fixed only in SvelteKit 3",
   },
+  {
+    name: "@sveltejs/kit",
+    url: "https://github.com/advisories/GHSA-3r8g-jcqq-3p5j",
+    vulnerable_versions: ">=2.42.0 <=3.1.0",
+    expires: "2026-12-15",
+    reason:
+      "only remote functions parse the affected form data, and neither web nor ui turns on kit.experimental.remoteFunctions. Fixed only in SvelteKit 3.1.1",
+    check: "scripts/remote-functions-off.test.mjs",
+  },
+  {
+    name: "picomatch",
+    url: "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+    vulnerable_versions: "<=4.0.7",
+    expires: "2026-12-15",
+    reason:
+      "needs an attacker-chosen glob pattern; picomatch runs only in build and developer tools (Vite, Rollup plugins, Nextra's fast-glob, Knip, Vitest) on patterns from their configuration and source, and the shipped Svelte server, web-next bundle and docs export contain none of it. No fixed release exists",
+  },
 ];
-for (const entry of ACCEPTED) {
+export function evaluate(report, now = new Date(), failedChecks = []) {
   assert.ok(
-    new Date() < new Date(`${entry.expires}T00:00:00Z`),
-    `Review ${entry.name} ${entry.url} and remove/renew its documented exception before ${entry.expires}.`,
+    report && typeof report === "object" && !Array.isArray(report),
+    "Invalid Bun audit report.",
   );
-}
-const regression = spawnSync(
-  process.execPath,
-  ["--test", "scripts/security-patches.test.mjs"],
-  { cwd, stdio: "inherit" },
-);
-assert.equal(
-  regression.status,
-  0,
-  "The installed dependency security patch must pass its behavior tests.",
-);
-const audit = spawnSync("bun", ["audit", "--json"], {
-  cwd,
-  encoding: "utf8",
-  maxBuffer: 4 * 1024 * 1024,
-});
-assert.ok(
-  audit.status === 0 || audit.status === 1,
-  "bun audit did not complete successfully",
-);
-const report = JSON.parse(audit.stdout);
-if (process.argv[2])
-  writeFileSync(process.argv[2], JSON.stringify(report, null, 2) + "\n");
-let blocking = 0;
-for (const [name, advisories] of Object.entries(report)) {
-  for (const advisory of advisories) {
-    const accepted = ACCEPTED.find(
-      (entry) =>
-        entry.name === name &&
-        entry.url === advisory.url &&
-        entry.vulnerable_versions === advisory.vulnerable_versions,
-    );
-    if (accepted) {
-      console.log(
-        `${name}: ${advisory.url} accepted, ${accepted.reason}; review expires ${accepted.expires}.`,
+  const errors = [];
+  const warnings = [];
+  const accepted = [];
+  const holds = (entry) =>
+    now < new Date(`${entry.expires}T00:00:00Z`) &&
+    !failedChecks.includes(entry.check);
+  for (const entry of ACCEPTED) {
+    if (now >= new Date(`${entry.expires}T00:00:00Z`)) {
+      errors.push(
+        `Review ${entry.name} ${entry.url} and remove/renew its documented exception before ${entry.expires}.`,
       );
-      continue;
     }
-    console.error(`${name}: ${advisory.severity} ${advisory.url}`);
-    blocking++;
+    if (failedChecks.includes(entry.check)) {
+      errors.push(
+        `${entry.name} ${entry.url} is no longer accepted: ${entry.check} failed.`,
+      );
+    }
   }
+  for (const [name, advisories] of Object.entries(report)) {
+    assert.ok(Array.isArray(advisories), `Invalid advisory list for ${name}.`);
+    for (const advisory of advisories) {
+      const entry = ACCEPTED.find(
+        (entry) =>
+          entry.name === name &&
+          entry.url === advisory.url &&
+          entry.vulnerable_versions === advisory.vulnerable_versions,
+      );
+      if (entry && holds(entry)) {
+        accepted.push(
+          `${name}: ${advisory.url} accepted, ${entry.reason}; review expires ${entry.expires}.`,
+        );
+        continue;
+      }
+      const severity = normalizeSeverity(advisory.severity);
+      const message = `${name}: ${severity ?? "unknown"} ${advisory.url}`;
+      if (!severity || blocksOnSeverity(severity)) errors.push(message);
+      else warnings.push(message);
+    }
+  }
+  return { errors, warnings, accepted };
 }
-process.exitCode = blocking > 0 ? 1 : 0;
+
+export function run(argv) {
+  const regression = spawnSync(
+    process.execPath,
+    ["--test", "--test-concurrency=1", "scripts/security-patches.test.mjs"],
+    { cwd, stdio: "inherit" },
+  );
+  assert.equal(
+    regression.status,
+    0,
+    "The installed dependency security patch must pass its behavior tests.",
+  );
+  const failedChecks = [];
+  for (const { check } of ACCEPTED) {
+    if (!check) continue;
+    const result = spawnSync(
+      process.execPath,
+      ["--test", "--test-concurrency=1", check],
+      { cwd, stdio: "inherit" },
+    );
+    if (result.status !== 0) failedChecks.push(check);
+  }
+  const audit = spawnSync("bun", ["audit", "--json"], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 4 * 1024 * 1024,
+  });
+  assert.ok(
+    audit.status === 0 || audit.status === 1,
+    "bun audit did not complete successfully",
+  );
+  const report = JSON.parse(audit.stdout);
+  if (argv[0]) writeFileSync(argv[0], JSON.stringify(report, null, 2) + "\n");
+  const result = evaluate(report, new Date(), failedChecks);
+  const escape = (message) =>
+    message
+      .replaceAll("%", "%25")
+      .replaceAll("\r", "%0D")
+      .replaceAll("\n", "%0A");
+  for (const message of result.accepted) console.log(message);
+  for (const message of result.warnings)
+    console.log(`::warning::${escape(message)}`);
+  for (const message of result.errors)
+    console.error(`::error::${escape(message)}`);
+  return result.errors.length > 0 ? 1 : 0;
+}
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  process.exitCode = run(process.argv.slice(2));
+}

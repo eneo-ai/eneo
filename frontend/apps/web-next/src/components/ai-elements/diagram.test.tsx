@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { MessageResponse } from "./message";
+
+// Answers load the diagram renderer on demand; load it once up front so the
+// tests time the dialog, not the import.
+beforeAll(async () => {
+  await import("./diagram");
+});
 
 // jsdom has no viewport or SVG layout. Keep lazy diagrams outside the viewport
 // here; browser checks cover SVG rendering. Dialog and focus behaviour are real.
@@ -30,7 +36,7 @@ it("opens a named diagram dialog, moves focus inside and returns it on close", a
   renderInApp(
     <MessageResponse isAnimating={false}>{"```mermaid\ngraph LR\nA --> B\n```"}</MessageResponse>
   );
-  const expand = screen.getByRole("button", { name: "Visa i helskärm" });
+  const expand = await screen.findByRole("button", { name: "Visa i helskärm" });
   expand.focus();
   fireEvent.click(expand);
   const dialog = await screen.findByRole("dialog", { name: "Diagram" });

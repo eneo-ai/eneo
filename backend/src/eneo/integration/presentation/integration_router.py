@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Optional
 from uuid import UUID
 
@@ -34,9 +35,16 @@ from eneo.integration.presentation.validation import (
     validate_folder_path,
 )
 from eneo.main.container.container import Container
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
+
+_CONNECTION_UPKEEP_ON_GET = (
+    "Using the connection renews its OAuth token when needed and records the "
+    "organization app's auth health. This is the upkeep any use of the connection "
+    "does; nothing in it is chosen by the request."
+)
 
 router = APIRouter()
 
@@ -360,6 +368,7 @@ async def get_sync_logs(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def get_integration_preview(
     user_integration_id: UUID,
@@ -389,6 +398,7 @@ async def get_integration_preview(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def search_sharepoint_library(
     user_integration_id: UUID,
@@ -457,6 +467,7 @@ async def search_sharepoint_library(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="Integration services enforce tenant, user and space access for this operation.",
+    effect_on_get=_CONNECTION_UPKEEP_ON_GET,
 )
 async def get_sharepoint_folder_tree(
     user_integration_id: UUID,
@@ -542,14 +553,16 @@ async def get_sharepoint_folder_tree(
         raise
     except Exception as e:
         # Unexpected errors
-        logger.error(
-            f"Unexpected error in SharePoint tree endpoint: {type(e).__name__}: {str(e)}",
+        log_error(
+            logger,
+            logging.ERROR,
+            "Unexpected error in SharePoint tree endpoint",
+            error=e,
             extra={
                 "user_integration_id": str(user_integration_id),
                 "space_id": str(space_id),
                 "site_id": site_id,
             },
-            exc_info=True,
         )
         raise BadRequestException(
             f"Failed to fetch SharePoint folder tree: {user_visible_error(e)}"

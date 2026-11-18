@@ -1,13 +1,17 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
+import { useLocale, useTranslations } from "use-intl";
+import { useMemo, useRef, useState } from "react";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { X } from "lucide-react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import {
   Dialog,
   DialogContent,
@@ -18,38 +22,46 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { storageQueryOptions } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { sessionQueries } from "@/lib/api/session";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
-import { collectDroppedFiles } from "@/features/files/collect-dropped-files";
+import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import { collectionBlobsQueryOptions } from "./knowledge";
+import { useFocusRescue } from "@/lib/focus-rescue";
 
 type ValidationError = { fileName?: string; message: string };
 
 const FILES_ID = "knowledge-upload-files";
 const FILE_ERRORS_ID = `${FILES_ID}-errors`;
+const session = sessionQueries(browserApi);
 
 /** "Ladda upp filer" on a collection's page: the button and its upload dialog. */
 export function UploadBlobsButton({
   collectionId,
   collectionName,
-  disabled
+  disabled,
+  disabledReason
 }: {
   collectionId: string;
   collectionName: string;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button disabled={disabled} onClick={() => setOpen(true)}>
-        {t("upload_files")}
-      </Button>
+      <AstryxButton
+        label={t("upload_files")}
+        isDisabled={disabled}
+        tooltip={disabledReason}
+        onClick={() => setOpen(true)}
+      />
       <UploadBlobsDialog
         collectionId={collectionId}
         collectionName={collectionName}
@@ -79,19 +91,84 @@ export function UploadBlobsDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const { limits, user, tenant, can } = useAppContext();
   const { queueUploads } = useJobs();
+  // Files whose titles the collection already has, waiting for "replace".
+  const [replacing, setReplacing] = useState<{ files: File[]; names: string[] } | null>(null);
+
+  function queue(files: File[]) {
+    queueUploads(collectionId, files);
+    setReplacing(null);
+    onOpenChange(false);
+  }
+
+  return (
+    <>
+      <Dialog open={open} onOpenChange={onOpenChange}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("upload_files")}</DialogTitle>
+            <DialogDescription>
+              {t("upload_files_to_collection_description", { name: collectionName })}
+            </DialogDescription>
+          </DialogHeader>
+          <UploadBlobsForm
+            collectionId={collectionId}
+            onCancel={() => onOpenChange(false)}
+            onUpload={(files, duplicateNames) => {
+              if (duplicateNames.length > 0) setReplacing({ files, names: duplicateNames });
+              else queue(files);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+      <ConfirmDialogControlled
+        open={replacing !== null}
+        onOpenChange={(next) => {
+          if (!next) setReplacing(null);
+        }}
+        title={t("duplicate_files_dialog_title")}
+        description={`${t("duplicate_files_dialog_description")} ${replacing?.names.join(", ") ?? ""}`}
+        confirmLabel={t("replace_files")}
+        variant="default"
+        onConfirm={() => {
+          if (replacing) queue(replacing.files);
+        }}
+      />
+    </>
+  );
+}
+
+/**
+ * The dialog's draft: the picked files and their problems. DialogContent
+ * mounts it afresh on each opening, so a closed dialog's files never return.
+ * Upload hands the files, with the titles the collection already has, to the
+ * dialog, which owns the queueing.
+ */
+function UploadBlobsForm({
+  collectionId,
+  onCancel,
+  onUpload
+}: {
+  collectionId: string;
+  onCancel: () => void;
+  onUpload: (files: File[], duplicateNames: string[]) => void;
+}) {
+  const t = useTranslations();
+  // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
+  const coarse = useMediaQuery("(pointer: coarse)");
+  const locale = useLocale();
+  const { limits, user, can } = useAppContext();
   const queryClient = useQueryClient();
   // The collection's files, for the duplicate-title warning (cached on its
   // page); loaded when the dialog opens, so Upload rarely waits for them.
-  useQuery({ ...collectionBlobsQueryOptions(browserApi, collectionId), enabled: open });
+  useQuery(collectionBlobsQueryOptions(browserApi, collectionId));
   const [checking, setChecking] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
-  const [dragging, setDragging] = useState(false);
-  const [duplicateFileNames, setDuplicateFileNames] = useState<string[]>([]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const rescueFocus = useFocusRescue();
+  const { dragging, handlers } = useFileDrop(addSelectedFiles, { enabled: !checking });
 
   const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
   const sizeLimitByType = new Map(
@@ -99,21 +176,16 @@ export function UploadBlobsDialog({
   );
 
   const { data: storage } = useQuery({
-    queryKey: ["storage", tenant.id],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/storage/")),
-    enabled: open && can("admin")
+    ...storageQueryOptions(browserApi),
+    enabled: can("admin")
   });
-  // The app context's user is read once on the server; the quota it carries
-  // goes stale with every upload. This query starts from that value and is
-  // refreshed whenever a job finishes (features/jobs/job-invalidation.ts).
-  const { data: me } = useQuery({
-    queryKey: ["users", "me"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/users/me/")),
-    initialData: user,
-    enabled: open
-  });
-  const quotaLimit = me.quota_limit ?? user.quota_limit;
-  const quotaUsed = me.quota_used ?? user.quota_used;
+  // The quota needs a fresh answer: the backend computes it live, and deleted
+  // files or uploads in another tab move it without touching this tab's cache.
+  // Each opening refetches the session's user (the one ["users", "me"]
+  // entry, which the app context shows too).
+  const { data: me = user } = useQuery({ ...session.me, staleTime: 0 });
+  const quotaLimit = me.quota_limit;
+  const quotaUsed = me.quota_used;
 
   const errors = useMemo<ValidationError[]>(() => {
     const found: ValidationError[] = [];
@@ -153,11 +225,8 @@ export function UploadBlobsDialog({
   // Upload is never disabled: with no files, or files it cannot take, the
   // problem shows at the file field, which takes focus.
   async function startUpload() {
-    if (checking) return;
     if (files.length === 0 || errors.length > 0) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(FILES_ID)?.focus();
+      revealProblems(() => setSubmitted(true), FILES_ID);
       return;
     }
 
@@ -168,29 +237,14 @@ export function UploadBlobsDialog({
       .catch(() => []);
     setChecking(false);
     const existingTitles = new Set(currentBlobs.map((blob) => blob.metadata.title));
-    const duplicates = files.filter((file) => existingTitles.has(file.name));
-    if (duplicates.length > 0) {
-      setDuplicateFileNames(duplicates.map((file) => file.name));
-      return;
-    }
-    queueSelectedFiles();
-  }
-
-  function reset() {
-    setFiles([]);
-    setSkippedFiles([]);
-    setDragging(false);
-    setDuplicateFileNames([]);
-    setSubmitted(false);
-  }
-
-  function queueSelectedFiles() {
-    queueUploads(collectionId, files);
-    reset();
-    onOpenChange(false);
+    onUpload(
+      files,
+      files.filter((file) => existingTitles.has(file.name)).map((file) => file.name)
+    );
   }
 
   function addSelectedFiles(selected: File[]) {
+    if (checking) return;
     const accepted = selected.filter((file) => acceptedMimeTypes.includes(file.type));
     const skipped = selected.filter((file) => !acceptedMimeTypes.includes(file.type));
     if (skipped.length > 0) {
@@ -212,142 +266,116 @@ export function UploadBlobsDialog({
 
   return (
     <>
-      <Dialog
-        open={open}
-        onOpenChange={(next) => {
-          onOpenChange(next);
-          if (!next) reset();
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("upload_files")}</DialogTitle>
-            <DialogDescription>
-              {t("upload_files_to_collection_description", { name: collectionName })}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex flex-col gap-3">
-            <div
-              className={cn(
-                "rounded-lg border-2 border-dashed p-4",
-                dragging && "border-primary bg-primary/5"
-              )}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={(event) => {
-                if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                setDragging(false);
-                void collectDroppedFiles(event.dataTransfer)
-                  .then(addSelectedFiles)
-                  .catch(() => toast.error(t("file_upload_error")));
-              }}
-            >
-              <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
-                {t("upload_dropzone_prompt")}
-              </Label>
-              <Input
-                id={FILES_ID}
-                type="file"
-                multiple
-                accept={acceptedMimeTypes.join(",")}
-                onChange={(event) => {
-                  addSelectedFiles(Array.from(event.target.files ?? []));
-                  event.target.value = "";
-                }}
-                {...fieldProblemProps(
-                  FILES_ID,
-                  noFilesProblem,
-                  errors.length > 0 ? FILE_ERRORS_ID : undefined
-                )}
-                // Files it cannot take make the choice invalid as soon as they are added.
-                aria-invalid={noFilesProblem !== null || errors.length > 0 || undefined}
-              />
-              <FieldProblem id={FILES_ID} problem={noFilesProblem} />
-            </div>
-            <FileFormatDetails
-              formats={limits.info_blobs.formats.map((format) => ({
-                mimetype: format.mimetype,
-                extensions: format.extensions,
-                maxSize: format.size
-              }))}
-            />
-            {skippedFiles.length > 0 && (
-              <p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
-                {t("upload_skipped_unsupported_files", { fileList: skippedFiles.join(", ") })}
-              </p>
+      <div className="flex flex-col gap-3">
+        <div
+          className={cn(
+            "rounded-lg border-2 border-dashed p-4",
+            dragging && "border-primary bg-primary/5"
+          )}
+          {...handlers}
+        >
+          <Label htmlFor={FILES_ID} className="text-muted-foreground mb-2 text-sm font-normal">
+            {coarse ? t("upload_dropzone_prompt_touch") : t("upload_dropzone_prompt")}
+          </Label>
+          <Input
+            ref={fileInput}
+            id={FILES_ID}
+            type="file"
+            multiple
+            disabled={checking}
+            accept={acceptedMimeTypes.join(",")}
+            onChange={(event) => {
+              addSelectedFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+            {...fieldProblemProps(
+              FILES_ID,
+              noFilesProblem,
+              errors.length > 0 ? FILE_ERRORS_ID : undefined
             )}
-            {files.length > 0 && (
-              <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
-                {files.map((file, index) => (
-                  <li
-                    key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                    className="flex justify-between gap-4 truncate py-0.5"
-                  >
-                    <span className="truncate">{file.name}</span>
-                    <span className="text-muted-foreground shrink-0">
-                      {formatBytes(file.size, locale)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {errors.length > 0 && (
-              <div
-                id={FILE_ERRORS_ID}
-                className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+            // Files it cannot take make the choice invalid as soon as they are added.
+            aria-invalid={noFilesProblem !== null || errors.length > 0 || undefined}
+          />
+          <FieldProblem id={FILES_ID} problem={noFilesProblem} />
+        </div>
+        <FileFormatDetails
+          formats={limits.info_blobs.formats.map((format) => ({
+            mimetype: format.mimetype,
+            extensions: format.extensions,
+            maxSize: format.size
+          }))}
+        />
+        {skippedFiles.length > 0 && (
+          <p className="text-muted-foreground rounded-md border px-3 py-2 text-sm">
+            {t("upload_skipped_unsupported_files", { fileList: skippedFiles.join(", ") })}
+          </p>
+        )}
+        {files.length > 0 && (
+          <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
+            {files.map((file) => (
+              <li
+                key={`${file.name}-${file.size}-${file.lastModified}`}
+                className="flex items-center gap-3 py-0.5"
               >
-                {errors.map((error, index) => (
-                  <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
-                ))}
-              </div>
-            )}
+                <span className="min-w-0 flex-1 break-words">{file.name}</span>
+                <span className="text-muted-foreground shrink-0">
+                  {formatBytes(file.size, locale)}
+                </span>
+                <IconButton
+                  label={t("remove_file", { fileName: file.name })}
+                  tooltip={t("remove_file", { fileName: file.name })}
+                  icon={<X aria-hidden="true" />}
+                  variant="ghost"
+                  isDisabled={checking}
+                  onClick={() => {
+                    rescueFocus(() => fileInput.current);
+                    setFiles((current) => current.filter((item) => item !== file));
+                  }}
+                />
+              </li>
+            ))}
+          </ul>
+        )}
+        {files.length > 0 && (
+          <AstryxButton
+            label={t("add_more_files")}
+            isDisabled={checking}
+            onClick={() => fileInput.current?.click()}
+          />
+        )}
+        {errors.length > 0 && (
+          <div
+            id={FILE_ERRORS_ID}
+            className="border-destructive/50 text-destructive rounded-md border px-3 py-2 text-sm"
+          >
+            {errors.map((error, index) => (
+              <p key={`${error.fileName}-${error.message}-${index}`}>{error.message}</p>
+            ))}
           </div>
-          <DialogFooter>
-            {files.length > 0 && (
-              <Button
-                variant="ghost"
-                className="mr-auto"
-                onClick={() => {
-                  setFiles([]);
-                  setSkippedFiles([]);
-                }}
-              >
-                {t("clear_list")}
-              </Button>
-            )}
-            <Button
-              variant="outline"
-              onClick={() => {
-                onOpenChange(false);
-                reset();
-              }}
-            >
-              {t("cancel")}
-            </Button>
-            {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-            <Button aria-busy={checking || undefined} onClick={() => void startUpload()}>
-              {t("upload_files")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-      <ConfirmDialogControlled
-        open={duplicateFileNames.length > 0}
-        onOpenChange={(next) => {
-          if (!next) setDuplicateFileNames([]);
-        }}
-        title={t("duplicate_files_dialog_title")}
-        description={`${t("duplicate_files_dialog_description")} ${duplicateFileNames.join(", ")}`}
-        confirmLabel={t("replace_files")}
-        variant="default"
-        onConfirm={queueSelectedFiles}
-      />
+        )}
+      </div>
+      <DialogFooter>
+        {files.length > 0 && (
+          <Button
+            variant="ghost"
+            className="mr-auto"
+            disabled={checking}
+            onClick={() => {
+              setFiles([]);
+              setSkippedFiles([]);
+            }}
+          >
+            {t("clear_list")}
+          </Button>
+        )}
+        <Button variant="outline" onClick={onCancel}>
+          {t("cancel")}
+        </Button>
+        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
+        <Button aria-busy={checking || undefined} onClick={() => void startUpload()}>
+          {t("upload_files")}
+        </Button>
+      </DialogFooter>
     </>
   );
 }

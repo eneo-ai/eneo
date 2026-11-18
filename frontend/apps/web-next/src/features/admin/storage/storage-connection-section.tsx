@@ -1,5 +1,3 @@
-"use client";
-
 import {
   ArrowLeftRight,
   CircleAlert,
@@ -9,10 +7,15 @@ import {
   KeyRound,
   RefreshCw
 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { LoadingState } from "@/components/composites/loading-state";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,7 +29,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import { SettingsGroup } from "@/components/composites/settings-rows";
@@ -235,9 +237,7 @@ export function StorageConnectionSection({
       ] as const
     ).find(([problem]) => problem)?.[1];
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     setSubmitting(true);
@@ -504,11 +504,7 @@ export function StorageConnectionSection({
             </p>
           </div>
         ) : loadStatus === "loading" ? (
-          <div className="space-y-3" aria-busy="true">
-            <Skeleton className="h-5 w-52" />
-            <Skeleton className="h-16 w-full" />
-            <span className="sr-only">{t("storage_connection_loading")}</span>
-          </div>
+          <LoadingState rows={2} label={t("storage_connection_loading")} />
         ) : loadStatus === "error" ? (
           <Alert variant="destructive">
             <CircleAlert className="size-4" />
@@ -771,6 +767,7 @@ export function StorageConnectionSection({
                     id="object-store-bucket"
                     {...fieldProblemProps("object-store-bucket", shownProblem("bucket"))}
                     autoComplete="off"
+                    {...KEYBOARD.identifier}
                     required
                     disabled={submitting}
                     placeholder={t("storage_connection_bucket_placeholder")}
@@ -795,6 +792,7 @@ export function StorageConnectionSection({
                       "object-store-region-help"
                     )}
                     autoComplete="off"
+                    {...KEYBOARD.identifier}
                     required
                     disabled={submitting}
                     placeholder={t("storage_connection_region_placeholder")}
@@ -822,6 +820,7 @@ export function StorageConnectionSection({
                     "object-store-access-key-help"
                   )}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   required
                   disabled={submitting}
                   value={input.access_key_id}
@@ -874,7 +873,7 @@ export function StorageConnectionSection({
                   >
                     <select
                       id="object-store-addressing"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                      className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                       disabled={submitting}
                       value={input.addressing_style}
                       onChange={(event) =>

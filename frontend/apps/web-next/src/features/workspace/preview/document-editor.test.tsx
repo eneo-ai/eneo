@@ -2,16 +2,31 @@
 import { act, cleanup, screen } from "@testing-library/react";
 import { createRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
+import { NonceProvider } from "@/components/providers/nonce";
 import { renderInApp } from "@/test/render";
 import { DocumentEditor, type DocumentEditorHandle } from "./document-editor";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(() => {
   cleanup();
 });
 
 const MARKDOWN = "# Plan\n\nMötet hålls på måndag.\n\n- [ ] Boka rum\n";
+
+it("marks its injected stylesheet with the document's CSP nonce", async () => {
+  renderInApp(
+    <NonceProvider nonce="document-nonce">
+      <DocumentEditor markdown={MARKDOWN} />
+    </NonceProvider>
+  );
+
+  await vi.waitFor(() =>
+    expect(document.querySelector<HTMLStyleElement>("style[data-tiptap-style]")?.nonce).toBe(
+      "document-nonce"
+    )
+  );
+});
 
 it("lays out the document, says so, and hands back its Markdown", async () => {
   const ref = createRef<DocumentEditorHandle>();

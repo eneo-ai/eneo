@@ -89,6 +89,19 @@ class TenantRepository:
 
         return await self.delegate.get_all()
 
+    async def get_all_tenant_ids(self) -> list[UUID]:
+        """Every tenant's id, oldest first, without validating the rows.
+
+        Platform sweeps that only scope work per tenant use this so one row
+        the tenant model refuses (a state value written outside the code)
+        cannot stop the sweep for every other tenant; the row still fails
+        wherever the tenant itself is loaded.
+        """
+        result = await self.session.execute(
+            sa.select(Tenants.id).order_by(Tenants.created_at)
+        )
+        return list(result.scalars().all())
+
     async def enable_module(
         self, tenant_id: UUID, module_id: UUID
     ) -> ModuleTenantAssignment:
@@ -207,6 +220,42 @@ class TenantRepository:
         if model is None:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         return model
+
+    async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
+        """The stored widget policy, row-locked until the transaction ends.
+
+        A partial update merges into this value rather than into the policy
+        loaded with the user at request start, so two administrators saving
+        different fields at the same time never overwrite each other.
+        """
+        stmt = (
+            sa.select(Tenants.widget_policy)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
+        row = (await self.session.execute(stmt)).one_or_none()
+        if row is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+        return dict(row[0] or {})
+
+    async def update_widget_policy(
+        self,
+        tenant_id: UUID,
+        policy: dict[str, Any],
+    ) -> TenantInDB:
+        tenant = await self.get(tenant_id)
+        if tenant is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
+        stmt = (
+            sa.update(Tenants)
+            .where(Tenants.id == tenant_id)
+            .values(widget_policy=policy, updated_at=datetime.now(timezone.utc))
+            .returning(Tenants)
+            .options(selectinload(Tenants.modules))
+        )
+        model = await self.delegate.get_model_from_query(stmt)
+        return cast(TenantInDB, model)
 
     async def update_show_model_pricing(
         self,
@@ -572,6 +621,7 @@ class TenantRepository:
         """Set or update federation config for tenant.
 
         IMPORTANT: client_secret must be encrypted BEFORE calling this method.
+        The caller's transaction commits it, together with its audit row.
 
         Args:
             tenant_id: The UUID of the tenant
@@ -586,10 +636,9 @@ class TenantRepository:
             )
         )
         await self.session.execute(stmt)
-        await self.session.commit()
 
     async def delete_federation_config(self, tenant_id: UUID) -> None:
-        """Remove federation config for tenant.
+        """Remove federation config for tenant; the caller's transaction commits.
 
         Args:
             tenant_id: The UUID of the tenant
@@ -603,7 +652,21 @@ class TenantRepository:
             )
         )
         await self.session.execute(stmt)
-        await self.session.commit()
+
+    async def lock_federation_config(self, tenant_id: UUID) -> dict[str, Any] | None:
+        """The stored federation config, with the tenant row locked until commit.
+
+        Every federation write reads under this lock, so two writers serialize
+        and the second one sees the first one's result. None when the tenant
+        does not exist.
+        """
+        stmt = (
+            sa.select(Tenants.federation_config)
+            .where(Tenants.id == tenant_id)
+            .with_for_update()
+        )
+        config = await self.session.scalar(stmt)
+        return None if config is None else dict(config)
 
     async def get_federation_config_with_metadata(
         self, tenant_id: UUID
@@ -622,6 +685,7 @@ class TenantRepository:
             - masked_secret: str (last 4 chars)
             - issuer: str
             - allowed_domains: list[str]
+            - signing_algorithms, email_verified_claims: list[str] | None
             - encrypted_at: str (ISO timestamp)
             - encryption_status: "encrypted" | "plaintext"
 
@@ -661,6 +725,11 @@ class TenantRepository:
         def _str_or_none(v: object) -> str | None:
             return v if isinstance(v, str) else None
 
+        def _strs_or_none(v: object) -> list[str] | None:
+            if not isinstance(v, list):
+                return None
+            return [s for s in cast(list[object], v) if isinstance(s, str)]
+
         domains_raw = config_typed.get("allowed_domains", [])
         domains: list[str] = (
             [d for d in cast(list[object], domains_raw) if isinstance(d, str)]
@@ -681,6 +750,10 @@ class TenantRepository:
             "issuer": _str_or_none(config_typed.get("issuer")),
             "allowed_domains": domains,
             "additional_redirect_uris": redirect_uris,
+            "signing_algorithms": _strs_or_none(config_typed.get("signing_algorithms")),
+            "email_verified_claims": _strs_or_none(
+                config_typed.get("email_verified_claims")
+            ),
             "encrypted_at": _str_or_none(config_typed.get("encrypted_at")),
             "encryption_status": encryption_status,
         }

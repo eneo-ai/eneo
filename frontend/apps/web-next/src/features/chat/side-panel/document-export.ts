@@ -1,6 +1,7 @@
 import { browserApi } from "@/lib/api/browser";
 import { apiErrorFromResponse, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { previewKindOf, type PreviewFile } from "@/features/workspace/preview/preview-kind";
 
 export type DocumentExportAvailability = Schema<"DocumentExportAvailability">;
 export type DocumentExportFormat = "docx" | "pdf";
@@ -10,6 +11,11 @@ export type DocumentExport = {
   availability: () => Promise<DocumentExportAvailability>;
   exportAs: (format: DocumentExportFormat) => Promise<Blob>;
 };
+
+/** Whether a file can be exported as Word or PDF: a Markdown document the assistant made here. */
+export function isExportableDocument(file: PreviewFile): boolean {
+  return previewKindOf(file) === "markdown";
+}
 
 /**
  * How a Markdown document the assistant made in `sessionId` is exported: the
@@ -33,12 +39,4 @@ export function documentExport(sessionId: string, fileId: string): DocumentExpor
       return data;
     }
   };
-}
-
-/** Hands a file to the browser to save under `name`. */
-export function saveBlob(blob: Blob, name: string) {
-  const url = URL.createObjectURL(blob);
-  Object.assign(document.createElement("a"), { href: url, download: name }).click();
-  // The exported file exists only in this page.
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
 }

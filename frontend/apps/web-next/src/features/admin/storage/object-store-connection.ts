@@ -41,6 +41,7 @@ export const CONNECTION_ERROR_KEYS = {
   object_store_probe_tls_failed: "tls",
   object_store_plain_http_not_permitted: "http",
   object_store_probe_binding_mismatch: "binding",
+  object_store_probe_keeps_versions: "versions",
   object_store_probe_integrity_failed: "integrity",
   object_store_credential_encryption_unavailable: "encryption",
   object_store_connection_revision_conflict: "conflict",

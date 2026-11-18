@@ -10,6 +10,7 @@
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
+  import { EneoError } from "@eneo/eneo-js";
 
   type InsightMessage = {
     id?: string;
@@ -26,16 +27,22 @@
   const eneo = getEneo();
 
   let loggingDetails = "";
+  // The question was not logged, or retention emptied its log.
+  let noLog = false;
 
   let loadingLog = false;
   async function loadLog() {
-    if (!loggingDetails) {
+    if (!loggingDetails && !noLog) {
       loadingLog = true;
       try {
         const loaded = message.id ? await eneo.logging.get({ id: message.id }) : message;
         loggingDetails = JSON.stringify(loaded, null, 2);
       } catch (e: unknown) {
-        loggingDetails = JSON.stringify(message, null, 2);
+        if (e instanceof EneoError && e.status === 400) {
+          noLog = true;
+        } else {
+          loggingDetails = JSON.stringify(message, null, 2);
+        }
       }
       loadingLog = false;
     }
@@ -79,10 +86,14 @@
             </div>
           {/if}
         </div>
-        <div class="mb-3 flex justify-end">
-          <CopyButton text={loggingDetails} label={m.copy()} showLabel variant="outline" />
-        </div>
-        <CodeBlock source={loggingDetails} class="max-h-[60vh]" />
+        {#if noLog}
+          <p class="text-secondary text-sm">{m.insights_question_no_log()}</p>
+        {:else}
+          <div class="mb-3 flex justify-end">
+            <CopyButton text={loggingDetails} label={m.copy()} showLabel variant="outline" />
+          </div>
+          <CodeBlock source={loggingDetails} class="max-h-[60vh]" />
+        {/if}
       {/if}
     </div>
     <Dialog.Footer class={dialogLayout.footer}>

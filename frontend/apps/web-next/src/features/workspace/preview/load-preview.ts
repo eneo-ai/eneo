@@ -126,7 +126,9 @@ export async function loadPreview(
   if (limit !== undefined && (file.original_size ?? file.size) > limit) {
     throw new PreviewTooLargeError();
   }
-  const response = await fetch(url, { signal });
+  // Never from or into the disk cache: originals are private, and the
+  // browser may be a shared PC's.
+  const response = await fetch(url, { signal, cache: "no-store" });
   if (!response.ok || !response.body) throw new Error(`Preview download failed`);
 
   switch (kind) {

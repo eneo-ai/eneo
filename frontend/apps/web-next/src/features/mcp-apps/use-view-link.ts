@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";

@@ -1,12 +1,10 @@
-"use client";
-
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Bell, BellDot, ChevronDown } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isCancelledCrawl, isCrawlWithWarnings, jobFailureMessage } from "./job-failure-message";
@@ -54,7 +52,7 @@ function ExpandableErrorRow({
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         aria-expanded={expanded}
         aria-controls={messageId}
       >
@@ -152,7 +150,14 @@ function JobRow({ job }: { job: Job }) {
  * An Astryx Popover lives in the top layer next to its trigger, so it also
  * opens from inside the modal navigation drawer on phones.
  */
-export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end" }) {
+export function JobIndicator({
+  alignment = "end",
+  isHiddenWhenIdle = false
+}: {
+  alignment?: "start" | "end";
+  /** Shown only while something runs or it is in use: a phone's top bar; the drawer has the bell. */
+  isHiddenWhenIdle?: boolean;
+}) {
   const t = useTranslations();
   const { jobs, uploads, runningCount } = useJobActivity();
 
@@ -165,59 +170,72 @@ export function JobIndicator({ alignment = "end" }: { alignment?: "start" | "end
     runningCount > 0 ? t("fix_notifications_running", { count: runningCount }) : t("notifications");
 
   return (
-    <Popover
-      label={t("notifications_and_jobs")}
-      placement="below"
-      alignment={alignment}
-      width={384}
-      content={
-        <div className="flex flex-col gap-3">
-          <p className="text-ax-text-secondary font-mono text-sm font-medium">
-            {t("notifications_and_jobs")}
-          </p>
-          {uploads.length > 0 && (
-            <Section title={t("uploading")}>
-              {uploads.map((upload) => (
-                <UploadRow key={upload.id} upload={upload} />
-              ))}
-            </Section>
-          )}
-          {sections.map((section) => (
-            <Section key={section.titleKey} title={t(section.titleKey)}>
-              {section.jobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </Section>
-          ))}
-          {otherJobs.length > 0 && (
-            <Section title={t("activity")}>
-              {otherJobs.map((job) => (
-                <JobRow key={job.id} job={job} />
-              ))}
-            </Section>
-          )}
-          {runningCount === 0 &&
-            sections.length === 0 &&
-            otherJobs.length === 0 &&
-            uploads.length === 0 && (
-              <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
-                {t("everything_up_to_date")}
-              </p>
-            )}
-        </div>
-      }
+    // Hidden, not removed: a job that settles takes away neither the open panel nor the bell
+    // that focus is on or comes back to, and the keyboard can still reach it. Keyboard focus
+    // shows it, not a press: a tap that lands on focus must not make the bar change.
+    <span
+      data-job-bell=""
+      className={cn(
+        "flex",
+        isHiddenWhenIdle &&
+          runningCount === 0 &&
+          "not-has-[:focus-visible,[aria-expanded=true]]:sr-only"
+      )}
     >
-      <IconButton
-        variant="ghost"
-        label={label}
-        tooltip={label}
-        icon={
-          <Icon
-            icon={runningCount === 0 ? Bell : BellDot}
-            color={runningCount === 0 ? "inherit" : "accent"}
-          />
+      <Popover
+        label={t("notifications_and_jobs")}
+        placement="below"
+        alignment={alignment}
+        width={384}
+        content={
+          <div className="flex flex-col gap-3">
+            <p className="text-ax-text-secondary font-mono text-sm font-medium">
+              {t("notifications_and_jobs")}
+            </p>
+            {uploads.length > 0 && (
+              <Section title={t("uploading")}>
+                {uploads.map((upload) => (
+                  <UploadRow key={upload.id} upload={upload} />
+                ))}
+              </Section>
+            )}
+            {sections.map((section) => (
+              <Section key={section.titleKey} title={t(section.titleKey)}>
+                {section.jobs.map((job) => (
+                  <JobRow key={job.id} job={job} />
+                ))}
+              </Section>
+            ))}
+            {otherJobs.length > 0 && (
+              <Section title={t("activity")}>
+                {otherJobs.map((job) => (
+                  <JobRow key={job.id} job={job} />
+                ))}
+              </Section>
+            )}
+            {runningCount === 0 &&
+              sections.length === 0 &&
+              otherJobs.length === 0 &&
+              uploads.length === 0 && (
+                <p className="text-ax-text-secondary flex min-h-24 items-center justify-center text-sm">
+                  {t("everything_up_to_date")}
+                </p>
+              )}
+          </div>
         }
-      />
-    </Popover>
+      >
+        <IconButton
+          variant="ghost"
+          label={label}
+          tooltip={label}
+          icon={
+            <Icon
+              icon={runningCount === 0 ? Bell : BellDot}
+              color={runningCount === 0 ? "inherit" : "accent"}
+            />
+          }
+        />
+      </Popover>
+    </span>
   );
 }

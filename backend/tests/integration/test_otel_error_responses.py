@@ -72,7 +72,7 @@ async def test_cors_exposes_both_trace_headers(
 async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     """An unhandled 500 must still expose the trace headers via CORS and carry
     error_id, exercising the manual CORS block in the Exception handler that
-    reuses _TRACE_EXPOSE_HEADERS (server/main.py).
+    reads CORS_OPTIONS (server/middleware/cors.py).
 
     A throwaway route raises so the catch-all Exception handler runs. We use a
     client with raise_app_exceptions=False because Starlette's

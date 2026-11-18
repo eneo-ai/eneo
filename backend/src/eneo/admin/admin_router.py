@@ -8,10 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.admin import admin_crawler_router
 from eneo.admin.admin_models import (
+    AccountIdentity,
     AdminApiKeysQueryParams,
     AdminApiKeyUsageQueryParams,
     AdminExpiringKeysQueryParams,
     AdminUsersQueryParams,
+    IdentityMigrationWindowCreate,
+    IdentityMigrationWindowPublic,
+    IdentityRebindingAllowance,
     PaginatedUsersResponse,
     PrivacyPolicy,
     UserDeletedListItem,
@@ -27,7 +31,6 @@ from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import (
     build_api_key_usage_page,
     build_api_key_usage_summary,
-    error_responses,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -832,11 +835,8 @@ async def reactivate_user(username: str, container: AdminContainer):
     service = container.admin_service()
     current_user = container.user()
 
-    # Get old state
-    old_user = await service.get_tenant_user(username)
-
-    # Reactivate user
-    user = await service.reactivate_tenant_user(username)
+    # Reactivate user; a removed user is found too
+    old_state, user = await service.reactivate_tenant_user(username)
 
     # Audit logging
     audit_service = container.audit_service()
@@ -850,7 +850,7 @@ async def reactivate_user(username: str, container: AdminContainer):
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=user,
-            changes={"state": {"old": str(old_user.state), "new": "active"}},
+            changes={"state": {"old": str(old_state), "new": "active"}},
         ),
     )
 
@@ -944,6 +944,145 @@ async def get_deleted_users(
     """
     service = container.admin_service()
     return await service.get_deleted_tenant_users()
+
+
+_SIGN_IN_IDENTITY_ACCESS_REASON = (
+    "Re-opening email matching weakens the protection of bound accounts, so it "
+    "needs the admin permission in an interactive session; the service reads "
+    "and writes only the caller's tenant."
+)
+
+
+@router.get(
+    "/users/{user_id}/identity",
+    response_model=AccountIdentity,
+    summary="Get a user's sign-in identities",
+    description=(
+        "The identity provider identities bound to the account (issuer, "
+        "audience, subject) and its open re-binding allowance, if any. A bound "
+        "account signs in only with its identities; its email binds no other. "
+        "The account is named by its id, the `id` of the user list."
+    ),
+    responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def get_user_identity(
+    user_id: UUID, container: AdminContainer
+) -> AccountIdentity:
+    return await container.admin_service().get_account_identity(user_id)
+
+
+@router.put(
+    "/users/{user_id}/identity/rebinding",
+    response_model=AccountIdentity,
+    summary="Allow a user to bind a new sign-in identity",
+    description=(
+        "Until `allowed_until` (at most 30 days ahead), the account's next "
+        "sign-in by email binds the identity it presents, replacing the "
+        "account's subject under that issuer and audience. Single use: the "
+        "allowance closes with that sign-in. It never takes an identity "
+        "another account holds. Audited."
+    ),
+    responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def allow_user_identity_rebinding(
+    user_id: UUID,
+    allowance: IdentityRebindingAllowance,
+    container: AdminApiKeyMutationContainer,
+) -> AccountIdentity:
+    return await container.admin_service().set_identity_rebinding(
+        user_id, allowance.allowed_until
+    )
+
+
+@router.delete(
+    "/users/{user_id}/identity/rebinding",
+    response_model=AccountIdentity,
+    summary="Withdraw a user's sign-in re-binding",
+    description="Closes the account's re-binding allowance. Audited.",
+    responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def withdraw_user_identity_rebinding(
+    user_id: UUID, container: AdminApiKeyMutationContainer
+) -> AccountIdentity:
+    return await container.admin_service().set_identity_rebinding(user_id, None)
+
+
+@router.get(
+    "/identity-migration-windows",
+    response_model=list[IdentityMigrationWindowPublic],
+    summary="List open identity migration windows",
+    description="The organisation's migration windows that are still open.",
+    responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def list_identity_migration_windows(
+    container: AdminContainer,
+) -> list[IdentityMigrationWindowPublic]:
+    return await container.admin_service().list_identity_migration_windows()
+
+
+@router.post(
+    "/identity-migration-windows",
+    response_model=IdentityMigrationWindowPublic,
+    status_code=status.HTTP_201_CREATED,
+    summary="Open an identity migration window",
+    description=(
+        "Until `closes_at` (at most 30 days ahead), an account bound under the "
+        "from issuer and audience also binds under the to pair by its email. "
+        "The from binding stays, so the first entry point keeps signing in. "
+        "Use it before a client change or when adding an entry point. A window "
+        "from a pair to itself is for a change of subject claim: an account "
+        "bound there before the window opened has its subject replaced once. "
+        "Audited."
+    ),
+    responses=responses.get_responses([401, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def open_identity_migration_window(
+    window: IdentityMigrationWindowCreate, container: AdminApiKeyMutationContainer
+) -> IdentityMigrationWindowPublic:
+    return await container.admin_service().open_identity_migration_window(window)
+
+
+@router.delete(
+    "/identity-migration-windows/{id}",
+    response_model=IdentityMigrationWindowPublic,
+    summary="Close an identity migration window",
+    description="Closes an open window now. Audited.",
+    responses=responses.get_responses([401, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.ADMIN,
+    reason=_SIGN_IN_IDENTITY_ACCESS_REASON,
+)
+async def close_identity_migration_window(
+    id: UUID, container: AdminApiKeyMutationContainer
+) -> IdentityMigrationWindowPublic:
+    return await container.admin_service().close_identity_migration_window(id)
 
 
 @router.get(
@@ -1249,7 +1388,7 @@ async def update_password_policy(
                 }
             },
         },
-        **error_responses([401, 403, 429]),
+        **responses.get_responses([401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1291,7 +1430,7 @@ async def get_api_key_policy(
                 }
             },
         },
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1365,7 +1504,7 @@ async def update_api_key_policy(
     description="Get tenant API key notification policy settings.",
     responses={
         200: {"description": "Current notification policy."},
-        **error_responses([401, 403, 429]),
+        **responses.get_responses([401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1398,7 +1537,7 @@ async def get_api_key_notification_policy(
     description="Update tenant API key notification policy under api_key_policy.notification_policy.",
     responses={
         200: {"description": "Updated notification policy."},
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1486,7 +1625,7 @@ async def update_api_key_notification_policy(
     ),
     responses={
         200: {"description": "Updated model pricing visibility."},
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1549,7 +1688,7 @@ async def update_model_pricing_visibility(
                 }
             },
         },
-        **error_responses([401, 403, 429]),
+        **responses.get_responses([401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1581,7 +1720,7 @@ async def get_super_api_key_status(
             "description": "Paginated tenant API key list.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_LIST_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 429]),
+        **responses.get_responses([400, 401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1666,7 +1805,7 @@ async def list_api_keys_admin(
     description="Returns all expiring keys in the tenant within the specified window.",
     responses={
         200: {"description": "Tenant-wide expiring key summary."},
-        **error_responses([401, 403, 429]),
+        **responses.get_responses([401, 403, 429]),
     },
 )
 @endpoint_access(
@@ -1710,7 +1849,7 @@ async def get_expiring_keys_admin(
                 }
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1767,7 +1906,7 @@ async def lookup_api_key_admin(
         200: {
             "description": "API key usage response.",
         },
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1825,7 +1964,7 @@ async def get_api_key_usage_admin(
             "description": "Tenant API key details.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
         },
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1869,7 +2008,7 @@ async def get_api_key_admin(
             "description": "Updated tenant API key.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1905,7 +2044,7 @@ async def update_api_key_admin(
     summary="Revoke API key (deprecated alias)",
     responses={
         204: {"description": "API key revoked. No response body."},
-        **error_responses([401, 403, 404, 429]),
+        **responses.get_responses([401, 403, 404, 429]),
     },
     deprecated=True,
     description="Deprecated. Use POST /api/v1/admin/api-keys/{id}/revoke with reason body.",
@@ -1948,7 +2087,7 @@ async def revoke_api_key_admin_deprecated(
                 }
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -1993,7 +2132,7 @@ async def revoke_api_key_admin(
                 }
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -2034,7 +2173,7 @@ async def suspend_api_key_admin(
             "description": "Reactivated tenant API key.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -2072,7 +2211,7 @@ async def reactivate_api_key_admin(
                 "application/json": {"example": _ADMIN_ROTATED_RESPONSE_EXAMPLE}
             },
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -2112,7 +2251,7 @@ async def rotate_api_key_admin(
         200: {
             "description": "Updated API key.",
         },
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(
@@ -2155,7 +2294,7 @@ async def extend_api_key_expiration_admin(
     ),
     responses={
         204: {"description": "API key permanently deleted."},
-        **error_responses([400, 401, 403, 404, 429]),
+        **responses.get_responses([400, 401, 403, 404, 429]),
     },
 )
 @endpoint_access(

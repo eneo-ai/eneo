@@ -14,7 +14,7 @@ async def test_update_tokens_in_run():
         MagicMock(id=1), AsyncMock(), MagicMock(), AsyncMock(), AsyncMock(), AsyncMock()
     )
 
-    app_run = MagicMock(user_id=1, skill_provenance=())
+    app_run = MagicMock(user_id=1, skill_provenance=(), input_text="input")
     app_run_service.repo.get.return_value = app_run
 
     completion = Completion(text="This is the output!")
@@ -29,7 +29,7 @@ async def test_update_tokens_in_run():
     file_ids = [uuid4()]
 
     # Execute
-    await app_run_service.run_app(app_id, app_run_id, file_ids, "input")
+    await app_run_service.run_app(app_id, app_run_id, file_ids)
 
     # Assert
     num_tokens_output = count_tokens(completion.text)

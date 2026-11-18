@@ -1,15 +1,12 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
-import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
-import { useClipboard } from "@astryxdesign/core/hooks";
+import { Collapsible, CollapsibleGroup } from "@/components/astryx/collapsible";
 import { Item } from "@astryxdesign/core/Item";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useQuery } from "@tanstack/react-query";
 import { Ban, CircleCheck, CircleX, Clock, Copy, LoaderCircle, Square, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cn } from "@/lib/utils";
@@ -22,6 +19,7 @@ import {
   toolTarget,
   type AttachedFile
 } from "./tool-presentation";
+import { useCopy } from "@/lib/hooks/use-copy";
 
 /**
  * The calls of one tool step in the Steg tab: a row per call (what it did,
@@ -35,6 +33,7 @@ const STATUS_KEY = {
   waiting: "chat_step_status_waiting",
   error: "chat_step_status_error",
   denied: "chat_step_status_denied",
+  "previous-attempt": "chat_tool_status_previous_attempt",
   stopped: "chat_step_status_stopped"
 } as const satisfies Record<StepStatus, string>;
 
@@ -44,6 +43,7 @@ const CALL_ICON: Record<StepStatus, { icon: LucideIcon; className: string; spin?
   waiting: { icon: Clock, className: "text-ax-text-secondary" },
   error: { icon: CircleX, className: "text-ax-error" },
   denied: { icon: Ban, className: "text-ax-warning" },
+  "previous-attempt": { icon: Clock, className: "text-ax-text-secondary" },
   stopped: { icon: Square, className: "text-ax-text-secondary" }
 };
 
@@ -122,7 +122,7 @@ function CallArguments({ part, files }: { part: ToolPart; files: AttachedFile[] 
 function CallResult({ part, sessionId }: { part: ToolPart; sessionId: string | null }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { copy } = useClipboard({ announce: t("copied_to_clipboard") });
+  const { copy } = useCopy();
   const finished = part.state === "output-available" || part.state === "output-error";
   const canLoad = Boolean(sessionId && part.toolCallId && finished);
   const result = useQuery({
@@ -209,7 +209,7 @@ export function ToolCallList({
   // span too): it has no min-width, so a long description would push the
   // chevron out of the row instead of truncating.
   const rows = (
-    <div className="px-1 [&_.astryx-collapsible-trigger]:min-h-9 [&_.astryx-collapsible-trigger>span:first-child]:min-w-0 [&_.astryx-collapsible-trigger>span:first-child]:flex-1 [&_.astryx-collapsible-trigger>span:first-child>*]:w-full">
+    <div className="px-1 [&_.astryx-collapsible-trigger]:min-h-9 pointer-coarse:[&_.astryx-collapsible-trigger]:min-h-11 [&_.astryx-collapsible-trigger>span:first-child]:min-w-0 [&_.astryx-collapsible-trigger>span:first-child]:flex-1 [&_.astryx-collapsible-trigger>span:first-child>*]:w-full">
       <CollapsibleGroup type="multiple" hasDividers density="compact">
         {presented.map(({ call, presentation, target }) => {
           const problem =
@@ -218,7 +218,10 @@ export function ToolCallList({
               : call.status === "denied" || call.status === "stopped"
                 ? t(STATUS_KEY[call.status])
                 : null;
-          const description = [sharedServer ? null : presentation.server, problem ?? target]
+          const description = [
+            sharedServer ? null : presentation.server,
+            call.status === "previous-attempt" ? t(STATUS_KEY[call.status]) : (problem ?? target)
+          ]
             .filter(Boolean)
             .join(" · ");
           const duration = durations?.stepMs[callTimingKey(call.part.toolCallId)];

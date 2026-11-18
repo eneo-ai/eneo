@@ -12,6 +12,8 @@ test("numbers are shown in the reader's locale, four-digit numbers ungrouped", (
   expect(sv(2024)).toBe("2024");
   expect(sv(12345)).toBe(`12${NBSP}345`);
   expect(sv(0.00325)).toBe("0,00325");
+  expect(sv(1607240.97 - 1678000)).toBe(`${MINUS}70${NBSP}759,03`);
+  expect(sv(0.1 + 0.2)).toBe("0,3");
   expect(sv(-1234.5)).toBe(`${MINUS}1234,5`);
   expect(sv(-12345.5)).toBe(`${MINUS}12${NBSP}345,5`);
   expect(numberFormatter("en")(120924.67)).toBe("120,924.67");

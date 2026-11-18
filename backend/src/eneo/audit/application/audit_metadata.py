@@ -35,7 +35,30 @@ Security considerations:
 from typing import Any, Mapping, Optional
 from uuid import UUID
 
+from eneo.audit.domain.removable_names import (
+    CONVERSATION_TARGET_NAME,
+    FILE_TARGET_NAME,
+)
 from eneo.authentication.auth_models import is_service_api_key
+
+
+def _target_name(target: Any) -> str | None:
+    """The name an audit row records for its target.
+
+    A conversation's name copies conversation text that retention removes:
+    its first question, or a title made from its turns. A file's name is
+    often what the file is about. An audit row would keep a copy, so a
+    conversation or file is recorded by its id and a fixed name.
+    """
+    # Deferred: the session and file models import much of the domain.
+    from eneo.files.file_models import FileBase, FileMetadataCreate
+    from eneo.sessions.session import SessionBase
+
+    if isinstance(target, SessionBase):
+        return CONVERSATION_TARGET_NAME
+    if isinstance(target, (FileBase, FileMetadataCreate)):
+        return FILE_TARGET_NAME
+    return getattr(target, "name", getattr(target, "title", None))
 
 
 def _actor_snapshot(actor: Any) -> dict[str, Any]:
@@ -74,6 +97,11 @@ def _actor_snapshot(actor: Any) -> dict[str, Any]:
 
 class AuditMetadata:
     """Factory for standardized audit metadata structures."""
+
+    @staticmethod
+    def actor(actor: Any) -> dict[str, Any]:
+        """The ``actor`` block alone, for metadata with its own target shape."""
+        return _actor_snapshot(actor)
 
     @staticmethod
     def standard(
@@ -119,7 +147,7 @@ class AuditMetadata:
         # Build target snapshot with all available context
         target_snapshot = {
             "id": str(target.id),
-            "name": getattr(target, "name", getattr(target, "title", None)),
+            "name": _target_name(target),
         }
 
         # Auto-include space_id from target if it exists
@@ -189,7 +217,7 @@ class AuditMetadata:
             "targets": [
                 {
                     "id": str(target.id),
-                    "name": getattr(target, "name", getattr(target, "title", None)),
+                    "name": _target_name(target),
                 }
                 for target in targets
             ],
@@ -241,7 +269,7 @@ class AuditMetadata:
         if target:
             metadata["target"] = {
                 "id": str(target.id),
-                "name": getattr(target, "name", getattr(target, "title", None)),
+                "name": _target_name(target),
             }
 
         if affected_count is not None:
@@ -286,7 +314,7 @@ class AuditMetadata:
                 method="password",
                 success=False,
                 failure_reason="Invalid password",
-                extra={"ip_address": request.client.host, "attempts": 3}
+                extra={"ip_address": get_request_context()["ip_address"], "attempts": 3}
             )
         """
         metadata: dict[str, Any] = {

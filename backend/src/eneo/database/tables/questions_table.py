@@ -32,6 +32,15 @@ if TYPE_CHECKING:
 
 
 class Questions(BasePublic):
+    __table_args__ = (
+        Index(
+            "ix_questions_retention_owner_created_id",
+            "assistant_id",
+            "created_at",
+            "id",
+        ),
+    )
+
     question: Mapped[str] = mapped_column()
     answer: Mapped[str] = mapped_column()
     num_tokens_question: Mapped[int] = mapped_column()
@@ -56,8 +65,8 @@ class Questions(BasePublic):
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="RESTRICT"),
     )
-    logging_details_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey(logging_table.id, ondelete="SET NULL")  # type: ignore[attr-defined]
+    logging_details_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("logging.id", ondelete="SET NULL"), index=True
     )
     session_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(Sessions.id, ondelete="CASCADE"), index=True
@@ -145,6 +154,10 @@ class InfoBlobReferences(BaseCrossReference):
     similarity_score: Mapped[Optional[float]] = mapped_column()
     order: Mapped[Optional[int]] = mapped_column()
     info_blob: Mapped[InfoBlobs] = relationship()
+
+    # The migrated schema has no primary key or other index on question_id, so
+    # without this every proof and cascaded question delete scans all citations.
+    __table_args__ = (Index("ix_info_blob_references_question_id", "question_id"),)
 
 
 class QuestionsFiles(BaseCrossReference):

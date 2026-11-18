@@ -108,7 +108,9 @@ describe("AnswerFeedbackSummary", () => {
     renderInApp(<AnswerFeedbackSummary assistantId="assistant-1" filters={filters} />);
 
     expect(screen.getByRole("status")).toBeTruthy();
-    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
+    const message = await screen.findByText("Nope");
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Försök igen" })).toBeTruthy();
   });
 
   it("has no axe violations", async () => {

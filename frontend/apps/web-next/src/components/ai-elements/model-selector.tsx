@@ -1,14 +1,13 @@
-"use client";
-
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import {
   Selector,
   SelectorOption,
   type SelectorOptionData,
-  type SelectorOptionType
+  type SelectorOptionType,
+  type SelectorProps
 } from "@astryxdesign/core/Selector";
 import { Lock } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
 import type { Schema } from "@/lib/api/models";
 import { cn } from "@/lib/utils";
@@ -19,7 +18,7 @@ import { ProviderLogo } from "./provider-logo";
 type CompletionModel = Schema<"CompletionModelPublic">;
 
 /** Thin reference (e.g. a policy `locked_model`) needs only these fields. */
-type ModelRef = {
+export type ModelRef = {
   id: string;
   name: string;
   nickname?: string | null;
@@ -37,7 +36,7 @@ function prettifyProviderType(type: string | null | undefined): string | null {
     .join(" ");
 }
 
-function vendorLabel(model: CompletionModel, fallback: string): string {
+export function vendorLabel(model: CompletionModel, fallback: string): string {
   return (
     model.org?.trim() ||
     model.provider_name?.trim() ||
@@ -46,7 +45,7 @@ function vendorLabel(model: CompletionModel, fallback: string): string {
   );
 }
 
-function modelName(model: ModelRef): string {
+export function modelName(model: ModelRef): string {
   return modelDisplayName(model);
 }
 
@@ -54,7 +53,7 @@ function modelName(model: ModelRef): string {
  * What a row says under the model's name, as text: context window,
  * capabilities and (when the organisation shows them) prices per 1M tokens.
  */
-function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate): string {
+export function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate): string {
   const facts: string[] = [];
   if (model.max_input_tokens > 0) {
     facts.push(t("model_context_tokens", { tokens: formatTokens(model.max_input_tokens) }));
@@ -74,11 +73,12 @@ function modelFacts(model: CompletionModel, showPricing: boolean, t: Translate):
 
 /**
  * The composer's footer cannot shrink its send actions, so the compact
- * trigger caps the model's name, and below 360 px shows only the provider's
- * logo, to keep the send button inside a 320 px screen. The full name stays
- * in the trigger's accessible name and in the list.
+ * trigger caps the model's name, and below 640 px shows only the provider's
+ * logo: beside a long assistant name in the footer's other half, a name here
+ * pushed the send button off a 390 px screen. The full name stays in the
+ * trigger's accessible name and in the list.
  */
-const COMPACT_NAME = "max-w-[min(12rem,30vw)] max-[359px]:hidden";
+const COMPACT_NAME = "max-w-[min(12rem,30vw)] max-sm:hidden";
 
 function ModelValue({ model, compact }: { model: ModelRef; compact: boolean }) {
   return (
@@ -177,8 +177,9 @@ export function ModelSelector({
     size: compact ? "md" : "lg",
     width: compact ? undefined : "100%",
     presentation: "adaptive",
-    className
-  } as const;
+    controlClassName: className
+    // `satisfies` checks this spread object's keys, which the spread itself hides.
+  } as const satisfies Partial<SelectorProps>;
 
   if (locked) {
     return (

@@ -1,4 +1,6 @@
 import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
+import { summarizeSource } from "../integrations/sources";
+import { matchesSearch } from "@/lib/search";
 
 /**
  * Pure logic for the knowledge picker (unit-tested), ported from the Svelte
@@ -9,24 +11,22 @@ import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
 
 type SpaceOwned = { space_id?: string | null };
 
-export function isPersonalItem(item: SpaceOwned, currentSpaceId: string | undefined): boolean {
-  const owner = item.space_id ?? undefined;
-  return !owner || owner === currentSpaceId;
-}
+// "personal" is the legacy name for current-space items, including shared spaces.
+export type KnowledgeOrigin = "personal" | "organization";
 
-export function isOrgItem(
+/**
+ * Exhaustive: only what the organization space owns is "organization";
+ * everything else, legacy links from another space included, belongs to the
+ * current space, so every visible source has one section and stays removable.
+ */
+export function classifyKnowledgeOrigin(
   item: SpaceOwned,
   currentSpaceId: string | undefined,
   orgSpaceId: string | undefined
-): boolean {
+): KnowledgeOrigin {
   const owner = item.space_id ?? undefined;
-  if (orgSpaceId) return owner === orgSpaceId;
-  if (!currentSpaceId) return false;
-  return Boolean(owner) && owner !== currentSpaceId;
+  return owner && owner !== currentSpaceId && owner === orgSpaceId ? "organization" : "personal";
 }
-
-// "personal" is the legacy name for current-space items, including shared spaces.
-export type KnowledgeOrigin = "personal" | "organization";
 
 export function byOrigin<T extends SpaceOwned>(
   items: T[],
@@ -34,10 +34,8 @@ export function byOrigin<T extends SpaceOwned>(
   currentSpaceId: string | undefined,
   orgSpaceId: string | undefined
 ): T[] {
-  return items.filter((item) =>
-    origin === "personal"
-      ? isPersonalItem(item, currentSpaceId)
-      : isOrgItem(item, currentSpaceId, orgSpaceId)
+  return items.filter(
+    (item) => classifyKnowledgeOrigin(item, currentSpaceId, orgSpaceId) === origin
   );
 }
 
@@ -124,6 +122,15 @@ export function integrationOptions(
   return sortEntries(options);
 }
 
+/** Flags an option whose last sync failed (for a wrapper: any item's) or that synced but holds nothing. */
+export function integrationSyncFlag(entry: IntegrationEntry): "error" | "empty" | null {
+  const { state } = summarizeSource(
+    entry.type === "wrapper" ? entry.wrapper.items : [entry.knowledge],
+    {}
+  );
+  return state === "attention" ? "error" : state === "empty" ? "empty" : null;
+}
+
 /**
  * How to render the currently selected integration knowledge: a fully
  * selected wrapper collapses into one row, otherwise items show individually.
@@ -140,7 +147,8 @@ export function selectedIntegrationDisplay(
     const first = selectedItems[0];
     if (!first) continue;
     const allItems = allWrappers.get(wrapperId) ?? [];
-    const fullySelected = allItems.length > 0 && selectedItems.length >= allItems.length;
+    const selectedIds = new Set(selectedItems.map((item) => item.id));
+    const fullySelected = allItems.length > 0 && allItems.every((item) => selectedIds.has(item.id));
     if (!fullySelected) {
       for (const item of selectedItems) {
         display.push({ type: "single", key: `integration:${item.id}`, knowledge: item });
@@ -153,7 +161,7 @@ export function selectedIntegrationDisplay(
       wrapper: {
         id: wrapperId,
         name: wrapperName(first),
-        items: allItems,
+        items: selectedItems,
         integration_type: first.integration_type
       }
     });
@@ -213,8 +221,7 @@ export function availableKnowledge(
   selected: KnowledgeSelections,
   filter?: string
 ): { sections: KnowledgeSection[]; showHeaders: boolean } {
-  const matches = (value?: string | null) =>
-    !filter || (value ?? "").toLowerCase().includes(filter.toLowerCase());
+  const matches = (...fields: (string | null | undefined)[]) => matchesSearch(fields, filter ?? "");
 
   const dominantModelId =
     selected.collections[0]?.embedding_model.id ??
@@ -255,13 +262,13 @@ export function availableKnowledge(
   for (const website of space.knowledge.websites) {
     const section = sectionFor(website.embedding_model);
     if (!section.isCompatible || selectedIds.has(website.id)) continue;
-    if (!(matches(website.url) || matches(website.name))) continue;
+    if (!matches(website.url, website.name)) continue;
     section.websites.push(website);
   }
   for (const knowledge of space.knowledge.integrationKnowledge) {
     const section = sectionFor(knowledge.embedding_model);
     if (!section.isCompatible || selectedIds.has(knowledge.id)) continue;
-    if (!(matches(knowledge.name) || matches(knowledge.wrapper_name))) continue;
+    if (!matches(knowledge.name, knowledge.wrapper_name)) continue;
     section.integrationKnowledge.push(knowledge);
   }
 
