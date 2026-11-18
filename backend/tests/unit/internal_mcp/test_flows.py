@@ -2314,17 +2314,40 @@ def _many_templates(count: int) -> list[tuple[str, str]]:
     return [(str(uuid4()), f"Mall {number} " + "x" * 300) for number in range(count)]
 
 
-async def test_the_overview_lists_the_flows_templates_within_its_page(monkeypatch):
-    _reading_chat(monkeypatch, templates=_many_templates(30), editing=True)
+async def test_an_editor_reads_every_template_and_adds_a_step_with_the_last(
+    monkeypatch,
+):
+    # Eleven templates no step uses, alike in their first hundred characters.
+    templates = [
+        (str(uuid4()), "Beslut om bygglov " * 6 + f"{number}.docx")
+        for number in range(11)
+    ]
+    _reading_chat(monkeypatch, templates=templates, editing=True)
 
-    _page, content = await _read()
+    text, offset, pages = "", 0, 0
+    with monkeypatch.context() as small_pages:
+        small_pages.setattr(flows, "default_page_cap", lambda: 2000)
+        while offset is not None:
+            result = await flows.read_flow(MagicMock(), offset=offset)
+            page = json.loads(result.content[0].text)
+            text, offset, pages = text + page["content"], page["next_offset"], pages + 1
 
-    # The first ten, each name cut short, and how many there are; _read holds
-    # the overview to one page.
-    assert len(content["word_templates"]) == 10
-    assert all(len(template["name"]) <= 81 for template in content["word_templates"])
-    assert content["word_template_count"] == 30
-    assert len(json.dumps(content["word_templates"], ensure_ascii=False)) <= 1600
+    assert pages > 1
+    # Each by its id and whole file name, the last changed first.
+    listed = json.loads(text)["word_templates"]
+    assert [(template["id"], template["name"]) for template in listed] == templates
+    eleventh = listed[10]
+
+    save, result, page = await _add_word_step(
+        monkeypatch, templates, template_asset_id=eleventh["id"]
+    )
+
+    assert result.isError is not True, page
+    (step,) = save.await_args.args[2].new_steps
+    assert step.configuration.output_config["template_asset_id"] == templates[10][0]
+    # The answer to the addition names the template, its file name cut short.
+    answered = json.loads(page["content"])["step"]["word_template"]
+    assert answered["id"] == eleventh["id"] and len(answered["name"]) == 81
 
 
 async def test_the_overview_of_a_flow_without_templates_does_not_mention_them(
@@ -2340,26 +2363,28 @@ async def test_the_overview_of_a_flow_without_templates_does_not_mention_them(
 
 async def test_a_chat_that_only_reads_is_not_shown_the_flows_templates(monkeypatch):
     # The editor lists a flow's templates for those who may edit it.
-    _reading_chat(monkeypatch, templates=_many_templates(2))
+    _reading_chat(monkeypatch, templates=_many_templates(11))
 
-    _page, content = await _read()
+    page, content = await _read()
 
     assert "word_templates" not in content
+    assert "Mall " not in page["content"]
 
 
 async def test_a_chat_left_in_edit_mode_without_edit_access_still_reads(monkeypatch):
-    _reading_chat(monkeypatch, templates=_many_templates(2), editing=True)
+    _reading_chat(monkeypatch, templates=_many_templates(11), editing=True)
     monkeypatch.setattr(
         flow_authoring_chat,
         "require_authoring_edit",
         AsyncMock(side_effect=UnauthorizedException("No edit access.")),
     )
 
-    _page, content = await _read()
+    page, content = await _read()
 
     # The overview is read as before, without the flow's templates.
     assert len(content["steps"]) == 2
     assert "word_templates" not in content
+    assert "Mall " not in page["content"]
 
 
 async def _add_word_step(monkeypatch, templates, **values):

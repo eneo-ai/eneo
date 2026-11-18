@@ -333,7 +333,7 @@ class _Refused(BadRequestException):
         self.fields = fields
 
 
-# The most rejected fields, or templates of the flow, one answer lists.
+# The most rejected fields, or templates of the flow, a refusal lists.
 MAX_LISTED = 10
 
 
@@ -760,27 +760,35 @@ def _template_id(output_config: Any) -> str:
     return str(output_config.get("template_asset_id") or "").strip()
 
 
-async def _flow_templates(container, flow_id: UUID) -> dict[str, str]:
+async def _flow_templates(
+    container, flow_id: UUID, *, whole_names: bool = False
+) -> dict[str, str]:
     """The Word templates the flow has, the last changed first: each id with
-    its file name cut short."""
+    its file name, cut short unless ``whole_names``. A refusal and the answer
+    to an addition must stay small; read_flow pages."""
     assets = await container.flow_template_asset_service().list_assets(flow_id=flow_id)
-    return {str(asset.id): cast(str, _cut(asset.name)) for asset in assets}
+    return {
+        str(asset.id): asset.name if whole_names else cast(str, _cut(asset.name))
+        for asset in assets
+    }
 
 
 async def _readable_templates(container, chat: Any) -> dict[str, str]:
-    """The flow's templates for a read: none unless the chat is in edit mode,
-    since the editor lists a flow's templates for those who may edit it."""
+    """The flow's templates for a read, each with its whole file name: none
+    unless the chat is in edit mode, since the editor lists a flow's
+    templates for those who may edit it."""
     from eneo.flows.application.flow_authoring_chat import require_authoring_edit
 
     try:
         await require_authoring_edit(container, chat)
     except (BadRequestException, UnauthorizedException):
         return {}
-    return await _flow_templates(container, chat.flow_id)
+    return await _flow_templates(container, chat.flow_id, whole_names=True)
 
 
 def _listed_templates(templates: dict[str, str]) -> list[dict[str, str]]:
-    """The first of ``templates``, each by its id and file name."""
+    """The first of ``templates`` for a refusal, each by its id and file name;
+    read_flow lists them all."""
     return [
         {"id": template_id, "name": name}
         for template_id, name in list(templates.items())[:MAX_LISTED]
@@ -898,9 +906,12 @@ async def read_flow(
                 value["description"] = flow.description
                 value["run_form_fields"] = run_form_fields(flow.metadata_json)
                 if templates:
-                    value["word_templates"] = _listed_templates(templates)
-                if len(templates) > MAX_LISTED:
-                    value["word_template_count"] = len(templates)
+                    # Every template, so that one no step uses can be chosen;
+                    # the pages carry a long list.
+                    value["word_templates"] = [
+                        {"id": template_id, "name": name}
+                        for template_id, name in templates.items()
+                    ]
                 offer = await _transcription_offer(container, chat.space_id)
                 if offer is not None:
                     value["transcription_offer"] = offer
