@@ -11,9 +11,12 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from dependency_injector import providers
+from pydantic import ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
-from eneo.assistants.api.assistant_models import KnowledgeMode
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic, KnowledgeMode
+from eneo.assistants.application import assistant_update_operation
 from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -34,6 +37,9 @@ from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ResourcePermission
 from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.client.mcp_client import (
+    STRUCTURED_CONTENT_MAX_BYTES,
+)
 
 _SERVER_TOKEN = "server-token-1f2e3d"
 _URL_KEY = "url-key-9a8b7c"
@@ -487,9 +493,14 @@ async def test_a_chat_that_is_not_the_persons_is_refused_as_text(monkeypatch):
 def test_no_tool_takes_an_assistant_from_the_model():
     for tool in (assistant_settings.read_assistant, assistant_settings.read_options):
         assert set(inspect.signature(tool).parameters) == {"ctx", "section", "offset"}
+    for tool in (
+        assistant_settings.propose_changes,
+        assistant_settings.update_assistant,
+    ):
+        assert set(inspect.signature(tool).parameters) == {"ctx", "changes"}
 
 
-async def test_both_modes_get_the_same_reading_tools():
+async def test_view_mode_offers_proposals_and_edit_mode_also_changes():
     asking = await assistant_settings.build_assistant_settings_mcp_server(
         token="t", tenant_id=uuid4(), editing=False
     )
@@ -497,7 +508,508 @@ async def test_both_modes_get_the_same_reading_tools():
         token="t", tenant_id=uuid4(), editing=True
     )
 
-    assert {tool.name for tool in asking.tools} == {"read_assistant", "read_options"}
-    assert {tool.name for tool in editing.tools} == {tool.name for tool in asking.tools}
-    assert all(tool.annotations == {"readOnlyHint": True} for tool in editing.tools)
+    assert {tool.name for tool in asking.tools} == {
+        "read_assistant",
+        "read_options",
+        "propose_changes",
+    }
+    assert {tool.name for tool in editing.tools} == {
+        "read_assistant",
+        "read_options",
+        "propose_changes",
+        "update_assistant",
+    }
+    assert all(tool.annotations == {"readOnlyHint": True} for tool in asking.tools)
+    update = next(tool for tool in editing.tools if tool.name == "update_assistant")
+    assert update.annotations == {"readOnlyHint": False, "destructiveHint": False}
     assert asking.name == "assistant"
+
+
+# --- Changes -----------------------------------------------------------------
+
+
+def _offering(**settings: ModelKwargCapability) -> SupportedModelKwargs:
+    return SupportedModelKwargs(**settings)
+
+
+_TEMPERATURE = ModelKwargCapability(
+    supported=True, control="slider", minimum=0, maximum=2
+)
+_EFFORTS = ModelKwargCapability(
+    supported=True, control="select", options=["low", "medium", "high"]
+)
+
+
+def _chat_model(nickname: str, offered: SupportedModelKwargs) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(),
+        name=nickname.lower().replace(" ", "-"),
+        nickname=nickname,
+        get_supported_model_kwargs=lambda: offered,
+    )
+
+
+_INSTRUCTIONS = "Du är ärendehjälpen.\nSvara kort och sakligt."
+
+
+def _changeable(**overrides) -> SimpleNamespace:
+    values = {
+        "name": "Ärendehjälpen",
+        "description": "Hjälper handläggare.",
+        "get_prompt_text": lambda: _INSTRUCTIONS,
+        "completion_model": _chat_model(
+            "Stor modell",
+            _offering(temperature=_TEMPERATURE, reasoning_effort=_EFFORTS),
+        ),
+        "completion_model_kwargs": ModelKwargs(
+            temperature=0.7, reasoning_effort="medium"
+        ),
+        "knowledge_mode": KnowledgeMode.TOOL,
+        "inline_file_text": False,
+        "published": False,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def _space(*models, below=()) -> SimpleNamespace:
+    by_id = {model.id: model for model in models}
+    return SimpleNamespace(
+        is_completion_model_available=lambda model_id: model_id in by_id,
+        get_completion_model=lambda model_id: by_id[model_id],
+        completion_models_below_classification=list(below),
+    )
+
+
+def _plan(assistant, changes, *, space=None, config=None):
+    current = [assistant.completion_model] if assistant.completion_model else []
+    return assistant_settings.plan_change(
+        assistant,
+        changes,
+        space=space or _space(*current),
+        effective_config=config,
+    )
+
+
+def test_a_change_keeps_only_what_differs_from_the_assistant_now():
+    assistant = _changeable()
+
+    planned = _plan(
+        assistant,
+        {
+            "name": "Ärendehjälpen",
+            "prompt": {"text": _INSTRUCTIONS},
+            "knowledge_mode": "inject",
+            "completion_model_kwargs": {"temperature": 0.2},
+        },
+    )
+
+    assert planned.update == {
+        "knowledge_mode": "inject",
+        "completion_model_kwargs": {"temperature": 0.2, "reasoning_effort": "medium"},
+    }
+    assert planned.changes == [
+        {"field": "completion_model_kwargs.temperature", "before": 0.7, "after": 0.2},
+        {"field": "knowledge_mode", "before": "tool", "after": "inject"},
+    ]
+
+
+def test_a_change_that_names_only_current_values_changes_nothing():
+    assistant = _changeable()
+
+    planned = _plan(
+        assistant,
+        {
+            "name": "Ärendehjälpen",
+            "description": "Hjälper handläggare.",
+            "completion_model": {"id": str(assistant.completion_model.id)},
+            "completion_model_kwargs": {"reasoning_effort": "medium"},
+            "inline_file_text": False,
+        },
+    )
+
+    assert planned.update == {} and planned.changes == []
+
+
+def test_null_keeps_a_setting_except_where_the_update_request_clears_it():
+    assistant = _changeable()
+
+    planned = _plan(
+        assistant,
+        {
+            "name": None,
+            "prompt": None,
+            "completion_model": None,
+            "knowledge_mode": None,
+            "description": None,
+        },
+    )
+    assert planned.update == {"description": None}
+
+    reset = _plan(assistant, {"completion_model_kwargs": None})
+    assert reset.update == {"completion_model_kwargs": {}}
+    assert [change["field"] for change in reset.changes] == [
+        "completion_model_kwargs.temperature",
+        "completion_model_kwargs.reasoning_effort",
+    ]
+    cleared = _plan(assistant, {"completion_model_kwargs": {"temperature": None}})
+    assert cleared.update == {"completion_model_kwargs": {"reasoning_effort": "medium"}}
+
+
+def test_new_instructions_get_a_short_version_description():
+    assistant = _changeable()
+
+    given = _plan(
+        assistant,
+        {
+            "prompt": {
+                "text": "Ny text.",
+                "description": "  Kortare svar,\n med hjälpen ",
+            }
+        },
+    )
+    missing = _plan(assistant, {"prompt": {"text": "Ny text."}})
+    long = _plan(
+        assistant, {"prompt": {"text": "Ny text.", "description": "ord " * 200}}
+    )
+
+    assert given.update["prompt"] == {
+        "text": "Ny text.",
+        "description": "Kortare svar, med hjälpen",
+    }
+    assert (
+        missing.update["prompt"]["description"] == "Changed with the helper assistant."
+    )
+    assert len(long.update["prompt"]["description"]) <= 200
+    assert long.update["prompt"]["description"].endswith("...")
+    assert given.changes == [
+        {"field": "prompt", "before": _INSTRUCTIONS, "after": "Ny text."}
+    ]
+
+
+def test_a_chosen_model_must_be_one_the_space_offers():
+    assistant = _changeable()
+    small = _chat_model("Liten modell", _offering(temperature=_TEMPERATURE))
+    below = _chat_model("Öppen modell", _offering())
+    space = _space(assistant.completion_model, small, below=[below])
+
+    planned = _plan(assistant, {"completion_model": {"id": str(small.id)}}, space=space)
+    assert planned.update == {"completion_model": {"id": str(small.id)}}
+    assert planned.changes == [
+        {
+            "field": "completion_model",
+            "before": {
+                "id": str(assistant.completion_model.id),
+                "name": "Stor modell",
+            },
+            "after": {"id": str(small.id), "name": "Liten modell"},
+        }
+    ]
+
+    stranger = uuid4()
+    with pytest.raises(BadRequestException) as missing:
+        _plan(assistant, {"completion_model": {"id": str(stranger)}}, space=space)
+    assert "does not offer that model" in str(missing.value)
+    assert str(stranger) not in str(missing.value)
+    with pytest.raises(BadRequestException) as classified:
+        _plan(assistant, {"completion_model": {"id": str(below.id)}}, space=space)
+    assert "security classification" in str(classified.value)
+
+
+def test_model_settings_the_model_does_not_offer_are_refused_by_name():
+    assistant = _changeable()
+    small = _chat_model("Liten modell", _offering(temperature=_TEMPERATURE))
+    space = _space(assistant.completion_model, small)
+
+    with pytest.raises(BadRequestException) as refused:
+        _plan(
+            assistant,
+            {
+                "completion_model": {"id": str(small.id)},
+                "completion_model_kwargs": {"temperature": 0.3},
+            },
+            space=space,
+        )
+    assert "Liten modell does not offer reasoning effort" in str(refused.value)
+
+    with pytest.raises(BadRequestException) as out_of_range:
+        _plan(assistant, {"completion_model_kwargs": {"temperature": 5}})
+    assert "does not offer temperature" in str(out_of_range.value)
+
+    without_model = _changeable(completion_model=None)
+    with pytest.raises(BadRequestException) as no_model:
+        _plan(without_model, {"completion_model_kwargs": {"temperature": 0.3}})
+    assert "Choose a chat model before its settings" in str(no_model.value)
+
+
+def test_what_a_policy_sets_is_refused_and_the_rest_is_planned():
+    assistant = _changeable()
+    policy = _policy(available_models=[assistant.completion_model])
+    other = _chat_model("Liten modell", _offering(temperature=_TEMPERATURE))
+    space = _space(assistant.completion_model, other)
+
+    for changes, what in [
+        ({"prompt": {"text": "Ny text."}}, "the instructions"),
+        ({"completion_model": {"id": str(other.id)}}, "the chat models"),
+        ({"completion_model_kwargs": {"reasoning_effort": "high"}}, "reasoning"),
+        ({"inline_file_text": True}, "files uploaded in a chat"),
+    ]:
+        with pytest.raises(BadRequestException) as refused:
+            _plan(assistant, changes, space=space, config=policy)
+        assert "An organisation policy sets" in str(refused.value)
+        assert what in str(refused.value)
+
+    planned = _plan(assistant, {"name": "Ärendestöd"}, space=space, config=policy)
+    assert planned.update == {"name": "Ärendestöd"}
+
+
+def test_only_the_allowed_settings_can_be_named():
+    assistant_settings.require_changeable(
+        {
+            "name": "x",
+            "prompt": {"text": "y", "description": "z"},
+            "completion_model": {"id": str(uuid4())},
+            "completion_model_kwargs": {"top_k": 3},
+        }
+    )
+
+    with pytest.raises(BadRequestException) as refused:
+        assistant_settings.require_changeable(
+            {
+                "mcp_servers": [],
+                "groups": [],
+                "completion_model_kwargs": {"response_format": {}},
+                "prompt": {"text": "y", "version_id": "v"},
+            }
+        )
+    text = str(refused.value)
+    assert text.startswith(
+        "MCP servers, knowledge (collections), the response format and version id "
+        "cannot be changed through the chat"
+    )
+    for key in ("mcp_servers", "groups", "response_format", "version_id"):
+        assert key not in text
+    assert "Nothing was changed." in text
+
+
+def test_the_undo_request_gives_the_changed_settings_their_earlier_values():
+    model = {"id": str(uuid4()), "name": "Stor modell"}
+    changes = [
+        {"field": "name", "before": "Ärendehjälpen", "after": "Ärendestöd"},
+        {"field": "description", "before": None, "after": "Ny."},
+        {"field": "prompt", "before": _INSTRUCTIONS, "after": "Ny text."},
+        {"field": "completion_model", "before": model, "after": {"id": "x"}},
+        {"field": "completion_model_kwargs.temperature", "before": 0.7, "after": 0.2},
+        {"field": "inline_file_text", "before": False, "after": True},
+    ]
+
+    undo = assistant_settings.undo_update(
+        changes, ModelKwargs(temperature=0.7, reasoning_effort="medium")
+    )
+
+    assert undo == {
+        "name": "Ärendehjälpen",
+        "description": None,
+        "prompt": {
+            "text": _INSTRUCTIONS,
+            "description": (
+                "Restored the instructions from before a change made with the "
+                "helper assistant."
+            ),
+        },
+        "completion_model": {"id": model["id"]},
+        "completion_model_kwargs": {"temperature": 0.7, "reasoning_effort": "medium"},
+        "inline_file_text": False,
+    }
+    AssistantUpdatePublic.model_validate(undo)
+    no_model_before = assistant_settings.undo_update(
+        [{"field": "completion_model", "before": None, "after": model}],
+        ModelKwargs(),
+    )
+    assert no_model_before == {}
+
+
+def test_the_model_is_told_what_changed_without_ids_or_long_texts():
+    assistant = _changeable(published=True)
+    small = _chat_model("Liten modell", _offering(temperature=_TEMPERATURE))
+    planned = _plan(
+        assistant,
+        {
+            "name": "Ärendestöd",
+            "description": "En ny och längre beskrivning av assistenten.",
+            "prompt": {"text": "Du är ärendestödet.\nSvara alltid på svenska."},
+            "completion_model": {"id": str(small.id)},
+            "completion_model_kwargs": {"temperature": 0.2, "reasoning_effort": None},
+        },
+        space=_space(assistant.completion_model, small),
+    )
+
+    for saved in (True, False):
+        text = assistant_settings.change_text(
+            planned.changes, saved=saved, published=True
+        )
+        for hidden in (
+            str(small.id),
+            str(assistant.completion_model.id),
+            "Svara alltid på svenska",
+            _INSTRUCTIONS.split("\n")[1],
+            "En ny och längre beskrivning",
+        ):
+            assert hidden not in text
+        assert 'name (from "Ärendehjälpen" to "Ärendestöd")' in text
+        assert "chat model (from Stor modell to Liten modell)" in text
+        assert "temperature (from 0.7 to 0.2)" in text
+        assert "reasoning effort (from medium to the model's default)" in text
+        assert "published" in text
+    proposed = assistant_settings.change_text(
+        planned.changes, saved=False, published=False
+    )
+    assert proposed.startswith("Proposed, nothing saved:")
+    assert "do not paste them" in proposed
+
+
+def test_a_refused_request_names_the_fields_but_not_what_was_sent():
+    secret = "not-a-mode-7f3a"
+    with pytest.raises(ValidationError) as invalid:
+        AssistantUpdatePublic.model_validate(
+            {"knowledge_mode": secret, "prompt": {"description": "x"}}
+        )
+
+    result = assistant_settings._error_result(invalid.value)  # pyright: ignore[reportPrivateUsage]
+
+    text = result.content[0].text
+    assert result.isError
+    assert "knowledge_mode" in text and "prompt.text" in text
+    assert secret not in text
+
+
+def test_instructions_too_long_to_keep_leave_their_text_out_but_not_the_request():
+    long_text = "x" * (STRUCTURED_CONTENT_MAX_BYTES // 2)
+    content = {
+        "target_id": str(uuid4()),
+        "changes": [
+            {"field": "prompt", "before": long_text, "after": long_text + "y"},
+            {"field": "name", "before": "A", "after": "B"},
+        ],
+        "undo": {"prompt": {"text": long_text}, "name": "A"},
+    }
+
+    kept = assistant_settings._within_cap(content)  # pyright: ignore[reportPrivateUsage]
+
+    assert kept["changes"][0] == {
+        "field": "prompt",
+        "before": None,
+        "after": None,
+        "too_long": True,
+    }
+    assert kept["changes"][1] == {"field": "name", "before": "A", "after": "B"}
+    assert kept["undo"]["prompt"]["text"] == long_text
+
+
+async def test_a_change_saves_its_audit_entries_in_its_own_transaction():
+    service = SimpleNamespace(log=AsyncMock(), log_async=AsyncMock())
+    container = SimpleNamespace(audit_service=providers.Factory(lambda: service))
+    entry = {"tenant_id": uuid4(), "description": "Updated assistant"}
+
+    async with assistant_settings._audit_in_transaction(container):  # pyright: ignore[reportPrivateUsage]
+        await container.audit_service().log_async(**entry)
+        service.log.assert_not_awaited()
+
+    service.log_async.assert_not_awaited()
+    service.log.assert_awaited_once_with(**entry)
+    assert container.audit_service() is service
+
+    service.log.reset_mock()
+    with pytest.raises(BadRequestException):
+        async with assistant_settings._audit_in_transaction(container):  # pyright: ignore[reportPrivateUsage]
+            await container.audit_service().log_async(**entry)
+            raise BadRequestException("refused")
+    service.log.assert_not_awaited()
+    service.log_async.assert_not_awaited()
+
+
+def _chat_calls(monkeypatch, *, editing: bool):
+    """A call's context as a chat in ``editing`` mode gives it, with the
+    assistant's update and the audit service watched."""
+    chat = SimpleNamespace(
+        target_id=uuid4(), space_id=uuid4(), session_id=uuid4(), editing=editing
+    )
+    container = MagicMock()
+    monkeypatch.setattr(
+        assistant_settings,
+        "internal_tool_context",
+        _tool_context(container, chat.session_id, uuid4()),
+    )
+    monkeypatch.setattr(helper_chat_service, "load_chat", AsyncMock(return_value=chat))
+
+    async def require_edit_mode(_container, _target, loaded, *, change=False):
+        if not loaded.editing:
+            raise ASSISTANT_TARGET.refusals.not_editing()
+
+    monkeypatch.setattr(helper_chat_service, "require_edit_mode", require_edit_mode)
+    monkeypatch.setattr(ASSISTANT_TARGET, "require_edit", AsyncMock())
+    apply = AsyncMock()
+    monkeypatch.setattr(assistant_update_operation, "apply_assistant_update", apply)
+    return container, apply
+
+
+async def test_a_change_outside_edit_mode_is_refused_before_anything_is_read(
+    monkeypatch,
+):
+    container, apply = _chat_calls(monkeypatch, editing=False)
+
+    result = await assistant_settings.update_assistant(
+        MagicMock(), changes={"name": "Ärendestöd"}
+    )
+
+    assert result.isError
+    assert "Turn on edit mode" in result.content[0].text
+    apply.assert_not_awaited()
+    container.assistant_service.assert_not_called()
+    container.audit_service.assert_not_called()
+
+
+async def test_a_setting_the_chat_may_not_change_is_refused_by_both_tools(monkeypatch):
+    container, apply = _chat_calls(monkeypatch, editing=True)
+    changes = {"name": "Ärendestöd", "enabled_capabilities": ["web_search"]}
+
+    for tool in (
+        assistant_settings.propose_changes,
+        assistant_settings.update_assistant,
+    ):
+        result = await tool(MagicMock(), changes=changes)
+
+        assert result.isError
+        assert result.content[0].text.startswith(
+            "Functions cannot be changed through the chat"
+        )
+        assert "enabled_capabilities" not in result.content[0].text
+    apply.assert_not_awaited()
+    container.assistant_service.assert_not_called()
+    container.audit_service().log.assert_not_called()
+    container.audit_service().log_async.assert_not_called()
+
+
+async def test_a_proposal_that_changes_nothing_says_so_and_proposes_nothing(
+    monkeypatch,
+):
+    container, apply = _chat_calls(monkeypatch, editing=False)
+    assistant = _changeable()
+    container.assistant_service.return_value.get_assistant_with_effective_config = (
+        AsyncMock(return_value=(assistant, [], None))
+    )
+    container.space_service.return_value.get_space = AsyncMock(
+        return_value=_space(assistant.completion_model)
+    )
+
+    result = await assistant_settings.propose_changes(
+        MagicMock(),
+        changes={"name": "Ärendehjälpen", "prompt": {"text": _INSTRUCTIONS}},
+    )
+
+    assert not result.isError
+    assert result.content[0].text == (
+        "Nothing to propose: the assistant already has these settings."
+    )
+    assert "proposal" not in result.structuredContent
+    apply.assert_not_awaited()
