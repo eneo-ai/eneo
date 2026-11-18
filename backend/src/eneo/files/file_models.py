@@ -200,6 +200,11 @@ class FileMetadataCreate(BaseModel):
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     revises_file_id: Optional[UUID] = None
+    # Where a Flow file came from; None when no origin was recorded. Never
+    # an access grant.
+    origin_space_id: UUID | None = None
+    origin_flow_id: UUID | None = None
+    origin_flow_run_id: UUID | None = None
 
     @model_validator(mode="after")
     def validate_owner_identity(self) -> "FileMetadataCreate":
