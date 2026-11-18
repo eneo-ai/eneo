@@ -314,7 +314,7 @@ test("publications running side by side never cancel or replace each other's wor
     "  group: ${{ github.workflow == 'CI' && format('CI-{0}', github.event.pull_request.number || github.ref) || format('{0}-checks-{1}', github.workflow, github.run_id) }}",
     "  cancel-in-progress: ${{ github.workflow == 'CI' }}",
   ].join("\n"));
-  // The user-facing check ci.yml calls cancels only an older run of the same pull request.
+  // The user-facing check cancels only an older run of the same pull request.
   const userFacing = read("user-facing.yml").split("\nconcurrency:\n")[1].split("\n\n")[0];
   assert.equal(userFacing, [
     "  group: ${{ github.event_name == 'pull_request' && format('user-facing-{0}-{1}', github.workflow, github.event.pull_request.number) || format('user-facing-{0}-{1}', github.workflow, github.run_id) }}",
@@ -553,7 +553,6 @@ test("push, tag and manual callers keep full validation even with only docs chan
     const plan = planCi([docsFile], event);
     assert.equal(plan.full, true);
     assert.equal(plan.docker_matrix.include.length, 3);
-    assert.equal(plan.expected_jobs["user-facing"], false);
   }
 });
 
@@ -676,7 +675,7 @@ test("workflow selection matches the required-job plan for each kind of change",
     for (const files of [[appFile], [backendFile], [docsFile], ["frontend/bun.lock"], [appFile, backendFile], []]) {
       const plan = planCi(files, event);
       for (const [job, required] of Object.entries(plan.expected_jobs)) {
-        if (["changes", "security", "user-facing"].includes(job)) continue;
+        if (["changes", "security"].includes(job)) continue;
         const block = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n  [a-z][a-z0-9-]*:\n/)[0];
         const condition = block?.match(/^    if: needs\.changes\.outputs\.([a-z0-9_]+) == 'true'$/m);
         assert.ok(condition, `${job} must use the canonical scope output`);

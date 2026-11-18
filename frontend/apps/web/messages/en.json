@@ -6068,6 +6068,7 @@
   "eneo_error_9079": "The sign-in could not be verified. Please try again.",
   "eneo_error_9082": "This account is already linked to another sign-in. Contact your administrator for help.",
   "eneo_error_9085": "This conversation holds content from a conversation that has been removed, so it can no longer be opened.",
+  "eneo_error_9086": "The retention period is longer than the limit that applies here.",
   "required_field": "This field is required",
   "federation_admin_change": "{field}: {from} → {to}",
   "federation_admin_confirm_action": "Save and apply",

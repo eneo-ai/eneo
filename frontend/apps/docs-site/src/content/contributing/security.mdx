@@ -194,6 +194,41 @@ Routine minor and patch updates are grouped to reduce PR noise. Do not enable au
 
 For packages that handle prompts, files, provider keys, network calls, authentication, authorization, Docker images, or GitHub Actions, read the changelog before merging.
 
+### Cooldown for new releases
+
+Package resolution ignores a release until it has been published for 7 days.
+That gives the registry and the community time to find and remove a malicious
+release before it can enter a lockfile. The limit applies when a lockfile is
+resolved or updated. Installing a frozen lockfile, as CI and the image builds
+do, is not affected.
+
+| Packages                       | Setting                                           |
+| ------------------------------ | ------------------------------------------------- |
+| Frontend (npm)                 | `minimumReleaseAge` in `frontend/bunfig.toml`     |
+| Tool runtime (npm)             | `minimumReleaseAge` in `tool-runtime/bunfig.toml` |
+| Backend (PyPI)                 | `exclude-newer` in `backend/pyproject.toml`       |
+| Tool runtime PDF helper (PyPI) | `exclude-newer` in `tool-runtime/uv.toml`         |
+
+The backend needs uv 0.13.7 or newer, which `required-version` in
+`backend/pyproject.toml` enforces. An older uv stops with a version error in
+`backend/`, also in a devcontainer created earlier: run `uv self update`.
+
+Keep the four settings on the same number of days;
+`scripts/tests/test_dependency_cooldown.py` fails when they differ.
+
+When a security fix cannot wait, add an exception for the required fix next to
+the setting:
+
+- Bun: `"package@x.y.z"` in `minimumReleaseAgeExcludes`.
+- uv: a time just after the last file of the release was uploaded, in
+  `exclude-newer-package`, for example `{ example = "2026-11-18T09:30:00Z" }`.
+  PyPI shows the upload time of each file. uv admits that package's releases
+  up to that time; a time at or before an upload excludes that file.
+
+Add a comment with the advisory link and a removal date at most 7 days out, and
+remove the entry when the release clears the cooldown. Never except a whole
+package.
+
 ## Handling Alerts
 
 Use this order when triaging security alerts:

@@ -27,7 +27,13 @@ the worker process.
 `eneo.policy_levels` is a pure module (standard library only, no I/O):
 
 - `PolicyLevel`: `installation`, `organization`, `space`, `assistant_or_app`,
-  `flow`. The strings are released API and audit values.
+  `flow`, `flow_step`. The strings are released API and audit values
+  (`flow_step` once a rule uses it).
+  `flow_step` is declared for retention in flows, which will resolve
+  organisation, space, flow and step with the space and the flow as caps; no
+  rule uses it yet. A write longer than its cap is to answer 400 with
+  `retention_exceeds_space` (9086) and the cap in days with the level that
+  chose it (`cap_days`, `cap_origin`).
 - `resolve(chain, *, stricter, bounding)` takes the levels from the outermost
   to the innermost. The nearest chosen value is inherited. The value that
   applies on a bounding level, chosen there or inherited from outside it, is a
