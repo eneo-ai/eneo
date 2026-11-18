@@ -551,11 +551,14 @@ _EFFORTS = ModelKwargCapability(
 )
 
 
-def _chat_model(nickname: str, offered: SupportedModelKwargs) -> SimpleNamespace:
+def _chat_model(
+    nickname: str, offered: SupportedModelKwargs, *, tools: bool = True
+) -> SimpleNamespace:
     return SimpleNamespace(
         id=uuid4(),
         name=nickname.lower().replace(" ", "-"),
         nickname=nickname,
+        supports_tool_calling=tools,
         get_supported_model_kwargs=lambda: offered,
     )
 
@@ -1560,6 +1563,330 @@ def test_the_options_give_the_ids_a_change_of_a_tool_or_source_takes():
         "All the knowledge of one assistant must use the same embedding model"
     )
     assert "embedding model [id " in knowledge
+
+
+# --- The editor's own rules --------------------------------------------------
+
+_HAS_SERVERS = (
+    "Knowledge and MCP servers are not combined on one assistant, and this one "
+    "has MCP servers, so no knowledge can be added to it. If the person wants "
+    "knowledge in their place, remove the MCP servers in the same change. "
+    "Nothing was changed."
+)
+_HAS_KNOWLEDGE = (
+    "Knowledge and MCP servers are not combined on one assistant, and this one "
+    "has knowledge, so no MCP server can be added to it. If the person wants MCP "
+    "servers in its place, remove its knowledge in the same change. Nothing was "
+    "changed."
+)
+_NO_TOOLS = (
+    "The chat model the assistant would answer with, Liten modell, cannot use "
+    "tools, so "
+)
+
+
+def _servers_only(world) -> SimpleNamespace:
+    """``world`` with an assistant that has MCP servers and no knowledge."""
+    world.assistant.collections = []
+    world.assistant.websites = []
+    world.assistant.integration_knowledge_list = []
+    return world
+
+
+def _knowledge_only(world) -> SimpleNamespace:
+    """``world`` with an assistant that has knowledge and no MCP server."""
+    world.assistant.mcp_servers = []
+    world.assistant.mcp_tools = []
+    return world
+
+
+def _without_tools() -> SimpleNamespace:
+    return _chat_model("Liten modell", _offering(), tools=False)
+
+
+def _with_models(world, *models) -> SimpleNamespace:
+    """``world`` with a space that also offers ``models``."""
+    offered = {model.id: model for model in (world.assistant.completion_model, *models)}
+    world.space.is_completion_model_available = lambda model_id: model_id in offered
+    world.space.get_completion_model = lambda model_id: offered[model_id]
+    return world
+
+
+def test_knowledge_and_mcp_servers_are_not_combined_by_a_change():
+    servers_only = _servers_only(_world())
+    routines = {"id": str(servers_only.routines.id)}
+    for changes in (
+        {"groups": {"add": [routines]}},
+        {"websites": [{"id": str(servers_only.site.id)}]},
+        {"integration_knowledge_list": {"add": [{"id": str(servers_only.folder.id)}]}},
+        # Another server in place of the one it has is still an MCP server.
+        {"groups": [routines], "mcp_servers": [{"id": str(servers_only.archive.id)}]},
+    ):
+        with pytest.raises(BadRequestException) as refused:
+            _plan_in(servers_only, changes)
+        assert str(refused.value) == _HAS_SERVERS, changes
+
+    knowledge_only = _knowledge_only(_world())
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(
+            knowledge_only,
+            {"mcp_servers": {"add": [{"id": str(knowledge_only.archive.id)}]}},
+        )
+    assert str(refused.value) == _HAS_KNOWLEDGE
+
+    neither = _knowledge_only(_servers_only(_world()))
+    routines = {"id": str(neither.routines.id)}
+    server = {"id": str(neither.cases.id)}
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(neither, {"groups": [routines], "mcp_servers": [server]})
+    assert str(refused.value) == (
+        "Knowledge and MCP servers are not combined on one assistant, so both "
+        "cannot be added: add one or the other. Nothing was changed."
+    )
+    assert _plan_in(neither, {"groups": [routines]}).update == {"groups": [routines]}
+    assert _plan_in(neither, {"mcp_servers": [server]}).update == {
+        "mcp_servers": [server]
+    }
+
+
+def test_an_assistant_with_knowledge_and_mcp_servers_stays_changeable_on_both_sides():
+    world = _world()
+    older = {"id": str(world.older.id)}
+    archive = {"id": str(world.archive.id)}
+
+    for changes, changed in (
+        ({"groups": {"add": [older]}}, {"groups"}),
+        ({"mcp_servers": {"add": [archive]}}, {"mcp_servers"}),
+        (
+            {"groups": {"add": [older]}, "mcp_servers": {"add": [archive]}},
+            {"groups", "mcp_servers"},
+        ),
+        (
+            {"groups": [], "websites": [], "integration_knowledge_list": []},
+            {"groups", "websites", "integration_knowledge_list"},
+        ),
+        ({"mcp_servers": []}, {"mcp_servers"}),
+    ):
+        assert set(_plan_in(world, changes).update) == changed, changes
+
+
+def test_a_change_that_removes_what_stands_in_the_way_may_add_in_the_same_request():
+    servers_only = _servers_only(_world())
+    routines = {"id": str(servers_only.routines.id)}
+
+    planned = _plan_in(servers_only, {"mcp_servers": [], "groups": {"add": [routines]}})
+    assert planned.update == {"groups": [routines], "mcp_servers": []}
+
+    knowledge_only = _knowledge_only(_world())
+    archive = {"id": str(knowledge_only.archive.id)}
+    cleared = {"groups": [], "websites": [], "integration_knowledge_list": []}
+    planned = _plan_in(knowledge_only, {**cleared, "mcp_servers": {"add": [archive]}})
+    assert planned.update == {**cleared, "mcp_servers": [archive]}
+
+    # Knowledge that stays still stands in the way.
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(knowledge_only, {"groups": [], "mcp_servers": {"add": [archive]}})
+    assert str(refused.value) == _HAS_KNOWLEDGE
+
+
+def test_removing_knowledge_mcp_servers_and_functions_is_always_allowed():
+    world = _servers_only(_world())
+    world.assistant.completion_model = _without_tools()
+
+    planned = _plan_in(
+        world,
+        {
+            "mcp_servers": {"remove": [{"id": str(world.cases.id)}]},
+            "enabled_capabilities": {"remove": ["file_creation"]},
+        },
+    )
+
+    assert planned.update == {"mcp_servers": [], "enabled_capabilities": []}
+    # A server that goes takes its tools' settings along.
+    assert [change["field"] for change in planned.changes] == [
+        "mcp_servers",
+        "mcp_tools",
+        "enabled_capabilities",
+    ]
+    knowledge_only = _knowledge_only(_world())
+    assert _plan_in(knowledge_only, {"groups": []}).update == {"groups": []}
+
+
+def test_mcp_servers_tools_and_functions_need_a_model_that_can_use_tools():
+    world = _world()
+    world.assistant.completion_model = _without_tools()
+    cases = world.cases
+
+    for changes, what in (
+        (
+            {"mcp_servers": {"add": [{"id": str(world.archive.id)}]}},
+            "no MCP server can be added",
+        ),
+        (
+            {"enabled_capabilities": {"add": ["web_search"]}},
+            "web search cannot be switched on",
+        ),
+        # The editor gives the space's reason first and the provider's last.
+        ({"enabled_capabilities": ["charts"]}, "charts cannot be switched on"),
+        (
+            {
+                "mcp_tools": {
+                    "add": [{"tool_id": str(cases.tools[0].id), "is_enabled": True}]
+                }
+            },
+            "no single MCP tool can be switched on or off",
+        ),
+        # The editor shows no single tool while the model cannot use tools,
+        # so switching one off or back to its server's setting is refused too.
+        (
+            {
+                "mcp_tools": {
+                    "add": [{"tool_id": str(cases.tools[0].id), "is_enabled": False}]
+                }
+            },
+            "no single MCP tool can be switched on or off",
+        ),
+        (
+            {"mcp_tools": {"remove": [{"tool_id": str(cases.tools[1].id)}]}},
+            "no single MCP tool can be switched on or off",
+        ),
+    ):
+        with pytest.raises(BadRequestException) as refused:
+            _plan_in(world, changes)
+        text = str(refused.value)
+        assert text.startswith(_NO_TOOLS + what), changes
+        assert "Choose a chat model that can use tools first, or in the same" in text
+        assert text.endswith("Nothing was changed.")
+
+    with pytest.raises(BadRequestException) as not_offered:
+        _plan_in(world, {"enabled_capabilities": {"add": ["compute"]}})
+    assert "does not offer compute" in str(not_offered.value)
+
+
+def test_the_model_rule_follows_a_model_chosen_in_the_same_change():
+    world = _world()
+    able = world.assistant.completion_model
+    without = _without_tools()
+    _with_models(world, without)
+    web_search = {"enabled_capabilities": {"add": ["web_search"]}}
+
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(world, {"completion_model": {"id": str(without.id)}, **web_search})
+    assert str(refused.value).startswith(_NO_TOOLS + "web search cannot be")
+    # The model alone may change: what is on stays on.
+    alone = _plan_in(world, {"completion_model": {"id": str(without.id)}})
+    assert alone.update == {"completion_model": {"id": str(without.id)}}
+
+    world.assistant.completion_model = without
+    with pytest.raises(BadRequestException):
+        _plan_in(world, web_search)
+    planned = _plan_in(
+        world,
+        {
+            "completion_model": {"id": str(able.id)},
+            "mcp_servers": {"add": [{"id": str(world.archive.id)}]},
+            **web_search,
+        },
+    )
+    assert planned.update["completion_model"] == {"id": str(able.id)}
+    assert planned.update["enabled_capabilities"] == ["file_creation", "web_search"]
+    assert planned.update["mcp_servers"][-1] == {"id": str(world.archive.id)}
+
+
+def test_the_model_rule_follows_the_model_a_models_policy_answers_with():
+    world = _world()
+    steered = _without_tools()
+    policy = _policy(
+        prompt_enforced=False,
+        mcp_enforced=False,
+        inline_file_text=None,
+        reasoning_policy_configured=False,
+        available_models=[steered],
+        locked_model=steered,
+        policy_default_model=steered,
+    )
+
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(
+            world, {"enabled_capabilities": {"add": ["web_search"]}}, config=policy
+        )
+
+    assert str(refused.value).startswith(_NO_TOOLS + "web search cannot be")
+
+
+def test_read_assistant_says_what_the_editors_rules_hold_back():
+    heading = "Held back by the editor's rules as the assistant is set up now:"
+    assert heading not in _text(assistant_lines(_reading(), "all"))
+
+    servers_only = _reading()
+    servers_only.assistant.collections = []
+    servers_only.assistant.websites = []
+    knowledge_line = (
+        "- knowledge: none can be added while the assistant has MCP servers (the "
+        "two are not combined); removing the MCP servers comes first"
+    )
+    overview = _text(assistant_lines(servers_only, "overview"))
+    assert f"{heading}\n{knowledge_line}" in overview
+    assert knowledge_line in _text(assistant_lines(servers_only, "knowledge"))
+    assert "- knowledge:" not in _text(assistant_lines(servers_only, "tools"))
+
+    knowledge_only = _reading()
+    knowledge_only.assistant.mcp_servers = []
+    knowledge_only.assistant.completion_model.supports_tool_calling = False
+    servers_line = (
+        "- MCP servers: none can be added while the assistant has knowledge (the "
+        "two are not combined); removing its knowledge comes first"
+    )
+    model_line = (
+        "- MCP servers, their tools and functions: the chat model Stor modell "
+        "cannot use tools, so no MCP server or function can be turned on and no "
+        "single tool switched on or off; choosing a model that can use tools "
+        "comes first"
+    )
+    for section in ("overview", "tools"):
+        text = _text(assistant_lines(knowledge_only, section))
+        assert servers_line in text and model_line in text
+
+    # Where a policy sets the MCP servers and functions, its lock says so.
+    governed = replace(knowledge_only, effective_config=_policy())
+    tools = _text(assistant_lines(governed, "tools"))
+    assert "- MCP servers and functions: set by the policy" in tools
+    assert servers_line not in tools and model_line not in tools
+
+
+async def test_the_editors_rules_are_refused_by_both_tools_and_nothing_is_written(
+    monkeypatch,
+):
+    container, apply = _chat_calls(monkeypatch, editing=True)
+    world = _knowledge_only(_world())
+    container.assistant_service.return_value.get_assistant_with_effective_config = (
+        AsyncMock(return_value=(world.assistant, [], None))
+    )
+    container.space_service.return_value.get_space = AsyncMock(return_value=world.space)
+    monkeypatch.setattr(
+        assistant_settings, "_change_facts", AsyncMock(return_value=_facts())
+    )
+    add_server = {"mcp_servers": {"add": [{"id": str(world.archive.id)}]}}
+    add_function = {"enabled_capabilities": {"add": ["web_search"]}}
+
+    for tool in (
+        assistant_settings.propose_changes,
+        assistant_settings.update_assistant,
+    ):
+        world.assistant.completion_model = _chat_model("Stor modell", _offering())
+        combined = await tool(MagicMock(), changes=add_server)
+        assert combined.isError
+        assert combined.content[0].text == _HAS_KNOWLEDGE
+
+        world.assistant.completion_model = _without_tools()
+        without_tools = await tool(MagicMock(), changes=add_function)
+        assert without_tools.isError
+        assert without_tools.content[0].text.startswith(
+            _NO_TOOLS + "web search cannot be switched on"
+        )
+    apply.assert_not_awaited()
+    container.audit_service().log.assert_not_called()
+    container.audit_service().log_async.assert_not_called()
 
 
 # --- read_prompt_history -----------------------------------------------------

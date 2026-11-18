@@ -123,6 +123,22 @@ def test_the_assistant_fragment_suggests_only_what_the_person_may_change():
     assert "or that a personal space does not use them" in fragment
 
 
+def test_the_assistant_fragment_explains_the_editors_rules_instead_of_working_around():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "Knowledge and MCP servers are not combined on one assistant" in fragment
+    assert (
+        "MCP servers, their tools and functions are turned on only while the chat "
+        "model can use tools"
+    ) in fragment
+    assert "read_assistant says when one of these rules stands in the way" in fragment
+    assert (
+        "Then do not propose around it: explain the rule and what the person can "
+        "do instead, such as removing the MCP servers or choosing a model that can "
+        "use tools, and propose that only when they want it."
+    ) in fragment
+
+
 def test_publishing_and_unpublishing_always_ask_the_person_first():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
