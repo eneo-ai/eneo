@@ -312,7 +312,9 @@ describe("ShellCommandPalette", () => {
       if (path === "/api/v1/conversations/recent/")
         return ok({ items: [conversation("c2", "Ny fråga")] });
       return ok({});
-    }) as unknown as typeof browserApi.GET);
+      // Typed as the client's own GET, the implementation is checked against
+      // every route of the API, which is more than the compiler instantiates.
+    }) as never);
 
     renderInApp(<ShellCommandPalette isOpen onOpenChange={vi.fn()} onCreateSpace={vi.fn()} />, {
       queryClient

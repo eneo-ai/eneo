@@ -10872,5 +10872,6 @@
   "helper_lock_title": "The helper is working",
   "helper_lock_description": "The settings are locked until it is done.",
   "helper_lock_started": "The helper is working. The settings are locked until it is done.",
-  "helper_lock_ended": "The helper is done. The settings can be changed again."
+  "helper_lock_ended": "The helper is done. The settings can be changed again.",
+  "helper_unavailable_disabled": "Your organisation has turned off the helper."
 }

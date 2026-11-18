@@ -158,6 +158,11 @@ describe("The editor's Hjälpassistent toggle", () => {
     renderToggle({ available: false, reason: "not_supported" });
     expect(screen.queryByRole("button")).toBeNull();
   });
+
+  it("is not there when the organisation has turned the helper off", () => {
+    renderToggle({ available: false, reason: "disabled" });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
 });
 
 describe("The assistant's helper adapter", () => {
@@ -179,6 +184,9 @@ describe("The assistant's helper adapter", () => {
     );
     expect(unavailable({ available: false, reason: "not_supported" })).toBe(
       "Den här assistenten ställs in på annat håll, så den har ingen hjälpassistent."
+    );
+    expect(unavailable({ available: false, reason: "disabled" })).toBe(
+      "Organisationen har stängt av hjälpassistenten."
     );
   });
 

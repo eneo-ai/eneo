@@ -21,7 +21,8 @@ type UnavailableReason = NonNullable<AssistantHelperAvailability["reason"]>;
 const UNAVAILABLE_KEYS: Record<UnavailableReason, string> = {
   no_model: "helper_unavailable_no_model",
   no_edit_rights: "helper_no_access",
-  not_supported: "helper_unavailable_not_supported"
+  not_supported: "helper_unavailable_not_supported",
+  disabled: "helper_unavailable_disabled"
 };
 
 /** The assistant's helper chat's refusals (the error's `code`), in plain words. */
@@ -29,6 +30,7 @@ const REFUSAL_KEYS: Record<string, string> = {
   helper_chat_no_model: "helper_unavailable_no_model",
   helper_chat_no_edit_rights: "helper_no_access",
   helper_chat_not_supported: "helper_unavailable_not_supported",
+  helper_chat_disabled: "helper_unavailable_disabled",
   helper_chat_not_editing: "helper_refusal_not_editing",
   helper_chat_model_without_tools: "helper_refusal_model_without_tools",
   helper_chat_model_below_classification: "helper_refusal_model_below_classification",

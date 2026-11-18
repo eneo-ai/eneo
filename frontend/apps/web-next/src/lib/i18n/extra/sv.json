@@ -4822,5 +4822,6 @@
   "helper_lock_title": "Hjälpassistenten arbetar",
   "helper_lock_description": "Inställningarna är låsta tills den är klar.",
   "helper_lock_started": "Hjälpassistenten arbetar. Inställningarna är låsta tills den är klar.",
-  "helper_lock_ended": "Hjälpassistenten är klar. Inställningarna går att ändra igen."
+  "helper_lock_ended": "Hjälpassistenten är klar. Inställningarna går att ändra igen.",
+  "helper_unavailable_disabled": "Organisationen har stängt av hjälpassistenten."
 }

@@ -20,7 +20,9 @@ describe("recentConversationsQueryOptions", () => {
     const items = [{ id: "c1" }, { id: "c2" }];
     const get = vi
       .spyOn(browserApi, "GET")
-      .mockImplementation((() => ok({ items, count: 2 })) as unknown as typeof browserApi.GET);
+      // Typed as the client's own GET, the implementation is checked against
+      // every route of the API, which is more than the compiler instantiates.
+      .mockImplementation((() => ok({ items, count: 2 })) as never);
 
     const conversations = await makeQueryClient().query(
       recentConversationsQueryOptions(browserApi)

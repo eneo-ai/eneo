@@ -338,7 +338,9 @@ describe("DesktopSideNav (main)", () => {
         attempts += 1;
         if (attempts === 1) return Promise.reject(new Error("offline"));
         return retryResponse;
-      }) as unknown as typeof browserApi.GET);
+        // Typed as the client's own GET, the implementation is checked against
+        // every route of the API, which is more than the compiler instantiates.
+      }) as never);
 
       const { container } = renderInApp(<RailedSideNav variant="main" navId="side-nav" />, {
         queryClient
