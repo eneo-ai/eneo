@@ -2,9 +2,9 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, Lightbulb, PencilLine } from "lucide-react";
+import { Check, Copy, Lightbulb, PencilLine, Send } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { Fragment, useId, useRef, useState, type ReactNode } from "react";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { SuccessMark } from "@/components/composites/success-mark";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -14,26 +14,39 @@ import { toastApiError } from "@/lib/api/toast";
 import { useCopy } from "@/lib/hooks/use-copy";
 import { cn } from "@/lib/utils";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
+import { availableDocumentTemplatesQueryOptions } from "@/features/document-templates/document-templates";
 import {
   FieldBeforeAfter,
+  FOLDED_LINES,
   FoldButton,
   HELPER_CARD_COLLAPSIBLE_CLASS,
   HelperCardFrame,
   isLongText
 } from "@/features/helper/helper-card";
+import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
+import { selectableRerankModels, spaceModelsQueryOptions } from "./assistant-editor-rules";
 import {
+  FUNCTION_FIELD_PREFIX,
+  LIST_FIELDS,
   changeOf,
   changeState,
+  functionName,
   kwargOf,
+  listEntries,
   proposalOf,
   proposalUsed,
+  publishedBy,
   requestGate,
   settingInRequest,
+  toolEntries,
   type AssistantChange,
   type AssistantProposal,
+  type GateContext,
+  type ListEntry,
   type RequestGate,
-  type SettingChange
+  type SettingChange,
+  type ToolEntry
 } from "./assistant-helper-changes";
 import {
   fieldsChangedBetween,
@@ -53,13 +66,27 @@ const SETTING_LABEL_KEYS: Record<string, string> = {
   prompt: "prompt",
   completion_model: "completion_model",
   knowledge_mode: "material_knowledge_timing",
-  inline_file_text: "material_chat_uploads"
+  inline_file_text: "material_chat_uploads",
+  groups: "collections",
+  websites: "websites",
+  integration_knowledge_list: "integrations",
+  rerank_model_id: "material_reranker",
+  mcp_servers: "mcp_servers",
+  mcp_tools: "tools",
+  enabled_capabilities: "capabilities",
+  document_template: "document_template_choice_label",
+  data_retention_days: "conversation_retention_title",
+  insight_enabled: "insights",
+  published: "status"
 };
 
 /** A setting's name as the editor calls it; one it does not show by its own name. */
 export function settingLabel(field: string, t: Translate): string {
   const kwarg = kwargOf(field);
   if (kwarg) return modelKwargLabel(kwarg, t);
+  if (field.startsWith(FUNCTION_FIELD_PREFIX)) {
+    return functionName(field.slice(FUNCTION_FIELD_PREFIX.length), t);
+  }
   const key = SETTING_LABEL_KEYS[field];
   return key ? t(key) : field;
 }
@@ -67,12 +94,54 @@ export function settingLabel(field: string, t: Translate): string {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** A setting's value in the editor's words: a model by name, a choice by its option's name. */
+/** An entry of a list setting by name: a function as the editor names it. */
+function entryName(field: string, entry: ListEntry, t: Translate): string {
+  if (field === "enabled_capabilities") return functionName(entry.id, t);
+  return entry.name ?? t("helper_card_unnamed");
+}
+
+/** A tool setting in words: on, off, or back to its server's own setting. */
+function toolStateText(entry: ToolEntry | undefined, t: Translate): string {
+  if (!entry) return t("helper_card_tool_server_setting");
+  return t(entry.isEnabled ? "helper_card_tool_on" : "helper_card_tool_off");
+}
+
+/**
+ * A setting's value in the editor's words: a model by name, a choice by its
+ * option's name, retention as the editor summarises it, a switch as on or
+ * off. Lists and tool settings are told as their own rows (`ListRow`,
+ * `ToolsRow`).
+ */
 export function settingText(field: string, value: unknown, t: Translate, format: Format): string {
   if (field === "completion_model") {
     return isRecord(value) && typeof value.name === "string"
       ? value.name
       : t("helper_card_no_model");
+  }
+  if (field === "rerank_model_id") {
+    if (!isRecord(value)) return t("material_reranker_none");
+    return typeof value.name === "string" && value.name
+      ? value.name
+      : t("material_reranker_missing");
+  }
+  if (field === "document_template") {
+    const mode = isRecord(value) ? value.mode : "default";
+    if (mode === "builtin") return t("document_template_builtin_name");
+    if (mode === "selected") {
+      return isRecord(value) && typeof value.name === "string" && value.name
+        ? value.name
+        : t("document_template_choice_selected");
+    }
+    return t("document_template_choice_default");
+  }
+  if (field === "data_retention_days" && (value === null || typeof value === "number")) {
+    return editorSummaries(t).retention(value);
+  }
+  if (field === "insight_enabled" && typeof value === "boolean") {
+    return t(value ? "enabled" : "disabled");
+  }
+  if (field === "published" && typeof value === "boolean") {
+    return editorSummaries(t).publishing(value);
   }
   if (field.startsWith("completion_model_kwargs.")) {
     if (value === null || value === undefined) return t("default_behavior");
@@ -180,6 +249,99 @@ function FoldedText({ text, folded }: { text: string; folded: boolean }) {
   return <span className={folded ? "line-clamp-4" : undefined}>{text}</span>;
 }
 
+/**
+ * A setting told in terms, each a word and what it covers ("Läggs till":
+ * names), never by colour alone. Many terms, or a long one, fold to a few
+ * until "Visa hela".
+ */
+function TermsRow({
+  label,
+  terms
+}: {
+  label: string;
+  terms: { key: string; term: string; text: string }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const long = terms.length > FOLDED_LINES || terms.some((item) => isLongText(item.text));
+  const folded = long && !open;
+  const shown = folded ? terms.slice(0, FOLDED_LINES) : terms;
+  return (
+    <li className="flex flex-col gap-1">
+      <p className="text-ax-text-secondary m-0 text-xs font-semibold">{label}</p>
+      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
+        {shown.map((item) => (
+          <Fragment key={item.key}>
+            <dt className="text-ax-text-secondary">{item.term}</dt>
+            <dd className="text-ax-text m-0 min-w-0 break-words whitespace-pre-wrap">
+              <FoldedText text={item.text} folded={folded} />
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+      {long ? (
+        <div>
+          <FoldButton open={open} onToggle={() => setOpen((value) => !value)} />
+        </div>
+      ) : null}
+    </li>
+  );
+}
+
+/** A list setting: what is added and what is removed, by name. */
+function ListRow({ change, proposal }: { change: SettingChange; proposal: boolean }) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const before = listEntries(change.before);
+  const after = listEntries(change.after);
+  const had = new Set(before.map((entry) => entry.id));
+  const has = new Set(after.map((entry) => entry.id));
+  const names = (entries: ListEntry[]) =>
+    format.list(entries.map((entry) => entryName(change.field, entry, t)));
+  const added = after.filter((entry) => !had.has(entry.id));
+  const removed = before.filter((entry) => !has.has(entry.id));
+  const terms = [
+    ...(added.length > 0
+      ? [
+          {
+            key: "added",
+            term: t(proposal ? "helper_card_adds" : "helper_card_added"),
+            text: names(added)
+          }
+        ]
+      : []),
+    ...(removed.length > 0
+      ? [
+          {
+            key: "removed",
+            term: t(proposal ? "helper_card_removes" : "helper_card_removed"),
+            text: names(removed)
+          }
+        ]
+      : [])
+  ];
+  return <TermsRow label={settingLabel(change.field, t)} terms={terms} />;
+}
+
+/** The tool settings: each tool whose setting changes, by name, and what it is set to. */
+function ToolsRow({ change }: { change: SettingChange }) {
+  const t = useTranslations();
+  const before = new Map(toolEntries(change.before).map((entry) => [entry.id, entry]));
+  const after = new Map(toolEntries(change.after).map((entry) => [entry.id, entry]));
+  const terms = [...new Set([...after.keys(), ...before.keys()])].flatMap((id) => {
+    const now = after.get(id);
+    const then = before.get(id);
+    if (now && then && now.isEnabled === then.isEnabled) return [];
+    return [
+      {
+        key: id,
+        term: now?.name ?? then?.name ?? t("helper_card_unnamed_tool"),
+        text: toolStateText(now, t)
+      }
+    ];
+  });
+  return <TermsRow label={settingLabel(change.field, t)} terms={terms} />;
+}
+
 /** One setting, before and after, in the editor's words. */
 function SettingRow({ change }: { change: SettingChange }) {
   const t = useTranslations();
@@ -196,13 +358,19 @@ function SettingRow({ change }: { change: SettingChange }) {
   );
 }
 
-/** The settings a card is about, one row each; `copyPrompt` offers the new instructions to copy. */
+/**
+ * The settings a card is about, one row each; `copyPrompt` offers the new
+ * instructions to copy. A list says what a proposal adds and removes
+ * (`proposal`), or what a change added and removed.
+ */
 function ChangeRows({
   changes,
-  copyPrompt = null
+  copyPrompt = null,
+  proposal = false
 }: {
   changes: SettingChange[];
   copyPrompt?: string | null;
+  proposal?: boolean;
 }) {
   return (
     <ul className="m-0 flex list-none flex-col gap-2.5 p-0">
@@ -214,10 +382,39 @@ function ChangeRows({
         if (change.field === "prompt") {
           return <InstructionsRow key={change.field} change={change} copyText={copyText} />;
         }
+        if (LIST_FIELDS.has(change.field)) {
+          return <ListRow key={change.field} change={change} proposal={proposal} />;
+        }
+        if (change.field === "mcp_tools") {
+          return <ToolsRow key={change.field} change={change} />;
+        }
         return <SettingRow key={change.field} change={change} />;
       })}
     </ul>
   );
+}
+
+/**
+ * What a card's gate reads beyond the assistant: the space, and the ranking
+ * models and templates the editor offers, read (from the editor's own
+ * cache where it has them) only for a request that chooses one.
+ */
+function useGateContext(body: AssistantUpdate | null): GateContext {
+  const { space, can } = useSpace();
+  const models = useQuery({
+    ...spaceModelsQueryOptions(browserApi, space.id),
+    enabled: typeof body?.rerank_model_id === "string"
+  });
+  const templates = useQuery({
+    ...availableDocumentTemplatesQueryOptions(browserApi),
+    enabled: body?.document_template?.mode === "selected"
+  });
+  return {
+    space,
+    canEditSpace: can("edit", "space"),
+    rerankModels: models.data ? selectableRerankModels(models.data) : undefined,
+    templates: templates.data?.items
+  };
 }
 
 /**
@@ -354,7 +551,7 @@ function AssistantProposalCard({
   assistantId: string;
 }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const gateContext = useGateContext(proposal.update);
   const assistant = useQuery(assistantQueryOptions(browserApi, assistantId)).data;
   const { send, pending, failure, stateId } = useCardSave(assistantId, {
     done: t("helper_card_applied"),
@@ -363,7 +560,7 @@ function AssistantProposalCard({
   });
   const used = assistant ? proposalUsed(proposal, assistant) : false;
   const gate: RequestGate = assistant
-    ? requestGate(proposal.update, proposal.changes, assistant, space.completion_models, t)
+    ? requestGate(proposal.update, proposal.changes, assistant, gateContext, t)
     : { offered: false };
   const prompt = settingInRequest(proposal.update, "prompt");
   return (
@@ -375,6 +572,7 @@ function AssistantProposalCard({
       <ChangeRows
         changes={proposal.changes}
         copyPrompt={typeof prompt === "string" ? prompt : null}
+        proposal
       />
       {used ? (
         <CardState id={stateId} text={t("helper_proposal_used")} success />
@@ -412,7 +610,7 @@ function AssistantChangeCard({
   assistantId: string;
 }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const gateContext = useGateContext(change.undo);
   const assistant = useQuery(assistantQueryOptions(browserApi, assistantId)).data;
   const { send, pending, failure, stateId } = useCardSave(assistantId, {
     done: t("helper_card_undone"),
@@ -425,7 +623,7 @@ function AssistantChangeCard({
   if (state === "current" && assistant && undo) {
     footer = (
       <CardAction
-        gate={requestGate(undo, change.changes, assistant, space.completion_models, t)}
+        gate={requestGate(undo, change.changes, assistant, gateContext, t)}
         label={t("helper_change_undo")}
         variant="secondary"
         pending={pending}
@@ -462,12 +660,44 @@ function AssistantChangeCard({
 }
 
 /**
+ * The helper chat published or unpublished the assistant, with the
+ * person's approval: the status before and after. A publish has no undo
+ * here; the card says so and where it is done.
+ */
+function AssistantPublishCard({
+  change,
+  published
+}: {
+  change: AssistantChange;
+  published: boolean;
+}) {
+  const t = useTranslations();
+  return (
+    <HelperCardFrame
+      label={t(published ? "helper_publish_title_published" : "helper_publish_title_unpublished")}
+      icon={<Send className="size-4" />}
+    >
+      <ChangeRows changes={change.changes} />
+      <p className="text-ax-text-secondary m-0 text-[13px]">
+        {t("helper_change_cannot_undo")} {t("helper_publish_where", { section: t("publishing") })}
+      </p>
+    </HelperCardFrame>
+  );
+}
+
+/**
  * The card the assistant's helper chat draws for one of its tool calls: a
- * proposal or a change to this assistant; null for any other call.
+ * proposal, a change or a publish of this assistant; null for any other call.
  */
 export function assistantHelperCardFor(call: ToolCallRecord, assistantId: string): ReactNode {
   const proposal = proposalOf(call, assistantId);
   if (proposal) return <AssistantProposalCard proposal={proposal} assistantId={assistantId} />;
   const change = changeOf(call, assistantId);
-  return change ? <AssistantChangeCard change={change} assistantId={assistantId} /> : null;
+  if (!change) return null;
+  const published = publishedBy(change);
+  return published !== null ? (
+    <AssistantPublishCard change={change} published={published} />
+  ) : (
+    <AssistantChangeCard change={change} assistantId={assistantId} />
+  );
 }

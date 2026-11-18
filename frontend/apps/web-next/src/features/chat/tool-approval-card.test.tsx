@@ -205,6 +205,49 @@ describe("ToolApprovalCard", () => {
     expect(screen.getByRole("button", { name: "Godkänn: Svara på granskningen" })).toBeTruthy();
   });
 
+  it("names the helper's publish of an assistant by what it will do", async () => {
+    const publish = (id: string, published: unknown, isInternal = true) => ({
+      server_name: "assistant",
+      tool_name: "publish_assistant",
+      tool_call_id: id,
+      is_internal: isInternal,
+      arguments: { published }
+    });
+    const { container } = renderCard({
+      approval_id: "a-publish",
+      status: "pending",
+      tools: [publish("call-1", true), publish("call-2", false)]
+    });
+
+    expect(
+      screen.getByText("Publicera assistenten så att alla i ytan kan använda den, även visare")
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Godkänn: Publicera assistenten så att alla i ytan kan använda den, även visare"
+      })
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", {
+        name: "Avvisa: Avpublicera assistenten så att ytans visare inte längre kan använda den"
+      })
+    ).toBeTruthy();
+    // Named by what it does: its arguments stay behind "Visa alla argument".
+    expect(screen.queryByText("published: true")).toBeNull();
+    await expectNoAxeViolations(container);
+    cleanup();
+
+    // An external server named assistant keeps its server and id.
+    renderCard({
+      approval_id: "a-external-publish",
+      status: "pending",
+      tools: [publish("call-1", true, false)]
+    });
+    expect(
+      screen.getByRole("button", { name: "Godkänn assistant/publish_assistant" })
+    ).toBeTruthy();
+  });
+
   it("keeps naming a call to an external server named flows by its server and id", () => {
     renderCard({
       approval_id: "a-external",

@@ -34,6 +34,11 @@ export function useSettingsMark(key: string | undefined): string | null {
   return key !== undefined && marks?.rows.has(key) ? marks.label : null;
 }
 
+/** The marks themselves, for a list that reads one per item. */
+export function useSettingsMarks(): SettingsRowMarks | null {
+  return useContext(MarksContext);
+}
+
 /** A marked row's tint: the margin it takes is given back as padding, so nothing moves. */
 export const MARKED_ROW_CLASS = "rounded-ax-element bg-ax-selected -mx-3 -my-2 px-3 py-2";
 

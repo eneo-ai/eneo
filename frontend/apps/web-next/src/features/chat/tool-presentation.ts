@@ -226,13 +226,31 @@ const OWN_SERVER_TOOLS = new Map<string, OwnServerTools>([
   [
     // The helper chat about an assistant's settings. Its calls' arguments
     // (sections, offsets, the changes it proposes or makes) show in the
-    // answer's own cards, not under the label.
+    // answer's own cards, not under the label. Unpublishing has a label of
+    // its own (`helper_tool_publish_assistant_unpublish`), and a publish
+    // waits for the person's approval named by what it will do.
     "assistant",
     {
       prefix: "helper_tool_",
       server: "helper_tool_server",
-      tools: new Set(["read_assistant", "read_options", "propose_changes", "update_assistant"]),
-      target: () => null
+      tools: new Set([
+        "read_assistant",
+        "read_options",
+        "read_prompt_history",
+        "propose_changes",
+        "update_assistant",
+        "publish_assistant"
+      ]),
+      variant: (tool, args) =>
+        tool === "publish_assistant" && args.published === false ? { suffix: "_unpublish" } : null,
+      target: () => null,
+      approval: (tool, args) => {
+        if (tool !== "publish_assistant") return null;
+        if (args.published === true) return "helper_tool_publish_assistant_approval_publish";
+        return args.published === false
+          ? "helper_tool_publish_assistant_approval_unpublish"
+          : "helper_tool_publish_assistant_approval";
+      }
     }
   ]
 ]);

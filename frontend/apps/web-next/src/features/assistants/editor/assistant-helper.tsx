@@ -6,6 +6,7 @@ import { useTranslations } from "use-intl";
 import type { ReactNode, Ref } from "react";
 import { EneoApiError } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 import type { ChatReferences } from "@/features/chat/chat-references";
 import type { HelperAdapter } from "@/features/helper/helper-adapter";
 import { useSpace } from "@/features/spaces/use-space";
@@ -45,7 +46,9 @@ const REFUSAL_KEYS: Record<string, string> = {
  * shows as a card to apply, a change made in Redigera as a card to undo.
  * When one of the chat's tools finishes, and when an answer ends, the
  * assistant and its space are read again, so the form shows what the
- * helper changed, and a change it made is handed to `onChanged`. The page
+ * helper changed (a publish also the API keys' expiry notices, as the
+ * publishing section's own publish does), and a change it made or a
+ * publish is handed to `onChanged`. The page
  * hands it what the chat can refer to (the assistant's settings), the
  * composer's "@" button, what runs before a message goes and what to do
  * while the helper may write.
@@ -64,7 +67,7 @@ export function useAssistantHelper({
   availability: AssistantHelperAvailability | undefined;
   references?: ChatReferences;
   footerActions?: ReactNode;
-  /** The settings an `update_assistant` call of this visit actually changed. */
+  /** The settings an `update_assistant` or `publish_assistant` call of this visit actually changed. */
   onChanged?: (fields: string[]) => void;
   beforeSend?: HelperAdapter["beforeSend"];
   onWritingChange?: HelperAdapter["onWritingChange"];
@@ -119,6 +122,9 @@ export function useAssistantHelper({
     onToolCallFinished: (call) => {
       if (!isAssistantToolCall(call)) return;
       refresh();
+      // A publish also changes whose API keys follow the assistant's, as the
+      // publishing section's own publish refreshes.
+      if (call.toolName === "publish_assistant") void invalidateExpiringApiKeys(queryClient);
       const change = changeOf(call, assistant.id);
       const fields = change ? changedFields(change.changes) : [];
       if (fields.length > 0) onChanged?.(fields);

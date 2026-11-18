@@ -436,3 +436,305 @@ describe("The helper's cards", () => {
     await expectNoAxeViolations(change.container);
   });
 });
+
+/** What each row of a card says: its name, then each word and value in order. */
+const rowTexts = (card: HTMLElement) =>
+  within(card)
+    .getAllByRole("listitem")
+    .map((row) => [...row.querySelectorAll("p, dt, dd")].map((part) => part.textContent));
+
+const named = (...items: [string, string][]) => items.map(([id, name]) => ({ id, name }));
+
+/** An assistant with the lists the API always gives, empty unless set. */
+const withSettings = (overrides: Record<string, unknown> = {}) =>
+  makeAssistant({
+    groups: [],
+    websites: [],
+    integration_knowledge_list: [],
+    mcp_servers: [],
+    mcp_tools: [],
+    enabled_capabilities: [],
+    ...overrides
+  });
+
+describe("The helper's cards for the rest of the settings", () => {
+  it("say what a list adds and removes by name, each tool on or off, and each choice in the editor's words", async () => {
+    const { container } = renderCard(
+      toolCall("propose_changes", {
+        target_id: ID,
+        proposal: {
+          changes: [
+            {
+              field: "groups",
+              before: named(["c1", "Bygglov"], ["c2", "Detaljplaner"]),
+              after: named(["c1", "Bygglov"], ["c3", "Strandskydd"])
+            },
+            { field: "mcp_servers", before: [], after: named(["s1", "Ärenden"]) },
+            {
+              field: "mcp_tools",
+              before: [
+                { id: "t1", name: "search_cases", is_enabled: true },
+                { id: "t3", name: "export_case", is_enabled: false }
+              ],
+              after: [
+                { id: "t1", name: "search_cases", is_enabled: false },
+                { id: "t2", name: "archive_case", is_enabled: true }
+              ]
+            },
+            {
+              field: "enabled_capabilities",
+              before: named(["web_search", "web search"]),
+              after: named(["charts", "charts"])
+            },
+            { field: "rerank_model_id", before: null, after: { id: "r1", name: "Rankaren" } },
+            {
+              field: "document_template",
+              before: { mode: "default", template_id: null, name: null },
+              after: { mode: "selected", template_id: "tpl-1", name: "Kommunens mall" }
+            },
+            { field: "data_retention_days", before: null, after: 30 },
+            { field: "insight_enabled", before: false, after: true }
+          ],
+          update: { data_retention_days: 30 }
+        }
+      })
+    );
+
+    const card = screen.getByRole("region", { name: "Förslag på 8 ändringar" });
+    expect(rowTexts(card)).toEqual([
+      ["Samlingar", "Läggs till", "Strandskydd", "Tas bort", "Detaljplaner"],
+      ["MCP-servrar", "Läggs till", "Ärenden"],
+      [
+        "Verktyg",
+        "search_cases",
+        "Av",
+        "archive_case",
+        "På",
+        "export_case",
+        "Följer serverns inställning"
+      ],
+      ["Funktioner", "Läggs till", "Diagram", "Tas bort", "Webbsökning"],
+      ["Rankning av träffar", "Före", "Ingen omrankning", "Efter", "Rankaren"],
+      ["Dokumentmall", "Före", "Organisationens standard", "Efter", "Kommunens mall"],
+      ["Gallring av konversationshistorik", "Före", "Ytans gallring", "Efter", "Sparas 30 dagar"],
+      ["Insikter", "Före", "Inaktiverad", "Efter", "Aktiverad"]
+    ]);
+    await expectNoAxeViolations(container);
+  });
+
+  it("say what a change added and removed", () => {
+    renderCard(
+      toolCall("update_assistant", {
+        target_id: ID,
+        changes: [
+          {
+            field: "websites",
+            before: named(["w1", "kommun.se"]),
+            after: named(["w2", "lansstyrelsen.se"])
+          }
+        ],
+        undo: { websites: [{ id: "w1" }] }
+      }),
+      withSettings({ websites: [{ id: "w2" }] })
+    );
+
+    expect(
+      rowTexts(screen.getByRole("region", { name: "Hjälpassistenten ändrade en inställning" }))
+    ).toEqual([["Webbplatser", "Lades till", "lansstyrelsen.se", "Togs bort", "kommun.se"]]);
+  });
+
+  it("saves exactly the proposal's request for a list with Använd, and then shows it as used", async () => {
+    const update = { groups: [{ id: "c1" }, { id: "c3" }] };
+    api.POST.mockResolvedValue(ok(withSettings({ groups: [{ id: "c3" }, { id: "c1" }] })));
+    renderCard(
+      toolCall("propose_changes", {
+        target_id: ID,
+        proposal: {
+          changes: [
+            {
+              field: "groups",
+              before: named(["c1", "Bygglov"]),
+              after: named(["c1", "Bygglov"], ["c3", "Strandskydd"])
+            }
+          ],
+          update
+        }
+      }),
+      withSettings({ groups: [{ id: "c1" }] })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Använd" }));
+
+    await waitFor(() => expect(screen.getByText("Använt")).toBeTruthy());
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+      params: { path: { id: ID } },
+      body: update
+    });
+  });
+
+  it("undoes exactly the change's request for a list with Ångra, and then shows it as undone", async () => {
+    const undo = { mcp_servers: [{ id: "s1" }] };
+    api.POST.mockResolvedValue(ok(withSettings({ mcp_servers: [{ id: "s1" }] })));
+    renderCard(
+      toolCall("update_assistant", {
+        target_id: ID,
+        changes: [
+          {
+            field: "mcp_servers",
+            before: named(["s1", "Ärenden"]),
+            after: named(["s1", "Ärenden"], ["s2", "Arkivet"])
+          }
+        ],
+        undo
+      }),
+      withSettings({ mcp_servers: [{ id: "s2" }, { id: "s1" }] })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Ångra" }));
+
+    await waitFor(() => expect(screen.getByText("Ångrat")).toBeTruthy());
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
+      params: { path: { id: ID } },
+      body: undo
+    });
+  });
+
+  it("shows a proposal of tools, ranking, retention and insights the assistant already has as used", () => {
+    const proposalOf = (assistant: Assistant) =>
+      renderCard(
+        toolCall("propose_changes", {
+          target_id: ID,
+          proposal: {
+            changes: [
+              {
+                field: "mcp_tools",
+                before: [{ id: "t1", name: "search_cases", is_enabled: true }],
+                after: [{ id: "t1", name: "search_cases", is_enabled: false }]
+              },
+              { field: "rerank_model_id", before: null, after: { id: "r1", name: "Rankaren" } },
+              { field: "data_retention_days", before: null, after: 30 },
+              { field: "insight_enabled", before: false, after: true }
+            ],
+            update: {
+              mcp_tools: [{ tool_id: "t1", is_enabled: false }],
+              rerank_model_id: "r1",
+              data_retention_days: 30,
+              insight_enabled: true
+            }
+          }
+        }),
+        assistant
+      );
+    const applied = {
+      mcp_tools: [{ tool_id: "t1", is_enabled: false }],
+      rerank_model_id: "r1",
+      data_retention_days: 30,
+      insight_enabled: true,
+      permissions: ["read", "edit", "insight_toggle"]
+    };
+    proposalOf(withSettings(applied));
+    expect(screen.getByText("Använt")).toBeTruthy();
+    cleanup();
+
+    proposalOf(withSettings({ ...applied, data_retention_days: 60 }));
+    expect(screen.queryByText("Använt")).toBeNull();
+    expect(screen.getByRole("button", { name: "Använd" })).toBeTruthy();
+  });
+
+  it("disables Använd with the reason where the editor's control is disabled for the person", () => {
+    renderCard(
+      toolCall("propose_changes", {
+        target_id: ID,
+        proposal: {
+          changes: [{ field: "insight_enabled", before: false, after: true }],
+          update: { insight_enabled: true }
+        }
+      }),
+      // May edit the assistant, but not toggle its insights.
+      withSettings({ insight_enabled: false })
+    );
+
+    const button = screen.getByRole("button", { name: "Använd" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    const reason = document.getElementById(button.getAttribute("aria-describedby")!.split(" ")[0]!);
+    expect(reason?.textContent).toBe("Endast ytans administratörer kan växla insikter.");
+    fireEvent.click(button);
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("disables Ångra with the reason where it would switch on a function the space does not offer", () => {
+    renderCard(
+      toolCall("update_assistant", {
+        target_id: ID,
+        changes: [
+          { field: "enabled_capabilities", before: named(["charts", "charts"]), after: [] }
+        ],
+        undo: { enabled_capabilities: ["charts"] }
+      }),
+      withSettings({ enabled_capabilities: [] })
+    );
+
+    const button = screen.getByRole("button", { name: "Ångra" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    const reason = document.getElementById(button.getAttribute("aria-describedby")!.split(" ")[0]!);
+    expect(reason?.textContent).toBe(
+      "Diagram kan inte slås på. Funktionen är avstängd i ytans inställningar."
+    );
+  });
+
+  it("offers no Använd for a list to someone who may not edit the assistant", () => {
+    renderCard(
+      toolCall("propose_changes", {
+        target_id: ID,
+        proposal: {
+          changes: [{ field: "groups", before: [], after: named(["c1", "Bygglov"]) }],
+          update: { groups: [{ id: "c1" }] }
+        }
+      }),
+      withSettings({ groups: [], permissions: ["read"] })
+    );
+
+    expect(screen.getByRole("region", { name: "Förslag på ändring" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Använd" })).toBeNull();
+  });
+});
+
+describe("The helper's publish card", () => {
+  const publish = (published: boolean, target = ID) =>
+    toolCall("publish_assistant", {
+      target_id: target,
+      changes: [{ field: "published", before: !published, after: published }],
+      undo: null
+    });
+
+  it("says the helper published the assistant, that it cannot be undone here and where it is done", async () => {
+    const { container } = renderCard(publish(true), withSettings({ published: true }));
+
+    const card = screen.getByRole("region", { name: "Hjälpassistenten publicerade assistenten" });
+    expect(rowTexts(card)).toEqual([["Status", "Före", "Utkast", "Efter", "Publicerad"]]);
+    expect(
+      within(card).getByText(
+        "Ändringen kan inte ångras här. Du publicerar och avpublicerar assistenten under Publicering."
+      )
+    ).toBeTruthy();
+    expect(within(card).queryByRole("button")).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("says the helper unpublished it, and is drawn only for this assistant's own server", () => {
+    renderCard(publish(false));
+    expect(
+      screen.getByRole("region", { name: "Hjälpassistenten avpublicerade assistenten" })
+    ).toBeTruthy();
+    expect(
+      [
+        publish(true, "assistant-2"),
+        toolCall("publish_assistant", publish(true).structuredContent, { serverName: "flows" }),
+        toolCall("publish_assistant", publish(true).structuredContent, { isInternal: false }),
+        toolCall("read_prompt_history", { target_id: ID })
+      ].map((call) => assistantHelperCardFor(call, ID))
+    ).toEqual([null, null, null, null]);
+  });
+});

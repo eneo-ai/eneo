@@ -12,6 +12,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "../publish-dialog";
+import { canToggleAssistantInsights } from "./assistant-editor-rules";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
@@ -76,7 +77,7 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
 
   const permissions = assistant.permissions ?? [];
   const canPublish = permissions.includes("publish");
-  const canToggleInsights = permissions.includes("insight_toggle");
+  const canToggleInsights = canToggleAssistantInsights(assistant);
   if (!canPublish && !canToggleInsights) return null;
 
   return (

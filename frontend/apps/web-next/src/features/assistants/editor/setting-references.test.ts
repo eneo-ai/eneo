@@ -39,6 +39,14 @@ const assistant = (overrides: Record<string, unknown> = {}) =>
 
 const ALL_SECTIONS = ASSISTANT_SECTION_IDS.map((id) => ({ id, label: id }));
 
+const RERANKER = {
+  id: "rerank-1",
+  name: "multilingual-rerank",
+  nickname: "Flerspråkig rankning",
+  can_access: true,
+  meets_security_classification: true
+};
+
 const reasoningModel = {
   supported_model_kwargs: {
     temperature: { supported: true },
@@ -73,6 +81,7 @@ describe("The keys a setting reference can name", () => {
     "knowledge_mode",
     "inline_file_text",
     "knowledge",
+    "rerank_model_id",
     "mcp_servers",
     "attachments",
     "completion_model",
@@ -84,6 +93,7 @@ describe("The keys a setting reference can name", () => {
     "completion_model_kwargs.frequency_penalty",
     "completion_model_kwargs.top_k",
     "enabled_capabilities",
+    "document_template",
     "data_retention_days",
     "published",
     "insight_enabled",
@@ -114,7 +124,13 @@ describe("The keys a setting reference can name", () => {
       )
     };
     const keys = settingReferences(
-      input({ kwargsModel: everySetting as SettingReferenceInput["kwargsModel"] })
+      input({
+        kwargsModel: everySetting as SettingReferenceInput["kwargsModel"],
+        // The ranking row shows where the space has a model to choose, the
+        // template while "Skapa fil" is on.
+        assistant: assistant({ enabled_capabilities: ["file_creation"] }),
+        spaceModels: { rerank_models: [RERANKER] } as SettingReferenceInput["spaceModels"]
+      })
     ).map((reference) => reference.key);
     expect(new Set(keys)).toEqual(new Set(SETTING_REFERENCE_KEYS));
   });
@@ -201,6 +217,67 @@ describe("What the helper chat can refer to", () => {
     const plain = keys({ kwargsModel: null });
     expect(plain).toContain("completion_model_kwargs");
     expect(plain.filter((key) => key.startsWith("completion_model_kwargs."))).toEqual([]);
+  });
+});
+
+describe("The result ranking and the document template in the '@' menu", () => {
+  const find = (key: string, overrides: Partial<SettingReferenceInput> = {}) =>
+    settingReferences(input(overrides)).find((reference) => reference.key === key);
+  const models = (...rerank: unknown[]) =>
+    ({ rerank_models: rerank }) as SettingReferenceInput["spaceModels"];
+
+  it("lists the ranking model under Kunskap where the form shows its row, landing on the row", () => {
+    expect(find("rerank_model_id", { spaceModels: models(RERANKER) })).toMatchObject({
+      section: "knowledge",
+      label: "Rankning av träffar",
+      value: "Ingen omrankning",
+      control: "reranker"
+    });
+    expect(
+      find("rerank_model_id", {
+        spaceModels: models(RERANKER),
+        assistant: assistant({ rerank_model_id: "rerank-1" })
+      })?.value
+    ).toBe("Flerspråkig rankning");
+    // A chosen model the space no longer allows stays, as the row keeps it.
+    expect(
+      find("rerank_model_id", {
+        spaceModels: models(),
+        assistant: assistant({ rerank_model_id: "rerank-gone" })
+      })?.value
+    ).toBe("Otillgänglig modell");
+  });
+
+  it("leaves the ranking model out where the form has no row for it", () => {
+    // Nothing the space lets the assistant choose, and nothing chosen.
+    expect(
+      find("rerank_model_id", { spaceModels: models({ ...RERANKER, can_access: false }) })
+    ).toBeUndefined();
+    // The space's models not read yet: the row waits for them too.
+    expect(find("rerank_model_id")).toBeUndefined();
+  });
+
+  it("lists the document template under Funktioner while Skapa fil is on, by its name", () => {
+    expect(find("document_template")).toBeUndefined();
+    expect(
+      find("document_template", {
+        assistant: assistant({
+          enabled_capabilities: ["file_creation"],
+          document_template: { mode: "selected", template_id: "template-1" }
+        }),
+        documentTemplates: [{ id: "template-1", name: "Kommunens mall" }]
+      })
+    ).toMatchObject({
+      section: "capabilities",
+      label: "Dokumentmall",
+      value: "Kommunens mall",
+      control: "assistant-document-template"
+    });
+    expect(
+      find("document_template", {
+        assistant: assistant({ enabled_capabilities: ["file_creation"] })
+      })?.value
+    ).toBe("Organisationens standard");
   });
 });
 

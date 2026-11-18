@@ -1,5 +1,11 @@
 import { createContext, useContext } from "react";
-import { currentSetting, sameSetting, type SettingChange } from "./assistant-helper-changes";
+import {
+  FUNCTION_FIELD_PREFIX,
+  currentSetting,
+  listEntries,
+  sameSetting,
+  type SettingChange
+} from "./assistant-helper-changes";
 import type { Assistant } from "./use-assistant";
 
 /**
@@ -28,24 +34,45 @@ export function useAssistantHelperForm(): AssistantHelperForm | null {
 }
 
 /**
+ * What a change of `field` names for the form: the functions it switched,
+ * each on its own (`enabled_capabilities.<purpose>`, as the form has a row
+ * for each); any other setting itself.
+ */
+function namedSettings(field: string, before: unknown, after: unknown): string[] {
+  if (field !== "enabled_capabilities") return [field];
+  const had = new Set(listEntries(before).map((entry) => entry.id));
+  const has = new Set(listEntries(after).map((entry) => entry.id));
+  const switched = [
+    ...[...has].filter((id) => !had.has(id)),
+    ...[...had].filter((id) => !has.has(id))
+  ];
+  return switched.length > 0 ? switched.map((id) => `${FUNCTION_FIELD_PREFIX}${id}`) : [field];
+}
+
+/**
  * The settings a call of the helper actually changed, each once: a value it
  * gives as before and after alike changed nothing; a text too long to show
- * changed, as the call says.
+ * changed, as the call says. A function switched is named on its own.
  */
 export function changedFields(changes: readonly SettingChange[]): string[] {
   const fields = changes
     .filter((change) => change.tooLong || !sameSetting(change.field, change.before, change.after))
-    .map((change) => change.field);
+    .flatMap((change) => namedSettings(change.field, change.before, change.after));
   return [...new Set(fields)];
 }
 
-/** The settings among `fields` whose values differ between two readings of the assistant. */
+/**
+ * The settings among `fields` whose values differ between two readings of
+ * the assistant; a function switched is named on its own.
+ */
 export function fieldsChangedBetween(
   fields: readonly string[],
   before: Assistant,
   after: Assistant
 ): string[] {
-  return [...new Set(fields)].filter(
-    (field) => !sameSetting(field, currentSetting(before, field), currentSetting(after, field))
-  );
+  return [...new Set(fields)].flatMap((field) => {
+    const then = currentSetting(before, field);
+    const now = currentSetting(after, field);
+    return sameSetting(field, then, now) ? [] : namedSettings(field, then, now);
+  });
 }

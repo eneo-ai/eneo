@@ -6,10 +6,15 @@ import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { modelSupportsToolCalling, readinessKey } from "@/features/capabilities/capabilities";
+import { readinessKey } from "@/features/capabilities/capabilities";
 import Link from "@/lib/link";
 import { getCapability } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
+import {
+  mcpBlockedByKnowledge,
+  mcpServerUnavailableReason,
+  modelBlocksTools as blocksTools
+} from "./assistant-editor-rules";
 import { assistantToolModel, isMcpEnforced, policyMcpServers } from "./effective-config";
 import {
   assistantMcpServersFromApi,
@@ -58,8 +63,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   // A picked model without tool calling never receives any server: rows stay
   // saved but read as unavailable, and only already-selected ones can be
   // switched off. No model picked is a separate state and does not block.
-  const toolModel = assistantToolModel(space.completion_models, assistant);
-  const modelBlocksTools = toolModel !== null && !modelSupportsToolCalling(toolModel);
+  const modelBlocksTools = blocksTools(assistantToolModel(space.completion_models, assistant));
 
   // Adopt server changes (e.g. our own save landing) unless the user diverged.
   const savedKey = JSON.stringify([sortedKey(savedIds), sortedToolKey(savedToolSettings)]);
@@ -75,12 +79,12 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
     }
   }, [savedKey, savedIds, savedToolSettings, selected, toolSettings]);
 
-  const hasKnowledge =
+  const disabledByKnowledge = mcpBlockedByKnowledge(
     assistant.groups.length +
       assistant.websites.length +
-      assistant.integration_knowledge_list.length >
-    0;
-  const disabledByKnowledge = hasKnowledge && selected.size === 0;
+      assistant.integration_knowledge_list.length,
+    selected.size
+  );
 
   function persist(
     nextSelected: Set<string>,
@@ -125,7 +129,8 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <SettingsGroup title={t("mcp_servers")} description={t("mcp_servers_description")}>
-      <SettingsRow>
+      {/* Marked as the section's one row: the servers and their tools are all in it. */}
+      <SettingsRow markKey="mcp">
         <div className="flex flex-col gap-2">
           {modelBlocksTools && (
             <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
@@ -192,13 +197,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                   selected={selected.has(server.id)}
                   expanded={expanded.has(server.id)}
                   disabled={disabledByKnowledge}
-                  unavailableReason={
-                    server.is_enabled === false
-                      ? "server_disabled"
-                      : modelBlocksTools
-                        ? "model_no_tool_calling"
-                        : null
-                  }
+                  unavailableReason={mcpServerUnavailableReason(server, modelBlocksTools)}
                   toolSettings={toolSettings}
                   onToggleServer={() => toggleServer(server)}
                   onToggleExpanded={() =>

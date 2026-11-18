@@ -2,7 +2,9 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useFormatter, useTranslations } from "use-intl";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { capabilityControlId } from "./assistant-editor-rules";
 import { settingLabel } from "./assistant-helper-cards";
+import { FUNCTION_FIELD_PREFIX } from "./assistant-helper-changes";
 import type { ChangeOrigin } from "./assistant-helper-form";
 import { modelSettingsMarkKey } from "./model-kwargs-rows";
 import type { AssistantSectionId, SettingReference } from "./setting-references";
@@ -24,15 +26,36 @@ export type ChatChangeMarks = {
 
 type References = ReadonlyMap<string, SettingReference>;
 
-/** The reference a changed setting is shown under: the temperature is the behaviour's. */
+/**
+ * The settings the form shows under another setting's reference: the
+ * temperature is the behaviour's, the knowledge lists are the knowledge's,
+ * the tool settings are the MCP servers'.
+ */
+const SHOWN_UNDER: Record<string, string> = {
+  "completion_model_kwargs.temperature": "completion_model_kwargs",
+  groups: "knowledge",
+  websites: "knowledge",
+  integration_knowledge_list: "knowledge",
+  mcp_tools: "mcp_servers"
+};
+
+/** The function a field names on its own (`enabled_capabilities.<purpose>`); null for any other field. */
+const functionOf = (field: string) =>
+  field.startsWith(FUNCTION_FIELD_PREFIX) ? field.slice(FUNCTION_FIELD_PREFIX.length) : null;
+
+/** The reference a changed setting is shown under: a function is the functions'. */
 function referenceOf(field: string, references: References): SettingReference | undefined {
-  return references.get(
-    field === "completion_model_kwargs.temperature" ? "completion_model_kwargs" : field
-  );
+  if (functionOf(field) !== null) return references.get("enabled_capabilities");
+  return references.get(SHOWN_UNDER[field] ?? field);
 }
 
-/** The key of the row that shows a reference: the model's own settings share one row. */
-function rowOf(reference: SettingReference): string | undefined {
+/**
+ * The key of the row that shows a changed setting: a function's own row,
+ * one row for the model's own settings, else its reference's control.
+ */
+function rowOf(field: string, reference: SettingReference): string | undefined {
+  const purpose = functionOf(field);
+  if (purpose !== null) return capabilityControlId(purpose);
   return reference.key.startsWith("completion_model_kwargs.")
     ? modelSettingsMarkKey("assistant")
     : reference.control;
@@ -49,7 +72,7 @@ export function chatChangeMarks(fields: Iterable<string>, references: References
   for (const field of fields) {
     const reference = referenceOf(field, references);
     if (!reference) continue;
-    const row = rowOf(reference);
+    const row = rowOf(field, reference);
     if (row) rows.add(row);
     const section = counted.get(reference.section) ?? new Set<string>();
     section.add(field);
@@ -92,8 +115,13 @@ export function useChatChangeMarks(references: References) {
   const show = useCallback(
     (changed: readonly string[], origin: ChangeOrigin) => {
       if (changed.length === 0) return;
+      // A function by its own name; any other setting as its reference names it.
       const labels = new Set(
-        changed.map((field) => referenceOf(field, references)?.label ?? settingLabel(field, t))
+        changed.map((field) =>
+          functionOf(field) !== null
+            ? settingLabel(field, t)
+            : (referenceOf(field, references)?.label ?? settingLabel(field, t))
+        )
       );
       announce(
         t(ANNOUNCEMENT_KEYS[origin], {

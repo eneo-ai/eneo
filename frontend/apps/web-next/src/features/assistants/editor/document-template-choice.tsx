@@ -3,6 +3,7 @@ import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { SettingsMarkLabel, useSettingsMark } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import type { Schema } from "@/lib/api/models";
 import { useRef, useState } from "react";
@@ -11,6 +12,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { availableDocumentTemplatesQueryOptions } from "@/features/document-templates/document-templates";
 import { browserApi } from "@/lib/api/browser";
+import { DOCUMENT_TEMPLATE_CONTROL } from "./assistant-editor-rules";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 type Choice = Schema<"DocumentTemplateChoicePublic">;
@@ -33,6 +35,7 @@ export function AssistantDocumentTemplateChoice({
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("assistant-document-template");
   const editable = assistant.permissions?.includes("edit") ?? false;
+  const mark = useSettingsMark(DOCUMENT_TEMPLATE_CONTROL);
   const busy = isDisabled || update.isPending;
   const attemptedChoice = update.variables?.document_template;
   const choice =
@@ -83,16 +86,27 @@ export function AssistantDocumentTemplateChoice({
       if (target) save({ mode, template_id: target.id });
     } else if (mode === "default" || mode === "builtin") save({ mode, template_id: null });
   }
+  const statusLine = (
+    <p ref={statusTarget} tabIndex={-1} className="text-ax-text-secondary text-sm">
+      {status}
+    </p>
+  );
   return (
     <div
-      id="assistant-document-template"
+      id={DOCUMENT_TEMPLATE_CONTROL}
       ref={container}
       className="ms-8 mt-2"
       aria-busy={busy || undefined}
     >
-      <p ref={statusTarget} tabIndex={-1} className="text-ax-text-secondary text-sm">
-        {status}
-      </p>
+      {mark ? (
+        // A change from the helper chat: the mark beside what the choice is now.
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {statusLine}
+          <SettingsMarkLabel label={mark} />
+        </div>
+      ) : (
+        statusLine
+      )}
       {blockingError(templates) ? (
         <ListError
           error={templates.error}

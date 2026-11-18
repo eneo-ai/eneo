@@ -1,6 +1,12 @@
 import type { useFormatter, useTranslations } from "use-intl";
 import { mentionParts, mentionText, type MentionPart } from "@/features/references/mentions";
+import type { Schema } from "@/lib/api/models";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
+import {
+  DOCUMENT_TEMPLATE_CONTROL,
+  rerankerShown,
+  selectableRerankModels
+} from "./assistant-editor-rules";
 import { settingLabel, settingText } from "./assistant-helper-cards";
 import { selectedCapabilities } from "./capabilities-section";
 import {
@@ -53,12 +59,14 @@ export const SETTING_REFERENCE_KEYS: readonly string[] = [
   "knowledge_mode",
   "inline_file_text",
   "knowledge",
+  "rerank_model_id",
   "mcp_servers",
   "attachments",
   "completion_model",
   "completion_model_kwargs",
   ...MODEL_SPECIFIC_KWARGS.map((name) => `completion_model_kwargs.${name}`),
   "enabled_capabilities",
+  "document_template",
   "data_retention_days",
   "published",
   "insight_enabled",
@@ -104,9 +112,58 @@ export type SettingReferenceInput = {
   kwargs: ModelKwargs;
   /** Whether files uploaded in a chat can be read by reference (the organisation's setting). */
   fileReferences: boolean;
+  /** The space's models, as the result ranking reads them; undefined while not known. */
+  spaceModels?: Schema<"ModelsPresentation">;
+  /** The organisation's document templates; undefined while not known. */
+  documentTemplates?: readonly { id: string; name: string }[];
   t: Translate;
   format: Format;
 };
+
+/**
+ * The result ranking, where the form shows its row: a space with a model
+ * to choose, or a model chosen. While the space's models are not known a
+ * chosen model is named by count.
+ */
+function rerankSetting(input: SettingReferenceInput): Setting[] {
+  const { assistant, spaceModels, t } = input;
+  const saved = assistant.rerank_model_id ?? null;
+  const selectable = selectableRerankModels(spaceModels);
+  if (!rerankerShown(selectable, saved)) return [];
+  const chosen = selectable.find((model) => model.id === saved);
+  const value =
+    saved === null
+      ? t("material_reranker_none")
+      : chosen
+        ? (chosen.nickname ?? chosen.name)
+        : spaceModels
+          ? t("material_reranker_missing")
+          : editorSummaries(t).chosen(1);
+  return [
+    {
+      key: "rerank_model_id",
+      label: settingLabel("rerank_model_id", t),
+      value,
+      control: "reranker"
+    }
+  ];
+}
+
+/** The document template, where the form shows it: under "Skapa fil", while that function is on. */
+function templateSetting(input: SettingReferenceInput): Setting[] {
+  const { assistant, documentTemplates, t, format } = input;
+  if (!selectedCapabilities(assistant).includes("file_creation")) return [];
+  const choice = assistant.document_template;
+  const name = documentTemplates?.find((item) => item.id === choice?.template_id)?.name ?? null;
+  return [
+    {
+      key: "document_template",
+      label: settingLabel("document_template", t),
+      value: settingText("document_template", { ...choice, name }, t, format),
+      control: DOCUMENT_TEMPLATE_CONTROL
+    }
+  ];
+}
 
 /** A section's own settings, as the form shows them to this person. */
 function sectionSettings(id: AssistantSectionId, input: SettingReferenceInput): Setting[] {
@@ -160,7 +217,8 @@ function sectionSettings(id: AssistantSectionId, input: SettingReferenceInput): 
               assistant.integration_knowledge_list.length
           ),
           control: "assistant-knowledge"
-        }
+        },
+        ...rerankSetting(input)
       ];
     case "mcp":
       return [
@@ -219,7 +277,8 @@ function sectionSettings(id: AssistantSectionId, input: SettingReferenceInput): 
           label: t("capabilities"),
           value: summary.chosen(selectedCapabilities(assistant).length),
           control: "capabilities"
-        }
+        },
+        ...templateSetting(input)
       ];
     case "security":
       return [

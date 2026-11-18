@@ -667,6 +667,38 @@ describe("Eneo's assistant server", () => {
     }
   });
 
+  it("names the prompt history and a publish while they run and once they are done", () => {
+    expect(toolPresentation(assistant("read_prompt_history"), svT, false)).toEqual({
+      label: "Läser prompthistoriken",
+      server: "Assistentens inställningar"
+    });
+    expect(toolPresentation(assistant("read_prompt_history"), svT, true).label).toBe(
+      "Läste prompthistoriken"
+    );
+    expect(
+      toolPresentation(assistant("publish_assistant", { published: true }), svT, false).label
+    ).toBe("Publicerar assistenten");
+    expect(
+      toolPresentation(assistant("publish_assistant", { published: true }), svT, true).label
+    ).toBe("Publicerade assistenten");
+    expect(
+      toolPresentation(assistant("publish_assistant", { published: false }), svT, false).label
+    ).toBe("Avpublicerar assistenten");
+    expect(
+      toolPresentation(assistant("publish_assistant", { published: false }), enT, true).label
+    ).toBe("Unpublished the assistant");
+    for (const input of [{}, { published: true }, { published: false }]) {
+      for (const tool of ["read_prompt_history", "publish_assistant"]) {
+        for (const done of [false, true]) {
+          const key = toolPresentation(assistant(tool, input), t, done).label;
+          expect(key).toMatch(/^helper_tool_/);
+          expect(sv).toHaveProperty(key);
+          expect(en).toHaveProperty(key);
+        }
+      }
+    }
+  });
+
   it("shows none of its arguments under the label: the answer's cards show the changes", () => {
     expect(toolTarget(assistant("read_assistant", { section: "model", offset: 0 }), t)).toBeNull();
     expect(

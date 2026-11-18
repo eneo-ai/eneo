@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
+import { API_KEYS_KEY, API_KEY_SUBSCRIPTIONS_KEY } from "@/features/api-keys/api-keys";
 import { HelperPanel } from "@/features/helper/helper-panel";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
@@ -242,6 +243,37 @@ describe("The assistant's helper adapter", () => {
       ["assistants", ID],
       ["spaces", "space-1"]
     ]);
+  });
+
+  it("after a publish also reads the API keys' expiry notices again, and hands the publish on", () => {
+    const queryClient = testQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const onChanged = vi.fn();
+    const { result } = renderHookInApp(
+      () =>
+        useAssistantHelper({ assistant: ASSISTANT, availability: { available: true }, onChanged }),
+      { queryClient }
+    );
+    invalidate.mockClear();
+
+    result.current.onToolCallFinished?.({
+      serverName: "assistant",
+      isInternal: true,
+      toolName: "publish_assistant",
+      structuredContent: {
+        target_id: ID,
+        changes: [{ field: "published", before: false, after: true }],
+        undo: null
+      }
+    } as unknown as ToolCallRecord);
+
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ["assistants", ID],
+      ["spaces", "space-1"],
+      API_KEY_SUBSCRIPTIONS_KEY,
+      [...API_KEYS_KEY, "expiring-soon"]
+    ]);
+    expect(onChanged).toHaveBeenCalledWith(["published"]);
   });
 
   it("leaves the assistant alone after another server's call, or one named like its own", () => {

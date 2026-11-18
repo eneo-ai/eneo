@@ -1,16 +1,26 @@
 import { useTranslations } from "use-intl";
-import { SettingsGroup } from "@/components/composites/settings-rows";
+import {
+  SettingsGroup,
+  SettingsMarkLabel,
+  useSettingsMarks
+} from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import {
   CAPABILITIES,
   capabilityBlockReason,
-  modelSupportsToolCalling,
   readinessKey,
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
+import { cn } from "@/lib/utils";
+import {
+  capabilityAvailability,
+  capabilityBlockMessageKey,
+  capabilityControlId,
+  modelBlocksTools as blocksTools
+} from "./assistant-editor-rules";
 import { AssistantDocumentTemplateChoice } from "./document-template-choice";
 import { assistantToolModel } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
@@ -33,8 +43,11 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
   // A picked model without tool calling never receives a capability: it reads
   // as unavailable, and only an already-enabled one can be switched off. No
   // model picked is a separate state and does not block.
-  const toolModel = assistantToolModel(space.completion_models ?? [], assistant);
-  const modelBlocksTools = toolModel !== null && !modelSupportsToolCalling(toolModel);
+  const modelBlocksTools = blocksTools(
+    assistantToolModel(space.completion_models ?? [], assistant)
+  );
+  // A function a change from the helper chat switched is marked for a while.
+  const marks = useSettingsMarks();
 
   return (
     <SettingsGroup
@@ -48,11 +61,7 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
         (capability) => {
           const enabled = selected.includes(capability.purpose);
           const offered = (space.enabled_capabilities ?? []).includes(capability.purpose);
-          const availability = (
-            governed
-              ? assistant.effective_config?.available_capabilities
-              : (assistant.available_capabilities ?? space.available_capabilities)
-          )?.find((item) => item.purpose === capability.purpose);
+          const availability = capabilityAvailability(assistant, space, capability.purpose);
           const blocked = capabilityBlockReason({
             enabled,
             spaceEnabled: offered,
@@ -66,21 +75,31 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
                 ? t(readinessKey(availability?.reason ?? "no_active_provider"))
                 : t(capability.assistantHint)
             : blocked
-              ? t(
-                  readinessKey(
-                    blocked === "no_active_provider" ? (availability?.reason ?? blocked) : blocked
-                  )
-                )
+              ? t(capabilityBlockMessageKey(blocked, availability))
               : t(capability.assistantHint);
+          const controlId = capabilityControlId(capability.purpose);
+          const mark = marks?.rows.has(controlId) ? marks.label : null;
+          const label = <Label htmlFor={controlId}>{t(capability.purpose)}</Label>;
           return (
-            <div key={capability.purpose} className="rounded-lg border p-4">
+            <div
+              key={capability.purpose}
+              className={cn("rounded-lg border p-4", mark && "bg-ax-selected")}
+            >
               <div className="flex items-center gap-3">
                 <capability.icon
                   aria-hidden="true"
                   className="text-muted-foreground size-5 shrink-0"
                 />
                 <div className="min-w-0 flex-1">
-                  <Label htmlFor={`assistant-${capability.purpose}`}>{t(capability.purpose)}</Label>
+                  {mark ? (
+                    // Beside the name, outside it: the switch's name stays the function's.
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      {label}
+                      <SettingsMarkLabel label={mark} />
+                    </span>
+                  ) : (
+                    label
+                  )}
                   {governed && (
                     <p className="text-muted-foreground text-sm">
                       {t(
@@ -97,7 +116,7 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
                 {/* Saving, it stays enabled so it keeps focus. A toggle meanwhile is
                 ignored: each save sends the whole selection. */}
                 <Switch
-                  id={`assistant-${capability.purpose}`}
+                  id={controlId}
                   checked={
                     governed
                       ? !assistant.effective_config?.default_disabled_capabilities?.includes(

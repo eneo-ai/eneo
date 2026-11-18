@@ -31,6 +31,7 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import { availableDocumentTemplatesQueryOptions } from "@/features/document-templates/document-templates";
 import { HelperPanel } from "@/features/helper/helper-panel";
 import { ReferenceMenuButton } from "@/features/references/reference-menu";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
@@ -46,6 +47,7 @@ import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
+import { spaceModelsQueryOptions } from "./assistant-editor-rules";
 import { AskHelperButton, AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
 import { assistantHelperAvailabilityQueryOptions } from "./assistant-helper-api";
 import { settingLabel } from "./assistant-helper-cards";
@@ -165,6 +167,14 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       null
     );
   };
+
+  // What the result ranking and the document template rows read (shared with
+  // them through the cache), so the helper's references follow the rows.
+  const { data: spaceModels } = useQuery(spaceModelsQueryOptions(browserApi, space.id));
+  const { data: documentTemplates } = useQuery({
+    ...availableDocumentTemplatesQueryOptions(browserApi),
+    enabled: selectedCapabilities(assistant).includes("file_creation")
+  });
 
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
@@ -334,6 +344,8 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     kwargsModel: ai.model,
     kwargs: ai.kwargs,
     fileReferences: settings.file_references_enabled === true,
+    spaceModels,
+    documentTemplates: documentTemplates?.items,
     t,
     format
   });
