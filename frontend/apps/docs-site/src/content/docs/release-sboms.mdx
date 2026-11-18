@@ -1,25 +1,23 @@
 # Release SBOMs and Attestations
 
-The current publication workflow attaches Software Bill of Materials (SBOM)
-files for the published backend, frontend, tool runtime and bundled
-object-store container images to the GitHub Release, with attestations that
-show where they were built. A separate job attaches them after the release
-bundle when it succeeds, and older releases may have fewer files, so check that
-the files you need are present for the version you run. For how this fits with Eneo's other
-security controls, see [Security at Eneo](/docs/security).
+A release built by the current publication workflow carries software bills of
+materials (SBOMs) for the published backend, frontend, tool runtime and bundled
+object-store container images, with attestations that show where they were
+built. After the release bundle is attached, a separate job prepares the SBOMs
+and their attestations. Check the assets on the GitHub release for the version
+you run; older releases may have fewer files. For how this fits with Eneo's
+other security controls, see [Security at Eneo](/docs/security).
 
 **In short**
 
-- A release built by the current publication workflow gets SBOMs (CycloneDX,
-  SPDX and a readable table) for every published image on its GitHub Release,
-  attached by a job that runs after the release bundle. Older releases may have
-  fewer files.
+- Each published image gets an SBOM in CycloneDX and SPDX format and as a
+  readable table.
 - The SBOMs are made from immutable image digests, not tags;
   `IMAGE-DIGESTS.txt` lists every digest that was scanned.
 - `gh attestation verify` with `--repo eneo-ai/eneo` checks that a file or
-  image was built in Eneo's repository. Add `--signer-workflow` and the source
-  commit to check the exact build; the commands are in
-  [Which file should you use?](#which-file-should-you-use).
+  image was built in Eneo's repository. The SeaweedFS examples also check the
+  signer workflow and the source branch; see the
+  [examples](#which-file-should-you-use).
 - An SBOM is an inventory, not a vulnerability verdict: scan it with a tool
   such as Grype or Trivy.
 - To check a release step by step, go to [Check a release](#check-a-release).

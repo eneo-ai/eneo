@@ -17,10 +17,11 @@ and what the operator must provide.
   the model providers or the internet.
 - The model never holds a download link: the backend swaps each file handle
   for a short-lived signed URL, and only for files in the same conversation.
-- Each job runs in its own child process. When Landlock is available and not
-  blocked (Linux 5.13 or later, permitted by seccomp), it confines a job to its
-  own files. Set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run
-  without it; otherwise the runtime runs unconfined on such hosts.
+- Each job runs in its own child process. With Landlock active (Linux 5.13 or
+  later, permitted by seccomp), each job can access only its own files. If the
+  host cannot provide Landlock, jobs run without that file confinement by
+  default; set `TOOL_RUNTIME_REQUIRE_CONFINEMENT=true` to refuse to run on
+  those hosts.
 - Outside the reference Compose stack, the operator provides the container
   layer: no egress, a read-only root filesystem, no capabilities and resource
   limits.
@@ -51,9 +52,9 @@ The runtime treats all its input as untrusted:
 The runtime protects four things:
 
 - **One conversation's files from another.** The runtime processes files for
-  every tenant. A job sees only the files it was given, never the attachments,
-  parsed sheets or outputs of another job; this is fully enforced with
-  Landlock (see below).
+  every tenant. With Landlock active, a job can access only the files it was
+  given, never the attachments, parsed sheets or outputs of another job.
+  Without Landlock, jobs are not confined to their own files (see below).
 - **Eneo's credentials and data.** The runtime has no path to the database,
   Redis, the signing key, the model providers or the internet, given the
   network isolation described in [Layer 5](#layer-5-the-container).

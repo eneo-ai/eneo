@@ -10,8 +10,8 @@ Do not report vulnerabilities in public issues, pull requests, or discussions. R
 
 **In short**
 
-- `develop` requires the checks `CI` and `Dependency Review`; `PR labels` is required on `develop`, `main` and `release/**`.
-- Dependency Review fails a pull request that adds a dependency with a known vulnerability of high severity or above. Update or remove the dependency; only a Core Maintainer can accept an unreachable advisory.
+- `develop` requires the checks `CI`, `Dependency Review` and `User-facing section`; `PR labels` is required on `develop`, `main` and `release/**`.
+- Dependency Review fails a pull request that adds a dependency with a known vulnerability of high severity or above. Update or remove the dependency. If the vulnerable code is unreachable, a Core Maintainer can add the advisory to the allow list.
 - Every endpoint needs `@endpoint_access` with its authentication and authorization. A missing declaration stops the application from starting.
 - A maintainer may run the advisory [Review Agent](/contributing#review-and-merge) with `/review`; fix or answer each finding.
 - If a secret leaks, rotate it first, then clean up.
@@ -62,7 +62,7 @@ Ruff currently checks `backend/src/eneo`. Tests and Alembic are not part of the 
 
 `Dependency Review / Dependency Review` checks dependency and lockfile changes in pull requests into `develop`. It fails if a PR introduces a known vulnerable dependency at `high` severity or above.
 
-When this check fails, update the dependency to a safe version, remove it, or, if the vulnerable code is genuinely unreachable, ask a Core Maintainer to add the advisory to `allow-ghsas` in `.github/workflows/dependency-review.yml` with the reason recorded in the PR. Do not dismiss the warning just to make the PR green.
+When this check fails, update the dependency to a safe version or remove it. If the vulnerable code is unreachable, record why in the pull request and ask a Core Maintainer to add the advisory to `allow-ghsas` in `.github/workflows/dependency-review.yml`. Do not dismiss the warning just to make the PR green.
 
 ### Source, dependency and secret scanning
 
@@ -166,7 +166,7 @@ the nested-router and mounted-API tests when upgrading FastAPI.
 
 ## Required Checks in Branch Protection
 
-The `develop` ruleset requires the checks `CI` and `Dependency Review` (shown on a pull request as `CI / CI` and `Dependency Review / Dependency Review`). A separate `PR label classification` ruleset requires `PR labels` on `develop`, `main` and `release/**`.
+The `develop` ruleset requires the checks `CI`, `Dependency Review` and `User-facing section` (shown on a pull request as `CI / CI`, `Dependency Review / Dependency Review` and `PR user-facing notes / User-facing section`). The User-facing section check runs again when the pull request description is edited. A separate `PR label classification` ruleset requires `PR labels` on `develop`, `main` and `release/**`.
 
 Who can approve, merge and release, and how branches and tags are protected, is described in [Governance and Roles](/contributing/governance).
 

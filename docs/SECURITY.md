@@ -25,8 +25,8 @@ Include as much of the following as possible:
 - suggested remediation, if known
 - contact details for coordinated follow-up
 
-Please do not publicly disclose the issue until a fix or mitigation is
-available and maintainers have had a reasonable coordination window.
+Please keep the report details private until the security advisory is
+published.
 
 ## What Happens After You Report
 

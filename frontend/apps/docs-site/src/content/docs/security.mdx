@@ -8,8 +8,7 @@ import { Callout } from "nextra/components";
 
 Municipalities and agencies run Eneo with their own users, documents and model
 providers. This page explains how we protect them, from who decides what goes
-into the platform to the evidence attached to a release. Each section
-links to the page that has the details.
+into the platform to the evidence attached to a release.
 
 <Callout type="warning">
   Found a vulnerability? Report it privately on GitHub through [**Security →
@@ -18,22 +17,6 @@ links to the page that has the details.
   you cannot use GitHub, e-mail `security@sundsvall.se`. Never report it in a
   public issue, pull request or discussion.
 </Callout>
-
-**In short**
-
-- The Core Maintainers at Sundsvalls kommun decide what is merged and
-  released. Everyone else contributes from a fork.
-- Every change into `develop` passes CI, dependency and secret checks and the
-  merge queue. Pull requests into a release branch or `main` need an approval
-  from a second Core Maintainer.
-- In a running deployment, every endpoint declares who may call it, services
-  check access to each space and resource, and code written by the model runs
-  in a separate tool runtime whose isolation depends on how it is deployed.
-- The current publication workflow attaches a release bundle of exact image
-  digests once its checks pass; a separate job then attaches SBOMs and
-  attestations. Check that the files you need are present.
-- Vulnerabilities are reported privately and handled as the security policy
-  describes; fixed ones are published as GitHub Security Advisories.
 
 **Where to start**
 
@@ -65,15 +48,15 @@ the permission table and the reasons behind them are in
 
 ## Protection in a deployment
 
-| Concern                       | How Eneo handles it                                                                                                                                                                                                                                                        | Explanation                                                      | Configure or operate                                                                                                                            |
-| ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Signing in                    | Username and password, OIDC single sign-on, SCIM provisioning and scoped API keys.                                                                                                                                                                                         | [Authentication Architecture](/docs/authentication-architecture) | [Authentication & OIDC](/guides/oidc-federation), [SCIM Provisioning](/guides/scim-provisioning)                                                |
-| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check access to the space and resource.                                                                                                                                           | [Security for Contributors](/contributing/security)              | Roles and permissions in **Admin**                                                                                                              |
-| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                                                                                                        | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
-| Code and files from the model | Run in a separate tool runtime. The reference Compose stack gives it no route to the database, Redis or the internet; other deployments must provide the same isolation. Each job is confined to its own files when Landlock is available, and operators can require that. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
-| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                                                                                                           | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
-| Network, TLS and secrets      | In the reference Compose stack, the database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                                                                               | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
-| Traceability                  | The audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                                                                                                                       | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
+| Concern                       | How Eneo handles it                                                                                                                                                                                                            | Explanation                                                      | Configure or operate                                                                                                                            |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Signing in                    | Username and password, OIDC single sign-on, SCIM provisioning and scoped API keys.                                                                                                                                             | [Authentication Architecture](/docs/authentication-architecture) | [Authentication & OIDC](/guides/oidc-federation), [SCIM Provisioning](/guides/scim-provisioning)                                                |
+| Access to each operation      | Every endpoint declares its authentication and the permission it requires; services then check access to the space and resource.                                                                                               | [Security for Contributors](/contributing/security)              | Roles and permissions in **Admin**                                                                                                              |
+| API keys                      | Stored only as hashes (HMAC-SHA256 for new keys) and limited to their scope, with origin, IP and expiry guardrails.                                                                                                            | [API Key Management](/docs/api-key-management)                   | [Key lifecycle](/docs/api-key-management#key-lifecycle)                                                                                         |
+| Code and files from the model | Run in a separate tool runtime. The reference Compose stack gives it no route to the database, Redis or the internet; other deployments must provide the same isolation. With Landlock, each job is confined to its own files. | [Tool Runtime Security](/docs/tool-runtime-security)             | [Tool runtime operator guide](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/TOOL_RUNTIME.md), [MCP Servers](/guides/mcp-servers) |
+| Stored files                  | PostgreSQL owns identity, integrity and authorization. Content in the object-content store is verified against its checksum before it is served.                                                                               | [Object Content Architecture](/docs/object-content-architecture) | [Choose Content Storage](/guides/object-content-storage)                                                                                        |
+| Network, TLS and secrets      | In the reference Compose stack, the database and Redis sit on internal networks, TLS ends at the reverse proxy, and secrets are read from environment files.                                                                   | [Architecture](/docs/architecture#security-architecture)         | [Deploy Eneo](/guides/deployment)                                                                                                               |
+| Traceability                  | The audit log records actions across the platform. Administrators configure what is logged, search it and export it.                                                                                                           | [Audit Logging](/docs/audit-logging)                             | [Audit Logging guide](/guides/audit-logging)                                                                                                    |
 
 ## Evidence you can inspect
 
@@ -84,14 +67,14 @@ files you need are attached.
 - **Release bundle.** A completed release publishes `release.json` and
   `release.env` with the version, source revision and immutable image
   digests. Deploy by digest from the bundle rather than from a moving tag.
-- **SBOMs.** A separate job then attaches CycloneDX and SPDX SBOMs for each
-  published image, plus SBOMs of the backend's Python runtime and the
+- **Software bills of materials (SBOMs).** These files list the packages found
+  in each published image. A separate job attaches them in CycloneDX and SPDX
+  format, together with SBOMs of the backend's Python runtime and the
   frontend's source dependencies. They show what is inside an image, not that
   it is free of vulnerabilities.
 - **Attestations.** Images, release bundles and SBOM files carry GitHub
   artifact attestations. `gh attestation verify` checks that a file or image
-  was built in the `eneo-ai/eneo` repository; add the signer workflow and
-  source commit to check the exact build.
+  was built in the `eneo-ai/eneo` repository.
 - **Rules and advisories.** The active
   [rulesets](https://github.com/eneo-ai/eneo/rules) and the published
   [security advisories](https://github.com/eneo-ai/eneo/security/advisories)
@@ -110,39 +93,41 @@ Every change is a pull request, and GitHub rulesets decide what may be merged.
 The rules are public at
 [github.com/eneo-ai/eneo/rules](https://github.com/eneo-ai/eneo/rules).
 
-- **Into `develop`.** Only people with write access, the Core Maintainers and
-  the organisation's administrators, can add a pull request to the merge
+- **Into `develop`.** Only people with write access (the Core Maintainers and
+  the organisation's administrators) can add a pull request to the merge
   queue, and nothing enters it without the required checks: **CI**,
-  **Dependency Review** and **PR labels**. The queue tests each change again
+  **Dependency Review**, **PR labels** and **User-facing section**. The queue tests each change again
   against the latest `develop`, and the ruleset has no bypass. Our team rule
   is that a Core Maintainer reviews and approves contributions from outside
   the team before queueing them, and that Core Maintainers agree on their own
   changes together; GitHub does not require a formal approval for either.
 - **Into a release.** A pull request into a `release/vX.Y` branch, or into
   `main`, needs an approval from a Core Maintainer other than its author. Only
-  Core Maintainers can create release branches and `v*` tags.
+  Core Maintainers can create release branches, and they authorise every
+  `v*` tag.
 - **What the checks cover.** CI runs on pull requests into `develop` and the
-  release branches. It runs the tests, linters and type checks and builds the
-  container images without publishing them. Its security job audits the
-  backend's runtime lockfile and the frontend lockfile for known
-  vulnerabilities, runs Semgrep's security rules over the application code and
-  workflows, and scans newly added Git history for secrets with Gitleaks.
+  release branches. It:
+  - runs the tests, linters and type checks, and builds the container images
+    without publishing them
+  - audits the backend's runtime lockfile and the frontend lockfile for known
+    vulnerabilities
+  - runs Semgrep's security rules over the application code and workflows
+  - scans newly added Git history for secrets with Gitleaks
+
   Dependency Review fails a pull request into `develop` that adds a dependency
   with a known high-severity vulnerability. Every endpoint must declare who may
   call it, or the application refuses to start. GitHub secret scanning with
   push protection blocks known credential formats.
-- **AI code review.** We use a self-hosted
-  [Review Agent](https://github.com/CCimen/review-agent) to get a second
-  opinion from another AI model on security and code quality. A maintainer
-  starts it on a pull request by commenting `/review`. It looks for problems
-  the change introduces and tries to disprove each one before reporting it;
-  findings can still be wrong. Our rule is to fix or answer its findings
-  before merging. The review is advisory: it cannot change the repository,
-  approve or merge, and it is not a full security audit
+
+- **AI code review.** A maintainer can ask our self-hosted
+  [Review Agent](https://github.com/CCimen/review-agent) for a second opinion
+  on a pull request by commenting `/review`. The review is advisory: it cannot
+  change the repository, approve or merge, and it is not a full security audit
   ([how reviews work](https://ccimen.github.io/review-agent/docs/how-reviews-work),
   [security scope](https://ccimen.github.io/review-agent/docs/faq#does-it-find-security-problems)).
-  A separate advisory report lists dead code and unused dependencies on pull
-  requests into `develop` and the release branches.
+  Our rule is to fix or answer its findings before merging. A separate
+  advisory report lists dead code and unused dependencies on pull requests
+  into `develop` and the release branches.
 - **How a release is published.** A `v*` tag starts the publication workflow.
   It builds the images, checks the runtimes, blocks fixable high and critical
   vulnerabilities in the frontend and tool runtime images, runs a combined
@@ -179,9 +164,9 @@ A reported vulnerability stays private while the Core Maintainers confirm it
 and prepare a fix or mitigation for the affected supported release lines, in a
 private GitHub Security Advisory. The fix then lands through ordinary pull
 requests, with the same checks, merge queue and release review as any other
-change. The first public pull request discloses the fix, so our procedure is
-to open them when the fixes are ready and to publish the patch releases and the
-advisory as soon as practical after that. The advisory names the affected and
+change. The first public pull request discloses the fix. Our procedure is
+therefore to open the pull requests only when every fix is ready, and to
+publish the patch releases and the advisory as soon as practical after that. The advisory names the affected and
 patched versions and credits the reporter, unless they ask not to be named. A
 vulnerability that is already public is fixed in ordinary pull requests.
 

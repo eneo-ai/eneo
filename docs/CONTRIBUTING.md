@@ -27,7 +27,7 @@ Every contribution starts with a GitHub issue, before any code is written. Searc
 
 **Epic** and **Development task** are planning templates for scheduled roadmap work. Blank issues are turned off.
 
-The project intake workflow labels each new issue from its template and Area, and adds it to the Eneo GitHub Project so maintainers can triage it. Comment that you would like to work on the issue and wait for a maintainer to confirm the approach: it avoids work that cannot be accepted, and your pull request must reference the issue.
+Comment on the issue and wait for a maintainer to confirm your approach before you start work: it avoids work that cannot be accepted. Link the issue in your pull request. New issues are labelled from their template and Area and added to the Eneo GitHub Project, where maintainers triage them.
 
 > **Issues are public.** Do not include personal data, credentials, internal hostnames or user content. Report vulnerabilities privately, as described in [Vulnerability Reporting](#vulnerability-reporting).
 
@@ -193,15 +193,15 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 ### 6. Checks, Review and Merge
 
-- `CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels` must pass. For contributors outside the `eneo-ai` organisation, a maintainer approves the workflow runs before they start.
-- If you cannot add labels yourself, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
+- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, a maintainer approves the workflow runs before they start.
+- Collaborators add the labels themselves. For everyone else, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
 - A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
 - If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
 Core Maintainers is the only team with write access, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
-**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. From the command line, `gh pr merge <number> --auto` works only while the repository setting **Allow auto-merge** is on; otherwise run `gh pr merge <number>` once the checks are green. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer.
+**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer.
 
 ---
 
