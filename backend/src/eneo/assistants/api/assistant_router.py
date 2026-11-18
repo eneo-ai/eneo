@@ -1,6 +1,5 @@
-import logging
 from datetime import datetime
-from typing import Annotated, cast
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -19,6 +18,9 @@ from eneo.assistants.application.assistant_guards import (
 from eneo.assistants.application.assistant_guards import (
     raise_if_helper_chat as _raise_if_helper_chat,
 )
+from eneo.assistants.application.assistant_publish_operation import (
+    apply_assistant_publish,
+)
 from eneo.assistants.application.assistant_update_operation import (
     apply_assistant_update,
 )
@@ -27,24 +29,17 @@ from eneo.assistants.application.assistant_update_operation import (
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.api_key_notification_auto_follow import (
-    auto_follow_on_publish,
-)
 from eneo.authentication.auth_dependencies import (
     get_scope_filter,
     require_resource_permission_for_method,
     require_user_for_creation,
 )
-from eneo.authentication.auth_models import (
-    ApiKeyNotificationTargetType,
-    audit_actor_for,
-)
+from eneo.authentication.auth_models import audit_actor_for
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
-from eneo.database.database import AsyncSession
 from eneo.main.container.container import Container
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import (
@@ -71,7 +66,6 @@ router = APIRouter()
 _ASSISTANT_ACCESS_REASON = (
     "AssistantService enforces assistant permissions and space membership."
 )
-logger = logging.getLogger(__name__)
 ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
@@ -858,64 +852,11 @@ async def publish_assistant(
     published: bool,
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    await _raise_if_helper_chat(container, id)
-    service = container.assistant_service()
-    assembler = container.assistant_assembler()
-    user = container.user()
-
-    # Publish/unpublish assistant
-    assistant, permissions = await service.publish_assistant(
-        assistant_id=id, publish=published
+    applied = await apply_assistant_publish(
+        container, assistant_id=id, published=published
     )
-
-    # Get space for context
-    space = None
-    if assistant.space_id:
-        try:
-            space_service = container.space_service()
-            space = await space_service.get_space(assistant.space_id)
-        except Exception:
-            space = None
-
-    # Build extra context
-    extra = {
-        "published": published,
-        "action": "published" if published else "unpublished",
-    }
-
-    audit_service = container.audit_service()
-    await audit_service.log_async(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.ASSISTANT_PUBLISHED,
-        entity_type=EntityType.ASSISTANT,
-        entity_id=id,
-        description=f"{'Published' if published else 'Unpublished'} assistant '{assistant.name}'",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=assistant,
-            space=space,
-            extra=extra,
-        ),
-    )
-
-    if published:
-        try:
-            session = cast(AsyncSession, container.session())
-            await auto_follow_on_publish(
-                session=session,
-                user=user,
-                target_type=ApiKeyNotificationTargetType.ASSISTANT,
-                target_id=id,
-            )
-        except Exception:
-            logger.exception(
-                "Failed to auto-follow API key expiry notifications for published assistant %s",
-                id,
-            )
-
-    return assembler.from_assistant_to_model(
-        assistant=assistant, permissions=permissions
+    return container.assistant_assembler().from_assistant_to_model(
+        assistant=applied.assistant, permissions=applied.permissions
     )
 
 

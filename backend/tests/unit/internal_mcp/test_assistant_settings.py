@@ -5,7 +5,10 @@ credential."""
 from __future__ import annotations
 
 import inspect
+import json
 from contextlib import asynccontextmanager
+from dataclasses import replace
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -16,7 +19,10 @@ from pydantic import ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantUpdatePublic, KnowledgeMode
-from eneo.assistants.application import assistant_update_operation
+from eneo.assistants.application import (
+    assistant_publish_operation,
+    assistant_update_operation,
+)
 from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     ModelKwargCapability,
@@ -511,17 +517,22 @@ async def test_view_mode_offers_proposals_and_edit_mode_also_changes():
     assert {tool.name for tool in asking.tools} == {
         "read_assistant",
         "read_options",
+        "read_prompt_history",
         "propose_changes",
     }
     assert {tool.name for tool in editing.tools} == {
         "read_assistant",
         "read_options",
+        "read_prompt_history",
         "propose_changes",
         "update_assistant",
+        "publish_assistant",
     }
     assert all(tool.annotations == {"readOnlyHint": True} for tool in asking.tools)
     update = next(tool for tool in editing.tools if tool.name == "update_assistant")
     assert update.annotations == {"readOnlyHint": False, "destructiveHint": False}
+    publish = next(tool for tool in editing.tools if tool.name == "publish_assistant")
+    assert publish.annotations == {"readOnlyHint": False, "destructiveHint": True}
     assert asking.name == "assistant"
 
 
@@ -776,18 +787,18 @@ def test_only_the_allowed_settings_can_be_named():
     with pytest.raises(BadRequestException) as refused:
         assistant_settings.require_changeable(
             {
-                "mcp_servers": [],
-                "groups": [],
+                "skill_bindings": [],
+                "logging_enabled": True,
                 "completion_model_kwargs": {"response_format": {}},
                 "prompt": {"text": "y", "version_id": "v"},
             }
         )
     text = str(refused.value)
     assert text.startswith(
-        "MCP servers, knowledge (collections), the response format and version id "
+        "Skills, conversation logging, the response format and version id "
         "cannot be changed through the chat"
     )
-    for key in ("mcp_servers", "groups", "response_format", "version_id"):
+    for key in ("skill_bindings", "logging_enabled", "response_format", "version_id"):
         assert key not in text
     assert "Nothing was changed." in text
 
@@ -971,7 +982,7 @@ async def test_a_change_outside_edit_mode_is_refused_before_anything_is_read(
 
 async def test_a_setting_the_chat_may_not_change_is_refused_by_both_tools(monkeypatch):
     container, apply = _chat_calls(monkeypatch, editing=True)
-    changes = {"name": "Ärendestöd", "enabled_capabilities": ["web_search"]}
+    changes = {"name": "Ärendestöd", "skill_bindings": []}
 
     for tool in (
         assistant_settings.propose_changes,
@@ -981,9 +992,9 @@ async def test_a_setting_the_chat_may_not_change_is_refused_by_both_tools(monkey
 
         assert result.isError
         assert result.content[0].text.startswith(
-            "Functions cannot be changed through the chat"
+            "Skills cannot be changed through the chat"
         )
-        assert "enabled_capabilities" not in result.content[0].text
+        assert "skill_bindings" not in result.content[0].text
     apply.assert_not_awaited()
     container.assistant_service.assert_not_called()
     container.audit_service().log.assert_not_called()
@@ -1013,3 +1024,746 @@ async def test_a_proposal_that_changes_nothing_says_so_and_proposes_nothing(
     )
     assert "proposal" not in result.structuredContent
     apply.assert_not_awaited()
+
+
+# --- Knowledge, tools, functions, ranking, template, retention, insights ------
+
+_EMBEDDING = SimpleNamespace(id=uuid4())
+_OTHER_EMBEDDING = SimpleNamespace(id=uuid4())
+_RANKER = uuid4()
+_TEMPLATE = uuid4()
+
+
+def _source(name: str, *, embedding=_EMBEDDING) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=uuid4(), name=name, embedding_model=embedding, space_id=uuid4()
+    )
+
+
+def _world() -> SimpleNamespace:
+    """An assistant with a source of each kind, a server with one tool
+    switched off and one function, in a space that offers more."""
+    routines = _source("Rutiner")
+    older = _source("Gamla rutiner")
+    site = SimpleNamespace(
+        id=uuid4(),
+        name=None,
+        url=f"https://reader:{_SITE_PASSWORD}@intra.example.org/docs?sig=abc",
+        embedding_model=_EMBEDDING,
+        space_id=uuid4(),
+    )
+    folder = _source("Delad mapp")
+    cases = _server()
+    archive = _server(name="Diariet")
+    off = _server(name="Avstängd", is_enabled=False)
+    assistant = _changeable(
+        collections=[routines],
+        websites=[site],
+        integration_knowledge_list=[folder],
+        rerank_model_id=None,
+        mcp_servers=[cases],
+        mcp_tools=[(cases.tools[1].id, False)],
+        enabled_capabilities=["file_creation"],
+        document_template=DocumentTemplateChoice(),
+        data_retention_days=None,
+        insight_enabled=False,
+    )
+    space = _space(assistant.completion_model)
+    space.collections = [routines, older]
+    space.websites = [site]
+    space.integration_knowledge_list = [folder]
+    space.mcp_servers = [cases, archive, off]
+    space.enabled_capabilities = ["file_creation", "web_search", "charts"]
+    return SimpleNamespace(
+        assistant=assistant,
+        space=space,
+        routines=routines,
+        older=older,
+        site=site,
+        folder=folder,
+        cases=cases,
+        archive=archive,
+        off=off,
+    )
+
+
+_ALL_RIGHTS = assistant_settings.PersonRights(
+    edit_retention=True, toggle_insight=True, publish=True
+)
+
+
+def _facts(**overrides) -> assistant_settings.ChangeFacts:
+    values = {
+        "rights": _ALL_RIGHTS,
+        "ready_functions": frozenset({"file_creation", "web_search"}),
+        "rerank_models": {_RANKER: "Rankaren"},
+        "selectable_rerank_models": frozenset({_RANKER}),
+        "document_templates": {_TEMPLATE: "Kommunmall"},
+    }
+    values.update(overrides)
+    return assistant_settings.ChangeFacts(**values)
+
+
+def _plan_in(world, changes, *, facts=None, config=None):
+    return assistant_settings.plan_change(
+        world.assistant,
+        changes,
+        space=world.space,
+        effective_config=config,
+        facts=facts or _facts(),
+    )
+
+
+def _everything(world) -> dict:
+    """A change of every setting added beside the base ones, lists given as
+    additions and removals where the form allows."""
+    return {
+        "groups": {"add": [{"id": str(world.older.id)}]},
+        "websites": [],
+        "integration_knowledge_list": {"remove": [{"id": str(world.folder.id)}]},
+        "rerank_model_id": str(_RANKER),
+        "mcp_servers": {"add": [{"id": str(world.archive.id)}]},
+        "mcp_tools": {
+            "add": [{"tool_id": str(world.archive.tools[0].id), "is_enabled": False}],
+            "remove": [{"tool_id": str(world.cases.tools[1].id)}],
+        },
+        "enabled_capabilities": {"add": ["web_search"], "remove": ["file_creation"]},
+        "document_template": {"mode": "selected", "template_id": str(_TEMPLATE)},
+        "data_retention_days": 30,
+        "insight_enabled": True,
+    }
+
+
+def test_each_added_setting_is_planned_as_the_update_request_takes_it():
+    world = _world()
+
+    planned = _plan_in(world, _everything(world))
+
+    assert planned.update == {
+        "groups": [{"id": str(world.routines.id)}, {"id": str(world.older.id)}],
+        "websites": [],
+        "integration_knowledge_list": [],
+        "rerank_model_id": str(_RANKER),
+        "mcp_servers": [{"id": str(world.cases.id)}, {"id": str(world.archive.id)}],
+        "mcp_tools": [{"tool_id": str(world.archive.tools[0].id), "is_enabled": False}],
+        "enabled_capabilities": ["web_search"],
+        "document_template": {"mode": "selected", "template_id": str(_TEMPLATE)},
+        "data_retention_days": 30,
+        "insight_enabled": True,
+    }
+    AssistantUpdatePublic.model_validate(planned.update)
+    assert [change["field"] for change in planned.changes] == [
+        "groups",
+        "websites",
+        "integration_knowledge_list",
+        "rerank_model_id",
+        "mcp_servers",
+        "mcp_tools",
+        "enabled_capabilities",
+        "document_template",
+        "data_retention_days",
+        "insight_enabled",
+    ]
+    changed = {
+        change["field"]: (change["before"], change["after"])
+        for change in planned.changes
+    }
+    routines = {"id": str(world.routines.id), "name": "Rutiner"}
+    assert changed["groups"] == (
+        [routines],
+        [{"id": str(world.older.id), "name": "Gamla rutiner"}, routines],
+    )
+    # A website is named as the editor shows it: without its sign-in part.
+    assert changed["websites"] == (
+        [{"id": str(world.site.id), "name": "intra.example.org/docs"}],
+        [],
+    )
+    assert changed["mcp_servers"][1] == [
+        {"id": str(world.archive.id), "name": "Diariet"},
+        {"id": str(world.cases.id), "name": "Ärendesystemet"},
+    ]
+    assert changed["mcp_tools"] == (
+        [
+            {
+                "id": str(world.cases.tools[1].id),
+                "name": "create_case",
+                "is_enabled": False,
+            }
+        ],
+        [
+            {
+                "id": str(world.archive.tools[0].id),
+                "name": "search_cases",
+                "is_enabled": False,
+            }
+        ],
+    )
+    assert changed["enabled_capabilities"] == (
+        [{"id": "file_creation", "name": "file creation"}],
+        [{"id": "web_search", "name": "web search"}],
+    )
+    assert changed["rerank_model_id"] == (
+        None,
+        {"id": str(_RANKER), "name": "Rankaren"},
+    )
+    assert changed["document_template"] == (
+        {"mode": "default", "template_id": None, "name": None},
+        {"mode": "selected", "template_id": str(_TEMPLATE), "name": "Kommunmall"},
+    )
+    assert changed["data_retention_days"] == (None, 30)
+    assert changed["insight_enabled"] == (False, True)
+
+
+def test_additions_and_removals_build_the_whole_list_from_the_stored_one():
+    world = _world()
+
+    added = _plan_in(
+        world,
+        {
+            "groups": {
+                "add": [{"id": str(world.older.id)}, {"id": str(world.routines.id)}]
+            },
+            "enabled_capabilities": {"add": ["web_search"]},
+        },
+    )
+    assert added.update == {
+        "groups": [{"id": str(world.routines.id)}, {"id": str(world.older.id)}],
+        "enabled_capabilities": ["file_creation", "web_search"],
+    }
+    # A whole list replaces the stored one.
+    whole = _plan_in(world, {"groups": [{"id": str(world.older.id)}]})
+    assert whole.update == {"groups": [{"id": str(world.older.id)}]}
+    # Adding what is there, removing what is not, the same list in another
+    # order, and an entry both added and removed change nothing.
+    unchanged = _plan_in(
+        world,
+        {
+            "groups": {
+                "add": [{"id": str(world.routines.id)}],
+                "remove": [{"id": str(uuid4())}],
+            },
+            "mcp_servers": [{"id": str(world.cases.id)}],
+            "enabled_capabilities": {"add": ["web_search"], "remove": ["web_search"]},
+            "mcp_tools": {
+                "add": [{"tool_id": str(world.cases.tools[1].id), "is_enabled": False}]
+            },
+        },
+    )
+    assert unchanged.update == {} and unchanged.changes == []
+
+
+def test_a_server_that_goes_takes_its_tool_settings_along():
+    world = _world()
+
+    planned = _plan_in(
+        world, {"mcp_servers": {"remove": [{"id": str(world.cases.id)}]}}
+    )
+
+    assert planned.update == {"mcp_servers": []}
+    tool = {
+        "id": str(world.cases.tools[1].id),
+        "name": "create_case",
+        "is_enabled": False,
+    }
+    assert planned.changes == [
+        {
+            "field": "mcp_servers",
+            "before": [{"id": str(world.cases.id), "name": "Ärendesystemet"}],
+            "after": [],
+        },
+        {"field": "mcp_tools", "before": [tool], "after": []},
+    ]
+    assert assistant_settings.undo_update(planned.changes, ModelKwargs()) == {
+        "mcp_servers": [{"id": str(world.cases.id)}],
+        "mcp_tools": [{"tool_id": tool["id"], "is_enabled": False}],
+    }
+
+
+def test_the_undo_request_gives_every_added_setting_its_earlier_value():
+    world = _world()
+    planned = _plan_in(world, _everything(world))
+
+    undo = assistant_settings.undo_update(planned.changes, planned.kwargs)
+
+    assert undo == {
+        "groups": [{"id": str(world.routines.id)}],
+        "websites": [{"id": str(world.site.id)}],
+        "integration_knowledge_list": [{"id": str(world.folder.id)}],
+        "rerank_model_id": None,
+        "mcp_servers": [{"id": str(world.cases.id)}],
+        "mcp_tools": [{"tool_id": str(world.cases.tools[1].id), "is_enabled": False}],
+        "enabled_capabilities": ["file_creation"],
+        "document_template": {"mode": "default", "template_id": None},
+        "data_retention_days": None,
+        "insight_enabled": False,
+    }
+    request = AssistantUpdatePublic.model_validate(undo)
+    assert {"rerank_model_id", "data_retention_days"} <= request.model_fields_set
+
+
+def test_retention_and_insights_are_refused_without_the_right_for_them():
+    world = _world()
+    without = _facts(rights=assistant_settings.NO_RIGHTS)
+
+    for changes, what in (
+        ({"data_retention_days": 30}, "how long conversations are kept"),
+        ({"insight_enabled": True}, "whether insights are on"),
+    ):
+        for facts in (without, None):
+            with pytest.raises(BadRequestException) as refused:
+                assistant_settings.plan_change(
+                    world.assistant,
+                    changes,
+                    space=world.space,
+                    effective_config=None,
+                    facts=facts,
+                )
+            text = str(refused.value)
+            assert text.startswith(f"The person's role does not let them change {what}")
+            assert "such as its administrators" in text
+            assert text.endswith("Nothing was changed.")
+    personal = _facts(
+        rights=assistant_settings.PersonRights(
+            edit_retention=True,
+            toggle_insight=False,
+            publish=False,
+            personal_space=True,
+        )
+    )
+    with pytest.raises(BadRequestException) as not_used:
+        _plan_in(world, {"insight_enabled": True}, facts=personal)
+    assert str(not_used.value) == (
+        "Insights are not used for an assistant in a personal space. "
+        "Nothing was changed."
+    )
+    # A value the assistant already has is no change, so nothing is refused.
+    same = _plan_in(
+        world, {"insight_enabled": False, "data_retention_days": None}, facts=without
+    )
+    assert same.update == {}
+
+
+def test_what_the_space_does_not_offer_is_refused_without_naming_an_id():
+    world = _world()
+    stranger = str(uuid4())
+    function_server = _server(name="Sökleverantören", purpose="web_search")
+    world.space.mcp_servers.append(function_server)
+
+    for changes, refusal in (
+        ({"groups": {"add": [{"id": stranger}]}}, "does not offer that collection"),
+        ({"websites": [{"id": stranger}]}, "does not offer that website"),
+        (
+            {"integration_knowledge_list": {"add": [{"id": stranger}]}},
+            "does not offer that integration source",
+        ),
+        ({"mcp_servers": {"add": [{"id": stranger}]}}, "does not offer that MCP"),
+        (
+            {"mcp_servers": {"add": [{"id": str(world.off.id)}]}},
+            "turned off by an administrator",
+        ),
+        (
+            {"mcp_servers": {"add": [{"id": str(function_server.id)}]}},
+            "provides a function",
+        ),
+        (
+            {
+                "mcp_tools": {
+                    "add": [
+                        {
+                            "tool_id": str(world.archive.tools[0].id),
+                            "is_enabled": False,
+                        }
+                    ]
+                }
+            },
+            "not a tool of the assistant's MCP servers",
+        ),
+        ({"enabled_capabilities": {"add": ["compute"]}}, "does not offer compute"),
+        ({"enabled_capabilities": ["charts"]}, "No provider is ready for charts"),
+        ({"rerank_model_id": stranger}, "cannot use that result ranking model"),
+        (
+            {"document_template": {"mode": "selected", "template_id": stranger}},
+            "no such document template",
+        ),
+        ({"document_template": {"mode": "selected"}}, '"mode": "selected"'),
+    ):
+        with pytest.raises(BadRequestException) as refused:
+            _plan_in(world, changes)
+        text = str(refused.value)
+        assert refusal in text, changes
+        assert stranger not in text
+        assert text.endswith("Nothing was changed.")
+
+
+def test_a_source_the_space_no_longer_offers_must_go_with_the_change():
+    world = _world()
+    world.space.collections = [world.older]
+
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(world, {"groups": {"add": [{"id": str(world.older.id)}]}})
+    assert str(refused.value).startswith('The space no longer offers "Rutiner"')
+
+    planned = _plan_in(world, {"groups": [{"id": str(world.older.id)}]})
+    assert planned.update == {"groups": [{"id": str(world.older.id)}]}
+
+
+def test_knowledge_on_another_embedding_model_is_refused():
+    world = _world()
+    foreign = _source("Annan modell", embedding=_OTHER_EMBEDDING)
+    world.space.collections.append(foreign)
+
+    with pytest.raises(BadRequestException) as refused:
+        _plan_in(world, {"groups": {"add": [{"id": str(foreign.id)}]}})
+    assert "must use the same embedding model" in str(refused.value)
+
+    # Replacing every source with sources on the other model keeps the rule.
+    replaced = _plan_in(
+        world,
+        {
+            "groups": [{"id": str(foreign.id)}],
+            "websites": [],
+            "integration_knowledge_list": [],
+        },
+    )
+    assert replaced.update["groups"] == [{"id": str(foreign.id)}]
+
+
+def test_mcp_servers_tools_and_functions_a_policy_sets_are_refused():
+    world = _world()
+    policy = _policy(available_models=[world.assistant.completion_model])
+
+    for changes in (
+        {"mcp_servers": {"remove": [{"id": str(world.cases.id)}]}},
+        {"mcp_tools": {"remove": [{"tool_id": str(world.cases.tools[1].id)}]}},
+        {"enabled_capabilities": {"add": ["web_search"]}},
+    ):
+        with pytest.raises(BadRequestException) as refused:
+            _plan_in(world, changes, config=policy)
+        assert str(refused.value).startswith(
+            "An organisation policy sets the MCP servers and functions"
+        )
+
+
+def test_no_credential_reaches_a_change_or_what_the_model_is_told():
+    world = _world()
+    planned = _plan_in(
+        world,
+        {
+            "websites": [],
+            "mcp_servers": {"add": [{"id": str(world.archive.id)}]},
+            "mcp_tools": {
+                "add": [{"tool_id": str(world.archive.tools[1].id), "is_enabled": True}]
+            },
+        },
+    )
+    told = " ".join(
+        assistant_settings.change_text(planned.changes, saved=saved, published=False)
+        for saved in (True, False)
+    )
+    content = json.dumps(
+        {
+            "changes": planned.changes,
+            "update": planned.update,
+            "undo": assistant_settings.undo_update(planned.changes, planned.kwargs),
+        },
+        default=str,
+    )
+
+    for secret in (_SERVER_TOKEN, _URL_KEY, _SITE_PASSWORD, "sig=abc", "reader"):
+        assert secret not in told and secret not in content
+    for address in ("cases.example.org", "https://"):
+        assert address not in told and address not in content
+    assert "intra.example.org/docs" in content
+
+
+def test_the_model_is_told_what_was_added_and_removed_by_name():
+    world = _world()
+    planned = _plan_in(world, _everything(world))
+
+    text = assistant_settings.change_text(planned.changes, saved=True, published=False)
+
+    for line in (
+        'collections (added "Gamla rutiner")',
+        'websites (removed "intra.example.org/docs")',
+        'integration sources (removed "Delad mapp")',
+        "result ranking (from none to Rankaren)",
+        'MCP servers (added "Diariet")',
+        "MCP tools (search_cases off, create_case back to its server's setting)",
+        'functions (added "web search"; removed "file creation")',
+        "document template (from the organisation's default to Kommunmall)",
+        "conversation retention (from following the space to 30 days)",
+        "insights (from off to on)",
+    ):
+        assert line in text
+    for ident in (str(world.older.id), str(world.archive.id), str(_RANKER)):
+        assert ident not in text
+
+
+def test_a_list_given_in_the_wrong_shape_names_the_fields_not_the_values():
+    secret = "not-an-id-5e6f"
+    with pytest.raises(ValidationError) as invalid:
+        assistant_settings.changes_request(
+            {"groups": {"add": [{"id": secret}], "replace": []}}
+        )
+
+    text = assistant_settings._error_result(invalid.value).content[0].text  # pyright: ignore[reportPrivateUsage]
+
+    assert "groups.add.0.id" in text and "groups.replace" in text
+    assert secret not in text
+
+
+def test_read_assistant_names_what_the_persons_role_does_not_let_them_change():
+    reading = replace(_reading(), rights=assistant_settings.NO_RIGHTS)
+
+    others = "someone with more rights in the space, such as its administrators, can"
+    for section in ("overview", "access"):
+        text = _text(assistant_lines(reading, section))
+        assert "Not the person's to change (their role does not allow it):" in text
+        for setting in (
+            f"- conversation retention: {others}",
+            f"- insights (turning them on or off): {others}",
+            f"- publishing (publishing or unpublishing it): {others}",
+        ):
+            assert setting in text
+
+    personal = replace(
+        _reading(),
+        rights=assistant_settings.PersonRights(
+            edit_retention=True,
+            toggle_insight=False,
+            publish=False,
+            personal_space=True,
+        ),
+    )
+    text = _text(assistant_lines(personal, "access"))
+    assert "- insights (turning them on or off): not used in a personal space" in text
+    assert (
+        "- publishing (publishing or unpublishing it): not used in a personal space"
+        in (text)
+    )
+    assert "conversation retention:" not in text
+
+    allowed = replace(_reading(), rights=_ALL_RIGHTS)
+    assert "Not the person's to change" not in _text(assistant_lines(allowed, "all"))
+
+
+def test_the_options_give_the_ids_a_change_of_a_tool_or_source_takes():
+    server = _server(name="Policyservern")
+    governed = _offer(_policy(available_mcp_servers=[server]))
+
+    tools = _text(option_lines(governed, "tools"))
+    assert f"search_cases [id {server.tools[0].id}]" in tools
+    assert "- MCP servers and functions: set by the policy" in tools
+
+    knowledge = _text(option_lines(_offer(), "knowledge"))
+    assert knowledge.startswith(
+        "All the knowledge of one assistant must use the same embedding model"
+    )
+    assert "embedding model [id " in knowledge
+
+
+# --- read_prompt_history -----------------------------------------------------
+
+
+def _version(text: str, *, minute: int, selected=False, description=None, user=None):
+    return SimpleNamespace(
+        text=text,
+        description=description,
+        is_selected=selected,
+        created_at=datetime(2026, 11, 18, 12, minute, tzinfo=UTC),
+        user=user,
+    )
+
+
+_NEWEST = "Du är ärendestödet.\n\nSvara kort.\nPå svenska.\nAlltid sakligt."
+
+
+def _versions() -> list[SimpleNamespace]:
+    return [
+        _version(
+            _NEWEST,
+            minute=30,
+            selected=True,
+            description="Kortare svar, ändrat med hjälpassistenten",
+            user=SimpleNamespace(username="anna", email="anna@example.org"),
+        ),
+        _version(
+            "Du är ärendehjälpen.",
+            minute=5,
+            user=SimpleNamespace(username=None, email="bo@example.org"),
+        ),
+    ]
+
+
+def test_the_history_lists_the_versions_newest_first_with_how_each_begins():
+    lines = assistant_settings.history_lines(_versions(), None)
+
+    assert lines == [
+        "1. saved 2026-11-18 12:30 UTC (in use now); author: anna; "
+        f"{len(_NEWEST)} characters",
+        "   description: Kortare svar, ändrat med hjälpassistenten",
+        "   begins: Du är ärendestödet. / Svara kort. / På svenska.",
+        "2. saved 2026-11-18 12:05 UTC; author: bo@example.org; 20 characters",
+        "   description: none",
+        "   begins: Du är ärendehjälpen.",
+    ]
+    assert assistant_settings.history_lines([], None) == [
+        "No versions of the instructions are saved."
+    ]
+
+
+def test_one_version_is_read_whole_by_its_number_in_the_list():
+    versions = _versions()
+
+    lines = assistant_settings.history_lines(versions, 1)
+
+    assert lines[0].startswith("Version 1 of 2, saved 2026-11-18 12:30 UTC")
+    assert lines[1] == "Description: Kortare svar, ändrat med hjälpassistenten"
+    assert lines[3:] == _NEWEST.split("\n")
+    for number in (0, 3):
+        with pytest.raises(BadRequestException) as refused:
+            assistant_settings.history_lines(versions, number)
+        assert "version must be from 1 to 2" in str(refused.value)
+
+
+async def test_the_history_is_read_through_the_editors_permission_check_in_pages(
+    monkeypatch,
+):
+    container, _ = _chat_calls(monkeypatch, editing=False)
+    chat = helper_chat_service.load_chat.return_value  # pyright: ignore[reportFunctionMemberAccess]
+    versions = _versions()
+    versions[0].text = "\n".join(f"rad {number}: " + "x" * 120 for number in range(40))
+    read = AsyncMock(return_value=versions)
+    container.assistant_service.return_value.get_prompts_by_assistant = read
+    monkeypatch.setattr(assistant_settings, "default_page_cap", lambda: 1600)
+
+    result = await assistant_settings.read_prompt_history(MagicMock(), version=1)
+
+    assert not result.isError
+    read.assert_awaited_once_with(chat.target_id)
+    text = result.content[0].text
+    assert text.startswith("Version 1 of the instructions (lines 1-")
+    next_offset = result.structuredContent["next_offset"]
+    assert f"with version=1 and offset={next_offset} before" in text
+
+    listed = await assistant_settings.read_prompt_history(MagicMock())
+    assert listed.content[0].text.startswith(
+        "The saved versions of the instructions, newest first (lines 1-6 of 6)"
+    )
+
+
+# --- publish_assistant -------------------------------------------------------
+
+
+def _publishing(monkeypatch, *, editing: bool, published: bool, rights):
+    container, _ = _chat_calls(monkeypatch, editing=editing)
+    chat = helper_chat_service.load_chat.return_value  # pyright: ignore[reportFunctionMemberAccess]
+    container.assistant_service.return_value.get_assistant = AsyncMock(
+        return_value=(SimpleNamespace(published=published), [])
+    )
+    monkeypatch.setattr(
+        assistant_settings, "_person_rights", AsyncMock(return_value=rights)
+    )
+    publish = AsyncMock(
+        return_value=SimpleNamespace(
+            assistant=SimpleNamespace(published=not published), permissions=[]
+        )
+    )
+    monkeypatch.setattr(assistant_publish_operation, "apply_assistant_publish", publish)
+    return chat, publish
+
+
+async def test_publishing_is_refused_outside_edit_mode_before_anything_is_read(
+    monkeypatch,
+):
+    _, publish = _publishing(
+        monkeypatch, editing=False, published=False, rights=_ALL_RIGHTS
+    )
+
+    result = await assistant_settings.publish_assistant(MagicMock(), published=True)
+
+    assert result.isError
+    assert result.content[0].text.startswith("Turn on edit mode")
+    assistant_settings._person_rights.assert_not_awaited()  # pyright: ignore[reportPrivateUsage, reportFunctionMemberAccess]
+    publish.assert_not_awaited()
+
+
+async def test_publishing_is_refused_without_the_right_or_when_nothing_would_change(
+    monkeypatch,
+):
+    _, publish = _publishing(
+        monkeypatch, editing=True, published=False, rights=assistant_settings.NO_RIGHTS
+    )
+    refused = await assistant_settings.publish_assistant(MagicMock(), published=True)
+    assert refused.isError
+    assert refused.content[0].text.startswith(
+        "The person's role does not let them change whether this assistant is "
+        "published; someone with more rights in the space"
+    )
+
+    _, publish_personal = _publishing(
+        monkeypatch,
+        editing=True,
+        published=False,
+        rights=assistant_settings.PersonRights(
+            edit_retention=True,
+            toggle_insight=False,
+            publish=False,
+            personal_space=True,
+        ),
+    )
+    personal = await assistant_settings.publish_assistant(MagicMock(), published=True)
+    assert personal.isError
+    assert personal.content[0].text == (
+        "An assistant in a personal space is not published. Nothing was changed."
+    )
+
+    _, publish_again = _publishing(
+        monkeypatch, editing=True, published=True, rights=_ALL_RIGHTS
+    )
+    already = await assistant_settings.publish_assistant(MagicMock(), published=True)
+    assert already.isError
+    assert already.content[0].text == (
+        "The assistant is already published. Nothing was changed."
+    )
+    publish.assert_not_awaited()
+    publish_personal.assert_not_awaited()
+    publish_again.assert_not_awaited()
+
+
+async def test_publishing_goes_through_the_shared_operation_in_the_persons_name(
+    monkeypatch,
+):
+    chat, publish = _publishing(
+        monkeypatch, editing=True, published=False, rights=_ALL_RIGHTS
+    )
+
+    result = await assistant_settings.publish_assistant(MagicMock(), published=True)
+
+    assert not result.isError
+    publish.assert_awaited_once()
+    assert publish.await_args.kwargs == {
+        "assistant_id": chat.target_id,
+        "published": True,
+        "audit_context": {"origin": "helper_chat", "session_id": str(chat.session_id)},
+    }
+    assert result.structuredContent == {
+        "target_id": str(chat.target_id),
+        "changes": [{"field": "published", "before": False, "after": True}],
+        "undo": None,
+    }
+    assert result.content[0].text.startswith("Published: the assistant is now")
+
+
+def test_the_history_and_publishing_take_no_assistant_from_the_model():
+    assert set(
+        inspect.signature(assistant_settings.read_prompt_history).parameters
+    ) == {
+        "ctx",
+        "offset",
+        "version",
+    }
+    assert set(inspect.signature(assistant_settings.publish_assistant).parameters) == {
+        "ctx",
+        "published",
+    }

@@ -314,5 +314,6 @@ async def test_a_turn_gets_the_assistant_settings_tools():
     assert {tool.name for tool in server.tools} == {
         "read_assistant",
         "read_options",
+        "read_prompt_history",
         "propose_changes",
     }
