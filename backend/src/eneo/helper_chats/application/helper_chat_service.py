@@ -359,13 +359,16 @@ def _now() -> datetime:
 async def _audit(
     container: Container,
     target: HelperChatTarget[Any],
-    event: HelperChatAuditEvent,
+    event: HelperChatAuditEvent | None,
     *,
     target_id: UUID,
     record: object,
     extra: dict[str, object],
 ) -> None:
-    """One audit entry for ``event`` on the target, with the person as actor."""
+    """One audit entry for ``event`` on the target, with the person as actor;
+    none when the target has no action for the event."""
+    if event is None:
+        return
     user = container.user()
     await container.audit_service().log_async(
         tenant_id=user.tenant_id,
@@ -431,6 +434,8 @@ async def _audit_mode_change(
     """The one audit entry for a change of edit mode, the person's or the
     pause's, with the mode the chat is now in."""
     target = target_for(chat.target_type)
+    if target.audit.mode_changed is None:
+        return
     await _audit(
         container,
         target,
@@ -483,6 +488,35 @@ def _opened(chat: HelperChats, default: CompletionModel | None) -> OpenedChat:
         chat=chat,
         default_completion_model_id=default.id if default is not None else None,
     )
+
+
+async def chat_exists(
+    container: Container, target: HelperChatTarget[Any], *, target_id: UUID
+) -> bool:
+    """Whether the caller already has a chat on the target. Reads only, so an
+    entry point that reports what ``get_or_create_chat`` would do can ask."""
+    user = container.user()
+    return bool(
+        await _session(container).scalar(
+            sa.select(
+                sa.exists().where(
+                    HelperChats.tenant_id == user.tenant_id,
+                    HelperChats.user_id == user.id,
+                    HelperChats.target_type == target.target_type,
+                    HelperChats.target_id == target_id,
+                )
+            )
+        )
+    )
+
+
+def chat_default_model(
+    container: Container, target: HelperChatTarget[Any], space: Space
+) -> CompletionModel | None:
+    """The model a chat on the target in ``space`` answers with while the
+    person has chosen none; None when the space offers no model the chat can
+    use, which ``get_or_create_chat`` refuses."""
+    return _chat_models(container, target, space).default
 
 
 async def get_or_create_chat(
@@ -638,20 +672,21 @@ async def _change_model(
         return
     chat.completion_model_id = new_model_id
     chat.reasoning_effort = new_effort
-    await _audit(
-        container,
-        target,
-        target.audit.model_changed,
-        target_id=chat.target_id,
-        record=await target.load(container, chat.target_id),
-        extra={
-            "session_id": str(chat.session_id),
-            "completion_model_id": (
-                str(new_model_id) if new_model_id is not None else None
-            ),
-            "reasoning_effort": new_effort,
-        },
-    )
+    if target.audit.model_changed is not None:
+        await _audit(
+            container,
+            target,
+            target.audit.model_changed,
+            target_id=chat.target_id,
+            record=await target.load(container, chat.target_id),
+            extra={
+                "session_id": str(chat.session_id),
+                "completion_model_id": (
+                    str(new_model_id) if new_model_id is not None else None
+                ),
+                "reasoning_effort": new_effort,
+            },
+        )
     await _session(container).flush()
 
 

@@ -20,6 +20,8 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.internal_mcp.assistant_settings import mcp as assistant_settings_mcp
+from eneo.internal_mcp.constants import ASSISTANT_SERVER_NAME
 from eneo.internal_mcp.files import FILES_SERVER_NAME
 from eneo.internal_mcp.files import mcp as files_mcp
 from eneo.internal_mcp.flows import FLOWS_SERVER_NAME
@@ -65,6 +67,11 @@ INTERNAL_MCP_SERVERS: tuple[InternalMCP, ...] = (
         name=INSIGHTS_SERVER_NAME,
         mcp=insights_mcp,
         app=insights_mcp.streamable_http_app(),
+    ),
+    InternalMCP(
+        name=ASSISTANT_SERVER_NAME,
+        mcp=assistant_settings_mcp,
+        app=assistant_settings_mcp.streamable_http_app(),
     ),
 )
 

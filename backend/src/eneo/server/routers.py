@@ -11,6 +11,9 @@ from eneo.api.audit.routes import router as audit_router
 from eneo.api.documentation.openapi_endpoints import router as documentation_router
 from eneo.apps.app_runs.api.app_run_router import router as app_run_router
 from eneo.apps.apps.api.app_router import router as app_router
+from eneo.assistants.api.assistant_helper_chat_router import (
+    router as assistant_helper_chat_router,
+)
 from eneo.assistants.api.assistant_router import router as assistants_router
 from eneo.authentication.api_key_capacity_router import (
     router as api_key_capacity_router,
@@ -335,6 +338,23 @@ router.include_router(
 )
 router.include_router(
     assistants_router,
+    prefix="/assistants",
+    tags=["assistants"],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "assistants", read_override_endpoints=ASSISTANTS_READ_OVERRIDES
+            )
+        ),
+        Depends(
+            require_api_key_scope_check(resource_type="assistant", path_param="id")
+        ),
+    ],
+)
+# The helper chat beside the assistant editor: session-only (every endpoint
+# declares Authentication.SESSION), with the assistants router's guards.
+router.include_router(
+    assistant_helper_chat_router,
     prefix="/assistants",
     tags=["assistants"],
     dependencies=[

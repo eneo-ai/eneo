@@ -2779,6 +2779,40 @@ class AssistantService:
             )
         )
 
+    async def lock_assistant(self, assistant_id: UUID) -> bool:
+        """Lock ``assistant_id`` in the caller's tenant for a change, in the
+        order an assistant save takes its locks: the tenant's fit token, then
+        the assistant's row. Whether the assistant exists."""
+        import sqlalchemy as sa
+
+        from eneo.database.tables.assistant_table import Assistants
+        from eneo.database.tables.spaces_table import Spaces
+
+        await self._acquire_personal_default_fit_lock(shared=True)
+        locked = await self.repo.session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Assistants.id == assistant_id,
+                Spaces.tenant_id == self.user.tenant_id,
+            )
+            .with_for_update(of=Assistants)
+        )
+        return locked is not None
+
+    async def _delete_helper_chats(self, assistant_id: UUID) -> None:
+        """Delete the helper chats on ``assistant_id`` with their hidden
+        assistants and conversations. API keys bound to such an assistant are
+        revoked, as for every deleted assistant."""
+        from eneo.helper_chats.targets import HelperChatTargetType
+
+        for hidden_id in await self.repo.delete_helper_chat_assistants(
+            target_type=HelperChatTargetType.ASSISTANT,
+            target_id=assistant_id,
+            tenant_id=self.user.tenant_id,
+        ):
+            await self._revoke_assistant_api_keys(hidden_id)
+
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
 
@@ -2927,6 +2961,8 @@ class AssistantService:
             )
 
         icon_id = await self.repo.delete(assistant_id, space.id)
+        # The people's helper chats on it go with it.
+        await self._delete_helper_chats(assistant_id)
 
         # After the delete: a widget created meanwhile holds the assistant row
         # until it commits, so it is archived here too.
