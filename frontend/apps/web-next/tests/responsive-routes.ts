@@ -68,7 +68,6 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/flow-knowledge-evidence": redirect("/admin/flow-settings"),
   "/admin/flow-settings": open("/admin/flow-settings"),
   "/admin/help-assistants": open("/admin/help-assistants"),
-  "/admin/help-assistants/$": { skip: "Needs a help assistant fixture." },
   "/admin/insights": open("/admin/insights"),
   "/admin/insights/assistant/$": { skip: "Needs an assistant with conversations." },
   "/admin/insights/group-chat/$": { url: (f) => `/admin/insights/group-chat/${f.groupChat}` },
@@ -146,7 +145,7 @@ export const ROUTES: Record<string, Entry> = {
 };
 
 /** Routes the contract does not open yet. Lower it when a fixture lands; never raise it. */
-export const SKIP_BUDGET = 8;
+export const SKIP_BUDGET = 7;
 
 /** The skips that are a debt: a redirect is not one. */
 export const skipped = () =>

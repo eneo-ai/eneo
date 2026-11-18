@@ -100,10 +100,13 @@ it("searches and announces how many migrations match", async () => {
 
 it("announces a failed read as an error with its retry, not as an empty status", async () => {
   const { browserApi } = await import("@/lib/api/browser");
-  vi.mocked(browserApi.GET).mockResolvedValue({
-    error: { message: "Boom", error_id: "8bc91e0a" },
-    response: new Response(null, { status: 500 })
-  } as never);
+  // An implementation cast to never: the resolved value's type, read from the
+  // typed client's GET, is more than the compiler instantiates.
+  vi.mocked(browserApi.GET).mockImplementation((() =>
+    Promise.resolve({
+      error: { message: "Boom", error_id: "8bc91e0a" },
+      response: new Response(null, { status: 500 })
+    })) as never);
   const { renderInApp } = await import("@/test/render");
   renderInApp(<MigrationHistoryPanel />);
 
@@ -148,10 +151,11 @@ it("keeps the focused retry button, busy, while a failed read is retried", async
 
 it("keeps the migrations on screen when a refresh fails", async () => {
   const { browserApi } = await import("@/lib/api/browser");
-  vi.mocked(browserApi.GET).mockResolvedValue({
-    error: { message: "Boom" },
-    response: new Response(null, { status: 500 })
-  } as never);
+  vi.mocked(browserApi.GET).mockImplementation((() =>
+    Promise.resolve({
+      error: { message: "Boom" },
+      response: new Response(null, { status: 500 })
+    })) as never);
   const { renderInApp, testQueryClient } = await import("@/test/render");
   const queryClient = testQueryClient();
   queryClient.setQueryData(MODEL_MIGRATION_HISTORY_KEY, history);

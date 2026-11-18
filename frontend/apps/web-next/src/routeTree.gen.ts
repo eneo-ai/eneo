@@ -62,7 +62,6 @@ import { Route as AppSpacesListRouteImport } from "./routes/_app/spaces/list"
 import { Route as EnEmbedPublicIdRouteImport } from "./routes/en/embed/$publicId"
 import { Route as IntegrationsCallbackTokenRouteImport } from "./routes/integrations/callback/token"
 import { Route as AppAdminHelpAssistantsIndexRouteImport } from "./routes/_app/admin/help-assistants/index"
-import { Route as AppAdminHelpAssistantsKindRouteImport } from "./routes/_app/admin/help-assistants/$kind"
 import { Route as AppAdminInsightsIndexRouteImport } from "./routes/_app/admin/insights/index"
 import { Route as AppAdminMcpServersIndexRouteImport } from "./routes/_app/admin/mcp-servers/index"
 import { Route as AppAdminMcpServersIdRouteImport } from "./routes/_app/admin/mcp-servers/$id"
@@ -374,12 +373,6 @@ const AppAdminHelpAssistantsIndexRoute =
     path: "/help-assistants/",
     getParentRoute: () => AppAdminRouteRoute,
   } as any)
-const AppAdminHelpAssistantsKindRoute =
-  AppAdminHelpAssistantsKindRouteImport.update({
-    id: "/help-assistants/$kind",
-    path: "/help-assistants/$kind",
-    getParentRoute: () => AppAdminRouteRoute,
-  } as any)
 const AppAdminInsightsIndexRoute = AppAdminInsightsIndexRouteImport.update({
   id: "/insights/",
   path: "/insights/",
@@ -665,7 +658,6 @@ export interface FileRoutesByFullPath {
   "/admin/": typeof AppAdminIndexRoute
   "/dashboard/": typeof AppDashboardIndexRoute
   "/spaces/": typeof AppSpacesIndexRoute
-  "/admin/help-assistants/$kind": typeof AppAdminHelpAssistantsKindRoute
   "/admin/mcp-servers/$id": typeof AppAdminMcpServersIdRoute
   "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
@@ -757,7 +749,6 @@ export interface FileRoutesByTo {
   "/admin": typeof AppAdminIndexRoute
   "/dashboard": typeof AppDashboardIndexRoute
   "/spaces": typeof AppSpacesIndexRoute
-  "/admin/help-assistants/$kind": typeof AppAdminHelpAssistantsKindRoute
   "/admin/mcp-servers/$id": typeof AppAdminMcpServersIdRoute
   "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
@@ -852,7 +843,6 @@ export interface FileRoutesById {
   "/_app/admin/": typeof AppAdminIndexRoute
   "/_app/dashboard/": typeof AppDashboardIndexRoute
   "/_app/spaces/": typeof AppSpacesIndexRoute
-  "/_app/admin/help-assistants/$kind": typeof AppAdminHelpAssistantsKindRoute
   "/_app/admin/mcp-servers/$id": typeof AppAdminMcpServersIdRoute
   "/_app/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
@@ -949,7 +939,6 @@ export interface FileRouteTypes {
     | "/admin/"
     | "/dashboard/"
     | "/spaces/"
-    | "/admin/help-assistants/$kind"
     | "/admin/mcp-servers/$id"
     | "/dashboard/$assistantId/{-$sessionId}"
     | "/spaces/$spaceId/$"
@@ -1041,7 +1030,6 @@ export interface FileRouteTypes {
     | "/admin"
     | "/dashboard"
     | "/spaces"
-    | "/admin/help-assistants/$kind"
     | "/admin/mcp-servers/$id"
     | "/dashboard/$assistantId/{-$sessionId}"
     | "/spaces/$spaceId/$"
@@ -1135,7 +1123,6 @@ export interface FileRouteTypes {
     | "/_app/admin/"
     | "/_app/dashboard/"
     | "/_app/spaces/"
-    | "/_app/admin/help-assistants/$kind"
     | "/_app/admin/mcp-servers/$id"
     | "/_app/dashboard/$assistantId/{-$sessionId}"
     | "/_app/spaces/$spaceId/$"
@@ -1569,13 +1556,6 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppAdminHelpAssistantsIndexRouteImport
       parentRoute: typeof AppAdminRouteRoute
     }
-    "/_app/admin/help-assistants/$kind": {
-      id: "/_app/admin/help-assistants/$kind"
-      path: "/help-assistants/$kind"
-      fullPath: "/admin/help-assistants/$kind"
-      preLoaderRoute: typeof AppAdminHelpAssistantsKindRouteImport
-      parentRoute: typeof AppAdminRouteRoute
-    }
     "/_app/admin/insights/": {
       id: "/_app/admin/insights/"
       path: "/insights"
@@ -1883,7 +1863,6 @@ interface AppAdminRouteRouteChildren {
   AppAdminUserGroupsRoute: typeof AppAdminUserGroupsRoute
   AppAdminUsersRoute: typeof AppAdminUsersRoute
   AppAdminIndexRoute: typeof AppAdminIndexRoute
-  AppAdminHelpAssistantsKindRoute: typeof AppAdminHelpAssistantsKindRoute
   AppAdminMcpServersIdRoute: typeof AppAdminMcpServersIdRoute
   AppAdminHelpAssistantsIndexRoute: typeof AppAdminHelpAssistantsIndexRoute
   AppAdminInsightsIndexRoute: typeof AppAdminInsightsIndexRoute
@@ -1920,7 +1899,6 @@ const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
   AppAdminUserGroupsRoute: AppAdminUserGroupsRoute,
   AppAdminUsersRoute: AppAdminUsersRoute,
   AppAdminIndexRoute: AppAdminIndexRoute,
-  AppAdminHelpAssistantsKindRoute: AppAdminHelpAssistantsKindRoute,
   AppAdminMcpServersIdRoute: AppAdminMcpServersIdRoute,
   AppAdminHelpAssistantsIndexRoute: AppAdminHelpAssistantsIndexRoute,
   AppAdminInsightsIndexRoute: AppAdminInsightsIndexRoute,

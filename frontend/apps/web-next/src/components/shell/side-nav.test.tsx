@@ -576,6 +576,12 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/crawler",
       "/admin/settings"
     ]);
+    // The helper assistant's settings, at the old help assistants' address.
+    expect(
+      within(within(navigation).getByRole("group", { name: "Organisation" }))
+        .getByRole("link", { name: "Hjälpassistent" })
+        .getAttribute("href")
+    ).toBe("/admin/help-assistants");
     expect(within(navigation).getByRole("link", { name: "Översikt" }).getAttribute("href")).toBe(
       "/admin"
     );

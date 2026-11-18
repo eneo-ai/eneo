@@ -31,8 +31,8 @@ vi.mock("@/features/admin/governance/governance-policy-page", () => ({
 vi.mock("@/features/admin/skills/admin-skills-page", () => ({
   AdminSkillsPage: () => <h1>Skills</h1>
 }));
-vi.mock("@/features/admin/help-assistants/help-assistants-page", () => ({
-  HelpAssistantsPage: () => <h1>Helpers</h1>
+vi.mock("@/features/admin/helper-chat/helper-chat-settings-page", () => ({
+  HelperChatSettingsPage: () => <h1>Helper</h1>
 }));
 
 const GENERATION = "Eneo-Session-Generation";
@@ -47,25 +47,6 @@ await import("@/router");
 
 beforeEach(async () => {
   vi.resetModules();
-  vi.doMock("@/features/admin/help-assistants/help-assistant-editor", async () => {
-    const { useSpace } = await import("@/features/spaces/use-space");
-    return {
-      HelpAssistantEditor: ({
-        assistantId,
-        helperKind
-      }: {
-        assistantId: string;
-        helperKind: string;
-      }) => {
-        const { space, routeId } = useSpace();
-        return (
-          <h1>
-            Helper {helperKind}: {assistantId} in {routeId} ({space.id})
-          </h1>
-        );
-      }
-    };
-  });
   HTMLElement.prototype.scrollTo = () => {};
   replies = new Map<string, unknown>([
     ["/api/v1/users/me/", context.user],
@@ -82,14 +63,10 @@ beforeEach(async () => {
     ["/api/v1/admin/model-providers/", []],
     ["/api/v1/mcp-servers/settings/", { items: [] }],
     ["/api/v1/settings/skills/runtime-policy", {}],
-    ["/api/v1/admin/help-assistants/roles/", { items: [] }],
-    ["/api/v1/admin/help-assistants/templates/", { items: [] }],
     [
-      "/api/v1/admin/help-assistants/roles/prompt_guide/",
-      { id: "role-1", kind: "prompt_guide", assistant_id: "helper-1" }
-    ],
-    ["/api/v1/assistants/helper-1/", { id: "helper-1" }],
-    ["/api/v1/spaces/type/organization/", { id: "organization-space", organization: true }]
+      "/api/v1/settings/helper-chat-policy",
+      { enabled: true, guidance: "", guidance_max_length: 4000, completion_model_id: null }
+    ]
   ]);
   fetcher = vi.fn<typeof fetch>(async (input) => {
     const url = new URL(input instanceof Request ? input.url : String(input), window.location.href);
@@ -187,9 +164,9 @@ it.each([
   ["/admin/skills", "Skills", "admin_skills_page_title", []],
   [
     "/admin/help-assistants",
-    "Helpers",
-    "admin_help_assistants_nav_label",
-    ["/api/v1/admin/help-assistants/roles/", "/api/v1/admin/help-assistants/templates/"]
+    "Helper",
+    "admin_helper_title",
+    ["/api/v1/settings/helper-chat-policy", "/api/v1/ai-models/"]
   ]
 ] as const)(
   "opens %s with its required data and title",
@@ -202,44 +179,32 @@ it.each([
   }
 );
 
-it("renders the installed helper inside the organization SpaceProvider", async () => {
-  await renderRoute("/admin/help-assistants/prompt_guide");
-  await screen.findByRole("heading", {
-    name: "Helper prompt_guide: helper-1 in organization (organization-space)",
-    level: 1
-  });
-  expect(document.title).toBe(`${messages.admin_help_assistants_nav_label} · Eneo`);
-  expect(requestedPaths()).toContain("/api/v1/assistants/helper-1/");
-  expect(requestedPaths()).toContain("/api/v1/spaces/type/organization/");
+it("leaves a failed read of the helper's settings to the page, which can retry it", async () => {
+  replies.set("/api/v1/settings/helper-chat-policy", failure(500));
+  const { router } = await renderRoute("/admin/help-assistants");
+  await screen.findByRole("heading", { name: "Helper", level: 1 });
+  expect(router.state.matches.some((match) => match.status === "error")).toBe(false);
+  expect(requestedPaths()).toContain("/api/v1/settings/helper-chat-policy");
 });
 
-it("rejects an unknown helper kind as not-found without making an invalid API request", async () => {
-  replies.set("/api/v1/admin/help-assistants/roles/unknown-kind/", failure(422));
-  const { router } = await renderRoute("/admin/help-assistants/unknown-kind");
-  await screen.findByRole("heading", { name: messages.page_not_found });
-  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
-  expect(requestedPaths()).not.toContain("/api/v1/admin/help-assistants/roles/unknown-kind/");
-});
-
-it("reports an uninstalled known helper as not-found before loading its editor data", async () => {
-  replies.set("/api/v1/admin/help-assistants/roles/prompt_guide/", null);
-  const { router } = await renderRoute("/admin/help-assistants/prompt_guide");
-  await screen.findByRole("heading", { name: messages.page_not_found });
-  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
-  expect(requestedPaths()).toContain("/api/v1/admin/help-assistants/roles/prompt_guide/");
-  expect(requestedPaths()).not.toContain("/api/v1/assistants/helper-1/");
-  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
-});
-
-it("keeps a refused helper read with the route error boundary", async () => {
-  replies.set("/api/v1/admin/help-assistants/roles/prompt_guide/", failure(403));
-  const { router } = await renderRoute("/admin/help-assistants/prompt_guide");
-  await waitFor(() =>
-    expect(router.state.matches.some((match) => match.status === "error")).toBe(true)
-  );
-  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(false);
-  expect(requestedPaths()).not.toContain("/api/v1/spaces/type/organization/");
-});
+it.each(["prompt_guide", "unknown-kind"])(
+  "answers not found at the old help assistant editor address %s without reading anything for it",
+  async (kind) => {
+    const { router } = await renderRoute(`/admin/help-assistants/${kind}`);
+    await screen.findByRole("heading", { name: messages.page_not_found, level: 1 });
+    expect(document.title).toBe(`${messages.page_not_found} · Eneo`);
+    expect(router.state.matches.at(-1)?.routeId).toBe("/_app/$");
+    expect(screen.queryByRole("heading", { name: "Helper", level: 1 })).toBeNull();
+    expect(
+      requestedPaths().filter(
+        (path) =>
+          path.startsWith("/api/v1/admin/help-assistants/") ||
+          path.startsWith("/api/v1/assistants/") ||
+          path === "/api/v1/settings/helper-chat-policy"
+      )
+    ).toEqual([]);
+  }
+);
 
 it("fails governance when a required read cannot refresh older cached data", async () => {
   replies.set("/api/v1/admin/governance-policy/", failure(500));

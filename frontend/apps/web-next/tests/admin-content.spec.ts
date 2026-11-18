@@ -1,12 +1,11 @@
 import messages from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
-import { apiPost } from "./helpers";
 
 for (const [path, heading] of [
   ["/admin/prompt-library", messages.governance_tab_prompts],
   ["/admin/personal-assistant", messages.governance_title],
   ["/admin/skills", messages.admin_skills_title],
-  ["/admin/help-assistants", messages.admin_help_assistants_page_title]
+  ["/admin/help-assistants", messages.admin_helper_title]
 ] as const) {
   test(`opens admin content at ${path}`, async ({ page }) => {
     await page.goto(path);
@@ -45,33 +44,6 @@ test("template administration follows the saved tenant setting", async ({ page }
     await expect(page).toHaveURL(/\/admin\/?$/);
   } finally {
     await setTemplates(original);
-  }
-});
-
-test("opens an installed helper in the organization editor", async ({ page }) => {
-  await page.goto("/admin/help-assistants");
-  await apiPost(page, "/admin/help-assistants/roles/prompt_guide/", {});
-  try {
-    await page.goto("/admin/help-assistants/prompt_guide");
-    await expect(
-      page.getByRole("heading", { level: 1, name: "Prompt Guide", exact: true })
-    ).toBeVisible();
-    await expect(
-      page.getByText(messages.admin_help_assistants_edit_banner, { exact: true })
-    ).toBeVisible();
-  } finally {
-    await page.goto("/admin/help-assistants");
-    await page
-      .getByRole("button", { name: messages.admin_help_assistants_delete_button, exact: true })
-      .click();
-    const dialog = page.getByRole("alertdialog", {
-      name: messages.admin_help_assistants_delete_button,
-      exact: true
-    });
-    await dialog
-      .getByRole("button", { name: messages.admin_help_assistants_delete_button, exact: true })
-      .click();
-    await expect(dialog).toBeHidden();
   }
 });
 
