@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   BookOpenCheck,
@@ -16,6 +16,8 @@ import {
 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
+import { useRef, useState } from "react";
+import { CompanionLayout } from "@/components/composites/companion-layout";
 import { SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -25,6 +27,7 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import { HelperPanel } from "@/features/helper/helper-panel";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import {
   EditorHeader,
@@ -38,6 +41,8 @@ import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
+import { AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
+import { assistantHelperAvailabilityQueryOptions } from "./assistant-helper-api";
 import { useAssistantAiDraft } from "./use-assistant-ai-draft";
 import { GeneralSection } from "./general-section";
 import { AttachmentsSection } from "./attachments-section";
@@ -56,6 +61,11 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  * breadcrumb back to the space's assistants, the name, the aggregate save
  * state and a shortcut into chat, then the section links. Opened right after
  * "Skapa assistent", it focuses the (default) name and announces the creation.
+ *
+ * "Hjälpassistent" in the header (and in a phone's bar) opens the helper chat
+ * beside the settings, or over them where the row has no room; it follows
+ * the helper's availability. The personal chat's own assistant has no helper
+ * (decision 11).
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   return (
@@ -76,6 +86,35 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   useCreatedAnnouncement(created, t("assistant_created_announcement"));
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
+
+  const personalDefault = space.personal && space.default_assistant?.id === assistant.id;
+  const availabilityQuery = useQuery({
+    ...assistantHelperAvailabilityQueryOptions(browserApi, assistantId),
+    enabled: !personalDefault
+  });
+  const availability = personalDefault ? undefined : availabilityQuery.data;
+  const helper = useAssistantHelper({ assistant, availability });
+  const [helperOpen, setHelperOpen] = useState(false);
+  const headerToggle = useRef<HTMLButtonElement>(null);
+  const phoneToggle = useRef<HTMLButtonElement>(null);
+  const helperToggle = (compact: boolean) => (
+    <AssistantHelperToggle
+      ref={compact ? phoneToggle : headerToggle}
+      availability={availability}
+      open={helperOpen}
+      onOpenChange={setHelperOpen}
+      compact={compact}
+    />
+  );
+  /** The toggle on screen (the header's, or a phone's bar's), for focus to return to. */
+  const shownToggle = () => {
+    const toggles = [headerToggle.current, phoneToggle.current];
+    return (
+      toggles.find((toggle) => toggle?.isConnected && toggle.getClientRects().length > 0) ??
+      toggles.find((toggle) => toggle?.isConnected) ??
+      null
+    );
+  };
 
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
@@ -232,23 +271,55 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     section: "assistants",
     name: assistant.name,
     actions: (
-      <AstryxButton
-        href={chatHref}
-        variant="secondary"
-        icon={<Play aria-hidden="true" className="size-4" />}
-        label={t("test")}
-      />
+      <>
+        {helperToggle(true)}
+        <AstryxButton
+          href={chatHref}
+          variant="secondary"
+          icon={<Play aria-hidden="true" className="size-4" />}
+          label={t("test")}
+        />
+      </>
     ),
     created
   });
 
   return (
-    <SectionedSettings
-      navigationLabel={t("editor_sections_label")}
-      sections={sections}
-      phone={phone}
-      header={<EditorHeader section="assistants" name={assistant.name} actions={test} />}
-    />
+    <CompanionLayout
+      open={helperOpen}
+      label={t("helper_heading")}
+      resizeLabel={t("helper_resize")}
+      widthStorageKey="eneo:assistant-helper-width"
+      returnFocus={shownToggle}
+      aside={(presentation) => (
+        <HelperPanel
+          adapter={helper}
+          close={{
+            label: presentation === "phone" ? t("helper_back") : t("helper_close"),
+            onClose: () => setHelperOpen(false),
+            asBack: presentation === "phone"
+          }}
+        />
+      )}
+    >
+      <SectionedSettings
+        navigationLabel={t("editor_sections_label")}
+        sections={sections}
+        phone={phone}
+        header={
+          <EditorHeader
+            section="assistants"
+            name={assistant.name}
+            actions={
+              <>
+                {helperToggle(false)}
+                {test}
+              </>
+            }
+          />
+        }
+      />
+    </CompanionLayout>
   );
 }
 

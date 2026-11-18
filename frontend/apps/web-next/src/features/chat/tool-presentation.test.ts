@@ -429,7 +429,6 @@ describe("Eneo's flows server", () => {
     "move_step",
     "remove_step",
     "publish_flow",
-    "unpublish_flow",
     "read_tool_options",
     "read_flow_suggestions",
     "apply_flow_suggestions",
@@ -626,5 +625,68 @@ describe("Eneo's insights server", () => {
       provider: null
     });
     expect(toolTarget(call, svT)).toBe("team: Support");
+  });
+});
+
+/** The loopback assistant server, as the helper chat about an assistant's settings calls it. */
+describe("Eneo's assistant server", () => {
+  const svT = testTranslator();
+  const enT = testTranslator("en");
+  const assistant = (toolName: string, input: Record<string, unknown> = {}) => ({
+    toolName,
+    input,
+    providerMetadata: { eneo: { server_name: "assistant", is_internal: true } }
+  });
+  const tools = ["read_assistant", "read_options", "propose_changes", "update_assistant"];
+
+  it("names each call in plain words while it runs and once it is done", () => {
+    expect(toolPresentation(assistant("read_assistant"), svT, false)).toEqual({
+      label: "Läser assistentens inställningar",
+      server: "Assistentens inställningar"
+    });
+    expect(toolPresentation(assistant("propose_changes"), svT, true).label).toBe(
+      "Föreslog ändringar"
+    );
+    expect(toolPresentation(assistant("update_assistant"), svT, false).label).toBe(
+      "Ändrar assistenten"
+    );
+    expect(toolPresentation(assistant("read_options"), enT, true)).toEqual({
+      label: "Read what the space offers",
+      server: "Assistant settings"
+    });
+  });
+
+  it("has both forms of every label in both languages", () => {
+    for (const tool of tools) {
+      for (const done of [false, true]) {
+        const key = toolPresentation(assistant(tool), t, done).label;
+        expect(key).toMatch(/^helper_tool_/);
+        expect(sv).toHaveProperty(key);
+        expect(en).toHaveProperty(key);
+      }
+    }
+  });
+
+  it("shows none of its arguments under the label: the answer's cards show the changes", () => {
+    expect(toolTarget(assistant("read_assistant", { section: "model", offset: 0 }), t)).toBeNull();
+    expect(
+      toolTarget(assistant("propose_changes", { changes: { name: "Skolhjälpen" } }), t)
+    ).toBeNull();
+  });
+
+  it("leaves an external server named assistant to its own titles and arguments", () => {
+    const call = {
+      toolName: "read_assistant",
+      input: { section: "model" },
+      providerMetadata: {
+        eneo: { server_name: "assistant", title: "Read assistant", is_internal: false }
+      }
+    };
+    expect(toolPresentation(call, svT, true)).toEqual({
+      label: "Read assistant",
+      server: "assistant",
+      provider: null
+    });
+    expect(toolTarget(call, svT)).toBe("section: model");
   });
 });

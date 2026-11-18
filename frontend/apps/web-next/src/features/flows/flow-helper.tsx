@@ -68,7 +68,7 @@ export function useFlowHelper({
   const { routeId } = useSpace();
   return {
     api: flowHelperApi(flow.id),
-    canUse: flow.permissions.can_edit,
+    unavailable: flow.permissions.can_edit ? null : t("flows_chat_no_access"),
     texts: {
       heading: t("flows_chat_heading"),
       partnerName: t("flows_chat_partner_name"),

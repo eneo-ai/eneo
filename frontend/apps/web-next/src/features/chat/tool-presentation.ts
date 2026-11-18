@@ -100,52 +100,33 @@ const CAPABILITY_STEPS: Record<string, { label: string; server: string }> = {
   compute: { label: "tool_compute", server: "compute" }
 };
 
-/**
- * The tools of Eneo's own flows server (the flow authoring chat). Each has a
- * label `tool_flows_<tool>` with a `_done` form; reading the suggestions
- * with the latest runs has its own (`tool_flows_read_flow_suggestions_runs`).
- */
-const FLOW_TOOLS = new Set([
-  "read_flow",
-  "update_flow_settings",
-  "read_step_assistant",
-  "update_step",
-  "update_steps",
-  "contract_from_example",
-  "add_step",
-  "move_step",
-  "remove_step",
-  "publish_flow",
-  "unpublish_flow",
-  "read_tool_options",
-  "read_flow_suggestions",
-  "apply_flow_suggestions",
-  "dismiss_flow_suggestion",
-  "run_flow",
-  "retry_run",
-  "read_run",
-  "cancel_run",
-  "read_review",
-  "review_run"
-]);
+/** A label's variant: what is added to its key (before `_done`), and the values it names. */
+type LabelVariant = { suffix: string; values?: Record<string, string> };
 
 /**
- * The tools of Eneo's own insights server (the insights chat's analysis of
- * an assistant's or group chat's conversations). Each has a label
- * `tool_insights_<tool>` with a `_done` form; a search names its words
- * (`tool_insights_search_questions_query`).
+ * One of Eneo's own loopback servers whose tools have labels of their own.
+ * Each tool it lists has a label `<prefix><tool>` with a `_done` form; the
+ * server is named by `server` (a catalog key). A tool it does not list is
+ * named like any other tool.
  */
-const INSIGHT_TOOLS = new Set([
-  "usage_summary",
-  "list_questions",
-  "top_questions",
-  "search_questions",
-  "read_conversation",
-  "find_gaps",
-  "list_ratings",
-  "knowledge_use",
-  "tool_use"
-]);
+type OwnServerTools = {
+  /** The start of each of its tools' label keys. */
+  prefix: string;
+  /** The catalog key of the server's name. */
+  server: string;
+  tools: ReadonlySet<string>;
+  /** A label that depends on the call's arguments (`_runs`, `_query`); null for the plain one. */
+  variant?: (tool: string, args: Record<string, unknown>) => LabelVariant | null;
+  /** What any call on the server acted on, for the row under its label; null for nothing. */
+  target: (
+    tool: string,
+    args: Record<string, unknown>,
+    t: Translate,
+    locale: string
+  ) => string | null;
+  /** The key that names what a call waiting for the person's approval will do; null for none. */
+  approval?: (tool: string, args: Record<string, unknown>) => string | null;
+};
 
 /**
  * The flows server's calls that wait for the person's approval, named by what
@@ -162,19 +143,114 @@ const FLOW_APPROVALS = new Set([
 ]);
 const REVIEW_ACTIONS = new Set(["approve", "reject", "edit", "resume", "approve_and_continue"]);
 
+const INSIGHT_TOOLS = new Set([
+  "usage_summary",
+  "list_questions",
+  "top_questions",
+  "search_questions",
+  "read_conversation",
+  "find_gaps",
+  "list_ratings",
+  "knowledge_use",
+  "tool_use"
+]);
+
+/** Eneo's own servers whose tools have labels of their own, by the server's name. */
+const OWN_SERVER_TOOLS = new Map<string, OwnServerTools>([
+  [
+    // The flow authoring chat. Reading the suggestions with the latest runs
+    // has a label of its own (`tool_flows_read_flow_suggestions_runs`). Its
+    // calls' arguments (revisions, offsets, ids) say nothing to a person, so
+    // they show none; a new step shows its name.
+    "flows",
+    {
+      prefix: "tool_flows_",
+      server: "flows",
+      tools: new Set([
+        "read_flow",
+        "update_flow_settings",
+        "read_step_assistant",
+        "update_step",
+        "update_steps",
+        "contract_from_example",
+        "add_step",
+        "move_step",
+        "remove_step",
+        "publish_flow",
+        "read_tool_options",
+        "read_flow_suggestions",
+        "apply_flow_suggestions",
+        "dismiss_flow_suggestion",
+        "run_flow",
+        "retry_run",
+        "read_run",
+        "cancel_run",
+        "read_review",
+        "review_run"
+      ]),
+      variant: (tool, args) =>
+        tool === "read_flow_suggestions" && args.include_runs === true ? { suffix: "_runs" } : null,
+      target: (tool, args) => {
+        const name = tool === "add_step" && typeof args.name === "string" ? args.name : "";
+        return name.trim() || null;
+      },
+      approval: (tool, args) => {
+        if (!FLOW_APPROVALS.has(tool)) return null;
+        const action = args.action;
+        return tool === "review_run" && typeof action === "string" && REVIEW_ACTIONS.has(action)
+          ? `tool_flows_review_run_approval_${action}`
+          : `tool_flows_${tool}_approval`;
+      }
+    }
+  ],
+  [
+    // The insights chat's analysis of an assistant's or group chat's
+    // conversations. A search names its words
+    // (`tool_insights_search_questions_query`); a call shows the period it
+    // covered or the conversation it read.
+    "insights",
+    {
+      prefix: "tool_insights_",
+      server: "insights",
+      tools: INSIGHT_TOOLS,
+      variant: (tool, args) => {
+        const query = searchQuery(args);
+        return tool === "search_questions" && query !== null
+          ? { suffix: "_query", values: { query } }
+          : null;
+      },
+      target: (tool, args, t, locale) =>
+        INSIGHT_TOOLS.has(tool) ? insightTarget(tool, args, t, locale) : readableArguments(args)
+    }
+  ],
+  [
+    // The helper chat about an assistant's settings. Its calls' arguments
+    // (sections, offsets, the changes it proposes or makes) show in the
+    // answer's own cards, not under the label.
+    "assistant",
+    {
+      prefix: "helper_tool_",
+      server: "helper_tool_server",
+      tools: new Set(["read_assistant", "read_options", "propose_changes", "update_assistant"]),
+      target: () => null
+    }
+  ]
+]);
+
+/** The labels of an own server's tools; none for an external server of the same name. */
+function ownServerTools(serverName: string | null | undefined, own: boolean) {
+  return own && serverName ? OWN_SERVER_TOOLS.get(serverName) : undefined;
+}
+
 /**
- * What a call waiting for approval will do, when it is one of Eneo's own
- * flows calls ("Publicera flödet"); null for every other tool, an external
- * server named "flows" included.
+ * What a call waiting for approval will do, when it is a call of one of
+ * Eneo's own servers that names it ("Publicera flödet"); null for every
+ * other tool, an external server of the same name included.
  */
 export function approvalLabel(tool: ToolCallInfo, t: Translate): string | null {
-  if (tool.server_name !== "flows" || !isOwnServer(tool.is_internal)) return null;
-  if (!FLOW_APPROVALS.has(tool.tool_name)) return null;
-  const action = tool.arguments?.action;
-  if (tool.tool_name === "review_run" && typeof action === "string" && REVIEW_ACTIONS.has(action)) {
-    return t(`tool_flows_review_run_approval_${action}`);
-  }
-  return t(`tool_flows_${tool.tool_name}_approval`);
+  const server = ownServerTools(tool.server_name, isOwnServer(tool.is_internal));
+  const key = server?.approval?.(tool.tool_name, tool.arguments ?? {});
+  return key ? t(key) : null;
 }
 
 function argumentsOf(part: ToolLike): Record<string, unknown> {
@@ -331,21 +407,12 @@ export function toolPresentation(part: ToolLike, t: Translate, done: boolean) {
   if (ownServer && serverName === "questions" && part.toolName === "ask_user") {
     return { label: t(`tool_ask_user${suffix}`), server: t("questions_server") };
   }
-  if (ownServer && serverName === "flows" && FLOW_TOOLS.has(part.toolName)) {
-    const runs = part.toolName === "read_flow_suggestions" && args.include_runs === true;
+  const own = ownServerTools(serverName, ownServer);
+  if (own?.tools.has(part.toolName)) {
+    const variant = own.variant?.(part.toolName, args) ?? null;
     return {
-      label: t(`tool_flows_${part.toolName}${runs ? "_runs" : ""}${suffix}`),
-      server: t("flows")
-    };
-  }
-  if (ownServer && serverName === "insights" && INSIGHT_TOOLS.has(part.toolName)) {
-    const searching = part.toolName === "search_questions" && query !== null;
-    return {
-      label: t(
-        `tool_insights_${part.toolName}${searching ? "_query" : ""}${suffix}`,
-        searching ? { query } : undefined
-      ),
-      server: t("insights")
+      label: t(`${own.prefix}${part.toolName}${variant?.suffix ?? ""}${suffix}`, variant?.values),
+      server: t(own.server)
     };
   }
   // An external provider's own name stays visible as the source; one of
@@ -463,11 +530,10 @@ function insightTarget(
 
 /**
  * What a call acted on, for the row under its label: the file and position
- * for a read of an attachment, the query for a search, the new step's name
- * for a flow step added in the authoring chat, else the readable arguments.
- * A signed download url never shows; the attachment's name does. The flows
- * server's other arguments (revisions, offsets, ids) say nothing to a person,
- * so its calls show none; an insights call shows its period or conversation.
+ * for a read of an attachment, the query for a search, what one of Eneo's
+ * own servers with labels of its own says (a flow step's name, an insights
+ * call's period), else the readable arguments. A signed download url never
+ * shows; the attachment's name does.
  */
 export function toolTarget(
   part: ToolLike,
@@ -490,12 +556,7 @@ export function toolTarget(
   if (query && (purpose === "web_search" || (ownServer && serverName === "knowledge"))) {
     return query;
   }
-  if (ownServer && serverName === "flows") {
-    const name = part.toolName === "add_step" && typeof args.name === "string" ? args.name : "";
-    return name.trim() || null;
-  }
-  if (ownServer && serverName === "insights" && INSIGHT_TOOLS.has(part.toolName)) {
-    return insightTarget(part.toolName, args, t, locale);
-  }
+  const own = ownServerTools(serverName, ownServer);
+  if (own) return own.target(part.toolName, args, t, locale);
   return readableArguments(args);
 }

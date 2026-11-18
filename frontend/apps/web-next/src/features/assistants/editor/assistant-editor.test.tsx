@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { Space } from "@/features/spaces/space";
+import type { HelperPanelClose } from "@/features/helper/helper-panel";
 import { AssistantEditor } from "./assistant-editor";
+import { assistantHelperKeys } from "./assistant-helper-api";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
@@ -31,6 +33,14 @@ vi.mock("./capabilities-section", () => ({
 vi.mock("./attachments-section", () => ({ AttachmentsSection: () => null }));
 vi.mock("./security-section", () => ({ SecuritySection: () => null }));
 vi.mock("./publishing-section", () => ({ PublishingSection: () => null }));
+// The helper panel is the helper feature's: the editor decides where it is and how it closes.
+vi.mock("@/features/helper/helper-panel", () => ({
+  HelperPanel: ({ close }: { close: HelperPanelClose }) => (
+    <button type="button" onClick={close.onClose}>
+      {close.label}
+    </button>
+  )
+}));
 afterEach(cleanup);
 
 it("lists its sections on a phone's index under the same groups as the app editor", () => {
@@ -64,4 +74,63 @@ it("lists its sections on a phone's index under the same groups as the app edito
     ["Modell och funktioner", ["ai", "capabilities"]],
     ["Åtkomst", ["security", "api-keys", "widget", "publishing"]]
   ]);
+});
+
+describe("The editor's helper", () => {
+  const ASSISTANT = {
+    id: "assistant-1",
+    name: "Bygglov",
+    permissions: ["read", "edit"],
+    groups: [],
+    websites: [],
+    integration_knowledge_list: [],
+    mcp_servers: [],
+    attachments: [],
+    prompt: null,
+    completion_model: null
+  };
+
+  function renderEditor(space: Space = makeSpace()) {
+    state.space = space;
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["assistants", "assistant-1"], ASSISTANT);
+    queryClient.setQueryData(assistantHelperKeys.availability("assistant-1"), { available: true });
+    renderInApp(<AssistantEditor assistantId="assistant-1" />, {
+      queryClient,
+      route: "/spaces/space-1/assistants/assistant-1/edit"
+    });
+  }
+
+  it("opens from the header beside or over the settings, and closes back to its toggle", () => {
+    renderEditor();
+    // The header's toggle; a phone's bar has one of its own.
+    const toggle = screen
+      .getAllByRole("button", { name: "Hjälpassistent" })
+      .find((button) => button.closest("header"))!;
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByRole("complementary", { name: "Hjälpassistent" })).toBeNull();
+
+    toggle.focus();
+    fireEvent.click(toggle);
+    const aside = screen.getByRole("complementary", { name: "Hjälpassistent" });
+    expect(document.activeElement).toBe(aside);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpassistenten" }));
+    expect(document.activeElement).toBe(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+  });
+
+  it("offers no helper on the personal chat's own assistant", () => {
+    renderEditor(
+      makeSpace({
+        overrides: {
+          personal: true,
+          default_assistant: { id: "assistant-1", name: "Bygglov", permissions: ["read"] }
+        }
+      })
+    );
+
+    expect(screen.queryByRole("button", { name: "Hjälpassistent" })).toBeNull();
+  });
 });

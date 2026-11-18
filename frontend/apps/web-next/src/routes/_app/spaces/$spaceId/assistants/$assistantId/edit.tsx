@@ -1,5 +1,6 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { AssistantEditor } from "@/features/assistants/editor/assistant-editor";
+import { assistantHelperAvailabilityQueryOptions } from "@/features/assistants/editor/assistant-helper-api";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import { promptGuideAvailabilityQueryOptions } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { browserApi } from "@/lib/api/browser";
@@ -19,6 +20,11 @@ export const Route = createFileRoute("/_app/spaces/$spaceId/assistants/$assistan
       warmQuery(
         context.queryClient,
         promptGuideAvailabilityQueryOptions(browserApi, params.assistantId)
+      );
+      // The header's "Hjälpassistent" waits for it: started here, it lands with the page.
+      warmQuery(
+        context.queryClient,
+        assistantHelperAvailabilityQueryOptions(browserApi, params.assistantId)
       );
       return { name: assistant.name };
     }

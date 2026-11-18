@@ -71,7 +71,7 @@ export type HelperTexts = {
   editingOff: string;
   /** Said when a read of the chat finds the server left Redigera after a pause. */
   askAfterPause: string;
-  /** Why the chat is not open to the person: no edit access. */
+  /** Why the server refused the chat for want of access (403), should the page's own reading be out of date. */
   noAccess: string;
   /** What starting a new conversation keeps and drops, in its confirmation. */
   newConversationDescription: string;
@@ -98,8 +98,12 @@ export type HelperLock = {
  */
 export type HelperAdapter = {
   api: HelperChatApi;
-  /** Whether the person may use the chat; without it the chat is not asked for. */
-  canUse: boolean;
+  /**
+   * Why the person cannot use the chat on this target, in the target's words
+   * (no edit access, no model for the chat); null when they can. While it is
+   * set the chat is not asked for, and the panel says this instead.
+   */
+  unavailable: string | null;
   texts: HelperTexts;
   /** Set while the target cannot be changed. */
   lock?: HelperLock | null;

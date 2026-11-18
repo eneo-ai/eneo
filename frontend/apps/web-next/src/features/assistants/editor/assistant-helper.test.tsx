@@ -1,0 +1,287 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
+import { HelperPanel } from "@/features/helper/helper-panel";
+import { browserApi } from "@/lib/api/browser";
+import { EneoApiError } from "@/lib/api/errors";
+import { renderHookInApp, renderInApp, testQueryClient } from "@/test/render";
+import {
+  assistantHelperApi,
+  assistantHelperAvailabilityQueryOptions,
+  type AssistantHelperAvailability
+} from "./assistant-helper-api";
+import { AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
+import type { Assistant } from "./use-assistant";
+
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
+const toast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }));
+
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+vi.mock("@/lib/toast", () => ({ toast }));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+vi.mock("@/features/spaces/use-space", async () => {
+  const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
+  const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
+  return { useSpace: () => useSpaceFromQuery(() => makeSpace()) };
+});
+// The conversation is the chat feature's: the panel decides its welcome and placeholder.
+vi.mock("@/features/chat/chat-view", () => ({
+  ChatView: ({ placeholder, partner }: { placeholder?: string; partner?: { name?: string } }) => (
+    <div>
+      <p>partner: {partner?.name}</p>
+      <p>{placeholder}</p>
+    </div>
+  )
+}));
+
+const ID = "assistant-1";
+const ASSISTANT = { id: ID, name: "Skolhjälpen", permissions: ["read", "edit"] } as Assistant;
+const ok = (data: unknown) => ({ data, response: new Response(null, { status: 200 }) });
+const CHAT = {
+  target_id: ID,
+  assistant_id: "helper-assistant",
+  session_id: "session-1",
+  editing: false
+};
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe("The assistant's helper chat endpoints", () => {
+  it("opens the chat, changes it and starts a conversation on the assistant's own routes", async () => {
+    api.POST.mockResolvedValue(ok(CHAT));
+    api.PATCH.mockResolvedValue(ok({ ...CHAT, editing: true }));
+    const chat = assistantHelperApi(ID);
+
+    expect(await chat.open()).toEqual(CHAT);
+    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
+      params: { path: { id: ID } }
+    });
+    await chat.update("session-1", { editing: true, reasoning_effort: null });
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/{session_id}/", {
+      params: { path: { id: ID, session_id: "session-1" } },
+      body: { editing: true, reasoning_effort: null }
+    });
+    await chat.startConversation("session-1");
+    expect(api.POST).toHaveBeenLastCalledWith(
+      "/api/v1/assistants/{id}/helper-chat/{session_id}/conversations/",
+      { params: { path: { id: ID, session_id: "session-1" } } }
+    );
+    expect(chat.key).toEqual(["helper-chats", "assistant", ID]);
+  });
+
+  it("reads whether the chat is available from the assistant's availability route", async () => {
+    api.GET.mockResolvedValue(ok({ available: false, reason: "no_model" }));
+
+    const answer = await testQueryClient().query(
+      assistantHelperAvailabilityQueryOptions(browserApi, ID)
+    );
+
+    expect(answer).toEqual({ available: false, reason: "no_model" });
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/availability", {
+      params: { path: { id: ID } },
+      signal: expect.any(AbortSignal)
+    });
+  });
+});
+
+describe("The editor's Hjälpassistent toggle", () => {
+  function renderToggle(
+    availability: AssistantHelperAvailability | undefined,
+    open = false,
+    compact = false
+  ) {
+    const onOpenChange = vi.fn();
+    renderInApp(
+      <AssistantHelperToggle
+        availability={availability}
+        open={open}
+        onOpenChange={onOpenChange}
+        compact={compact}
+      />
+    );
+    return onOpenChange;
+  }
+
+  it("is not there while the availability is not known", () => {
+    renderToggle(undefined);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("opens and closes the helper where it is available, pressed while it is open", () => {
+    const onOpenChange = renderToggle({ available: true });
+    const toggle = screen.getByRole("button", { name: "Hjälpassistent" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onOpenChange).toHaveBeenCalledWith(true);
+    cleanup();
+
+    renderToggle({ available: true }, true);
+    expect(
+      screen.getByRole("button", { name: "Hjälpassistent" }).getAttribute("aria-pressed")
+    ).toBe("true");
+  });
+
+  it("is disabled, saying why, while the space has no model for it", () => {
+    const onOpenChange = renderToggle({ available: false, reason: "no_model" });
+    const toggle = screen.getByRole("button", { name: "Hjälpassistent" });
+
+    expect(toggle.getAttribute("aria-disabled")).toBe("true");
+    const description = toggle
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent)
+      .join(" ");
+    expect(description).toContain(
+      "Ytan har ingen modell som kan använda verktyg. Be en administratör för ytan att lägga till en."
+    );
+    fireEvent.click(toggle);
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("leaves a disabled toggle out of a phone's bar, where its reason could not be reached", () => {
+    renderToggle({ available: false, reason: "no_model" }, false, true);
+    expect(screen.queryByRole("button")).toBeNull();
+    cleanup();
+
+    renderToggle({ available: true }, false, true);
+    expect(screen.getByRole("button", { name: "Hjälpassistent" })).toBeTruthy();
+  });
+
+  it("is not there for someone who may not edit the assistant, or one set up elsewhere", () => {
+    renderToggle({ available: false, reason: "no_edit_rights" });
+    expect(screen.queryByRole("button")).toBeNull();
+    cleanup();
+    renderToggle({ available: false, reason: "not_supported" });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+describe("The assistant's helper adapter", () => {
+  const call = (serverName: string, isInternal = true) =>
+    ({ serverName, isInternal, toolName: "update_assistant" }) as ToolCallRecord;
+
+  it("says why the helper is not open, for each reason the availability gives", () => {
+    const unavailable = (availability: AssistantHelperAvailability | undefined) =>
+      renderHookInApp(() => useAssistantHelper({ assistant: ASSISTANT, availability })).result
+        .current.unavailable;
+
+    expect(unavailable(undefined)).toBeNull();
+    expect(unavailable({ available: true })).toBeNull();
+    expect(unavailable({ available: false, reason: "no_model" })).toBe(
+      "Ytan har ingen modell som kan använda verktyg. Be en administratör för ytan att lägga till en."
+    );
+    expect(unavailable({ available: false, reason: "no_edit_rights" })).toBe(
+      "Du får inte ändra den här assistenten, så hjälpassistenten är inte öppen för dig."
+    );
+    expect(unavailable({ available: false, reason: "not_supported" })).toBe(
+      "Den här assistenten ställs in på annat håll, så den har ingen hjälpassistent."
+    );
+  });
+
+  it("puts the chat's refusals in plain words, and shows a refused change in a toast", () => {
+    const { result } = renderHookInApp(() =>
+      useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } })
+    );
+    const { refusalText, onRefused } = result.current;
+
+    expect(refusalText?.("helper_chat_model_without_tools")).toBe(
+      "Modellen kan inte använda verktyg. Välj en annan modell för hjälpassistenten."
+    );
+    expect(refusalText?.("helper_chat_not_editing")).toBe(
+      "Välj Redigera innan hjälpassistenten ändrar assistenten."
+    );
+    expect(refusalText?.("something_else")).toBeNull();
+
+    onRefused(
+      new EneoApiError("The model is not enabled.", {
+        status: 400,
+        reason: "helper_chat_model_not_in_space"
+      }),
+      "Modellen ändrades inte"
+    );
+    expect(toast.error).toHaveBeenCalledWith(
+      "Modellen ändrades inte",
+      expect.objectContaining({
+        description: expect.stringContaining(
+          "Modellen är inte aktiverad i ytan. Välj en annan modell."
+        )
+      })
+    );
+  });
+
+  it("reads the assistant and its space again after a call of the assistant server and an answer", () => {
+    const queryClient = testQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHookInApp(
+      () => useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } }),
+      { queryClient }
+    );
+    invalidate.mockClear();
+
+    result.current.onToolCallFinished?.(call("assistant"));
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ["assistants", ID],
+      ["spaces", "space-1"]
+    ]);
+
+    invalidate.mockClear();
+    result.current.onAnswerFinished?.();
+    expect(invalidate.mock.calls.map(([filters]) => filters?.queryKey)).toEqual([
+      ["assistants", ID],
+      ["spaces", "space-1"]
+    ]);
+  });
+
+  it("leaves the assistant alone after another server's call, or one named like its own", () => {
+    const queryClient = testQueryClient();
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHookInApp(
+      () => useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } }),
+      { queryClient }
+    );
+    invalidate.mockClear();
+
+    result.current.onToolCallFinished?.(call("knowledge"));
+    result.current.onToolCallFinished?.(call("flows"));
+    result.current.onToolCallFinished?.(call("assistant", false));
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("The helper panel on an assistant", () => {
+  function Panel({ availability }: { availability: AssistantHelperAvailability }) {
+    return <HelperPanel adapter={useAssistantHelper({ assistant: ASSISTANT, availability })} />;
+  }
+
+  it("opens the assistant's chat, in its own words, where it is available", async () => {
+    api.POST.mockResolvedValue(ok(CHAT));
+    api.GET.mockImplementation(async (path: string) =>
+      path === "/api/v1/assistants/{id}/"
+        ? ok({ id: "helper-assistant", name: "Skolhjälpen", mcp_servers: [] })
+        : ok({ id: "session-1", name: "", messages: [] })
+    );
+    renderInApp(<Panel availability={{ available: true }} />);
+
+    expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 2, name: "Hjälpassistent" })).toBeTruthy();
+    expect(screen.getByText("Fråga om assistenten…")).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/", {
+      params: { path: { id: ID } }
+    });
+  });
+
+  it("does not ask for the chat where it is unavailable, and says why", async () => {
+    renderInApp(<Panel availability={{ available: false, reason: "not_supported" }} />);
+
+    expect(
+      await screen.findByText(
+        "Den här assistenten ställs in på annat håll, så den har ingen hjälpassistent."
+      )
+    ).toBeTruthy();
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+});

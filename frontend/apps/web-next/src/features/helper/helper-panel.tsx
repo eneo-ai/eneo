@@ -6,9 +6,10 @@ import {
   DropdownMenuRadioItem
 } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MessageSquare, Pencil } from "lucide-react";
+import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -294,15 +295,35 @@ function unavailableReason(
 }
 
 /**
+ * How a page that can put the panel away closes it: a close button at the
+ * end of the title row, or, where the panel fills the screen, a way back at
+ * its start.
+ */
+export type HelperPanelClose = {
+  label: string;
+  onClose: () => void;
+  /** The panel fills the screen (a phone): the control is a way back, before the heading. */
+  asBack?: boolean;
+};
+
+/**
  * A helper chat beside a page: an ordinary conversation with an assistant
  * whose tools reach only the page's target. It opens in Fråga; the picker
  * beside the send button lets the chat change the target, and the page
  * shows each change as the chat's tools make it. The adapter says what the
- * target is; everything else is the same on every page.
+ * target is; everything else is the same on every page. A page that shows
+ * the panel only on request passes `close`.
  */
-export function HelperPanel({ adapter }: { adapter: HelperAdapter }) {
+export function HelperPanel({
+  adapter,
+  close
+}: {
+  adapter: HelperAdapter;
+  close?: HelperPanelClose;
+}) {
   const t = useTranslations();
-  const { api, canUse, lock, texts } = adapter;
+  const { api, lock, texts } = adapter;
+  const canUse = adapter.unavailable === null;
   // The person's chat for the target, created on first use. Reading it
   // again returns the same chat, but the server turns edit mode off when
   // the chat has been idle: it is read again when the window regains focus
@@ -314,16 +335,33 @@ export function HelperPanel({ adapter }: { adapter: HelperAdapter }) {
     staleTime: Infinity,
     refetchOnWindowFocus: "always",
     retry: false,
-    // Without access the core would refuse the chat (a 403 still says so,
-    // should the page's flag be out of date).
+    // Where the target says the chat is unavailable the core would refuse it
+    // (a 403 still says so, should the page's reading be out of date).
     enabled: canUse
   });
   useAnnounceModeFallback(hashKey(api.key), !!lock, texts.askAfterPause);
-  const unavailable: Unavailable | null = !canUse
-    ? { status: "info", text: texts.noAccess }
-    : chat.isError
-      ? unavailableReason(chat.error, adapter, t)
-      : null;
+  const unavailable: Unavailable | null =
+    adapter.unavailable !== null
+      ? { status: "info", text: adapter.unavailable }
+      : chat.isError
+        ? unavailableReason(chat.error, adapter, t)
+        : null;
+  const closeButton = close ? (
+    <IconButton
+      label={close.label}
+      tooltip={close.label}
+      variant="ghost"
+      size="sm"
+      icon={
+        close.asBack ? (
+          <ArrowLeft aria-hidden className="size-4" />
+        ) : (
+          <X aria-hidden className="size-4" />
+        )
+      }
+      onClick={close.onClose}
+    />
+  ) : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -331,19 +369,29 @@ export function HelperPanel({ adapter }: { adapter: HelperAdapter }) {
         {/* The panel is narrow: the actions sit in the title row as icon
             buttons, and the chat's settings are behind one of them. */}
         <div className="flex items-center justify-between gap-2">
-          <Heading level={2} weight="semibold" className="min-w-0 truncate text-lg">
+          {close?.asBack ? <span className="-my-1 -ms-2 shrink-0">{closeButton}</span> : null}
+          <Heading
+            level={2}
+            weight="semibold"
+            className={cn("min-w-0 truncate text-lg", close?.asBack && "flex-1")}
+          >
             {texts.heading}
           </Heading>
-          {chat.data ? (
+          {chat.data || (close && !close.asBack) ? (
             <span className="-my-1 -me-2 flex shrink-0 items-center gap-0.5">
-              {adapter.headerActions}
-              <NewConversationButton
-                chat={chat.data}
-                api={api}
-                description={texts.newConversationDescription}
-                onRefused={adapter.onRefused}
-              />
-              <HelperChatSettings chat={chat.data} api={api} onRefused={adapter.onRefused} />
+              {chat.data ? (
+                <>
+                  {adapter.headerActions}
+                  <NewConversationButton
+                    chat={chat.data}
+                    api={api}
+                    description={texts.newConversationDescription}
+                    onRefused={adapter.onRefused}
+                  />
+                  <HelperChatSettings chat={chat.data} api={api} onRefused={adapter.onRefused} />
+                </>
+              ) : null}
+              {close?.asBack ? null : closeButton}
             </span>
           ) : null}
         </div>

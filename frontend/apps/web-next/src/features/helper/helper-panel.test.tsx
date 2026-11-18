@@ -79,7 +79,7 @@ const TEXTS: HelperTexts = {
 function adapter(overrides: Partial<HelperAdapter> = {}): HelperAdapter {
   return {
     api: flowHelperApi("flow-1"),
-    canUse: true,
+    unavailable: null,
     texts: TEXTS,
     onRefused: () => {},
     ...overrides
@@ -157,12 +157,64 @@ describe("HelperPanel when the chat cannot open", () => {
     expect(screen.queryByText("No model.")).toBeNull();
   });
 
-  it("does not ask for the chat of someone the target says may not use it", async () => {
-    renderPanel(adapter({ canUse: false }));
+  it("does not ask for the chat of someone the target says may not use it, and says why", async () => {
+    renderPanel(adapter({ unavailable: "Ytan har ingen modell för chatten." }));
 
-    expect(await bannerStatus(TEXTS.noAccess)).toBe("info");
+    expect(await bannerStatus("Ytan har ingen modell för chatten.")).toBe("info");
     expect(screen.getByText(messages.flows_chat_unavailable)).toBeTruthy();
     expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("says the server's refusal for want of access in the target's words", async () => {
+    api.POST.mockResolvedValue({
+      error: { message: "Forbidden.", eneo_error_code: 9006 },
+      response: new Response(null, { status: 403 })
+    });
+    renderPanel();
+
+    expect(await bannerStatus(TEXTS.noAccess)).toBe("info");
+    expect(screen.queryByText("Forbidden.")).toBeNull();
+  });
+});
+
+describe("HelperPanel's close", () => {
+  it("has no close where the page keeps the panel on screen", async () => {
+    openChat(false);
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stäng panelen" })).toBeNull();
+  });
+
+  it("closes from the end of the title row, also while the chat cannot open", async () => {
+    const onClose = vi.fn();
+    renderInApp(
+      <HelperPanel
+        adapter={adapter({ unavailable: "Inte här." })}
+        close={{ label: "Stäng panelen", onClose }}
+      />
+    );
+
+    const button = await screen.findByRole("button", { name: "Stäng panelen" });
+    const heading = screen.getByRole("heading", { level: 2, name: TEXTS.heading });
+    expect(heading.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(await bannerStatus("Inte här.")).toBe("info");
+    fireEvent.click(button);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a way back before the heading where the panel fills the screen", async () => {
+    openChat(false);
+    const onClose = vi.fn();
+    renderInApp(
+      <HelperPanel adapter={adapter()} close={{ label: "Tillbaka", onClose, asBack: true }} />
+    );
+
+    const back = await screen.findByRole("button", { name: "Tillbaka" });
+    const heading = screen.getByRole("heading", { level: 2, name: TEXTS.heading });
+    expect(back.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(back);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
