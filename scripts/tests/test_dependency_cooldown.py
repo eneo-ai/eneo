@@ -60,13 +60,13 @@ def version(text: str) -> tuple[int, ...]:
 
 
 def uv_image_tags(dockerfile: str) -> list[str]:
-    """The tag of every uv image a Dockerfile builds from or copies from."""
-    return re.findall(r"ghcr\.io/astral-sh/uv:(\S+)", dockerfile)
+    """The tag of every uv image a Dockerfile builds from or copies from; empty when it names none."""
+    return [suffix.removeprefix(":") for suffix in re.findall(r"ghcr\.io/astral-sh/uv(?![\w-])(\S*)", dockerfile)]
 
 
 def tag_version(tag: str) -> str | None:
     """The uv version a tag names: 0.13.7 and 0.13.7-python3.11-trixie-slim do, a bare variant does not."""
-    match = re.match(r"(\d+\.\d+\.\d+)(?:-|$)", tag)
+    match = re.match(r"(\d+\.\d+\.\d+)(?:[-@]|$)", tag)
     return match[1] if match else None
 
 
@@ -160,6 +160,9 @@ class DependencyCooldownTests(unittest.TestCase):
         self.assertEqual([tag_version(tag) for tag in uv_image_tags(floating)], [None])
         self.assertEqual(uv_image_tags("COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/"), ["0.13.7"])
         self.assertEqual(tag_version("0.14.0-python3.11-trixie-slim"), "0.14.0")
+        self.assertEqual(tag_version("0.14.0@sha256:0123"), "0.14.0")
+        untagged = "COPY --from=ghcr.io/astral-sh/uv /uv /uvx /bin/"
+        self.assertEqual([tag_version(tag) for tag in uv_image_tags(untagged)], [None])
 
 
 if __name__ == "__main__":
