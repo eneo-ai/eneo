@@ -269,10 +269,9 @@ on the documentation site.
   a pull request to the merge queue; the Core Maintainers do the ordinary
   merges. Required checks must
   pass and review conversations must be resolved. A Core Maintainer reviews
-  and approves contributions from outside the team before queueing them;
-  `.github/CODEOWNERS` requests that review automatically. If someone without
-  write access pushes new commits afterwards, GitHub cancels the pending
-  merge. Core Maintainers agree on their own changes as a team and may queue
+  and approves contributions from outside the team before queueing them. If
+  someone without write access pushes new commits afterwards, GitHub cancels
+  the pending merge. Core Maintainers agree on their own changes as a team and may queue
   them without a formal approval.
 - **Releases.** Only Core Maintainers can create, update or delete
   `release/**` branches and control human `v*` tag operations. When configured
@@ -283,10 +282,10 @@ on the documentation site.
   cannot merge PRs, move/delete tags or bypass branch checks. A `v*` tag starts
   image publication, so these restrictions control who can publish a release.
   Every pull request
-  into a release branch needs an approval from a Core Maintainer other than its
-  author: the `Release and main review` ruleset requires one approval and
-  code-owner review, and dismisses an approval when new commits are pushed.
-  Each release branch therefore needs `.github/CODEOWNERS`. When no second
+  into a release branch needs an approval from someone with write access other
+  than its author, in practice another Core Maintainer: the
+  `Release and main review` ruleset requires one approval and dismisses it
+  when new commits are pushed. When no second
   maintainer is available, a Core Maintainer can bypass the approval for a
   single pull request and states the reason in it; GitHub records the bypass.
   Direct pushes and force pushes stay blocked.
