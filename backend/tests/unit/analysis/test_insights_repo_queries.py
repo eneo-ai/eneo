@@ -159,8 +159,9 @@ async def test_figure_reads_never_join_users_and_keep_the_hidden_and_copy_rules(
         offset=0,
         limit=10,
     )
+    await repo.count_tenant_activity(tenant_id=scope.tenant_id, window=_window())
 
-    assert len(recorder.statements) == 5
+    assert len(recorder.statements) == 6
     for statement in recorder.statements:
         sql = str(statement.compile(dialect=postgresql.dialect()))
         assert "JOIN users" not in sql

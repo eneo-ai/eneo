@@ -1199,6 +1199,34 @@ async def get_conversation_insight_finding_cases(
 
 
 @router.get(
+    "/targets/activity/",
+    response_model=InsightActivity,
+    description=(
+        "Conversations and questions per local day for the whole organisation, "
+        "split by source: every assistant people see and every group chat, "
+        "listed and in personal spaces, counted by the rules of the target "
+        "list. A conversation counts on every day it had a question, so the "
+        "days of a period can add up to more conversations than the target "
+        "list's totals. source is always null."
+    ),
+    responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
+)
+async def get_insight_targets_activity(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+) -> InsightActivity:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_tenant_activity(window=window)
+
+
+@router.get(
     "/targets/",
     response_model=InsightTargetPage,
     description=(
@@ -1211,7 +1239,9 @@ async def get_conversation_insight_finding_cases(
         "and usage together, without ratings, the same on every page and "
         "whatever q and activity say. totals is everything the organisation "
         "used: every listed target that matches the filters, not only the page, "
-        "plus the personal usage."
+        "plus the personal usage. counts gives the listed targets q finds, "
+        "whatever activity says; users the signed-in users with a question on "
+        "any target people see, whatever the filters."
     ),
     responses=responses.get_responses([400, 403]),
 )

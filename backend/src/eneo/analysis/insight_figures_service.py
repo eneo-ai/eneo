@@ -34,9 +34,11 @@ from eneo.analysis.analysis import (
     InsightRating,
     InsightSummary,
     InsightTarget,
+    InsightTargetCounts,
     InsightTargetPage,
     InsightTargetTotals,
     InsightTargetUsage,
+    InsightTargetUsers,
     InsightToolUsage,
     InsightToolUse,
     InsightTopQuestions,
@@ -680,6 +682,28 @@ class InsightFiguresService:
         )
 
     @validate_permissions(Permission.INSIGHTS)
+    async def get_tenant_activity(self, *, window: InsightWindow) -> InsightActivity:
+        """Conversations and questions per local day over every target people
+        see, by the rules of :meth:`list_targets`."""
+        days = await self.repo.count_tenant_activity(
+            tenant_id=self.user.tenant_id, window=window
+        )
+        return InsightActivity(
+            timezone=window.timezone,
+            source=None,
+            start=window.start,
+            end=window.end,
+            days=[
+                InsightActivityDay(
+                    date=day.day,
+                    conversations=_counts(day.conversations),
+                    questions=_counts(day.questions),
+                )
+                for day in days
+            ],
+        )
+
+    @validate_permissions(Permission.INSIGHTS)
     async def list_targets(
         self,
         *,
@@ -692,7 +716,7 @@ class InsightFiguresService:
         offset: int,
         limit: int,
     ) -> InsightTargetPage:
-        rows, total, totals, personal = await self.repo.list_targets(
+        listing = await self.repo.list_targets(
             tenant_id=self.user.tenant_id,
             window=window,
             previous=previous_window(window) if compare else None,
@@ -703,6 +727,7 @@ class InsightFiguresService:
             offset=offset,
             limit=limit,
         )
+        totals, personal = listing.totals, listing.personal
         return InsightTargetPage(
             items=[
                 InsightTarget(
@@ -725,9 +750,9 @@ class InsightFiguresService:
                         else None
                     ),
                 )
-                for row in rows
+                for row in listing.rows
             ],
-            total_count=total,
+            total_count=listing.total,
             limit=limit,
             offset=offset,
             totals=InsightTargetTotals(
@@ -744,5 +769,12 @@ class InsightFiguresService:
                 )
                 if personal is not None
                 else None
+            ),
+            counts=InsightTargetCounts(
+                all=listing.counts.all, unused=listing.counts.unused
+            ),
+            users=InsightTargetUsers(
+                current=listing.users.current,
+                previous=listing.users.previous if compare else None,
             ),
         )

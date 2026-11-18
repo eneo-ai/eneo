@@ -1,7 +1,7 @@
 """The insights figures service: the period a request asks about, the access
 decision before any read, and what a target with insights off shows."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock
@@ -22,6 +22,7 @@ from eneo.analysis.insight_figures_service import (
 )
 from eneo.analysis.insight_scope import InsightWindow
 from eneo.analysis.insights_repo import (
+    ActivityDay,
     KnowledgeCitations,
     KnowledgeSetup,
     KnowledgeUse,
@@ -29,9 +30,12 @@ from eneo.analysis.insights_repo import (
     PersonalUsage,
     RephrasingRow,
     SourceCounts,
+    TargetCounts,
+    TargetListing,
     TargetRow,
     TargetTotals,
     TargetUsage,
+    TargetUsers,
     UnansweredRow,
 )
 from eneo.main.exceptions import BadRequestException, UnauthorizedException
@@ -153,7 +157,10 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
             offset=0,
             limit=10,
         )
+    with pytest.raises(UnauthorizedException):
+        await denied.get_tenant_activity(window=window)
     denied_repo.list_targets.assert_not_awaited()
+    denied_repo.count_tenant_activity.assert_not_awaited()
 
     service, _, repo = _service(permissions=[Permission.INSIGHTS])
     usage = TargetUsage(SourceCounts(3, 1, 0, 2), 4)
@@ -165,11 +172,13 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
         )  # fmt: skip
 
     personal = PersonalUsage(3, TargetUsage(SourceCounts(2, 2, 0, 0), 5), usage)
-    repo.list_targets.return_value = (
+    repo.list_targets.return_value = TargetListing(
         [row(True), row(False)],
         2,
         TargetTotals(usage, TargetUsage(SourceCounts(1, 1, 0, 0), 1)),
         personal,
+        TargetCounts(all=41, unused=18),
+        TargetUsers(current=7, previous=4),
     )
 
     page = await service.list_targets(
@@ -192,8 +201,13 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
     assert page.personal is not None
     assert (page.personal.assistants, page.personal.questions) == (3, 5)
     assert page.personal.previous is None
+    assert (page.counts.all, page.counts.unused) == (41, 18)
+    # The previous period's users only when compared.
+    assert (page.users.current, page.users.previous) == (7, None)
 
-    repo.list_targets.return_value = ([], 0, TargetTotals(usage, usage), None)
+    repo.list_targets.return_value = TargetListing(
+        [], 0, TargetTotals(usage, usage), None, TargetCounts(0, 0), TargetUsers(2, 1)
+    )
     without = await service.list_targets(
         window=window,
         compare=True,
@@ -205,6 +219,23 @@ async def test_targets_need_the_insights_permission_and_insights_off_shows_usage
         limit=10,
     )
     assert without.personal is None and without.totals.previous is not None
+    assert (without.users.current, without.users.previous) == (2, 1)
+
+    # The organisation's days, of every source, for the caller's tenant.
+    repo.count_tenant_activity.return_value = [
+        ActivityDay(
+            date(2026, 11, 16), SourceCounts(2, 1, 0, 1), SourceCounts(3, 2, 0, 1)
+        )
+    ]
+    activity = await service.get_tenant_activity(window=window)
+    assert (activity.source, activity.timezone) == (None, "UTC")
+    assert [
+        (d.date, d.conversations.widget, d.questions.total) for d in activity.days
+    ] == [(date(2026, 11, 16), 1, 3)]
+    assert repo.count_tenant_activity.await_args.kwargs == {
+        "tenant_id": service.user.tenant_id,
+        "window": window,
+    }
 
 
 async def test_findings_carry_examples_only_for_what_passes_the_thresholds():
