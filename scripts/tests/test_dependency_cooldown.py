@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 import tomllib
 import unittest
 from pathlib import Path
@@ -58,9 +59,31 @@ def version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
 
+def uv_image_tags(dockerfile: str) -> list[str]:
+    """The tag of every uv image a Dockerfile builds from or copies from."""
+    return re.findall(r"ghcr\.io/astral-sh/uv:(\S+)", dockerfile)
+
+
+def dockerfiles() -> list[Path]:
+    """Every tracked Dockerfile, so other checkouts under the repository are not read."""
+    tracked = subprocess.run(
+        ["git", "ls-files", "--", "Dockerfile*", "**/Dockerfile*"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    return [ROOT / path for path in tracked]
+
+
 def pinned_uv_versions() -> list[tuple[str, str]]:
-    """The uv version of every setup-uv step and of the pre-commit hook that names one."""
-    pins = []
+    """The uv version of every setup-uv step, uv image and pre-commit hook that names one."""
+    pins = [
+        (str(file.relative_to(ROOT)), tag)
+        for file in dockerfiles()
+        for tag in uv_image_tags(file.read_text())
+        if re.fullmatch(r"[\d.]+", tag)
+    ]
     files = [*sorted((ROOT / ".github/workflows").glob("*.yml")), ROOT / ".pre-commit-config.yaml"]
     for file in files:
         lines = file.read_text().splitlines()
@@ -118,8 +141,18 @@ class DependencyCooldownTests(unittest.TestCase):
 
         pins = pinned_uv_versions()
         self.assertGreater(len(pins), 1, pins)
+        self.assertIn("backend/Dockerfile", [path for path, _ in pins])
         for path, pinned in pins:
             self.assertGreaterEqual(version(pinned), version(required[1]), f"{path} pins uv {pinned}")
+
+    def test_a_uv_image_names_its_version(self) -> None:
+        # A floating tag such as python3.11-bookworm-slim can stop following uv releases.
+        for file in dockerfiles():
+            for tag in uv_image_tags(file.read_text()):
+                self.assertRegex(tag, r"^[\d.]+$", f"{file.relative_to(ROOT)} builds on uv:{tag}")
+        floating = "FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder"
+        self.assertEqual(uv_image_tags(floating), ["python3.11-bookworm-slim"])
+        self.assertEqual(uv_image_tags("COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/"), ["0.13.7"])
 
 
 if __name__ == "__main__":
