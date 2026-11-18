@@ -82,12 +82,13 @@ class ApiKeyMaintenanceService:
         ``errors`` and the rest goes on. An unreachable database or a lost
         connection fails the run.
 
-        The run never waits for a key another transaction holds: the key is
-        left as it is and counted in ``selected_unchanged`` with the keys
-        that stopped matching after selection. Later runs try it again and
-        change it when they select it, it still matches and it is free, so a
-        key held at every run can be put off indefinitely. A key selected but
-        left unchanged still takes a place in the selection's limit."""
+        The run never waits for a key another transaction holds: the
+        selection writing the key skips it, and counts it in
+        ``selected_unchanged`` with the keys that stopped matching after
+        selection. A later selection in the same run, or a later run, can
+        change it if it selects it, it still matches and it is free, so a key
+        held at every run can be put off indefinitely. A key selected but left
+        unchanged still takes a place in the selection's limit."""
         # Connect before the per-step error boundaries, so a database that
         # cannot be reached fails the job instead of becoming one error per step.
         await self.api_key_repo.session.connection()

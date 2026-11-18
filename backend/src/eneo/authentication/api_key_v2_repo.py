@@ -688,7 +688,7 @@ class ApiKeysV2Repository:
     ) -> Optional[ApiKeyV2InDB]:
         """Revoke ``key`` if it still matches ``condition``; None when no row
         changed, so a concurrent revocation or a new grace period stands, and
-        a key another transaction holds is left to a later run."""
+        a key another transaction holds is left as it is."""
         return await self._update_matching(
             condition, key=key, state=ApiKeyState.REVOKED.value, **values
         )
@@ -702,7 +702,8 @@ class ApiKeysV2Repository:
         # Take the row's lock under the same conditions as the update, skipping
         # the row when another transaction holds it: the job never waits for a
         # revocation, use or edit in progress, which may take the job's keys in
-        # another order. Such a key is left as it is (None) for a later run.
+        # another order. Such a key is left as it is (None) by this selection's
+        # write; a later selection in the same run, or a later run, can take it.
         # The conditions in the lock keep the job from locking a row that
         # already fails them in the statement's snapshot; a change committed
         # between that snapshot and the lock can still leave the row unchanged
