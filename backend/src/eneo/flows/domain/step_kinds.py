@@ -17,10 +17,11 @@ from enum import StrEnum
 from typing import Any, Final, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.flows.domain.contract_from_example import contract_from_example
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.long_material import LONG_MATERIAL_KEY, LongMaterialConfig
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -79,11 +80,11 @@ STEP_KIND_DESCRIPTIONS: Final[Mapping[FlowStepKind, str]] = {
 
 
 class StepKindUpload(BaseModel):
-    """An upload the run brings to the first step."""
+    """The first step's upload, in the words of its saved input_config.runtime_input."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    format: Literal["document", "file"] = Field(
+    input_format: Literal["document", "file"] = Field(
         description="document: a text document read as text; file: any file."
     )
     required: bool = Field(
@@ -93,6 +94,22 @@ class StepKindUpload(BaseModel):
             "form then carries the material)."
         ),
     )
+    enabled: Literal[True] = Field(
+        default=True,
+        description="Always true: an upload that is given is on.",
+    )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def _on_when_given(cls, value: object) -> object:
+        # A saved upload has enabled true, so true is taken and says nothing
+        # more. A step without an upload is one that is given no upload.
+        if value is not True:
+            raise ValueError(
+                "An upload that is given is on, so enabled takes only true: "
+                "leave upload out for a step without an upload."
+            )
+        return value
 
 
 class StepKindValues(BaseModel):
@@ -129,6 +146,13 @@ class StepKindValues(BaseModel):
         description=(
             "The run brings an upload the step reads; the save refuses it on any "
             "step but the first."
+        ),
+    )
+    long_material: LongMaterialConfig | None = Field(
+        default=None,
+        description=(
+            "How the step reads input larger than its model's window, as "
+            "input_config.long_material is saved."
         ),
     )
     format: Literal["docx", "pdf"] | None = Field(
@@ -175,16 +199,42 @@ class StepKindValues(BaseModel):
         description="The tool: mcp_server_id, tool_id and arguments.",
     )
 
+    @field_validator("review", mode="before")
+    @classmethod
+    def _review_with_the_default_mode(cls, value: object) -> object:
+        """A review asked for without a mode ({}, true or {"enabled": true})
+        is the review a review step has. The saved step's own policy is left
+        as strict as it is: this is the kinds' reading of the value. Anything
+        else that names no mode is told the shape, never what was sent."""
+        if value is None or isinstance(value, FlowStepReviewPolicy):
+            return value
+        if value is True or value in ({}, {"enabled": True}):
+            return {"mode": "edit"}
+        if isinstance(value, Mapping) and "mode" in value:
+            return cast(object, value)
+        raise ValueError(
+            'review takes an object with a mode: {"mode": "edit"} lets the '
+            'reviewer edit the result, {"mode": "view"} only approve it. '
+            "Left out, an ai or structured step has no review."
+        )
+
 
 # The values each kind takes, those it cannot do without first.
 STEP_KIND_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
-    FlowStepKind.AI: ("instruction", "input_bindings", "review", "upload"),
+    FlowStepKind.AI: (
+        "instruction",
+        "input_bindings",
+        "review",
+        "upload",
+        "long_material",
+    ),
     FlowStepKind.STRUCTURED: (
         "instruction",
         "example",
         "input_bindings",
         "review",
         "upload",
+        "long_material",
     ),
     FlowStepKind.COMPOSE: ("input_bindings",),
     FlowStepKind.DOCUMENT: ("input_bindings", "format"),
@@ -282,15 +332,16 @@ def step_kind_configuration(
         configuration["input_type"] = FlowInputType.TEXT
     if (review := given("review")) is not None:
         configuration["review_policy"] = dump_flow_step_review_policy(review)
+    # An upload and long material are keys of one input_config: each is laid
+    # beside the other, and the save's rules judge what goes together.
+    input_config: FlowPersistedJsonObject = {}
     if (upload := given("upload")) is not None:
-        configuration["input_type"] = FlowInputType(upload.format)
-        configuration["input_config"] = {
-            "runtime_input": {
-                "enabled": True,
-                "required": upload.required,
-                "input_format": upload.format,
-            }
-        }
+        configuration["input_type"] = FlowInputType(upload.input_format)
+        input_config["runtime_input"] = upload.model_dump()
+    if (long_material := given("long_material")) is not None:
+        input_config[LONG_MATERIAL_KEY] = long_material.model_dump(mode="json")
+    if input_config:
+        configuration["input_config"] = input_config
     if (example := given("example")) is not None:
         text = example if isinstance(example, str) else json.dumps(example)
         configuration["output_contract"] = contract_from_example(text).contract

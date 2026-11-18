@@ -1337,7 +1337,14 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     assert "instruction" in values["properties"]
     # Its parts are inline, so the shape reads without references.
     upload = values["properties"]["upload"]["anyOf"][0]
-    assert upload["properties"]["format"]["enum"] == ["document", "file"]
+    # An upload is given in the words its saved configuration has.
+    assert set(upload["properties"]) == {"input_format", "required", "enabled"}
+    assert upload["properties"]["input_format"]["enum"] == ["document", "file"]
+    assert upload["properties"]["enabled"]["const"] is True
+    assert upload["required"] == ["input_format"]
+    # Long material is given as it is saved.
+    long_material = values["properties"]["long_material"]["anyOf"][0]
+    assert long_material["properties"]["mode"]["enum"] == ["digest"]
     assert "$ref" not in json.dumps(values)
     assert "runtime_input" not in (tool.description or "")
     assert "configuration" not in schema["properties"]
@@ -1375,7 +1382,7 @@ async def test_a_value_of_the_wrong_type_is_refused_with_its_field_and_what_it_t
     result, page = await _add(
         name="Läs bilaga",
         kind="ai",
-        values={"instruction": "Läs.", "upload": {"format": "MARKOR-5"}},
+        values={"instruction": "Läs.", "upload": {"input_format": "MARKOR-5"}},
     )
 
     assert result.isError is True
@@ -1386,10 +1393,119 @@ async def test_a_value_of_the_wrong_type_is_refused_with_its_field_and_what_it_t
     )
     # Where it was wrong and what that value takes, never what was sent.
     (error,) = page["errors"]
-    assert error["loc"] == ["upload", "format"]
+    assert error["loc"] == ["upload", "input_format"]
     assert error["type"] == "literal_error"
     assert "'document' or 'file'" in error["msg"]
     assert "MARKOR-5" not in result.content[0].text
+    save.assert_not_awaited()
+
+
+async def test_the_upload_a_saved_step_shows_is_the_upload_a_new_step_takes(
+    monkeypatch,
+):
+    save = _adding_chat(monkeypatch, [])
+
+    # The words of input_config.runtime_input, as the model reads them.
+    result, page = await _add(
+        name="Läs bilaga",
+        kind="ai",
+        values={
+            "instruction": "Läs.",
+            "upload": {"enabled": True, "required": True, "input_format": "document"},
+        },
+    )
+
+    assert result.isError is not True, page
+    (new_step,) = save.await_args.args[2].new_steps
+    assert new_step.configuration.input_type == "document"
+    assert new_step.configuration.input_config == {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "input_format": "document",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("upload", "told"),
+    [
+        (
+            {"input_format": "document", "enabled": False},
+            {
+                "loc": ["upload", "enabled"],
+                "msg": "leave upload out for a step without an upload",
+            },
+        ),
+        # The format has one name: the one the saved configuration has.
+        (
+            {"format": "document"},
+            {"loc": ["upload", "input_format"], "msg": "Field required"},
+        ),
+    ],
+    ids=["turned off", "another name"],
+)
+async def test_an_upload_of_another_shape_is_refused_unsaved_with_what_it_takes(
+    monkeypatch, upload, told
+):
+    save = _adding_chat(monkeypatch, [])
+
+    result, page = await _add(
+        name="Läs bilaga", kind="ai", values={"instruction": "Läs.", "upload": upload}
+    )
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert [
+        error
+        for error in page["errors"]
+        if error["loc"] == told["loc"] and told["msg"] in error["msg"]
+    ], page["errors"]
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "review", [{}, True, {"enabled": True}], ids=["empty", "true", "enabled"]
+)
+async def test_a_step_added_with_a_review_without_a_mode_gets_the_default_review(
+    monkeypatch, review
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Sammanfatta.", "review": review},
+    )
+
+    assert result.isError is not True, page
+    (new_step,) = save.await_args.args[2].new_steps
+    assert new_step.configuration.review_policy.mode == "edit"
+    assert json.loads(page["content"])["step"]["review"] is True
+
+
+async def test_a_review_given_as_text_is_refused_unsaved_with_the_shape_it_takes(
+    monkeypatch,
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Sammanfatta.", "review": "MARKOR-7"},
+    )
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    # Where it was wrong and the shape it takes, never what was sent.
+    (error,) = page["errors"]
+    assert error["loc"] == ["review"]
+    assert '{"mode": "edit"}' in error["msg"]
+    assert "MARKOR-7" not in result.content[0].text
     save.assert_not_awaited()
 
 
@@ -1485,6 +1601,101 @@ async def test_a_tool_that_is_not_closed_still_runs_through_the_servers_check(
 
     assert not refused, text
     save.assert_awaited_once()
+
+
+async def test_update_step_changes_the_assistant_alone(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta kort.")
+
+    # The server checks the arguments before the tool runs: a call that only
+    # gives the step a new instruction names no step fields.
+    refused, text = await _through_the_server(
+        "update_step",
+        expected_revision=4,
+        step_id=str(_DRAFT_IDS[1]),
+        assistant_changes={"prompt": {"text": "Sammanfatta kort."}},
+    )
+
+    assert not refused, text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert request.expected_revision == 4
+    assert request.step_edits == []
+    assert [(a.assistant_id, a.step_id) for a in request.assistants] == [
+        (_DRAFT_IDS[3], _DRAFT_IDS[1])
+    ]
+    assert json.loads(json.loads(text)["content"])["changes"] == [
+        {
+            "field": "assistant.prompt",
+            "before": "Sammanfatta.",
+            "after": "Sammanfatta kort.",
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"changes": {}},
+        {"changes": None},
+        {"assistant_changes": {}},
+        {"changes": {}, "assistant_changes": {}},
+    ],
+    ids=str,
+)
+async def test_update_step_refuses_a_call_that_changes_nothing(monkeypatch, arguments):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_step", expected_revision=4, step_id=str(_DRAFT_IDS[1]), **arguments
+    )
+
+    # As an edit of update_steps that names neither part.
+    assert refused, text
+    assert f"The edit of step {_DRAFT_IDS[1]} changes nothing." in text
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize("tool", ["update_step", "update_steps"])
+async def test_an_empty_assistant_change_beside_a_step_change_leaves_the_assistant(
+    monkeypatch, tool
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    edit = {"changes": {"user_description": "Steg 2"}, "assistant_changes": {}}
+    arguments = (
+        {"step_id": str(_DRAFT_IDS[1]), **edit}
+        if tool == "update_step"
+        else {"edits": [{"step_id": str(_DRAFT_IDS[1]), **edit}]}
+    )
+
+    refused, text = await _through_the_server(tool, expected_revision=4, **arguments)
+
+    # A shared assistant would otherwise get the step its own copy.
+    assert not refused, text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert [step_edit.step_id for step_edit in request.step_edits] == [_DRAFT_IDS[1]]
+    assert request.assistants == []
+
+
+async def test_update_step_refuses_an_argument_it_does_not_have_unsaved(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_step",
+        expected_revision=4,
+        step_id=str(_DRAFT_IDS[1]),
+        step_changes={"review_policy": {"mode": "MARKOR-4"}},
+        assistant_changes={"prompt": {"text": "Sammanfatta kort."}},
+    )
+
+    # Saving the assistant part alone would drop the step part unseen.
+    assert refused, text
+    assert "step_changes" in text
+    assert "MARKOR-4" not in text
+    save.assert_not_awaited()
+    (tool,) = [t for t in await flows.mcp.list_tools() if t.name == "update_step"]
+    assert tool.inputSchema["additionalProperties"] is False
 
 
 async def test_an_unknown_key_in_http_is_refused_without_its_value(monkeypatch):
@@ -2166,6 +2377,25 @@ async def test_update_steps_refuses_a_bad_batch_without_saving(
     save.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "edit", [{}, {"changes": {}}, {"assistant_changes": {}}], ids=str
+)
+async def test_an_edit_that_changes_nothing_refuses_the_whole_call(monkeypatch, edit):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_steps",
+        expected_revision=4,
+        edits=[{"step_id": str(_DRAFT_IDS[1]), **edit}],
+        settings={"description": "Ny beskrivning"},
+    )
+
+    # Everything is saved or nothing: the settings change is not saved either.
+    assert refused, text
+    assert f"The edit of step {_DRAFT_IDS[1]} changes nothing." in text
+    save.assert_not_awaited()
+
+
 async def test_update_steps_states_the_shape_of_an_edit_in_its_schema():
     (tool,) = [t for t in await flows.mcp.list_tools() if t.name == "update_steps"]
     edit = tool.inputSchema["properties"]["edits"]["items"]
@@ -2833,6 +3063,26 @@ def test_each_configuration_example_is_saved_and_published():
         assert all("HTTP_MISSING_AUTH" in str(refusal) for refusal in publish), publish
 
 
+def test_an_example_shown_as_a_value_of_add_step_is_a_value_it_takes():
+    from eneo.flows.domain.step_kinds import (
+        FlowStepKind,
+        StepKindValues,
+        check_step_kind_values,
+    )
+
+    examples = flow_authoring_chat.CONFIGURATION_EXAMPLES
+
+    values = StepKindValues.model_validate(
+        {
+            "instruction": "Läs.",
+            "upload": examples["runtime_input"],
+            "long_material": examples["long_material"],
+        }
+    )
+
+    check_step_kind_values(FlowStepKind.AI, values)
+
+
 @pytest.mark.parametrize(
     ("name", "broken"),
     [
@@ -3088,6 +3338,12 @@ async def test_read_step_kinds_says_which_kinds_may_stand_first_and_why_not(
     assert review["review"] is True
     assert kinds["structured"]["needs"] == ["instruction", "example"]
     assert "upload" in kinds["structured"]["may_take"]
+    # Long material is a value of the kinds whose model reads the input.
+    assert [
+        kind
+        for kind, item in kinds.items()
+        if "long_material" in item.get("may_take", ())
+    ] == ["ai", "structured"]
     # Allowed here is not saved: the space's checks come with the save.
     assert "checked when the step is saved" in answer["note"]
 

@@ -196,8 +196,12 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     assert "A new Word step takes the flow's only template" in instructions
     assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
-    # An upload is chosen by its value, never by raw fields.
-    assert "A first step that takes an upload says so with upload" in instructions
+    # An upload is chosen by its value, never by raw fields. The value has
+    # the words of the saved configuration, so one example shows both.
+    assert (
+        "A first step that takes an upload says so with upload, for example "
+        + json.dumps(CONFIGURATION_EXAMPLES["runtime_input"])
+    ) in instructions
     assert "When the flow cannot run without the upload it is required" in (
         instructions
     )
@@ -208,13 +212,17 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
         for sentence in instructions.split(". ")
         if "runtime_input" in sentence
     )
-    assert "A first step that is already saved gets an upload with update_step" in (
-        instructions
-    )
     assert (
-        "can set, with update_step once the step is added, "
-        "input_config.long_material" in " ".join(instructions.split())
+        "A saved first step gets the same value with update_step as "
+        "input_config.runtime_input" in instructions
     )
+    # Long material is a new step's value too, so the upload it is added with
+    # is not replaced by a second call; the raw field is a saved step's.
+    assert (
+        'gets long_material {"mode": "digest"} in add_step (on a saved step: '
+        "input_config.long_material)" in instructions
+    )
+    assert "once the step is added" not in instructions
     assert "in add_step, the value bindings" in " ".join(instructions.split())
 
 
@@ -351,13 +359,39 @@ def test_the_instructions_show_the_expected_result_without_doing_the_work() -> N
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "say in a few lines what its result will look like" in instructions
+    assert (
+        "Derive it from the steps' results and contracts as saved, and mark what "
+        "is not saved yet as a proposal." in instructions
+    )
     assert "mark what is not saved yet as a proposal" in instructions
     assert "Use placeholders for content" in instructions
-    assert "Describing the shape of the result this way is part of building" in (
-        instructions
-    )
+    assert "Describing the result's shape this way is always allowed" in instructions
     assert "filling it with content is doing the work the flow is for" in instructions
     assert "Explaining a run the person asks about" in instructions
+
+
+def test_the_instructions_describe_the_result_after_the_build_in_the_same_answer() -> (
+    None
+):
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    # The build comes first: a description in its place ends the turn with
+    # nothing built.
+    assert (
+        "After building a flow or changing what it delivers, and in the same "
+        "answer, say in a few lines what its result will look like" in instructions
+    )
+    assert "Before building a flow" not in instructions
+    # Where nothing can be saved, the result is described with the change the
+    # chat would make.
+    assert (
+        'In "Fråga" or on a published flow, say it with what you would change.'
+        in instructions
+    )
+    # A question that shapes the flow is still asked before the build, and
+    # outside edit mode the steps are still described.
+    assert "ask it before you build, not between two steps" in instructions
+    assert "When edit mode is off, describe the steps you would build" in instructions
 
 
 def test_the_instructions_carry_a_change_to_the_steps_that_read_it() -> None:
@@ -510,7 +544,7 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
 
     assert "they reach this flow only" in instructions
     assert "follow next_offset until it is null" in instructions
-    assert 'input_config.long_material to {"mode": "digest"}' in instructions
+    assert 'long_material {"mode": "digest"} in add_step' in instructions
     assert "partial coverage fails the step unless it has a review" in instructions
     assert "A change to input_config or output_config replaces it whole" in (
         instructions
