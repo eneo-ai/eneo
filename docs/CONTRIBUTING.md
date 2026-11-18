@@ -66,6 +66,23 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+**Ports on your machine**
+
+Docker publishes the dev servers on your machine's loopback address: the web
+app on 3000, the backend on 8123 and the React beta on 3101. A container
+created before this was introduced publishes nothing until you rebuild it
+(**Dev Containers: Rebuild Container**). When something else on your machine
+already uses one of the ports, create `.devcontainer/.env` with other host
+ports, rebuild the container, and point `frontend/apps/web/.env` at the new
+backend port:
+
+```dotenv
+# .devcontainer/.env
+ENEO_WEB_PORT=3100
+ENEO_API_PORT=8223
+ENEO_WEB_NEXT_PORT=3201
+```
+
 **Browser calls from the dev server**
 
 The web app on `http://localhost:3000` calls the backend on
