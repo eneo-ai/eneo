@@ -2382,18 +2382,39 @@ async def test_the_overview_of_a_flow_without_templates_does_not_mention_them(
     assert "word_template_count" not in content
 
 
+def _fills_a_template(public, template_id: str) -> None:
+    """Makes the example flow's second step a Word step that fills the template."""
+    from eneo.flows.enums import FlowOutputMode
+
+    public.steps[1] = public.steps[1].model_copy(
+        update={
+            "output_mode": FlowOutputMode.TEMPLATE_FILL,
+            "output_config": {"template_asset_id": template_id, "bindings": {}},
+        }
+    )
+
+
 async def test_a_chat_that_only_reads_is_not_shown_the_flows_templates(monkeypatch):
     # The editor lists a flow's templates for those who may edit it.
-    _reading_chat(monkeypatch, templates=_many_templates(11))
+    templates = _many_templates(11)
+    public = _reading_chat(monkeypatch, templates=templates)
+    _fills_a_template(public, templates[0][0])
 
     page, content = await _read()
 
+    # Neither the list nor a file name, the step's own template included.
     assert "word_templates" not in content
+    assert content["steps"][1]["word_template"] == {
+        "id": templates[0][0],
+        "name": None,
+    }
     assert "Mall " not in page["content"]
 
 
 async def test_a_chat_left_in_edit_mode_without_edit_access_still_reads(monkeypatch):
-    _reading_chat(monkeypatch, templates=_many_templates(11), editing=True)
+    templates = _many_templates(11)
+    public = _reading_chat(monkeypatch, templates=templates, editing=True)
+    _fills_a_template(public, templates[0][0])
     monkeypatch.setattr(
         flow_authoring_chat,
         "require_authoring_edit",
@@ -2402,9 +2423,11 @@ async def test_a_chat_left_in_edit_mode_without_edit_access_still_reads(monkeypa
 
     page, content = await _read()
 
-    # The overview is read as before, without the flow's templates.
+    # The overview is read as before, without the flow's templates or a
+    # file name.
     assert len(content["steps"]) == 2
     assert "word_templates" not in content
+    assert content["steps"][1]["word_template"]["name"] is None
     assert "Mall " not in page["content"]
 
 
