@@ -1115,10 +1115,11 @@ async def update_step(
     ctx: Context,
     expected_revision: int,
     step_id: UUID,
-    changes: dict[str, Any],
+    changes: dict[str, Any] | None = None,
     assistant_changes: dict[str, Any] | None = None,
 ) -> CallToolResult:
-    """Patch one saved step and optionally its assistant in one revision. Use the flow's own
+    """Patch one saved step (changes), its assistant (assistant_changes) or both
+    in one revision. Use the flow's own
     field names; input_config and output_config are each replaced whole (long material:
     input_config.long_material), except that a Word step keeps its template when
     output_config leaves template_asset_id out: only output_config null removes
@@ -1232,7 +1233,8 @@ def _change_result(
 
 class _StepEdit:
     """One step's part of an editor update, checked as update_step checks
-    it: only configuration fields change, and no credential is sent or
+    it: it changes the step, its assistant or both, only configuration
+    fields change, and no credential is sent or
     retargeted. ``fields`` is what the edit changes, each with its value
     before and after, for the model; ``card_fields`` the same for the
     chat's change card, which keeps more of each value."""
@@ -1298,6 +1300,8 @@ async def _step_edit(
 
     step_id = step.id
     changes = changes or {}
+    if not changes and assistant_changes is None:
+        raise BadRequestException(f"The edit of step {step_id} changes nothing.")
     if set(changes) - (
         set(FlowStepUpdateRequest.model_fields) - {"id", "assistant_id", "step_order"}
     ):
@@ -1418,10 +1422,6 @@ async def update_steps(
                 raise BadRequestException("Each edit needs a step_id.") from None
             if step_id in edited:
                 raise BadRequestException("A step appears once per call.")
-            if not edit.get("changes") and edit.get("assistant_changes") is None:
-                raise BadRequestException(
-                    f"The edit of step {step_id} changes nothing."
-                )
             step = _saved_step(flow, step_id)
             before = await _assistant_before(
                 container, request, chat.flow_id, step, edit.get("assistant_changes")

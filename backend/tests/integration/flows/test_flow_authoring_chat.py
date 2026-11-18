@@ -763,12 +763,12 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
     revision = sharing.json()["draft_revision"]
     ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
 
+    # Only the instruction changes: the call names no step fields.
     result = await flows.update_step(
         ctx,
         revision,
         UUID(check["id"]),
-        {},
-        {"prompt": {"text": "Only for Check."}},
+        assistant_changes={"prompt": {"text": "Only for Check."}},
     )
 
     assert not result.isError, result.content[0].text
@@ -784,6 +784,65 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
     assert await _prompt(client, base, headers, current["steps"][1]) == (
         "Only for Check."
     )
+
+
+async def test_an_instruction_changed_alone_is_one_revision_and_a_refusal_leaves_no_trace(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Collect", "Collect the facts.", input_source="flow_input")
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    (collect,) = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    # Neither part is given: refused as update_steps refuses such an edit.
+    nothing = await flows.update_step(ctx, revision, UUID(collect["id"]))
+    assert nothing.isError
+    assert "changes nothing" in nothing.content[0].text
+    # The draft was read before another change: refused, with nothing saved.
+    stale = await flows.update_step(
+        ctx,
+        revision - 1,
+        UUID(collect["id"]),
+        assistant_changes={"prompt": {"text": "Never saved."}},
+    )
+    assert stale.isError
+    assert _page(stale)["code"] == "stale_revision"
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert await _prompt(client, base, headers, collect) == "Collect the facts."
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+    saved = await flows.update_step(
+        ctx,
+        revision,
+        UUID(collect["id"]),
+        assistant_changes={"prompt": {"text": "Collect the dates."}},
+    )
+
+    assert not saved.isError, saved.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    # The step's own assistant is changed where it is: no copy is made.
+    assert current["steps"][0]["assistant_id"] == collect["assistant_id"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert await _prompt(client, base, headers, collect) == "Collect the dates."
+    assert audited != []
 
 
 # --- The chat's model -------------------------------------------------------

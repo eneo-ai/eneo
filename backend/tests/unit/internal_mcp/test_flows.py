@@ -1603,6 +1603,49 @@ async def test_a_tool_that_is_not_closed_still_runs_through_the_servers_check(
     save.assert_awaited_once()
 
 
+async def test_update_step_changes_the_assistant_alone(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta kort.")
+
+    # The server checks the arguments before the tool runs: a call that only
+    # gives the step a new instruction names no step fields.
+    refused, text = await _through_the_server(
+        "update_step",
+        expected_revision=4,
+        step_id=str(_DRAFT_IDS[1]),
+        assistant_changes={"prompt": {"text": "Sammanfatta kort."}},
+    )
+
+    assert not refused, text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert request.expected_revision == 4
+    assert request.step_edits == []
+    assert [(a.assistant_id, a.step_id) for a in request.assistants] == [
+        (_DRAFT_IDS[3], _DRAFT_IDS[1])
+    ]
+    assert json.loads(json.loads(text)["content"])["changes"] == [
+        {
+            "field": "assistant.prompt",
+            "before": "Sammanfatta.",
+            "after": "Sammanfatta kort.",
+        }
+    ]
+
+
+@pytest.mark.parametrize("arguments", [{}, {"changes": {}}, {"changes": None}], ids=str)
+async def test_update_step_refuses_a_call_that_changes_nothing(monkeypatch, arguments):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_step", expected_revision=4, step_id=str(_DRAFT_IDS[1]), **arguments
+    )
+
+    # As an edit of update_steps that names neither part.
+    assert refused, text
+    assert f"The edit of step {_DRAFT_IDS[1]} changes nothing." in text
+    save.assert_not_awaited()
+
+
 async def test_an_unknown_key_in_http_is_refused_without_its_value(monkeypatch):
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
