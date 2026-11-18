@@ -1632,7 +1632,17 @@ async def test_update_step_changes_the_assistant_alone(monkeypatch):
     ]
 
 
-@pytest.mark.parametrize("arguments", [{}, {"changes": {}}, {"changes": None}], ids=str)
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {},
+        {"changes": {}},
+        {"changes": None},
+        {"assistant_changes": {}},
+        {"changes": {}, "assistant_changes": {}},
+    ],
+    ids=str,
+)
 async def test_update_step_refuses_a_call_that_changes_nothing(monkeypatch, arguments):
     save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
 
@@ -1644,6 +1654,48 @@ async def test_update_step_refuses_a_call_that_changes_nothing(monkeypatch, argu
     assert refused, text
     assert f"The edit of step {_DRAFT_IDS[1]} changes nothing." in text
     save.assert_not_awaited()
+
+
+@pytest.mark.parametrize("tool", ["update_step", "update_steps"])
+async def test_an_empty_assistant_change_beside_a_step_change_leaves_the_assistant(
+    monkeypatch, tool
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+    edit = {"changes": {"user_description": "Steg 2"}, "assistant_changes": {}}
+    arguments = (
+        {"step_id": str(_DRAFT_IDS[1]), **edit}
+        if tool == "update_step"
+        else {"edits": [{"step_id": str(_DRAFT_IDS[1]), **edit}]}
+    )
+
+    refused, text = await _through_the_server(tool, expected_revision=4, **arguments)
+
+    # A shared assistant would otherwise get the step its own copy.
+    assert not refused, text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert [step_edit.step_id for step_edit in request.step_edits] == [_DRAFT_IDS[1]]
+    assert request.assistants == []
+
+
+async def test_update_step_refuses_an_argument_it_does_not_have_unsaved(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_step",
+        expected_revision=4,
+        step_id=str(_DRAFT_IDS[1]),
+        step_changes={"review_policy": {"mode": "MARKOR-4"}},
+        assistant_changes={"prompt": {"text": "Sammanfatta kort."}},
+    )
+
+    # Saving the assistant part alone would drop the step part unseen.
+    assert refused, text
+    assert "step_changes" in text
+    assert "MARKOR-4" not in text
+    save.assert_not_awaited()
+    (tool,) = [t for t in await flows.mcp.list_tools() if t.name == "update_step"]
+    assert tool.inputSchema["additionalProperties"] is False
 
 
 async def test_an_unknown_key_in_http_is_refused_without_its_value(monkeypatch):
@@ -2322,6 +2374,25 @@ async def test_update_steps_refuses_a_bad_batch_without_saving(
     )
 
     assert result.isError is True
+    save.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "edit", [{}, {"changes": {}}, {"assistant_changes": {}}], ids=str
+)
+async def test_an_edit_that_changes_nothing_refuses_the_whole_call(monkeypatch, edit):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    refused, text = await _through_the_server(
+        "update_steps",
+        expected_revision=4,
+        edits=[{"step_id": str(_DRAFT_IDS[1]), **edit}],
+        settings={"description": "Ny beskrivning"},
+    )
+
+    # Everything is saved or nothing: the settings change is not saved either.
+    assert refused, text
+    assert f"The edit of step {_DRAFT_IDS[1]} changes nothing." in text
     save.assert_not_awaited()
 
 
