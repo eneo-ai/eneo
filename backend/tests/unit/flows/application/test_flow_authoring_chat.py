@@ -359,11 +359,9 @@ def test_the_instructions_show_the_expected_result_without_doing_the_work() -> N
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "say in a few lines what its result will look like" in instructions
-    assert "mark what is not saved yet as a proposal" in instructions
+    assert "Derive it from the steps' results and contracts as saved." in instructions
     assert "Use placeholders for content" in instructions
-    assert "Describing the shape of the result this way is part of building" in (
-        instructions
-    )
+    assert "Describing the result's shape this way is always allowed" in instructions
     assert "filling it with content is doing the work the flow is for" in instructions
     assert "Explaining a run the person asks about" in instructions
 
@@ -373,13 +371,20 @@ def test_the_instructions_describe_the_result_after_the_build_in_the_same_answer
 ):
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
-    # The build comes first: a description in its place ends the turn with
-    # nothing built.
+    # In edit mode the build comes first: a description in its place ends the
+    # turn with nothing built.
     assert (
-        "After building a flow or changing what it delivers, and in the same "
-        "answer, say in a few lines what its result will look like" in instructions
+        "In edit mode, after building a flow or changing what it delivers, and in "
+        "the same answer, say in a few lines what its result will look like"
+        in instructions
     )
     assert "Before building a flow" not in instructions
+    # With edit mode off nothing is built, so the result is described with the
+    # steps that are proposed.
+    assert (
+        "When edit mode is off, say it with the steps you would build, as a "
+        "proposal." in instructions
+    )
     # A question that shapes the flow is still asked before the build, and
     # outside edit mode the steps are still described.
     assert "ask it before you build, not between two steps" in instructions

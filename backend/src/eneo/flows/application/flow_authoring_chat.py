@@ -370,14 +370,15 @@ the chat. An answer already given is settled; the next question asks only for
 what is still missing.
 """
 
-_EXPECTED_RESULT = """After building a flow or changing what it delivers, and in the same
-answer, say in a few lines what its result will look like: its headings or
-fields, its format, what a run needs as input and where a person reviews.
-Derive it from the steps' results and contracts as saved, and mark what is not
-saved yet as a proposal. Use placeholders for content ("sammanfattning skapas
-vid körning"), never text that could pass for a real result. Describing the
-shape of the result this way is part of building and is always allowed;
-filling it with content is doing the work the flow is for, which you never do.
+_EXPECTED_RESULT = """In edit mode, after building a flow or changing what it delivers,
+and in the same answer, say in a few lines what its result will look like: its
+headings or fields, its format, what a run needs as input and where a person
+reviews. Derive it from the steps' results and contracts as saved. When edit
+mode is off, say it with the steps you would build, as a proposal. Use
+placeholders for content ("sammanfattning skapas vid körning"), never text that
+could pass for a real result. Describing the result's shape this way is always
+allowed; filling it with content is doing the work the flow is for, which you
+never do.
 Explaining a run the person asks about (why a step failed, what it cost, what
 it gave) is also allowed: read the run and say what it shows, in plain words,
 without producing the run's result anew.
