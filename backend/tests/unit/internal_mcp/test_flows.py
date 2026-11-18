@@ -1109,14 +1109,24 @@ async def test_an_added_step_gets_the_instruction_as_its_prompt(
     assert (given.text if given is not None else None) == prompt
 
 
+@pytest.mark.parametrize("limit", [None, 4096], ids=["default limit", "small limit"])
 @pytest.mark.parametrize(
     ("fields", "described"),
     [(400, "Step 1"), (1, "Brev " * 1000), (400, '"' * 5000)],
     ids=["many fields", "a long name before it", "both"],
 )
-async def test_an_addition_answers_whole_in_one_page(monkeypatch, fields, described):
+async def test_an_addition_answers_whole_in_one_page(
+    monkeypatch, fields, described, limit
+):
+    from eneo.internal_mcp import foundation
     from tests.unit.flows.application.test_flow_step_kinds import _step
 
+    if limit is not None:
+        settings = foundation.get_settings().model_copy(
+            update={"mcp_tool_output_max_chars": limit}
+        )
+        monkeypatch.setattr(foundation, "get_settings", lambda: settings)
+        assert flows._page_size() == 512
     first = _step(1, user_description=described)
     save = _adding_chat(monkeypatch, [first])
     example = {f"falt_med_ett_langt_namn_{number:03}": "x" for number in range(fields)}
@@ -1141,6 +1151,17 @@ async def test_an_addition_answers_whole_in_one_page(monkeypatch, fields, descri
     (handed,) = content["hand_over"]
     assert (handed["step_id"], handed["step_order"]) == (str(first.id), 2)
     assert handed["changes"] == {"input_source": "previous_step"}
+    if limit is not None:
+        # What is only shown gives way to a small page; read_flow has it.
+        assert page["total_chars"] <= 512
+        assert "read_flow steps=[1]" in content["in_full"]
+        if '"' in described:
+            # Neither the name, too long once escaped, nor the step in short.
+            assert "name" not in handed and "step" not in content
+        else:
+            assert described.startswith(handed["name"].removesuffix("…"))
+            assert content["step"]["step_order"] == 1
+        return
     assert len(handed["name"]) <= 81
     assert described.startswith(handed["name"].removesuffix("…"))
     step = content["step"]

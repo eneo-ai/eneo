@@ -1750,23 +1750,40 @@ def _addition_receipt(
 ) -> dict[str, Any]:
     """What add_step answers with, whole in one page: a change cannot be read
     on from an offset. That the step was saved, its id and each step it took
-    over from (id, order, changes and the name cut short; an addition hands
-    over from one step at most) are always there. The step's details are as
-    the overview gives them when the answer fits a page; otherwise the step
-    in short, of fixed size, and where to read it in full."""
+    over from (id, order and changes, all of fixed size; an addition hands
+    over from one step at most) are always there. What is only shown gives
+    way until the answer fits a page: the step's details as the overview
+    gives them and the names of the steps it took over from, cut short; else
+    the step in short, of fixed size, and where to read it in full; else, on
+    a page too small for that, neither the step in short nor the names."""
     receipt = {
         "saved": True,
         "step_id": str(added.id),
         "step": details,
         "hand_over": hand_over,
     }
-    if len(_serialized(receipt)) <= _page_size():
-        return receipt
-    return {
+    short = {
         **receipt,
         "step": {key: details[key] for key in _RECEIPT_STEP_FIELDS if key in details},
         "in_full": f"read_flow steps=[{added.step_order}] gives the step in full.",
     }
+    bare = {
+        "saved": True,
+        "step_id": str(added.id),
+        "hand_over": [
+            {key: value for key, value in step.items() if key != "name"}
+            for step in hand_over
+        ],
+        "in_full": short["in_full"],
+    }
+    return next(
+        (
+            shape
+            for shape in (receipt, short)
+            if len(_serialized(shape)) <= _page_size()
+        ),
+        bare,
+    )
 
 
 _STEP_KINDS_NOTE = (
