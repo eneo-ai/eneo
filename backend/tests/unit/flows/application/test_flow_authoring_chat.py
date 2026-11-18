@@ -368,6 +368,24 @@ def test_the_instructions_show_the_expected_result_without_doing_the_work() -> N
     assert "Explaining a run the person asks about" in instructions
 
 
+def test_the_instructions_describe_the_result_after_the_build_in_the_same_answer() -> (
+    None
+):
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    # The build comes first: a description in its place ends the turn with
+    # nothing built.
+    assert (
+        "After building a flow or changing what it delivers, and in the same "
+        "answer, say in a few lines what its result will look like" in instructions
+    )
+    assert "Before building a flow" not in instructions
+    # A question that shapes the flow is still asked before the build, and
+    # outside edit mode the steps are still described.
+    assert "ask it before you build, not between two steps" in instructions
+    assert "When edit mode is off, describe the steps you would build" in instructions
+
+
 def test_the_instructions_carry_a_change_to_the_steps_that_read_it() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 

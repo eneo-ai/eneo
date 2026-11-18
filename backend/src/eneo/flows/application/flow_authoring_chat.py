@@ -370,9 +370,9 @@ the chat. An answer already given is settled; the next question asks only for
 what is still missing.
 """
 
-_EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
-flow delivers, say in a few lines what its result will look like: its headings
-or fields, its format, what a run needs as input and where a person reviews.
+_EXPECTED_RESULT = """After building a flow or changing what it delivers, and in the same
+answer, say in a few lines what its result will look like: its headings or
+fields, its format, what a run needs as input and where a person reviews.
 Derive it from the steps' results and contracts as saved, and mark what is not
 saved yet as a proposal. Use placeholders for content ("sammanfattning skapas
 vid körning"), never text that could pass for a real result. Describing the
