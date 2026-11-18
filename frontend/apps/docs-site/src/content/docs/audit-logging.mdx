@@ -4,8 +4,8 @@ The audit log records who did what, and when, in each tenant. This page explains
 
 **In short**
 
-- Events are written through `AuditService` (`log_async` is preferred and queues an ARQ job) and stored in the PostgreSQL table `audit_logs`.
-- Logging is switched on or off per tenant with the `audit_logging_enabled` feature flag, with category and action overrides. Changes apply to new events only. Required Flow events are always logged.
+- Events are written through `AuditService` (`log_async` is preferred and queues an ARQ job) and stored in the PostgreSQL table `audit_logs`. Run terminal and review transitions are recorded through the Flow audit outbox ([details](#high-level-architecture)).
+- Logging is switched on or off per tenant with the `audit_logging_enabled` feature flag, with category and action overrides. Changes apply to new events only. Required Flow events bypass these controls.
 - Reading the log requires an access justification session (`POST /api/v1/audit/access-session`). A session lasts one hour, and a user can open at most five per hour.
 - Retention is set per tenant; the default is 365 days (range 1–2555), and a daily job deletes older entries.
 - A synchronous export stops at 50,000 records (at most 100,000 with `max_records`) and marks a cut-off result with the `X-Records-Truncated` header. For more, request an async export; its files are kept for 24 hours.

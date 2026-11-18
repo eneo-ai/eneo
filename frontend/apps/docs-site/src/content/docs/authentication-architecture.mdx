@@ -9,7 +9,7 @@ import { Callout, Tabs, Steps } from 'nextra/components'
 - Sign-in uses the OAuth 2.0 Authorization Code Flow through `/api/v1/auth/initiate` and `/api/v1/auth/callback`. The `state` is a JWT that the server signs (HS256) and that expires after 600 seconds (`oidc_state_ttl_seconds`).
 - An Eneo session needs `token_version` `2`, and Eneo finds the account by both `user_id` and `tenant_id`. After this upgrade every user signs in again; update all API instances and workers together.
 - A password set for another account normally has to be replaced at the account's next password sign-in ([exceptions](#local-password-lifecycle)). Password expiry (`max_age_days`) is off by default.
-- No account is created at sign-in by default (`tenant.provisioning: false`). When it is on, the tenant needs a domain allowlist, the email domain must match and the identity provider must send `email_verified: true`.
+- No account is created at sign-in by default (`tenant.provisioning: false`). When it is on, the tenant needs a domain allowlist, the email domain must match and the token must verify the address under the [claim order](#claims-validated).
 - `ENCRYPTION_KEY` is required when `FEDERATION_ENABLED=true`. Back it up: without it, every tenant's identity provider must be registered again.
 
 <Callout type="info">
@@ -535,7 +535,7 @@ Global OIDC uses `OIDC_ALLOWED_DOMAINS` (JSON array, default `[]`); per-tenant f
 | Existing active member of the tenant | Sign in, subject to any configured domain restriction and to [account binding](/guides/oidc-federation#account-binding) (`403` `identity_conflict` otherwise). No new email-verification requirement is applied. |
 | Existing account in another tenant, or inactive/removed account | `403`; no account creation or reactivation. |
 | No account, `tenant.provisioning: false` (default) | `403`; provision through SCIM or administration. |
-| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and the ID token's `email_verified: true` for the selected address. |
+| No account, `tenant.provisioning: true` | Creation requires a non-empty domain allowlist, a matching domain and an ID token that verifies the selected address under the [claim order](#claims-validated). |
 
 `FederatedIdentity.from_claims` receives validated token claims and preserves only a valid email address and its verification status. OIDC defines `email_verified` as a boolean; as a compatibility deviation for IdPs that can only emit text claims, the strings `"true"` (case-insensitive) and `"1"` and the number `1` also count as verification. Microsoft Entra ID omits `email_verified` for organisational accounts and can emit `xms_edov` (email domain owner verified) instead; when the token carries no `email_verified` at all, a positive `xms_edov`, in the same forms, verifies the standard `email` instead, because the mandatory domain allowlist already restricts which domains may be admitted. `xms_edov` is only that fallback: any `email_verified` value the IdP does send keeps its own verdict, so a negative or unrecognised value is never overridden, and an explicit boolean `false` still rejects the login. Missing claims and all other values do not verify. When email is selected through a custom claims mapping, neither claim authorizes JIT unless the selected address equals the standard `email` claim.
 

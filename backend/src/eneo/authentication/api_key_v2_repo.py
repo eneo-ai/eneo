@@ -144,7 +144,8 @@ class ApiKeysV2Repository:
         """Return the key; with ``for_update`` the row stays locked until the
         surrounding transaction completes. Another transaction that needs a
         conflicting lock on the row, as every change to the row does, waits
-        and then reads the key as this transaction left it.
+        and then reads the key as this transaction left it, except the two
+        writers below that skip a held key.
 
         ``"no_key"`` takes FOR NO KEY UPDATE, for a change that keeps the row
         and does not write its key columns (``id``, ``key_hash``,
@@ -155,7 +156,11 @@ class ApiKeysV2Repository:
         to the key between the read and the delete. Neither lock keeps other
         transactions from reading the key, so a request that signed in with
         the key before a change can still finish after it. Recording a use
-        (``last_used_at``) writes the row and waits for either lock.
+        (``update_last_used_at``) skips a key another transaction holds, so the
+        request goes on and the key keeps its earlier time; a change that comes
+        after a recorded use waits until that request's transaction ends. The
+        writes of ``run_daily_maintenance`` (``_update_matching``) skip a held
+        key the same way.
         """
         query = (
             sa.select(self.table)

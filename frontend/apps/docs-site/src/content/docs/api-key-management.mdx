@@ -8,9 +8,9 @@ import { Callout } from "nextra/components";
 
 - There are two key types. `sk_` keys are for servers: up to `admin` permission, with an optional IP allowlist. `pk_` keys are for browsers: up to `read`, and they need at least one allowed origin.
 - A user key stops working when its owner is deactivated or loses access. A service key (`ownership: "service"`) does not depend on any user; only tenant administrators create them, and write or admin service keys need an IP allowlist or an expiry date.
-- Service keys cannot create user-owned resources or upload and delete files, and no API key can manage API keys; that needs a session login.
+- Service keys cannot create user-owned resources or upload and delete files through the general file API ([published-Flow runtime routes are the exception](#what-service-keys-cannot-do)), and no API key can manage API keys; that needs a session login.
 - The secret is shown once. If it is lost, rotate the key; the old key keeps working for `rotation_grace_hours` (24 by default).
-- Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days`.
+- Tenant administrators set limits with `require_expiration`, `max_expiration_days`, `max_rate_limit_override` and `auto_expire_unused_days` ([not applied yet](#nightly-maintenance)).
 
 ---
 
