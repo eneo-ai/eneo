@@ -1,8 +1,53 @@
+import { Token } from "@astryxdesign/core/Token";
 import { createContext, useContext, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** What the page puts at the end of the heading row of the settings group inside. */
 const GroupActionContext = createContext<ReactNode>(null);
+
+/**
+ * Rows marked for a while, by their key (`SettingsRow`'s `markKey`, else its
+ * `htmlFor`, else its `id`), and what the mark says ("Ändrad från chatten").
+ */
+export type SettingsRowMarks = { rows: ReadonlySet<string>; label: string };
+
+const MarksContext = createContext<SettingsRowMarks | null>(null);
+
+/**
+ * Marks the rows below that `marks` names: a quiet tint and the mark's
+ * label beside the row's title, never colour alone. A row that is not a
+ * `SettingsRow` reads its mark with `useSettingsMark`.
+ */
+export function SettingsMarks({
+  marks,
+  children
+}: {
+  marks: SettingsRowMarks | null;
+  children: ReactNode;
+}) {
+  return <MarksContext.Provider value={marks}>{children}</MarksContext.Provider>;
+}
+
+/** The mark's label while the row `key` names is marked; null otherwise. */
+export function useSettingsMark(key: string | undefined): string | null {
+  const marks = useContext(MarksContext);
+  return key !== undefined && marks?.rows.has(key) ? marks.label : null;
+}
+
+/** A marked row's tint: the margin it takes is given back as padding, so nothing moves. */
+export const MARKED_ROW_CLASS = "rounded-ax-element bg-ax-selected -mx-3 -my-2 px-3 py-2";
+
+/** A marked row's label, beside its title. */
+export function SettingsMarkLabel({ label }: { label: string }) {
+  return (
+    <Token
+      size="sm"
+      color="blue"
+      label={label}
+      className="motion-safe:animate-in motion-safe:fade-in"
+    />
+  );
+}
 
 /**
  * Puts `action` at the end of the heading row of the settings group inside,
@@ -105,6 +150,7 @@ export function SettingsGroup({
  * or custom widgets and the title labels the control region via `role="group"`.
  * `id` gives a save error a direct link to this row.
  * Omit `title` entirely for a row whose label would just repeat the card header.
+ * Under `SettingsMarks` a row is marked by `markKey`, else `htmlFor`, else `id`.
  */
 export function SettingsRow({
   id,
@@ -113,6 +159,7 @@ export function SettingsRow({
   description,
   htmlFor,
   inline,
+  markKey,
   children
 }: {
   id?: string;
@@ -121,26 +168,39 @@ export function SettingsRow({
   description?: string;
   htmlFor?: string;
   inline?: boolean;
+  /** The row's key among `SettingsMarks`, for a row without `htmlFor` or `id`. */
+  markKey?: string;
   children: React.ReactNode;
 }) {
   const reactId = useId();
   const titleId = `${reactId}-title`;
   const descriptionId = description ? `${reactId}-desc` : undefined;
-  const hasLabel = Boolean(title || description);
+  const mark = useSettingsMark(markKey ?? htmlFor ?? id);
+  const hasLabel = Boolean(title || description || mark);
+
+  const titleNode = title ? (
+    htmlFor ? (
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {title}
+      </label>
+    ) : (
+      <span id={titleId} className="text-sm font-medium">
+        {title}
+      </span>
+    )
+  ) : null;
 
   const label = hasLabel ? (
     <div className="flex flex-col gap-0.5">
-      {title ? (
-        htmlFor ? (
-          <label htmlFor={htmlFor} className="text-sm font-medium">
-            {title}
-          </label>
-        ) : (
-          <span id={titleId} className="text-sm font-medium">
-            {title}
-          </span>
-        )
-      ) : null}
+      {mark ? (
+        // Beside the title, outside it: the field's name stays the title alone.
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {titleNode}
+          <SettingsMarkLabel label={mark} />
+        </span>
+      ) : (
+        titleNode
+      )}
       {description ? (
         <p id={descriptionId} className="text-muted-foreground text-sm">
           {description}
@@ -159,7 +219,10 @@ export function SettingsRow({
       <div
         id={id}
         data-tour={tour}
-        className="flex scroll-mt-32 items-center justify-between gap-4"
+        className={cn(
+          "flex scroll-mt-32 items-center justify-between gap-4",
+          mark && MARKED_ROW_CLASS
+        )}
       >
         {label}
         <div className="flex min-w-0 shrink-0 flex-col items-end gap-2" {...groupAttrs}>
@@ -170,7 +233,11 @@ export function SettingsRow({
   }
 
   return (
-    <div id={id} data-tour={tour} className="flex scroll-mt-32 flex-col gap-2">
+    <div
+      id={id}
+      data-tour={tour}
+      className={cn("flex scroll-mt-32 flex-col gap-2", mark && MARKED_ROW_CLASS)}
+    >
       {label}
       <div className="flex w-full min-w-0 flex-col gap-2" {...groupAttrs}>
         {children}

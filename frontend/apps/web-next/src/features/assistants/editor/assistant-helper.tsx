@@ -10,8 +10,9 @@ import type { ChatReferences } from "@/features/chat/chat-references";
 import type { HelperAdapter } from "@/features/helper/helper-adapter";
 import { useSpace } from "@/features/spaces/use-space";
 import { assistantHelperApi, type AssistantHelperAvailability } from "./assistant-helper-api";
-import { isAssistantToolCall } from "./assistant-helper-changes";
+import { changeOf, isAssistantToolCall } from "./assistant-helper-changes";
 import { assistantHelperCardFor } from "./assistant-helper-cards";
+import { changedFields } from "./assistant-helper-form";
 import type { Assistant } from "./use-assistant";
 
 type UnavailableReason = NonNullable<AssistantHelperAvailability["reason"]>;
@@ -42,20 +43,29 @@ const REFUSAL_KEYS: Record<string, string> = {
  * shows as a card to apply, a change made in Redigera as a card to undo.
  * When one of the chat's tools finishes, and when an answer ends, the
  * assistant and its space are read again, so the form shows what the
- * helper changed. The page hands it what the chat can refer to (the
- * assistant's settings) and the composer's "@" button.
+ * helper changed, and a change it made is handed to `onChanged`. The page
+ * hands it what the chat can refer to (the assistant's settings), the
+ * composer's "@" button, what runs before a message goes and what to do
+ * while the helper may write.
  */
 export function useAssistantHelper({
   assistant,
   availability,
   references,
-  footerActions
+  footerActions,
+  onChanged,
+  beforeSend,
+  onWritingChange
 }: {
   assistant: Assistant;
   /** The availability read; undefined while it is pending or failed. */
   availability: AssistantHelperAvailability | undefined;
   references?: ChatReferences;
   footerActions?: ReactNode;
+  /** The settings an `update_assistant` call of this visit actually changed. */
+  onChanged?: (fields: string[]) => void;
+  beforeSend?: HelperAdapter["beforeSend"];
+  onWritingChange?: HelperAdapter["onWritingChange"];
 }): HelperAdapter {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -105,9 +115,15 @@ export function useAssistantHelper({
     footerActions,
     toolCards: (call) => assistantHelperCardFor(call, assistant.id),
     onToolCallFinished: (call) => {
-      if (isAssistantToolCall(call)) refresh();
+      if (!isAssistantToolCall(call)) return;
+      refresh();
+      const change = changeOf(call, assistant.id);
+      const fields = change ? changedFields(change.changes) : [];
+      if (fields.length > 0) onChanged?.(fields);
     },
-    onAnswerFinished: refresh
+    onAnswerFinished: refresh,
+    beforeSend,
+    onWritingChange
   };
 }
 

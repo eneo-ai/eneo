@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { useSuspenseQuery } from "@tanstack/react-query";
+import { SettingsMarks } from "@/components/composites/settings-rows";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { assistantQueryOptions, type Assistant } from "./use-assistant";
 import { MaterialHandling } from "./material-handling";
@@ -53,4 +54,24 @@ it("explains unavailable file references and the tool-model fallback", () => {
   expect(screen.getByText(/Kunskapskällor söks därför inför varje svar/)).toBeTruthy();
   expect(screen.getByText(/Filåtkomst vid behov är inte tillgänglig/)).toBeTruthy();
   expect(screen.queryByRole("radio", { name: "Öppna vid behov" })).toBeNull();
+});
+it("marks the knowledge timing or the uploads' handling while it is marked", () => {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["assistants", "assistant"], initial);
+  renderInApp(
+    <SettingsMarks marks={{ rows: new Set(["material-uploads"]), label: "Ändrad från chatten" }}>
+      <MaterialHandling assistant={initial} modelSupportsTools />
+    </SettingsMarks>,
+    { queryClient, appContext: testAppContext({ settings: { file_references_enabled: true } }) }
+  );
+  const uploads = document.getElementById("material-uploads")!;
+  const knowledge = document.getElementById("material-knowledge")!;
+  expect(within(uploads).getByText("Ändrad från chatten")).toBeTruthy();
+  expect(uploads.className).toContain("bg-ax-selected");
+  expect(within(knowledge).queryByText("Ändrad från chatten")).toBeNull();
+  expect(knowledge.className).not.toContain("bg-ax-selected");
+  // The choice keeps its own name.
+  expect(
+    screen.getByRole("radiogroup", { name: /Dokument från användare i chatten/ })
+  ).toBeTruthy();
 });

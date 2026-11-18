@@ -9,8 +9,18 @@ import { CompanionLayout } from "./companion-layout";
 
 afterEach(cleanup);
 
-/** A page with a toggle in its content and the aside's own close. */
-function Page({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
+/**
+ * A page with a toggle in its content and the aside's own close; with
+ * `closable`, Escape may close the aside, which holds a field that takes
+ * Escape for itself and a dialog.
+ */
+function Page({
+  initiallyOpen = false,
+  closable = false
+}: {
+  initiallyOpen?: boolean;
+  closable?: boolean;
+}) {
   const [open, setOpen] = useState(initiallyOpen);
   const toggle = useRef<HTMLButtonElement>(null);
   return (
@@ -22,12 +32,28 @@ function Page({ initiallyOpen = false }: { initiallyOpen?: boolean }) {
         resizeLabel="Ändra hjälpens bredd"
         widthStorageKey="test:companion-width"
         returnFocus={() => toggle.current}
+        onClose={closable ? () => setOpen(false) : undefined}
         aside={(presentation) => (
           <div>
             <p>Visas som {presentation}</p>
             <button type="button" onClick={() => setOpen(false)}>
               Stäng hjälpen
             </button>
+            {closable ? (
+              <>
+                {/* A field whose open suggestions Escape closes, as a composer's "@" menu
+                    does: it prevents the key's default, as Astryx's menus and layers do. */}
+                <input
+                  aria-label="Meddelande"
+                  onKeyDown={(event) => {
+                    if (event.key === "Escape") event.preventDefault();
+                  }}
+                />
+                <dialog open>
+                  <button type="button">Avbryt</button>
+                </dialog>
+              </>
+            ) : null}
           </div>
         )}
       >
@@ -148,5 +174,68 @@ describe("CompanionLayout", () => {
 
     measureRow(700);
     await expectNoAxeViolations(container);
+  });
+
+  describe("Escape", () => {
+    const pressEscape = (target: Element) =>
+      fireEvent.keyDown(target, { key: "Escape", bubbles: true, cancelable: true });
+
+    it("closes an aside over the content, focus back on the toggle", () => {
+      renderInApp(<Page closable />);
+      measureRow(700);
+      const toggle = screen.getByRole("button", { name: "Hjälp" });
+      toggle.focus();
+      openAside();
+      expect(frame()?.dataset.companion).toBe("cover");
+
+      pressEscape(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      expect(frame()?.hidden).toBe(true);
+      expect(document.activeElement).toBe(toggle);
+      expect(content().hasAttribute("inert")).toBe(false);
+    });
+
+    it("closes the aside on a phone too", () => {
+      setViewport("phone");
+      renderInApp(<Page closable />);
+      measureRow(1200);
+      openAside();
+      pressEscape(region()!);
+      expect(frame()?.hidden).toBe(true);
+    });
+
+    it("leaves an aside beside the content open", () => {
+      renderInApp(<Page closable />);
+      measureRow(1200);
+      openAside();
+      pressEscape(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      expect(frame()?.hidden).toBe(false);
+    });
+
+    it("first leaves an Escape that something in the aside acted on to it, and closes on the next", () => {
+      renderInApp(<Page closable />);
+      measureRow(700);
+      openAside();
+      pressEscape(screen.getByRole("textbox", { name: "Meddelande" }));
+      expect(frame()?.hidden).toBe(false);
+
+      pressEscape(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      expect(frame()?.hidden).toBe(true);
+    });
+
+    it("leaves an Escape in a dialog to the dialog", () => {
+      renderInApp(<Page closable />);
+      measureRow(700);
+      openAside();
+      pressEscape(screen.getByRole("button", { name: "Avbryt" }));
+      expect(frame()?.hidden).toBe(false);
+    });
+
+    it("does nothing where the page gives no way to close it", () => {
+      renderInApp(<Page />);
+      measureRow(700);
+      openAside();
+      pressEscape(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      expect(frame()?.hidden).toBe(false);
+    });
   });
 });

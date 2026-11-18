@@ -129,4 +129,17 @@ export type HelperAdapter = {
   onToolCallFinished?: (call: ToolCallRecord) => void;
   /** An answer ended: the target may have changed. */
   onAnswerFinished?: () => void;
+  /**
+   * Runs before each message goes, once its files are uploaded: null lets it
+   * go; a sentence holds it, back in the composer, and the panel shows the
+   * sentence. A page that saves as the person types saves what is pending
+   * here, so the chat reads what is on screen.
+   */
+  beforeSend?: () => Promise<string | null>;
+  /**
+   * A message sent in Redigera left the composer, so the chat may change the
+   * target from now on (true), until its answer has ended (false): finished,
+   * failed or stopped, or the message came back. Never true in Fråga.
+   */
+  onWritingChange?: (writing: boolean) => void;
 };

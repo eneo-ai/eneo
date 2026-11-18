@@ -52,6 +52,15 @@ export function modelKwargFieldId(
 }
 
 /**
+ * The key the model settings row (the settings the model itself offers) is
+ * marked by among `SettingsMarks`; the behaviour row is marked by its
+ * select's id, `${idPrefix}-model-behaviour`.
+ */
+export function modelSettingsMarkKey(idPrefix: string): string {
+  return `${idPrefix}-model-settings`;
+}
+
+/**
  * The model behaviour preset (with a custom temperature) and the settings the
  * chosen model supports, as two settings rows: the Svelte SelectBehaviourV2
  * and SelectModelSpecificSettings. Presets set the temperature, so they are
@@ -200,7 +209,11 @@ export function ModelKwargsRows({
       </SettingsRow>
 
       {specificKwargs.length > 0 && (
-        <SettingsRow title={t("model_settings")} description={t("model_settings_description")}>
+        <SettingsRow
+          title={t("model_settings")}
+          description={t("model_settings_description")}
+          markKey={modelSettingsMarkKey(idPrefix)}
+        >
           <div className="flex flex-col gap-3">
             {specificKwargs.map((name) => {
               if (!isSelectKwarg(name)) {

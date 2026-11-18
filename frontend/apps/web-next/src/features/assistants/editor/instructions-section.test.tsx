@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
 import { useMutation } from "@tanstack/react-query";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { Space } from "@/features/spaces/space";
 import { browserApi } from "@/lib/api/browser";
 import { promptGuideAvailabilityQueryOptions } from "@/features/help-assistants/prompt-guide/helper-runs";
+import { SettingsMarks } from "@/components/composites/settings-rows";
 import { renderInApp, testQueryClient } from "@/test/render";
 import type { Assistant } from "./use-assistant";
 
@@ -70,4 +71,32 @@ it("hides an unavailable Promptguide on a phone, where its reason's tooltip cann
   // Where the layout is not a phone's, the disabled button stays, its reason in the tooltip.
   expect(guide(false).classList.contains("phone:hidden")).toBe(true);
   expect(guide(true).classList.contains("phone:hidden")).toBe(false);
+});
+
+it("marks the instructions while they are marked, beside their label, the field's name unchanged", () => {
+  state.space = makeSpace({ permissions: ["read", "edit"] });
+  const assistant = {
+    id: "assistant",
+    prompt: { text: "Svara kort." },
+    attachments: [],
+    completion_model: null,
+    permissions: ["edit"]
+  } as unknown as Assistant;
+  renderInApp(
+    <SettingsMarks marks={{ rows: new Set(["assistant-prompt"]), label: "Ändrad från chatten" }}>
+      <InstructionsSection promptGuide={false} assistant={assistant} />
+    </SettingsMarks>
+  );
+
+  const field = screen.getByRole("textbox", { name: "Prompt" });
+  const block = field.parentElement!;
+  expect(within(block).getByText("Ändrad från chatten")).toBeTruthy();
+  expect(block.className).toContain("bg-ax-selected");
+  cleanup();
+
+  renderInApp(<InstructionsSection promptGuide={false} assistant={assistant} />);
+  expect(screen.queryByText("Ändrad från chatten")).toBeNull();
+  expect(screen.getByRole("textbox", { name: "Prompt" }).parentElement!.className).not.toContain(
+    "bg-ax-selected"
+  );
 });

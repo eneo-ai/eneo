@@ -723,3 +723,122 @@ describe("SectionedSettings: a section's own control, and showing a setting", ()
     setViewport("desktop");
   });
 });
+
+describe("SectionedSettings: what just happened to a section, and a lock", () => {
+  const markedSections = phoneSections.map((section) =>
+    section.id === "general" ? { ...section, mark: "2 ändrade" } : section
+  );
+
+  it("says a section's mark with its link: in the list beside the form, the strip and a phone's index", () => {
+    setRoute(EDIT);
+    renderInApp(
+      <SaveStatusProvider>
+        <SectionedSettings
+          navigationLabel="Avsnitt"
+          header={<h1>Min assistent</h1>}
+          sections={markedSections}
+          phone={{ title: "Min assistent" }}
+        />
+      </SaveStatusProvider>
+    );
+
+    // Read after the section's name, as a phone's index row reads what it holds.
+    expect(within(rail()).getByRole("link", { name: /^Allmänt ?, 2 ändrade$/ })).toBeTruthy();
+    expect(within(header()).getByRole("link", { name: /^Allmänt ?, 2 ändrade$/ })).toBeTruthy();
+    expect(within(rail()).getByText("2 ändrade")).toBeTruthy();
+    expect(
+      within(index()).getByRole("link", { name: /^Allmänt ?, 2 ändrade, Ingen beskrivning$/ })
+    ).toBeTruthy();
+    // A section without a mark is named as before.
+    expect(within(rail()).getByRole("link", { name: "AI-inställningar" })).toBeTruthy();
+  });
+
+  const lockable: SettingsSection[] = [
+    {
+      id: "general",
+      label: "Allmänt",
+      icon: SlidersHorizontal,
+      node: (
+        <SettingsGroup title="Allmänt">
+          <label htmlFor="name">Namn</label>
+          <input id="name" />
+        </SettingsGroup>
+      )
+    },
+    { id: "ai", label: "AI", icon: Sparkles, node: <SettingsGroup title="AI">AI</SettingsGroup> }
+  ];
+  const editor = (lock: React.ReactNode) => (
+    <>
+      <button type="button">I chatten</button>
+      <SectionedSettings
+        navigationLabel="Avsnitt"
+        header={<h1>Redigera</h1>}
+        sections={lockable}
+        contentLock={lock}
+      />
+    </>
+  );
+  const notice = () => document.querySelector<HTMLElement>("[data-editor-lock]");
+  const sectionsInert = () =>
+    lockable.map((section) => document.getElementById(section.id)!.hasAttribute("inert"));
+
+  it("makes the sections inert under a notice while locked, and moves the focus a section had to it and back", () => {
+    const { rerender } = renderInApp(editor(null));
+    expect(notice()).toBeNull();
+    expect(sectionsInert()).toEqual([false, false]);
+    const field = screen.getByRole("textbox", { name: "Namn" });
+    field.focus();
+
+    rerender(editor(<p>Låst medan hjälpen arbetar.</p>));
+    expect(sectionsInert()).toEqual([true, true]);
+    expect(notice()?.textContent).toBe("Låst medan hjälpen arbetar.");
+    // Above the sections, and the section links stay usable.
+    expect(notice()!.nextElementSibling?.id).toBe("general");
+    expect(header().hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(notice());
+
+    rerender(editor(null));
+    expect(notice()).toBeNull();
+    expect(sectionsInert()).toEqual([false, false]);
+    expect(document.activeElement).toBe(field);
+  });
+
+  it("leaves focus outside the sections where it is, when the lock starts and when it ends", () => {
+    const { rerender } = renderInApp(editor(null));
+    const chat = screen.getByRole("button", { name: "I chatten" });
+    chat.focus();
+
+    rerender(editor(<p>Låst</p>));
+    expect(document.activeElement).toBe(chat);
+    rerender(editor(null));
+    expect(document.activeElement).toBe(chat);
+  });
+
+  it("puts a section bar's own actions after its save state on a phone, and only there", () => {
+    setViewport("phone");
+    setRoute(`${EDIT}?section=general`);
+    try {
+      renderInApp(
+        <SaveStatusProvider>
+          <SectionedSettings
+            navigationLabel="Avsnitt"
+            header={<h1>Min assistent</h1>}
+            sections={phoneSections}
+            phone={{
+              parent: { label: "Assistenter", href: "/spaces/s1/assistants" },
+              title: "Min assistent",
+              actions: <button type="button">Testa</button>,
+              sectionActions: <button type="button">Hjälp</button>
+            }}
+          />
+        </SaveStatusProvider>
+      );
+      const bar = document.querySelector<HTMLElement>("[data-phone-page-bar]")!;
+      expect(view()).toBe("section");
+      expect(within(bar).getByRole("button", { name: "Hjälp" })).toBeTruthy();
+      expect(within(bar).queryByRole("button", { name: "Testa" })).toBeNull();
+    } finally {
+      setViewport("desktop");
+    }
+  });
+});

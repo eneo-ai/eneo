@@ -10,6 +10,8 @@ import { HelperPanel } from "./helper-panel";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
 const announce = vi.hoisted(() => vi.fn());
+/** What the conversation's own send decided: true where the page let the message go. */
+const conversation = vi.hoisted(() => ({ sent: [] as boolean[] }));
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -32,7 +34,9 @@ vi.mock("@/features/chat/chat-view", () => ({
     composerLabel,
     partner,
     onToolCallFinished,
-    onAnswerFinished
+    onAnswerFinished,
+    onSendingChange,
+    beforeSend
   }: {
     footerActions?: unknown;
     placeholder?: string;
@@ -40,6 +44,8 @@ vi.mock("@/features/chat/chat-view", () => ({
     partner?: { name?: string; description?: string; personalSpace?: boolean };
     onToolCallFinished?: (call: { serverName: string; isInternal: boolean }) => void;
     onAnswerFinished?: () => void;
+    onSendingChange?: (sending: boolean) => void;
+    beforeSend?: () => Promise<boolean>;
   }) => (
     <div>
       <p>partner: {partner?.name}</p>
@@ -57,6 +63,19 @@ vi.mock("@/features/chat/chat-view", () => ({
       <button type="button" onClick={() => onAnswerFinished?.()}>
         Svar klart
       </button>
+      <button
+        type="button"
+        onClick={() => void beforeSend?.().then((go) => conversation.sent.push(go))}
+      >
+        Skicka
+      </button>
+      <button type="button" onClick={() => onSendingChange?.(true)}>
+        Tur börjar
+      </button>
+      <button type="button" onClick={() => onSendingChange?.(false)}>
+        Tur slut
+      </button>
+      <p>{beforeSend ? "asks before sending" : "sends at once"}</p>
     </div>
   )
 }));
@@ -123,6 +142,7 @@ async function bannerStatus(text: string) {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  conversation.sent = [];
 });
 
 describe("HelperPanel when the chat cannot open", () => {
@@ -332,5 +352,67 @@ describe("HelperPanel's conversation", () => {
     const mode = await screen.findByRole("button", { name: "Läge: Fråga" });
     const control = screen.getByRole("button", { name: "Målets kontroll" });
     expect(control.compareDocumentPosition(mode) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});
+
+describe("HelperPanel while a message is on its way", () => {
+  it("tells the page the chat may change the target while a message sent in Redigera runs", async () => {
+    openChat(true);
+    const onWritingChange = vi.fn();
+    renderPanel(adapter({ onWritingChange }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
+    expect(onWritingChange.mock.calls).toEqual([[true]]);
+    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
+    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("never for a message sent in Fråga, until Redigera is picked while it runs", async () => {
+    openChat(false);
+    const onWritingChange = vi.fn();
+    renderPanel(adapter({ onWritingChange }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
+    expect(onWritingChange).not.toHaveBeenCalled();
+
+    await pickEdit();
+    await waitFor(() => expect(onWritingChange.mock.calls).toEqual([[true]]));
+    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
+    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("says it has ended once the panel is gone", async () => {
+    openChat(true);
+    const onWritingChange = vi.fn();
+    const { unmount } = renderPanel(adapter({ onWritingChange }));
+    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
+
+    unmount();
+    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("holds a message the page holds back, and says why at the top of the panel until one goes", async () => {
+    openChat(false);
+    const reasons: (string | null)[] = ["Inställningarna kunde inte sparas.", null];
+    const beforeSend = vi.fn(async () => reasons.shift() ?? null);
+    renderPanel(adapter({ beforeSend }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false]));
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.map((alert) => alert.textContent).join(" ")).toContain(
+      "Inställningarna kunde inte sparas."
+    );
+    expect(screen.getByText(messages.helper_send_held)).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false, true]));
+    expect(screen.queryByText("Inställningarna kunde inte sparas.")).toBeNull();
+  });
+
+  it("sends at once for a page with nothing to do first", async () => {
+    openChat(false);
+    renderPanel();
+    expect(await screen.findByText("sends at once")).toBeTruthy();
   });
 });

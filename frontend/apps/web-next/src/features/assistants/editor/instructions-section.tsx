@@ -5,7 +5,12 @@ import { useState } from "react";
 import { AssistantContextMeter } from "./assistant-context-meter";
 import type { Schema } from "@/lib/api/models";
 import { assistantToolModel } from "./effective-config";
-import { SettingsGroup } from "@/components/composites/settings-rows";
+import {
+  MARKED_ROW_CLASS,
+  SettingsGroup,
+  SettingsMarkLabel,
+  useSettingsMark
+} from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,16 +132,27 @@ export function InstructionsSection({
   }
 
   const availability = promptGuideAvailability.data;
+  const promptMark = useSettingsMark("assistant-prompt");
+  const promptLabel = (
+    <label htmlFor="assistant-prompt" className="text-sm font-medium">
+      {t("prompt")}
+    </label>
+  );
 
   return (
     <SettingsGroup title={t("instructions")}>
-      <div className="flex flex-col gap-2">
+      <div className={cn("flex flex-col gap-2", promptMark && MARKED_ROW_CLASS)}>
         {/* The buttons move under the label where both do not fit on a line. */}
         <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
           <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
-            <label htmlFor="assistant-prompt" className="text-sm font-medium">
-              {t("prompt")}
-            </label>
+            {promptMark ? (
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {promptLabel}
+                <SettingsMarkLabel label={promptMark} />
+              </span>
+            ) : (
+              promptLabel
+            )}
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
           {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled

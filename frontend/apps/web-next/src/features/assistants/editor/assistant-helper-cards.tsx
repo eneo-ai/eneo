@@ -1,7 +1,7 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Copy, Lightbulb, PencilLine } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useId, useRef, useState, type ReactNode } from "react";
@@ -35,6 +35,11 @@ import {
   type RequestGate,
   type SettingChange
 } from "./assistant-helper-changes";
+import {
+  fieldsChangedBetween,
+  useAssistantHelperForm,
+  type ChangeOrigin
+} from "./assistant-helper-form";
 import { modelKwargLabel, modelKwargOptionLabel } from "./model-kwargs";
 import { assistantQueryOptions, useUpdateAssistant, type AssistantUpdate } from "./use-assistant";
 
@@ -217,28 +222,51 @@ function ChangeRows({
 
 /**
  * Saves a request as the person's own edit through the assistant's normal
- * update, so the editor's cache takes the new values. Success is announced
- * politely, and the button that went with it hands focus to the card's
- * state (`stateId`); a failure is said at the card and in a toast, and the
- * card stays usable.
+ * update, so the editor's cache takes the new values. In the editor, what
+ * the form has not saved goes first, so the two saves cannot race; if that
+ * fails, nothing is sent and the card says so (the form shows the failure
+ * as its own). Success is announced politely, naming the settings that
+ * changed, which the form marks; the button that went with it hands focus
+ * to the card's state (`stateId`). A failure is said at the card and in a
+ * toast, and the card stays usable.
  */
-function useCardSave(assistantId: string, done: string, failed: string) {
+function useCardSave(
+  assistantId: string,
+  { done, failed, origin }: { done: string; failed: string; origin: ChangeOrigin }
+) {
   const t = useTranslations();
   const announce = useAnnounce();
   const rescue = useFocusRescue();
+  const queryClient = useQueryClient();
+  const form = useAssistantHelperForm();
   const stateId = useId();
   const save = useUpdateAssistant(assistantId);
   const [failure, setFailure] = useState<string | null>(null);
+  const [savingForm, setSavingForm] = useState(false);
   // A second press while the save is on its way is the same press.
   const busy = useRef(false);
-  async function send(body: AssistantUpdate) {
+  async function send(body: AssistantUpdate, fields: readonly string[]) {
     if (busy.current) return;
     busy.current = true;
     rescue(() => document.getElementById(stateId));
     setFailure(null);
     try {
-      await save.mutateAsync(body);
-      announce(done);
+      if (form) {
+        setSavingForm(true);
+        const saved = await form.savePending().finally(() => setSavingForm(false));
+        if (!saved) {
+          setFailure(t("helper_card_held"));
+          announce(t("helper_card_held"));
+          return;
+        }
+      }
+      const before = queryClient.getQueryData(
+        assistantQueryOptions(browserApi, assistantId).queryKey
+      );
+      const after = await save.mutateAsync(body);
+      const changed = before ? fieldsChangedBetween(fields, before, after) : [];
+      if (form && changed.length > 0) form.showChanges(changed, origin);
+      else announce(done);
     } catch (error) {
       setFailure(getErrorMessage(error, t));
       toastApiError(error, t, { title: failed });
@@ -246,7 +274,7 @@ function useCardSave(assistantId: string, done: string, failed: string) {
       busy.current = false;
     }
   }
-  return { send, pending: save.isPending, failure, stateId };
+  return { send, pending: savingForm || save.isPending, failure, stateId };
 }
 
 /**
@@ -328,11 +356,11 @@ function AssistantProposalCard({
   const t = useTranslations();
   const { space } = useSpace();
   const assistant = useQuery(assistantQueryOptions(browserApi, assistantId)).data;
-  const { send, pending, failure, stateId } = useCardSave(
-    assistantId,
-    t("helper_card_applied"),
-    t("helper_card_apply_failed")
-  );
+  const { send, pending, failure, stateId } = useCardSave(assistantId, {
+    done: t("helper_card_applied"),
+    failed: t("helper_card_apply_failed"),
+    origin: "applied"
+  });
   const used = assistant ? proposalUsed(proposal, assistant) : false;
   const gate: RequestGate = assistant
     ? requestGate(proposal.update, proposal.changes, assistant, space.completion_models, t)
@@ -357,7 +385,12 @@ function AssistantProposalCard({
           variant="primary"
           pending={pending}
           failure={failure}
-          onAction={() => void send(proposal.update)}
+          onAction={() =>
+            void send(
+              proposal.update,
+              proposal.changes.map((item) => item.field)
+            )
+          }
         />
       )}
     </HelperCardFrame>
@@ -381,11 +414,11 @@ function AssistantChangeCard({
   const t = useTranslations();
   const { space } = useSpace();
   const assistant = useQuery(assistantQueryOptions(browserApi, assistantId)).data;
-  const { send, pending, failure, stateId } = useCardSave(
-    assistantId,
-    t("helper_card_undone"),
-    t("helper_card_undo_failed")
-  );
+  const { send, pending, failure, stateId } = useCardSave(assistantId, {
+    done: t("helper_card_undone"),
+    failed: t("helper_card_undo_failed"),
+    origin: "undone"
+  });
   const state = assistant ? changeState(change, assistant) : null;
   const undo = change.undo;
   let footer: ReactNode = null;
@@ -397,7 +430,12 @@ function AssistantChangeCard({
         variant="secondary"
         pending={pending}
         failure={failure}
-        onAction={() => void send(undo)}
+        onAction={() =>
+          void send(
+            undo,
+            change.changes.map((item) => item.field)
+          )
+        }
       />
     );
   } else if (state === "undone") {

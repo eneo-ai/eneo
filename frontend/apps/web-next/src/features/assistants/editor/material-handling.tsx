@@ -1,8 +1,14 @@
 import { Button } from "@astryxdesign/core/Button";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { useTranslations } from "use-intl";
+import {
+  MARKED_ROW_CLASS,
+  SettingsMarkLabel,
+  useSettingsMark
+} from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
+import { cn } from "@/lib/utils";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 export function MaterialHandling({
@@ -26,9 +32,19 @@ export function MaterialHandling({
     value: assistant.inline_file_text,
     save: (inline_file_text) => uploadsUpdate.mutateAsync({ inline_file_text })
   });
+  const knowledgeMark = useSettingsMark("material-knowledge");
+  const uploadsMark = useSettingsMark("material-uploads");
   return (
     <div className="flex flex-col gap-6">
-      <div id="material-knowledge" className="flex flex-col gap-2">
+      <div
+        id="material-knowledge"
+        className={cn("flex flex-col gap-2", knowledgeMark && MARKED_ROW_CLASS)}
+      >
+        {knowledgeMark ? (
+          <span>
+            <SettingsMarkLabel label={knowledgeMark} />
+          </span>
+        ) : null}
         <RadioList
           label={t("material_knowledge_timing")}
           description={t("material_knowledge_timing_description")}
@@ -53,7 +69,15 @@ export function MaterialHandling({
           />
         )}
       </div>
-      <div id="material-uploads" className="flex flex-col gap-2">
+      <div
+        id="material-uploads"
+        className={cn("flex flex-col gap-2", uploadsMark && MARKED_ROW_CLASS)}
+      >
+        {uploadsMark ? (
+          <span>
+            <SettingsMarkLabel label={uploadsMark} />
+          </span>
+        ) : null}
         {settings.file_references_enabled ? (
           <RadioList
             label={t("material_chat_uploads")}

@@ -57,7 +57,10 @@ function useViewHeight(ref: RefObject<HTMLElement | null>): number | null {
  * closed, so what it holds (a conversation) survives. Focus moves into it
  * when it opens, and into it when it comes to cover the content the focus
  * was in; when it closes, focus goes back to the control that opened it
- * (`returnFocus`).
+ * (`returnFocus`). With `onClose`, Escape in an aside that covers the
+ * content closes it, once nothing in the aside took that Escape for itself
+ * (a menu, a popover, a dialog, a composer's suggestions); beside the
+ * content Escape leaves it open.
  */
 export function CompanionLayout({
   open,
@@ -65,6 +68,7 @@ export function CompanionLayout({
   resizeLabel,
   widthStorageKey,
   returnFocus,
+  onClose,
   aside,
   children
 }: {
@@ -77,6 +81,8 @@ export function CompanionLayout({
   widthStorageKey: string;
   /** The control focus goes back to when the aside closes. */
   returnFocus: () => HTMLElement | null;
+  /** Closes the aside: Escape asks for it while the aside covers the content. */
+  onClose?: () => void;
   aside: (presentation: CompanionPresentation) => ReactNode;
   children: ReactNode;
 }) {
@@ -121,6 +127,26 @@ export function CompanionLayout({
       asideRef.current?.focus({ preventScroll: true });
     }
   }, [covered]);
+
+  // Escape closes an aside over the content. It is heard on the window, after
+  // the document, where Astryx's layers (menus, popovers, dialogs, tooltips)
+  // and a composer's suggestions claim an Escape they act on by preventing
+  // its default; a press inside a dialog is that dialog's in any case.
+  const close = useEffectEvent(() => onClose?.());
+  const closable = covered && onClose !== undefined;
+  useEffect(() => {
+    if (!closable) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented || event.isComposing) return;
+      const target = event.target;
+      if (!(target instanceof Element) || !asideRef.current?.contains(target)) return;
+      if (target.closest("dialog, [role='dialog'], [role='alertdialog']")) return;
+      event.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [closable]);
 
   return (
     <div ref={row} data-companion-row="" className="relative flex min-w-0 flex-1 items-start">

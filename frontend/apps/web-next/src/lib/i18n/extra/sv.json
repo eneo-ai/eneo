@@ -4810,5 +4810,17 @@
   "helper_reference_button": "Referera till en inställning",
   "helper_reference_menu": "Inställningar",
   "helper_reference_empty": "Ingen inställning matchar.",
-  "helper_reference_whole_section": "Hela avsnittet"
+  "helper_reference_whole_section": "Hela avsnittet",
+  "helper_send_held": "Meddelandet skickades inte",
+  "helper_send_held_unsaved": "Inställningarna kunde inte sparas, så meddelandet skickades inte. Rätta det som inte sparades och skicka igen.",
+  "helper_card_held": "Inställningarna kunde inte sparas, så ändringen gjordes inte.",
+  "helper_mark_changed": "Ändrad från chatten",
+  "helper_mark_section_count": "{count, plural, one {# ändrad} other {# ändrade}}",
+  "helper_marks_changed_by_helper": "Hjälpassistenten ändrade {settings}.",
+  "helper_marks_applied": "Du använde förslaget och ändrade {settings}.",
+  "helper_marks_undone": "Du ångrade ändringen av {settings}.",
+  "helper_lock_title": "Hjälpassistenten arbetar",
+  "helper_lock_description": "Inställningarna är låsta tills den är klar.",
+  "helper_lock_started": "Hjälpassistenten arbetar. Inställningarna är låsta tills den är klar.",
+  "helper_lock_ended": "Hjälpassistenten är klar. Inställningarna går att ändra igen."
 }

@@ -1,7 +1,16 @@
 import { CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { SuccessMark } from "./success-mark";
 import { useTranslations } from "use-intl";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 
@@ -17,14 +26,41 @@ const SetStatusContext = createContext<((key: string, status: SaveStatus | null)
 );
 const StatusMapContext = createContext<Readonly<Record<string, TrackedStatus>>>({});
 
+/** Saves a field's pending draft, or waits for its save on the way: false when that save failed. */
+type PendingSave = () => Promise<boolean>;
+
+type PendingSaves = {
+  add: (save: PendingSave) => () => void;
+  saveAll: () => Promise<boolean>;
+};
+
+function createPendingSaves(): PendingSaves {
+  const saves = new Set<PendingSave>();
+  return {
+    add: (save) => {
+      saves.add(save);
+      return () => void saves.delete(save);
+    },
+    saveAll: async () => {
+      const results = await Promise.all([...saves].map((save) => save().catch(() => false)));
+      return results.every(Boolean);
+    }
+  };
+}
+
+// The fields' pending saves, for a page that must have everything saved before it acts.
+const PendingSavesContext = createContext<PendingSaves | null>(null);
+
 /**
  * Aggregates the live save status of every autosaving field on the page. Pages
- * autosave per field, so this powers two things: the header indicator
- * (Saving… / All saved / Couldn't save) and a beforeunload guard that warns
- * while there is dirty local state, an in-flight save, or a failed save.
+ * autosave per field, so this powers three things: the header indicator
+ * (Saving… / All saved / Couldn't save), a beforeunload guard that warns
+ * while there is dirty local state, an in-flight save, or a failed save, and
+ * `useSavePendingNow`, which saves what is pending before the page acts.
  */
 export function SaveStatusProvider({ children }: { children: React.ReactNode }) {
   const [statuses, setStatuses] = useState<Record<string, TrackedStatus>>({});
+  const [pendingSaves] = useState(createPendingSaves);
 
   const setStatus = useCallback((key: string, status: SaveStatus | null) => {
     setStatuses((current) => {
@@ -51,7 +87,9 @@ export function SaveStatusProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <SetStatusContext.Provider value={setStatus}>
-      <StatusMapContext.Provider value={statuses}>{children}</StatusMapContext.Provider>
+      <PendingSavesContext.Provider value={pendingSaves}>
+        <StatusMapContext.Provider value={statuses}>{children}</StatusMapContext.Provider>
+      </PendingSavesContext.Provider>
     </SetStatusContext.Provider>
   );
 }
@@ -60,6 +98,33 @@ export function SaveStatusProvider({ children }: { children: React.ReactNode }) 
 export function useSetSaveStatus() {
   return useContext(SetStatusContext);
 }
+
+/**
+ * A field's part in `useSavePendingNow`: `save` sends the field's draft that
+ * has not been sent, or waits for its save on the way, and resolves whether
+ * that landed. Nothing outside a provider.
+ */
+export function usePendingSave(save: PendingSave) {
+  const pendingSaves = useContext(PendingSavesContext);
+  const latest = useRef(save);
+  useLayoutEffect(() => {
+    latest.current = save;
+  });
+  useEffect(() => pendingSaves?.add(() => latest.current()), [pendingSaves]);
+}
+
+/**
+ * Saves now what the page's fields have pending: every draft not yet sent
+ * goes, and every save on its way is waited for. Resolves false when one of
+ * them failed, which its field shows as it shows any failed save (the header
+ * and a toast); true when everything is saved, and outside a provider.
+ */
+export function useSavePendingNow(): () => Promise<boolean> {
+  const pendingSaves = useContext(PendingSavesContext);
+  return pendingSaves?.saveAll ?? saveNothing;
+}
+
+const saveNothing = () => Promise.resolve(true);
 
 type IndicatorState = "error" | "saving" | "dirty" | "saved";
 

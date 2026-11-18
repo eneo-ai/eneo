@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { IntlProvider } from "use-intl";
 import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
-import { SaveStatusIndicator, SaveStatusProvider } from "./save-status";
+import { SaveStatusIndicator, SaveStatusProvider, useSavePendingNow } from "./save-status";
 import { useAutosave, useAutosaveField, useDirtySaveStatus } from "./use-autosave";
 
 const messages = {
@@ -533,4 +533,81 @@ it("does not retry a failed debounced save on its own", async () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+/** "Save everything": what a page does before it acts on what the fields hold. */
+function SaveNowProbe({ results }: { results: boolean[] }) {
+  const saveNow = useSavePendingNow();
+  return (
+    <button type="button" onClick={() => void saveNow().then((saved) => results.push(saved))}>
+      Save now
+    </button>
+  );
+}
+
+it("saves what is pending on request: a draft not yet sent goes, a save on its way is waited for", async () => {
+  const save = vi.fn(() => Promise.resolve());
+  const running = deferred();
+  const results: boolean[] = [];
+  renderWithStatus(
+    <>
+      <AutosaveFieldProbe save={save} />
+      <AutosaveProbe saves={[() => running.promise]} />
+      <SaveNowProbe results={results} />
+    </>
+  );
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Text field" }), {
+    target: { value: "draft" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+
+  await waitFor(() => expect(save).toHaveBeenCalledWith("draft"));
+  // The other field's save is still on its way: not done yet.
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(results).toEqual([]);
+
+  await act(async () => running.resolve());
+  await waitFor(() => expect(results).toEqual([true]));
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+it("says when a pending save failed, which the field shows as any failed save", async () => {
+  const results: boolean[] = [];
+  const { status } = renderWithStatus(
+    <>
+      <AutosaveFieldProbe save={() => Promise.reject(new Error("offline"))} />
+      <SaveNowProbe results={results} />
+    </>
+  );
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Text field" }), {
+    target: { value: "draft" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+
+  await waitFor(() => expect(results).toEqual([false]));
+  expect(await status.findByRole("link", { name: "Couldn't save changes" })).toBeDefined();
+});
+
+it("is done at once with nothing pending, and outside a provider", async () => {
+  const results: boolean[] = [];
+  renderWithStatus(
+    <>
+      <AutosaveFieldProbe save={vi.fn()} />
+      <SaveNowProbe results={results} />
+    </>
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+  await waitFor(() => expect(results).toEqual([true]));
+  cleanup();
+
+  render(
+    <IntlProvider locale="en" messages={messages}>
+      <SaveNowProbe results={results} />
+    </IntlProvider>
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save now" }));
+  await waitFor(() => expect(results).toEqual([true, true]));
 });

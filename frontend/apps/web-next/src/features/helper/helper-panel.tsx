@@ -11,7 +11,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -125,6 +125,25 @@ function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapte
   );
 }
 
+/**
+ * Whether the chat may change the target now: from the moment a message sent
+ * in Redigera (or one whose mode was switched to Redigera while it runs)
+ * leaves the composer until its answer ends, reported to the page through
+ * `onWritingChange`. A conversation left for another, or the panel gone,
+ * ends it: the old turn's answer is no longer followed.
+ */
+function useWritingTurn(chat: HelperChat, editing: boolean, adapter: HelperAdapter) {
+  const [turn, setTurn] = useState<{ session: string; editing: boolean } | null>(null);
+  const writing = turn !== null && turn.session === chat.session_id && (turn.editing || editing);
+  const report = useEffectEvent((value: boolean) => adapter.onWritingChange?.(value));
+  useEffect(() => {
+    if (!writing) return;
+    report(true);
+    return () => report(false);
+  }, [writing]);
+  return (sending: boolean) => setTurn(sending ? { session: chat.session_id, editing } : null);
+}
+
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
 function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
   const t = useTranslations();
@@ -140,6 +159,11 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   // The conversation shown first; a later one was started here ("Ny
   // konversation"), and its composer takes the focus the dialog left behind.
   const [firstSession] = useState(chat.session_id);
+  const editing = chat.editing && !lock;
+  const onSendingChange = useWritingTurn(chat, editing, adapter);
+  // Why the page held the last message back, until the next one goes.
+  const [held, setHeld] = useState<string | null>(null);
+  const beforeSend = adapter.beforeSend;
 
   const assistant = useQuery({
     queryKey: ["assistants", chat.assistant_id],
@@ -184,7 +208,6 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   }
 
   const model = assistant.data;
-  const editing = chat.editing && !lock;
   // The chat's assistant is hidden and named after its target; the panel
   // names it by what it does. A locked target cannot be changed (the
   // panel's header says why); in Fråga the chat changes nothing either.
@@ -214,33 +237,51 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   };
 
   return (
-    <ChatView
-      key={chat.session_id}
-      focusComposerIfLost={chat.session_id !== firstSession}
-      partner={partner}
-      initialSessionId={chat.session_id}
-      initialMessages={initialMessages}
-      activity={activity}
-      onActivityChange={setActivity}
-      startHeadingLevel={3}
-      references={references}
-      toolCards={adapter.toolCards}
-      footerActions={
-        <>
-          {adapter.footerActions}
-          <ModePicker chat={chat} adapter={adapter} />
-        </>
-      }
-      placeholder={editing ? texts.placeholder.edit : texts.placeholder.ask}
-      // Named by what a message does in the mode it is sent in.
-      composerLabel={editing ? texts.composerLabelEdit : undefined}
-      onToolCallFinished={adapter.onToolCallFinished}
-      onAnswerFinished={() => {
-        adapter.onAnswerFinished?.();
-        // The turn's start may have left edit mode after a pause: show the mode the server holds.
-        void queryClient.invalidateQueries({ queryKey: api.key });
-      }}
-    />
+    <>
+      {held !== null ? (
+        // Something that just happened: read out at once, and kept until a message goes.
+        <div className="shrink-0 px-4 pt-3">
+          <Banner role="alert" status="error" title={t("helper_send_held")} description={held} />
+        </div>
+      ) : null}
+      <ChatView
+        key={chat.session_id}
+        focusComposerIfLost={chat.session_id !== firstSession}
+        partner={partner}
+        initialSessionId={chat.session_id}
+        initialMessages={initialMessages}
+        activity={activity}
+        onActivityChange={setActivity}
+        startHeadingLevel={3}
+        references={references}
+        toolCards={adapter.toolCards}
+        footerActions={
+          <>
+            {adapter.footerActions}
+            <ModePicker chat={chat} adapter={adapter} />
+          </>
+        }
+        placeholder={editing ? texts.placeholder.edit : texts.placeholder.ask}
+        // Named by what a message does in the mode it is sent in.
+        composerLabel={editing ? texts.composerLabelEdit : undefined}
+        onToolCallFinished={adapter.onToolCallFinished}
+        onAnswerFinished={() => {
+          adapter.onAnswerFinished?.();
+          // The turn's start may have left edit mode after a pause: show the mode the server holds.
+          void queryClient.invalidateQueries({ queryKey: api.key });
+        }}
+        onSendingChange={onSendingChange}
+        beforeSend={
+          beforeSend
+            ? async () => {
+                const reason = await beforeSend();
+                setHeld(reason);
+                return reason === null;
+              }
+            : undefined
+        }
+      />
+    </>
   );
 }
 
