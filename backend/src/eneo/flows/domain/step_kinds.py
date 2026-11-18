@@ -17,7 +17,7 @@ from enum import StrEnum
 from typing import Any, Final, Literal, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.flows.domain.contract_from_example import contract_from_example
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
@@ -80,11 +80,11 @@ STEP_KIND_DESCRIPTIONS: Final[Mapping[FlowStepKind, str]] = {
 
 
 class StepKindUpload(BaseModel):
-    """An upload the run brings to the first step."""
+    """The first step's upload, in the words of its saved input_config.runtime_input."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    format: Literal["document", "file"] = Field(
+    input_format: Literal["document", "file"] = Field(
         description="document: a text document read as text; file: any file."
     )
     required: bool = Field(
@@ -94,6 +94,22 @@ class StepKindUpload(BaseModel):
             "form then carries the material)."
         ),
     )
+    enabled: Literal[True] = Field(
+        default=True,
+        description="Always true: an upload that is given is on.",
+    )
+
+    @field_validator("enabled", mode="before")
+    @classmethod
+    def _on_when_given(cls, value: object) -> object:
+        # A saved upload has enabled true, so true is taken and says nothing
+        # more. A step without an upload is one that is given no upload.
+        if value is not True:
+            raise ValueError(
+                "An upload that is given is on, so enabled takes only true: "
+                "leave upload out for a step without an upload."
+            )
+        return value
 
 
 class StepKindValues(BaseModel):
@@ -301,12 +317,8 @@ def step_kind_configuration(
     # beside the other, and the save's rules judge what goes together.
     input_config: FlowPersistedJsonObject = {}
     if (upload := given("upload")) is not None:
-        configuration["input_type"] = FlowInputType(upload.format)
-        input_config["runtime_input"] = {
-            "enabled": True,
-            "required": upload.required,
-            "input_format": upload.format,
-        }
+        configuration["input_type"] = FlowInputType(upload.input_format)
+        input_config["runtime_input"] = upload.model_dump()
     if (long_material := given("long_material")) is not None:
         input_config[LONG_MATERIAL_KEY] = long_material.model_dump(mode="json")
     if input_config:

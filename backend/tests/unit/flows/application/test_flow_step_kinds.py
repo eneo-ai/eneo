@@ -598,7 +598,10 @@ async def test_a_first_step_reads_an_upload_only_when_asked(
     upload = await _added(
         empty,
         FlowStepKind.AI,
-        {"instruction": "Läs.", "upload": {"format": "document", "required": False}},
+        {
+            "instruction": "Läs.",
+            "upload": {"input_format": "document", "required": False},
+        },
         monkeypatch,
     )
 
@@ -611,6 +614,46 @@ async def test_a_first_step_reads_an_upload_only_when_asked(
             "input_format": "document",
         }
     }
+
+
+async def test_an_upload_is_given_in_the_words_its_saved_configuration_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What a saved step's input_config.runtime_input reads as is what
+    # upload takes: the value is saved as it was given.
+    step = await _added(
+        _flow([]),
+        FlowStepKind.AI,
+        {"instruction": "Läs.", "upload": _DOCUMENT_UPLOADS["runtime_input"]},
+        monkeypatch,
+    )
+
+    assert step.input_type == "document"
+    assert step.input_config == _DOCUMENT_UPLOADS
+
+
+@pytest.mark.parametrize(
+    ("upload", "where", "told"),
+    [
+        # The format has one name, the saved one.
+        ({"format": "document"}, ("upload", "input_format"), "Field required"),
+        (
+            {"input_format": "document", "enabled": False},
+            ("upload", "enabled"),
+            "leave upload out for a step without an upload",
+        ),
+        ({"input_format": "audio"}, ("upload", "input_format"), "'document' or 'file'"),
+    ],
+    ids=["another name", "turned off", "audio"],
+)
+def test_an_upload_of_another_shape_is_refused_with_what_it_takes(
+    upload: dict[str, Any], where: tuple[str, ...], told: str
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"upload": upload})
+
+    messages = {error["loc"]: error["msg"] for error in refused.value.errors()}
+    assert told in messages[where]
 
 
 @pytest.mark.parametrize(
@@ -629,7 +672,7 @@ async def test_long_material_is_saved_beside_the_upload_it_is_given_with(
     first = await _added(
         _flow([]),
         kind,
-        {**needs, "upload": {"format": "document"}, **digest},
+        {**needs, "upload": {"input_format": "document"}, **digest},
         monkeypatch,
     )
     later = await _added(_flow([_step(1)]), kind, {**needs, **digest}, monkeypatch)
@@ -721,7 +764,7 @@ async def test_an_upload_on_a_later_step_is_refused_by_the_save(
     values = StepKindValues.model_validate(
         {
             "instruction": "Läs.",
-            "upload": {"format": "document"},
+            "upload": {"input_format": "document"},
             **({"input_bindings": reads} if reads else {}),
         }
     )

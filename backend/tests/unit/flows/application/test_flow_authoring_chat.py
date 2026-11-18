@@ -196,8 +196,12 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     assert "A new Word step takes the flow's only template" in instructions
     assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
-    # An upload is chosen by its value, never by raw fields.
-    assert "A first step that takes an upload says so with upload" in instructions
+    # An upload is chosen by its value, never by raw fields. The value has
+    # the words of the saved configuration, so one example shows both.
+    assert (
+        "A first step that takes an upload says so with upload, for example "
+        + json.dumps(CONFIGURATION_EXAMPLES["runtime_input"])
+    ) in instructions
     assert "When the flow cannot run without the upload it is required" in (
         instructions
     )
@@ -208,8 +212,9 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
         for sentence in instructions.split(". ")
         if "runtime_input" in sentence
     )
-    assert "A first step that is already saved gets an upload with update_step" in (
-        instructions
+    assert (
+        "A saved first step gets the same value with update_step as "
+        "input_config.runtime_input" in instructions
     )
     # Long material is a new step's value too, so the upload it is added with
     # is not replaced by a second call; the raw field is a saved step's.

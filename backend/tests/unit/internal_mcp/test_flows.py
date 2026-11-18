@@ -1337,7 +1337,11 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     assert "instruction" in values["properties"]
     # Its parts are inline, so the shape reads without references.
     upload = values["properties"]["upload"]["anyOf"][0]
-    assert upload["properties"]["format"]["enum"] == ["document", "file"]
+    # An upload is given in the words its saved configuration has.
+    assert set(upload["properties"]) == {"input_format", "required", "enabled"}
+    assert upload["properties"]["input_format"]["enum"] == ["document", "file"]
+    assert upload["properties"]["enabled"]["const"] is True
+    assert upload["required"] == ["input_format"]
     # Long material is given as it is saved.
     long_material = values["properties"]["long_material"]["anyOf"][0]
     assert long_material["properties"]["mode"]["enum"] == ["digest"]
@@ -1378,7 +1382,7 @@ async def test_a_value_of_the_wrong_type_is_refused_with_its_field_and_what_it_t
     result, page = await _add(
         name="Läs bilaga",
         kind="ai",
-        values={"instruction": "Läs.", "upload": {"format": "MARKOR-5"}},
+        values={"instruction": "Läs.", "upload": {"input_format": "MARKOR-5"}},
     )
 
     assert result.isError is True
@@ -1389,10 +1393,74 @@ async def test_a_value_of_the_wrong_type_is_refused_with_its_field_and_what_it_t
     )
     # Where it was wrong and what that value takes, never what was sent.
     (error,) = page["errors"]
-    assert error["loc"] == ["upload", "format"]
+    assert error["loc"] == ["upload", "input_format"]
     assert error["type"] == "literal_error"
     assert "'document' or 'file'" in error["msg"]
     assert "MARKOR-5" not in result.content[0].text
+    save.assert_not_awaited()
+
+
+async def test_the_upload_a_saved_step_shows_is_the_upload_a_new_step_takes(
+    monkeypatch,
+):
+    save = _adding_chat(monkeypatch, [])
+
+    # The words of input_config.runtime_input, as the model reads them.
+    result, page = await _add(
+        name="Läs bilaga",
+        kind="ai",
+        values={
+            "instruction": "Läs.",
+            "upload": {"enabled": True, "required": True, "input_format": "document"},
+        },
+    )
+
+    assert result.isError is not True, page
+    (new_step,) = save.await_args.args[2].new_steps
+    assert new_step.configuration.input_type == "document"
+    assert new_step.configuration.input_config == {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "input_format": "document",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    ("upload", "told"),
+    [
+        (
+            {"input_format": "document", "enabled": False},
+            {
+                "loc": ["upload", "enabled"],
+                "msg": "leave upload out for a step without an upload",
+            },
+        ),
+        # The format has one name: the one the saved configuration has.
+        (
+            {"format": "document"},
+            {"loc": ["upload", "input_format"], "msg": "Field required"},
+        ),
+    ],
+    ids=["turned off", "another name"],
+)
+async def test_an_upload_of_another_shape_is_refused_unsaved_with_what_it_takes(
+    monkeypatch, upload, told
+):
+    save = _adding_chat(monkeypatch, [])
+
+    result, page = await _add(
+        name="Läs bilaga", kind="ai", values={"instruction": "Läs.", "upload": upload}
+    )
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    assert [
+        error
+        for error in page["errors"]
+        if error["loc"] == told["loc"] and told["msg"] in error["msg"]
+    ], page["errors"]
     save.assert_not_awaited()
 
 
@@ -2846,7 +2914,11 @@ def test_an_example_shown_as_a_value_of_add_step_is_a_value_it_takes():
     examples = flow_authoring_chat.CONFIGURATION_EXAMPLES
 
     values = StepKindValues.model_validate(
-        {"instruction": "Läs.", "long_material": examples["long_material"]}
+        {
+            "instruction": "Läs.",
+            "upload": examples["runtime_input"],
+            "long_material": examples["long_material"],
+        }
     )
 
     check_step_kind_values(FlowStepKind.AI, values)

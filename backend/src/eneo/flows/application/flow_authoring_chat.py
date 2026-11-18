@@ -173,13 +173,14 @@ the first step reads the run; the others read earlier steps, an http_get
 request or a tool. add_step sets what a new step reads for its place: a step
 put first takes the run over from the step that was first, which then reads
 the new step. read_step_kinds says which kinds may stand at a place and why
-the others may not. A first step that takes an upload says so with upload;
+the others may not. A first step that takes an upload says so with upload,
+for example ${runtime_input};
 an audio upload is a transcribe step. When the flow cannot run without the
 upload it is required. When the person may type the material instead of
 uploading it, also add a text field to the run form and make the upload not
-required. A first step that is already saved gets an upload with update_step:
-input_config.runtime_input with its input_type (document or file) as
-input_format, for example ${runtime_input}.
+required. A saved first step gets the same value with update_step as
+input_config.runtime_input, its input_format (document or file) also as
+input_type.
 An AI step whose input may exceed its model's window gets long_material
 ${long_material} in add_step (on a saved step: input_config.long_material): such input is read in parts
 with the step's own model and the answer is written over the notes; the step's

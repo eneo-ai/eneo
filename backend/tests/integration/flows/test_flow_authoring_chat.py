@@ -1983,7 +1983,12 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
             {
                 "instruction": "Ta fram beslutet och datumet.",
                 "example": '{"beslut": "Bifall", "datum": "2026-11-11"}',
-                "upload": {"format": "document"},
+                # The words a saved step's runtime_input has.
+                "upload": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "document",
+                },
             },
         ),
         (
@@ -2019,7 +2024,11 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
     facts, text, word = steps
     assert facts["output_contract"]["required"] == ["beslut", "datum"]
     assert facts["input_type"] == "document"
-    assert facts["input_config"]["runtime_input"]["required"] is True
+    assert facts["input_config"]["runtime_input"] == {
+        "enabled": True,
+        "required": True,
+        "input_format": "document",
+    }
     assert await _prompt(client, base, headers, facts) == (
         "Ta fram beslutet och datumet."
     )
@@ -2045,7 +2054,7 @@ async def test_a_step_added_with_an_upload_and_long_material_is_saved_with_both(
         FlowStepKind.AI,
         values={
             "instruction": "Sammanfatta underlaget.",
-            "upload": {"format": "document"},
+            "upload": {"input_format": "document"},
             "long_material": {"mode": "digest"},
         },
     )
@@ -2329,7 +2338,7 @@ async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
         revision,
         "Läs bilaga",
         FlowStepKind.AI,
-        values={"instruction": "Läs.", "upload": {"format": "document"}},
+        values={"instruction": "Läs.", "upload": {"input_format": "document"}},
     )
 
     assert refused.isError, refused.content[0].text
