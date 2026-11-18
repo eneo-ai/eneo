@@ -55,6 +55,11 @@ def uv_exception_problems(settings: dict) -> list[str]:
     ]
 
 
+def uv_pip_overrides(settings: dict) -> list[str]:
+    """Cooldown keys under [pip], which `uv pip compile` would use instead of the settings above."""
+    return sorted({"exclude-newer", "exclude-newer-package"} & settings.get("pip", {}).keys())
+
+
 def version(text: str) -> tuple[int, ...]:
     return tuple(int(part) for part in text.split("."))
 
@@ -118,6 +123,14 @@ class DependencyCooldownTests(unittest.TestCase):
             self.assertEqual(bun_exception_problems(bun_install((ROOT / path).read_text())), [], path)
         for path in UV_CONFIGS:
             self.assertEqual(uv_exception_problems(read_uv(path)), [], path)
+            self.assertEqual(uv_pip_overrides(read_uv(path)), [], path)
+
+    def test_a_pip_section_cannot_replace_the_cooldown(self) -> None:
+        text = 'exclude-newer = "7 days"\n\n[pip]\nexclude-newer = false\nexclude-newer-package = { example = false }\n'
+        self.assertEqual(uv_pip_overrides(uv_settings(text, pyproject=False)), ["exclude-newer", "exclude-newer-package"])
+        nested = '[tool.uv]\nexclude-newer = "7 days"\n\n[tool.uv.pip]\nexclude-newer = false\n'
+        self.assertEqual(uv_pip_overrides(uv_settings(nested, pyproject=True)), ["exclude-newer"])
+        self.assertEqual(uv_pip_overrides(uv_settings('[pip]\ngenerate-hashes = true\n', pyproject=False)), [])
 
     def test_a_whole_package_exception_is_rejected_however_it_is_spelled(self) -> None:
         for text in (
