@@ -298,8 +298,10 @@ Maintainers decide on each merge and are accountable for what is released.
 ### How do I get a fix into a released version?
 
 Open a pull request against the affected `release/vX.Y` branch, or ask in the
-issue for a backport. Someone other than the author approves it, it is merged and
-carried over to `develop`, and a Core Maintainer publishes a patch release.
+issue for a backport. Someone other than the author approves it, it is merged,
+and a Core Maintainer publishes a patch release. A fix that originated on the
+release branch is also carried to `develop`; a fix backported from `develop`
+is already there.
 
 ### Can Core Maintainers merge their own changes without review?
 

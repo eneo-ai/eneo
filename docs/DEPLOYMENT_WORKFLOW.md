@@ -279,7 +279,7 @@ CI rejects a `next` block on a release branch and an undated release block on `d
 
 **4. Create subsequent RCs** the same way via GitHub Releases (tag `v1.8.0-rc.2`, target `release/v1.8`, mark as pre-release)
 
-**5. When stable, create the final release** via GitHub Releases:
+**5. When stable, publish the final release** by following [Creating a Production Release](#creating-a-production-release) for the line's publication mode. Where managed publication is not enabled, create it via GitHub Releases:
 - Tag `v1.8.0`, target `release/v1.8`
 - Leave **Set as pre-release** unchecked
 - Add full release notes

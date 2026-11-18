@@ -301,8 +301,9 @@ on the documentation site.
   change in a GitHub issue. The release branch and tag rulesets keep Core
   Maintainers as bypass actors because cutting releases requires it.
 - **Workflow trust.** Jobs that run code from a fork get a read-only
-  `GITHUB_TOKEN` and no repository secrets. Project intake and the PR label
-  check run trusted code from the base branch. Workflows started from
+  `GITHUB_TOKEN` and no repository secrets. Project intake runs trusted code
+  from the base branch, and the PR label check uses the default branch's
+  policy for every target. Workflows started from
   branches in this repository can request package write permissions, which is
   why write access stays with the Core Maintainers and the organisation owners. Keep repository
   and organisation secrets limited to those referenced by workflows; when a
