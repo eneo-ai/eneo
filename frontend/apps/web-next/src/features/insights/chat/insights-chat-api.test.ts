@@ -167,7 +167,11 @@ const refused = (status: number, error: unknown): ApiResult => ({
 
 function answerGets(...results: ApiResult[]) {
   const get = vi.spyOn(browserApi, "GET");
-  for (const result of results) get.mockResolvedValueOnce(result as never);
+  // A resolved value typed on every route of the API is more than the
+  // compiler will instantiate, so each answer is given as an implementation.
+  for (const result of results) {
+    get.mockImplementationOnce((() => Promise.resolve(result)) as never);
+  }
   return get;
 }
 

@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import aliased
 
 from eneo.assistants.assistant import AssistantOrigin
+from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.auth_dependencies import get_scope_filter
 from eneo.database.tables.assistant_table import Assistants
@@ -32,7 +33,11 @@ from eneo.flows.domain.flow_authoring_chat_policy import (
 from eneo.helper_chats.application import helper_chat_service
 from eneo.helper_chats.application.helper_chat_service import OpenedChat
 from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
-from eneo.helper_chats.targets import HelperChatAudit, HelperChatTargetType
+from eneo.helper_chats.targets import (
+    HelperChatAudit,
+    HelperChatAuditEvent,
+    HelperChatTargetType,
+)
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
@@ -261,14 +266,23 @@ class _AssistantTarget:
 
     target_type = HelperChatTargetType.ASSISTANT
     instructions = ASSISTANT_INSTRUCTIONS
-    # No action of the audit log names a helper chat on an assistant yet, so
-    # these events are not recorded; see HelperChatAudit.
     audit = HelperChatAudit(
         entity_type=EntityType.ASSISTANT,
-        chat_created=None,
-        mode_changed=None,
-        conversation_started=None,
-        model_changed=None,
+        chat_created=HelperChatAuditEvent(
+            ActionType.HELPER_CHAT_CREATED, "Created a helper chat on an assistant."
+        ),
+        mode_changed=HelperChatAuditEvent(
+            ActionType.HELPER_CHAT_MODE_CHANGED,
+            "Changed edit mode in a helper chat on an assistant.",
+        ),
+        conversation_started=HelperChatAuditEvent(
+            ActionType.HELPER_CHAT_CONVERSATION_STARTED,
+            "Started a new conversation in a helper chat on an assistant.",
+        ),
+        model_changed=HelperChatAuditEvent(
+            ActionType.HELPER_CHAT_MODEL_CHANGED,
+            "Changed the model of a helper chat on an assistant.",
+        ),
     )
     refusals = _AssistantChatRefusals()
 

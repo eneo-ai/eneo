@@ -565,6 +565,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_authoring_conversation_started,
     description: m.audit_action_flow_authoring_conversation_started_description
   },
+  helper_chat_created: {
+    name: m.audit_action_helper_chat_created,
+    description: m.audit_action_helper_chat_created_description
+  },
+  helper_chat_mode_changed: {
+    name: m.audit_action_helper_chat_mode_changed,
+    description: m.audit_action_helper_chat_mode_changed_description
+  },
+  helper_chat_model_changed: {
+    name: m.audit_action_helper_chat_model_changed,
+    description: m.audit_action_helper_chat_model_changed_description
+  },
+  helper_chat_conversation_started: {
+    name: m.audit_action_helper_chat_conversation_started,
+    description: m.audit_action_helper_chat_conversation_started_description
+  },
   insight_conversation_started: {
     name: m.audit_action_insight_conversation_started,
     description: m.audit_action_insight_conversation_started_description
