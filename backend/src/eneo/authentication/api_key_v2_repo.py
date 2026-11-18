@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -36,17 +36,34 @@ class ApiKeysV2Repository:
         return ApiKeyV2InDB.model_validate(record)
 
     async def get(
-        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
+        self,
+        *,
+        key_id: UUID,
+        tenant_id: UUID,
+        for_update: bool | Literal["no_key"] = False,
     ) -> Optional[ApiKeyV2InDB]:
         """Return the key; with ``for_update`` the row stays locked until the
-        surrounding transaction completes."""
+        surrounding transaction completes, so another transaction that locks or
+        changes the key waits and then reads it as this one left it.
+
+        ``"no_key"`` takes FOR NO KEY UPDATE, for a change that keeps the row
+        and does not write its key columns (``id``, ``key_hash``,
+        ``hash_version``). Rows that point to the key can still be written in
+        the meantime: their foreign key check only takes FOR KEY SHARE.
+        ``True`` takes FOR UPDATE, which also makes such rows wait until the
+        transaction ends; deleting the key needs it, so that no new row points
+        to the key between the read and the delete. Neither lock keeps other
+        transactions from reading the key, so a request that signed in with
+        the key before a change can still finish after it. Recording a use
+        (``last_used_at``) writes the row and waits for either lock.
+        """
         query = (
             sa.select(self.table)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
         )
         if for_update:
-            query = query.with_for_update()
+            query = query.with_for_update(key_share=for_update == "no_key")
         record = await self.session.scalar(query)
 
         if record is None:

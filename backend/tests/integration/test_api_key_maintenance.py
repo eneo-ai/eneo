@@ -4,6 +4,9 @@ Every check reads committed rows in a new session. The expiry and race
 tests also sign in with the key, because sign-in judges a key by its dates,
 never by the stored ``state``; the isolation and limit tests use keys that
 cannot sign in and read the stored state.
+
+The last tests pin the lock a change to a key takes, beside the rows that
+point to the key.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from eneo.audit.application.audit_service import AuditService
@@ -42,10 +45,13 @@ from eneo.authentication.auth_models import (
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.feature_flag_table import GlobalFeatureFlag
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.container.container import Container
+from eneo.sessions.session import SessionAdd, SessionInDB
 from eneo.tenants.tenant import TenantBase
 from tests.integration.fixtures.locks import (
+    finishes_beside,
     wait_until_blocked,
     wait_until_blocked_by,
 )
@@ -1156,3 +1162,140 @@ async def test_a_revocation_taking_the_keys_in_the_other_order_does_not_deadlock
     assert ActionType.API_KEY_EXPIRED.value not in await audit_actions(
         db_container, newer
     )
+
+
+# A change to a key beside the rows that point to it. Every change reads the
+# key locked; a row that points to the key checks it when the row is written.
+
+
+async def create_conversation(
+    db_container, key_id: UUID, pid: asyncio.Future[int]
+) -> SessionInDB:
+    """Create and commit a conversation the service key owns, as the session
+    service does for the key's request."""
+    async with db_container() as container:
+        pid.set_result(
+            await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+        )
+        return await container.session_repo().add(
+            SessionAdd(name="conversation", api_key_id=key_id)
+        )
+
+
+async def conversation_owner(db_container, conversation_id: UUID) -> UUID | None:
+    async with db_container() as container:
+        return await container.session().scalar(
+            sa.select(Sessions.api_key_id).where(Sessions.id == conversation_id)
+        )
+
+
+async def test_a_conversation_is_created_while_its_key_is_renamed(
+    db_container, admin_user
+):
+    """A change that keeps the key's row does not hold back a row that points
+    to the key: the conversation commits while the rename is still open."""
+    key_id = await insert_key(
+        db_container,
+        admin_user.tenant_id,
+        name="service",
+        created_at=datetime.now(timezone.utc),
+    )
+    pid = asyncio.get_running_loop().create_future()
+    creating: asyncio.Task[SessionInDB] | None = None
+    try:
+        async with db_container() as renaming:
+            await renaming.api_key_lifecycle_service().update_key(
+                key_id=key_id, request=ApiKeyUpdateRequest(name="renamed")
+            )
+            creating = asyncio.create_task(
+                create_conversation(db_container, key_id, pid)
+            )
+            conversation = await finishes_beside(renaming.session(), creating, pid)
+            assert await conversation_owner(db_container, conversation.id) == key_id
+    finally:
+        # A failure releases the rename first, so the conversation can finish.
+        if creating is not None:
+            await asyncio.wait({creating}, timeout=10)
+
+    assert (await read_key(db_container, key_id)).name == "renamed"
+
+
+async def test_a_rotation_waiting_on_a_revocation_is_refused(db_container, admin_user):
+    """Changes of the same key still wait for each other, and the second one
+    judges the key as the first one left it."""
+    key_id = await insert_key(
+        db_container,
+        admin_user.tenant_id,
+        name="service",
+        created_at=datetime.now(timezone.utc),
+    )
+    pid = asyncio.get_running_loop().create_future()
+
+    async def rotate() -> None:
+        async with db_container() as container:
+            pid.set_result(
+                await container.session().scalar(sa.text("SELECT pg_backend_pid()"))
+            )
+            await container.api_key_lifecycle_service().rotate_key(key_id=key_id)
+
+    async with db_container() as revoking:
+        await revoking.api_key_lifecycle_service().revoke_key(key_id=key_id)
+        rotating = asyncio.create_task(rotate())
+        await wait_until_blocked_by(revoking.session(), rotating, pid)
+
+    with pytest.raises(ApiKeyValidationError) as refused:
+        await rotating
+    assert refused.value.status_code == 401
+    assert (await read_key(db_container, key_id)).revoked_at is not None
+    async with db_container() as container:
+        successors = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(ApiKeysV2)
+            .where(ApiKeysV2.rotated_from_key_id == key_id)
+        )
+    assert successors == 0
+
+
+@pytest.mark.parametrize("committed", [True, False], ids=["committed", "rolled-back"])
+async def test_a_conversation_waits_for_its_key_being_deleted(
+    db_container, admin_user, monkeypatch, committed
+):
+    """A conversation for the key, started after the deletion has read the
+    key and before it deletes it, waits for the deletion: it fails once the
+    key is gone and goes ahead when the deletion rolls back. (A service key
+    that already owns a conversation cannot be deleted: the conversation
+    would be left without an owner.)"""
+    key_id = await insert_key(
+        db_container,
+        admin_user.tenant_id,
+        name="revoked",
+        created_at=datetime.now(timezone.utc),
+        revoked_at=datetime.now(timezone.utc),
+    )
+    pid = asyncio.get_running_loop().create_future()
+    creating: list[asyncio.Task[SessionInDB]] = []
+    delete = ApiKeysV2Repository.delete
+
+    async def delete_once_a_conversation_waits(self, **kwargs):
+        creating.append(
+            asyncio.create_task(create_conversation(db_container, key_id, pid))
+        )
+        await wait_until_blocked_by(self.session, creating[0], pid)
+        return await delete(self, **kwargs)
+
+    monkeypatch.setattr(ApiKeysV2Repository, "delete", delete_once_a_conversation_waits)
+    with contextlib.suppress(_RollBack):
+        async with db_container() as deleting:
+            await deleting.api_key_lifecycle_service().purge_key(key_id=key_id)
+            if not committed:
+                raise _RollBack
+    [conversation] = creating
+
+    if committed:
+        with pytest.raises(IntegrityError, match="violates foreign key constraint"):
+            await asyncio.wait_for(conversation, timeout=10)
+        async with db_container() as container:
+            assert await container.session().get(ApiKeysV2, key_id) is None
+    else:
+        created = await asyncio.wait_for(conversation, timeout=10)
+        assert await conversation_owner(db_container, created.id) == key_id
