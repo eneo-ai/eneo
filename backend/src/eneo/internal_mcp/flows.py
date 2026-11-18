@@ -1110,7 +1110,7 @@ def require_safe_model_configuration(
             )
 
 
-@_tool(_EDITS_DRAFT, appendix=_INPUT_BINDINGS_SHAPE)
+@_tool(_EDITS_DRAFT, appendix=_INPUT_BINDINGS_SHAPE, closed=True)
 async def update_step(
     ctx: Context,
     expected_revision: int,
@@ -1300,6 +1300,10 @@ async def _step_edit(
 
     step_id = step.id
     changes = changes or {}
+    # An empty assistant change changes nothing; sent on, it would still give
+    # a step that shares its assistant a copy of its own.
+    if assistant_changes == {}:
+        assistant_changes = None
     if not changes and assistant_changes is None:
         raise BadRequestException(f"The edit of step {step_id} changes nothing.")
     if set(changes) - (

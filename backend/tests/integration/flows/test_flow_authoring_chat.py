@@ -716,11 +716,9 @@ async def test_chat_renames_carry_reads_and_a_refused_edit_audits_nothing(
     assert _page(removed)["code"] == "flow_form_field_still_read"
 
 
-async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
-    client, enabled_flow, db_container, admin_user
-):
-    flow, headers = enabled_flow
-    base = f"/api/v1/flows/{flow['id']}"
+async def _two_steps_sharing_an_assistant(client, flow, headers, base):
+    """Collect and Check, with Check on Collect's assistant; the draft
+    revision after the change."""
     created = await client.patch(
         base + "/editor/",
         headers=headers,
@@ -760,7 +758,17 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
         },
     )
     assert sharing.status_code == 200, sharing.text
-    revision = sharing.json()["draft_revision"]
+    return collect, check, sharing.json()["draft_revision"]
+
+
+async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    collect, check, revision = await _two_steps_sharing_an_assistant(
+        client, flow, headers, base
+    )
     ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
 
     # Only the instruction changes: the call names no step fields.
@@ -784,6 +792,50 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
     assert await _prompt(client, base, headers, current["steps"][1]) == (
         "Only for Check."
     )
+
+
+async def test_an_empty_assistant_change_leaves_a_shared_assistant_shared(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    collect, check, revision = await _two_steps_sharing_an_assistant(
+        client, flow, headers, base
+    )
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    # An empty assistant change is no change: refused, with nothing saved.
+    nothing = await flows.update_step(
+        ctx, revision, UUID(check["id"]), assistant_changes={}
+    )
+    assert nothing.isError
+    assert "changes nothing" in nothing.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert current["steps"][1]["assistant_id"] == collect["assistant_id"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+    # Beside a step change it gives the step no copy of the assistant.
+    renamed = await flows.update_step(
+        ctx,
+        revision,
+        UUID(check["id"]),
+        {"user_description": "Verify"},
+        assistant_changes={},
+    )
+
+    assert not renamed.isError, renamed.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    assert current["steps"][1]["user_description"] == "Verify"
+    assert [step["assistant_id"] for step in current["steps"]] == [
+        collect["assistant_id"],
+        collect["assistant_id"],
+    ]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
 
 
 async def test_an_instruction_changed_alone_is_one_revision_and_a_refusal_leaves_no_trace(
