@@ -95,6 +95,57 @@ def test_the_assistant_fragment_sends_the_rest_to_the_editor():
     assert "say where in the editor they change it" in fragment
 
 
+def test_the_assistant_fragment_names_every_setting_the_chat_changes():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert (
+        "You can change the name, the description, the instructions, the chat "
+        "model and its settings, the knowledge and the ranking of its results, "
+        "the knowledge mode, how files uploaded in a chat are handled, the MCP "
+        "servers and their tools, the functions, the document template, how long "
+        "conversations are kept and whether insights are on."
+    ) in fragment
+    assert "name only what changes; the rest stays" in fragment
+    assert "sources on different ones cannot be combined" in fragment
+    assert (
+        "Everything else you cannot change, in either mode: attachments, skills, "
+        "the icon, API keys, the web widget, conversation logging, and moving or "
+        "deleting the assistant."
+    ) in fragment
+
+
+def test_the_assistant_fragment_suggests_only_what_the_person_may_change():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "Suggest only what the person may change" in fragment
+    assert "names what their role does not let them change" in fragment
+    assert "Never propose those; say who changes them" in fragment
+    assert "or that a personal space does not use them" in fragment
+
+
+def test_publishing_and_unpublishing_always_ask_the_person_first():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "Publishing and unpublishing always ask the person first" in fragment
+    assert (
+        'Only when they ask for it, and only in "Redigera", call publish_assistant'
+        in (fragment)
+    )
+    assert "nothing happens until they do" in fragment
+    assert "do not repeat it unless they ask again" in fragment
+    assert 'say that they switch to "Redigera" or publish under Publicering' in (
+        fragment
+    )
+
+
+def test_earlier_versions_of_the_instructions_can_be_read():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "Earlier versions of the instructions are kept" in fragment
+    assert "read_prompt_history reads them" in fragment
+    assert "bringing one back is a change like any other" in fragment
+
+
 # The same list, in the same order, as SETTING_REFERENCE_KEYS in the editor
 # (frontend/apps/web-next/src/features/assistants/editor/setting-references.ts),
 # whose test holds it to this one: change both together.
@@ -105,6 +156,7 @@ EDITOR_REFERENCE_KEYS = (
     "knowledge_mode",
     "inline_file_text",
     "knowledge",
+    "rerank_model_id",
     "mcp_servers",
     "attachments",
     "completion_model",
@@ -116,6 +168,7 @@ EDITOR_REFERENCE_KEYS = (
     "completion_model_kwargs.frequency_penalty",
     "completion_model_kwargs.top_k",
     "enabled_capabilities",
+    "document_template",
     "data_retention_days",
     "published",
     "insight_enabled",

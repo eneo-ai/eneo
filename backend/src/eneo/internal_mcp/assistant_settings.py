@@ -8,30 +8,44 @@ space decides what a call can see and change. What a call returns to the
 model is plain text built from an allow-list of settings, so a credential, an
 API key or a server's sign-in configuration never reaches it.
 
-Two tools read, one proposes a change without saving it, and one, offered
-only in edit mode, changes the assistant through the same update a person's
-own save makes (``apply_assistant_update``), audited with the person as
-actor.
+Three tools read (the assistant, what its space offers and the saved
+versions of its instructions) and one proposes a change without saving it.
+Two more are offered only in edit mode: one changes the assistant through the
+same update a person's own save makes (``apply_assistant_update``), and one
+publishes or unpublishes it through the same publishing a person's own does
+(``apply_assistant_publish``), each audited with the person as actor. A
+setting the person's role does not let them change in the editor is refused
+by the tools that propose and change it, and named as such when the
+assistant is read.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
+from collections.abc import (
+    AsyncIterator,
+    Awaitable,
+    Callable,
+    Iterable,
+    Mapping,
+    Sequence,
+)
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Any, Literal, TypeVar
 from urllib.parse import urlsplit
 from uuid import UUID
 
 from dependency_injector import providers
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
-from pydantic import ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.internal_mcp.constants import ASSISTANT_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -45,25 +59,35 @@ from eneo.main.exceptions import (
     NotFoundException,
     UnauthorizedException,
 )
+from eneo.main.models import MCPToolSetting, ModelId
+from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
+from eneo.mcp_servers.domain.entities.mcp_server import is_capability_purpose
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     STRUCTURED_CONTENT_MAX_BYTES,
 )
 
 logger = logging.getLogger(__name__)
 
+_SERVER_DESCRIPTION = (
+    "Read the assistant this chat is about, what its space offers and the "
+    "saved versions of its instructions, propose changes, and in edit mode "
+    "make them and publish or unpublish the assistant."
+)
+
 mcp = FastMCP(
     name="Eneo Assistant Settings",
     stateless_http=True,
-    instructions=(
-        "Read the assistant this chat is about and what its space offers, "
-        "propose changes, and in edit mode make them."
-    ),
+    instructions=_SERVER_DESCRIPTION,
 )
 
 # Reading tools change nothing, and neither does a proposal. A change is not
 # destructive: the person sees it with its before and after and can undo it.
+# Publishing acts beyond the editor (who can use the assistant changes) and
+# has no undo on its card, so it declares destructiveHint and the chat asks
+# the person before each call.
 _READS = ToolAnnotations(readOnlyHint=True)
 _CHANGES = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
+_ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 
 AssistantSection = Literal[
     "overview", "instructions", "model", "knowledge", "tools", "access", "all"
@@ -236,9 +260,14 @@ def page_lines(
     section: str,
     offset: int,
     assistant_id: UUID,
+    title: str | None = None,
+    again: str | None = None,
 ) -> CallToolResult:
     """One page of ``lines`` from line ``offset``, sized to the tool output
-    cap, saying how to read on when more is left."""
+    cap, saying how to read on when more is left. ``title`` heads the page in
+    place of the tool's own heading for ``section``, and ``again`` names the
+    arguments, other than the offset, that read on (``section=...`` when
+    left out)."""
     if offset < 0:
         raise BadRequestException("offset must be zero or more.")
     total = len(lines)
@@ -246,15 +275,17 @@ def page_lines(
         raise BadRequestException(
             f"offset is past the end ({total} lines); read again from offset 0."
         )
-    header = f"{_title(tool, section)} (lines {offset + 1}-"
+    header = f"{title or _title(tool, section)} (lines {offset + 1}-"
     kept = fit_lines(lines[offset:], default_page_cap() - len(header) - 400)
     shown_to = offset + len(kept)
     text = f"{header}{shown_to} of {total}):\n" + "\n".join(kept)
     next_offset = shown_to if shown_to < total else None
     if next_offset is not None:
+        arguments = f"section={section}" if again is None else again
         text += (
-            f"\n\nMore follows. Call {tool} again with section={section} and "
-            f"offset={next_offset} before you say you have read it all."
+            f"\n\nMore follows. Call {tool} again with "
+            f"{arguments + ' and ' if arguments else ''}offset={next_offset} "
+            "before you say you have read it all."
         )
     return CallToolResult(
         content=[TextContent(type="text", text=text)],
@@ -351,6 +382,16 @@ def _website(website: Any) -> str:
     return f"{website.name or address}: {address}"
 
 
+def _website_name(website: Any) -> str:
+    """A website as the editor names it: its name, else its address without
+    a sign-in part or query."""
+    return website.name or _url(website.url)
+
+
+def _tool_name(tool: Any) -> str:
+    return tool.display_name or tool.name
+
+
 def _loaded_tools(server: Any) -> list[Any]:
     """A server's tools as read; none when it was read without them."""
     return list(server.tools) if getattr(server, "tools_loaded", True) else []
@@ -371,9 +412,81 @@ def _function_line(purpose: str, availability: Iterable[Any]) -> str:
 
 
 @dataclass(frozen=True)
+class PersonRights:
+    """Whether the person's role in the assistant's space lets them change
+    conversation retention, the insights switch and publishing, which the
+    update and publishing check (``can_edit_retention``,
+    ``can_toggle_insight``, ``can_publish_assistants``), and whether the
+    space is a personal one, where nobody publishes an assistant or turns
+    its insights on."""
+
+    edit_retention: bool
+    toggle_insight: bool
+    publish: bool
+    personal_space: bool = False
+
+    @classmethod
+    def of(cls, actor: Any) -> PersonRights:
+        """The rights of ``actor``, the person's actor in the space."""
+        return cls(
+            edit_retention=bool(actor.can_edit_retention()),
+            toggle_insight=bool(actor.can_toggle_insight()),
+            publish=bool(actor.can_publish_assistants()),
+            personal_space=bool(actor.space.is_personal()),
+        )
+
+
+# None of the rights: what a change is checked against when nothing says
+# otherwise, so a check that was not prepared refuses.
+NO_RIGHTS = PersonRights(edit_retention=False, toggle_insight=False, publish=False)
+
+# Who may change what the person's role withholds, as a person would say it.
+_WHO_CAN = "someone with more rights in the space, such as its administrators"
+_PERSONAL_INSIGHTS = "Insights are not used for an assistant in a personal space."
+_PERSONAL_PUBLISHING = "An assistant in a personal space is not published."
+
+
+def withheld_settings(rights: PersonRights | None) -> list[str]:
+    """The settings the person's role does not let them change, each with
+    who can; none when the rights are not known."""
+    if rights is None:
+        return []
+    others = f"{_WHO_CAN}, can"
+    withheld: list[str] = []
+    if not rights.edit_retention:
+        withheld.append(f"conversation retention: {others}")
+    if not rights.toggle_insight:
+        withheld.append(
+            "insights (turning them on or off): "
+            + ("not used in a personal space" if rights.personal_space else others)
+        )
+    if not rights.publish:
+        withheld.append(
+            "publishing (publishing or unpublishing it): "
+            + ("not used in a personal space" if rights.personal_space else others)
+        )
+    return withheld
+
+
+def _withheld_lines(reading: AssistantReading) -> list[str]:
+    withheld = withheld_settings(reading.rights)
+    if not withheld:
+        return []
+    return ["Not the person's to change (their role does not allow it):"] + [
+        f"- {setting}" for setting in withheld
+    ]
+
+
+async def _person_rights(container: Any, space_id: UUID) -> PersonRights:
+    access = await container.space_service().get_space_access_facts(space_id)
+    return PersonRights.of(container.actor_manager().get_space_actor(access))
+
+
+@dataclass(frozen=True)
 class AssistantReading:
     """What ``read_assistant`` reports on: the assistant as the person reads
-    it, with the names its saved choices point at."""
+    it, with the names its saved choices point at and, when known, what the
+    person's role lets them change."""
 
     assistant: Any
     permissions: Sequence[Any]
@@ -381,6 +494,7 @@ class AssistantReading:
     show_pricing: bool
     rerank_model_name: str | None = None
     document_template_name: str | None = None
+    rights: PersonRights | None = None
 
 
 def policy_locks(config: Any | None) -> list[str]:
@@ -433,7 +547,7 @@ def _overview(reading: AssistantReading) -> list[str]:
             + (", ".join(assistant.enabled_capabilities) or "none")
         ),
     ]
-    return lines + _rights(reading) + _locks_lines(reading)
+    return lines + _rights(reading) + _withheld_lines(reading) + _locks_lines(reading)
 
 
 def _rights(reading: AssistantReading) -> list[str]:
@@ -614,6 +728,7 @@ def _access(reading: AssistantReading) -> list[str]:
     return [
         f"Published: {_yes(assistant.published)}",
         *_rights(reading),
+        *_withheld_lines(reading),
         f"Insights: {'on' if assistant.insight_enabled else 'off'}",
         f"Conversation logging: {'on' if assistant.logging_enabled else 'off'}",
         "Conversation retention: "
@@ -687,6 +802,7 @@ async def _reading(container: Any, target_id: UUID) -> AssistantReading:
         show_pricing=bool(getattr(container.user(), "can_view_model_pricing", False)),
         rerank_model_name=rerank_name,
         document_template_name=template_name,
+        rights=await _person_rights(container, assistant.space_id),
     )
 
 
@@ -703,7 +819,8 @@ async def read_assistant(
     """Read the assistant this chat is about, as saved, in plain text. The
     overview (default) is short: name, description, published, chat model,
     the length of the instructions, counts of knowledge and tools, what the
-    person may do and what an organisation policy locks. Section
+    person may do, what their role does not let them change and what an
+    organisation policy locks; suggest neither of the last two. Section
     "instructions" gives the instructions whole; "model" the chat model with
     what it can do and its settings; "knowledge" the knowledge mode, sources,
     result ranking, file handling and attachments; "tools" the MCP servers
@@ -790,6 +907,15 @@ def _knowledge_options(offer: SpaceOffer) -> list[str]:
     space = offer.space
     usable = {model.id for model in space.embedding_models}
     organisation = space.organization_space_id
+    knowledge = space.knowledge
+    sources = [
+        *knowledge.groups.items,
+        *knowledge.websites.items,
+        *knowledge.integration_knowledge_list.items,
+    ]
+    # One assistant's knowledge shares one embedding model, so where the
+    # sources use several, each says which it uses.
+    several = len({item.embedding_model.id for item in sources}) > 1
 
     def item_line(item: Any, label: str) -> str:
         notes = []
@@ -801,10 +927,20 @@ def _knowledge_options(offer: SpaceOffer) -> list[str]:
             notes.append("organisation knowledge")
         if item.embedding_model.id not in usable:
             notes.append("its embedding model is not enabled in the space")
+        if several:
+            notes.append(f"embedding model [id {item.embedding_model.id}]")
         return f"- {label} [id {item.id}]" + (f" ({'; '.join(notes)})" if notes else "")
 
-    knowledge = space.knowledge
-    lines = [f"Collections ({len(knowledge.groups.items)}):"]
+    lines = (
+        [
+            "All the knowledge of one assistant must use the same embedding "
+            "model; these sources use more than one, so combine only those "
+            "with the same embedding model id."
+        ]
+        if several
+        else []
+    )
+    lines.append(f"Collections ({len(knowledge.groups.items)}):")
     lines += [item_line(item, item.name) for item in knowledge.groups.items]
     lines.append(f"Websites ({len(knowledge.websites.items)}):")
     lines += [item_line(item, _website(item)) for item in knowledge.websites.items]
@@ -862,12 +998,19 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
         + (" (the organisation's default)" if item.is_default else "")
         for item in offer.document_templates
     ]
-    return lines
+    return lines + [
+        f"- {lock}" for lock in policy_locks(config) if lock.startswith("MCP")
+    ]
 
 
 def _server_view(server: Any) -> dict[str, Any]:
     """The parts of a server, a domain entity or the space's view of one,
-    that say what it is: never its address or sign-in configuration."""
+    that say what it is: never its address or sign-in configuration. Each
+    tool is named with the id a change of the tool's setting takes."""
+
+    def tool_label(name: str, tool_id: object) -> str:
+        return f"{name} [id {tool_id}]" if tool_id else name
+
     if isinstance(server, dict):
         tools = server.get("tools") or []
         return {
@@ -875,7 +1018,10 @@ def _server_view(server: Any) -> dict[str, Any]:
             "name": server["name"],
             "description": server.get("description"),
             "is_enabled": server.get("is_enabled", True),
-            "tools": sorted(tool.get("display_name") or tool["name"] for tool in tools),
+            "tools": sorted(
+                tool_label(tool.get("display_name") or tool["name"], tool.get("id"))
+                for tool in tools
+            ),
         }
     return {
         "id": server.id,
@@ -883,7 +1029,7 @@ def _server_view(server: Any) -> dict[str, Any]:
         "description": server.description,
         "is_enabled": server.is_enabled,
         "tools": sorted(
-            tool.display_name or tool.name for tool in _loaded_tools(server)
+            tool_label(_tool_name(tool), tool.id) for tool in _loaded_tools(server)
         ),
     }
 
@@ -949,15 +1095,17 @@ async def read_options(
     ctx: Context, section: OptionsSection = "all", offset: int = 0
 ) -> CallToolResult:
     """Read what the assistant's space offers to choose from, in plain text,
-    before suggesting a choice. Section "model" gives the chat models the
-    assistant may use, with what each can do (context window, tool calling,
-    reasoning and its efforts, images, price when shown), the space's default
-    and the one in use, and those below the space's security classification;
-    "knowledge" the collections, websites and integration sources of the space
-    and the organisation, and the result ranking models; "tools" the MCP
-    servers with their tools, the functions and the document templates; "all"
-    (default) everything. When the text says more follows, call again with
-    the offset it gives."""
+    before suggesting a choice, with the ids a change takes. Section "model"
+    gives the chat models the assistant may use, with what each can do
+    (context window, tool calling, reasoning and its efforts, images, price
+    when shown), the space's default and the one in use, and those below the
+    space's security classification; "knowledge" the collections, websites
+    and integration sources of the space and the organisation, with their
+    embedding models where they differ, and the result ranking models;
+    "tools" the MCP servers with their tools, the functions with whether a
+    provider is ready for each, and the document templates; "all" (default)
+    everything. When the text says more follows, call again with the offset
+    it gives."""
 
     async def operation(container, chat):
         lines = option_lines(await _offer(container, chat), section)
@@ -987,30 +1135,39 @@ _CHANGEABLE: dict[str, str] = {
     "completion_model_kwargs": "model settings",
     "knowledge_mode": "knowledge mode",
     "inline_file_text": "handling of files uploaded in a chat",
+    "groups": "knowledge (collections)",
+    "websites": "knowledge (websites)",
+    "integration_knowledge_list": "knowledge (integration sources)",
+    "rerank_model_id": "result ranking",
+    "mcp_servers": "MCP servers",
+    "mcp_tools": "MCP tools",
+    "enabled_capabilities": "functions",
+    "document_template": "the document template",
+    "data_retention_days": "conversation retention",
+    "insight_enabled": "insights",
 }
 _PROMPT_KEYS = frozenset({"text", "description"})
 _MODEL_KEYS = frozenset({"id"})
 _SETTING_KEYS = frozenset(key for key, _ in _SETTINGS)
+_TEMPLATE_KEYS = frozenset({"mode", "template_id"})
+
+# The list settings: the assistant's update request replaces each whole, and
+# the chat also takes additions and removals, which it applies to the list as
+# stored now.
+_KNOWLEDGE_LISTS = ("groups", "websites", "integration_knowledge_list")
+_LIST_SETTINGS = frozenset(
+    {*_KNOWLEDGE_LISTS, "mcp_servers", "mcp_tools", "enabled_capabilities"}
+)
 
 # What a person calls the rest of an assistant's update request, to say what
 # the chat cannot change.
 _UNCHANGEABLE: dict[str, str] = {
     "id": "the assistant's identity",
     "space_id": "the space",
-    "groups": "knowledge (collections)",
-    "websites": "knowledge (websites)",
-    "integration_knowledge_list": "knowledge (integration sources)",
-    "rerank_model_id": "result ranking",
     "attachments": "attachments",
-    "mcp_servers": "MCP servers",
-    "mcp_tools": "MCP tools",
-    "enabled_capabilities": "functions",
-    "document_template": "the document template",
     "skill_bindings": "skills",
     "published": "publishing",
-    "insight_enabled": "insights",
     "logging_enabled": "conversation logging",
-    "data_retention_days": "conversation retention",
     "icon_id": "the icon",
     "metadata_json": "metadata",
     "hidden": "visibility",
@@ -1042,7 +1199,31 @@ _CHANGES_TAKE = (
     'assistant searches its knowledge when it needs to) or "inject" '
     "(relevant parts go in the prompt on every question). inline_file_text: "
     "true (files uploaded in a chat go whole into the prompt) or false "
-    "(looked up when needed). Every other setting is changed in the editor."
+    "(looked up when needed). "
+    "Knowledge and tools take the ids read_options lists. groups "
+    "(collections), websites, integration_knowledge_list (integration "
+    "sources) and mcp_servers: to add or remove some, send "
+    '{"add": [{"id": ...}], "remove": [{"id": ...}]}; the rest of the list '
+    'is kept. Use this form. A list in its place ([{"id": ...}, ...]) '
+    "replaces the whole list, and whatever it leaves out is removed. All the "
+    "knowledge of one assistant must use the same embedding model. "
+    'enabled_capabilities (functions): {"add": ["web_search"], "remove": '
+    '["charts"]} in the same way, or the whole list of functions. mcp_tools '
+    "(single tools of the assistant's MCP servers): "
+    '{"add": [{"tool_id": ..., "is_enabled": false}], "remove": '
+    '[{"tool_id": ...}]}, where add switches a tool on or off for this '
+    "assistant and remove returns it to its server's own setting; a whole "
+    'list [{"tool_id": ..., "is_enabled": ...}] replaces every such setting. '
+    "rerank_model_id: a result ranking model read_options lists, or null for "
+    'none. document_template: {"mode": "default"} (the organisation\'s '
+    'default), {"mode": "builtin"} (Eneo\'s built-in look) or {"mode": '
+    '"selected", "template_id": a template read_options lists}. '
+    "data_retention_days: how many days conversations are kept, "
+    f"{MIN_RETENTION_DAYS} to {MAX_RETENTION_DAYS}, or null to follow the "
+    "space. insight_enabled: true or false. Leave out what read_assistant "
+    "says the person may not change or a policy locks. Attachments, skills, "
+    "the icon, API keys, the web widget and conversation logging are changed "
+    "in the editor; publishing has a tool of its own."
 )
 
 
@@ -1068,6 +1249,7 @@ def require_changeable(changes: dict[str, Any]) -> None:
             "prompt": _PROMPT_KEYS,
             "completion_model": _MODEL_KEYS,
             "completion_model_kwargs": _SETTING_KEYS,
+            "document_template": _TEMPLATE_KEYS,
         }.get(key)
         if allowed is not None and isinstance(value, dict):
             refused += [_person_name(inner) for inner in value if inner not in allowed]
@@ -1081,17 +1263,101 @@ def require_changeable(changes: dict[str, Any]) -> None:
         "Nothing was changed. The chat changes only the name, the description, "
         "the instructions, the chat model and its settings ("
         + ", ".join(label for _, label in _SETTINGS)
-        + "), the knowledge mode and the handling of files uploaded in a chat."
+        + "), the knowledge mode, the handling of files uploaded in a chat, the "
+        "knowledge and its result ranking, the MCP servers and their tools, the "
+        "functions, the document template, conversation retention and insights."
+        + (
+            " Publishing and unpublishing have a tool of their own, in edit mode."
+            if "published" in changes
+            else ""
+        )
     )
 
 
-def changes_request(changes: dict[str, Any]) -> Any:
-    """The assistant's update request ``changes`` make, refused when they
-    name anything the chat may not change or do not have its shape."""
+class _IdEdit(BaseModel):
+    """Additions to and removals from a list of ids."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    add: list[ModelId] = Field(default_factory=list[ModelId])
+    remove: list[ModelId] = Field(default_factory=list[ModelId])
+
+
+class _FunctionEdit(BaseModel):
+    """Functions to switch on and off."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    add: list[CapabilityPurpose] = Field(default_factory=list[CapabilityPurpose])
+    remove: list[CapabilityPurpose] = Field(default_factory=list[CapabilityPurpose])
+
+
+class _ToolRef(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    tool_id: UUID
+
+
+class _ToolEdit(BaseModel):
+    """Tools to switch on or off for the assistant, and tools to return to
+    their server's own setting."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    add: list[MCPToolSetting] = Field(default_factory=list[MCPToolSetting])
+    remove: list[_ToolRef] = Field(default_factory=list[_ToolRef])
+
+
+class _ListEdits(BaseModel):
+    """The list settings a change gives as additions and removals."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    groups: _IdEdit | None = None
+    websites: _IdEdit | None = None
+    integration_knowledge_list: _IdEdit | None = None
+    mcp_servers: _IdEdit | None = None
+    enabled_capabilities: _FunctionEdit | None = None
+    mcp_tools: _ToolEdit | None = None
+
+
+@dataclass(frozen=True)
+class ChangeRequest:
+    """Changes as the chat reads them: the assistant's update request
+    (``update``) and the list settings given as additions and removals
+    (``edits``), which are not in ``update``."""
+
+    update: Any
+    edits: _ListEdits
+
+    def names(self, key: str) -> bool:
+        """Whether the change gives the setting ``key`` a value: a list
+        setting a list or additions and removals, any other setting a value
+        other than null, and those an update clears with null a null too."""
+        if getattr(self.edits, key, None) is not None:
+            return True
+        if key in ("description", "data_retention_days", "rerank_model_id"):
+            return key in self.update.model_fields_set
+        return getattr(self.update, key, None) is not None
+
+
+def changes_request(changes: dict[str, Any]) -> ChangeRequest:
+    """The request ``changes`` make, refused when they name anything the chat
+    may not change or do not have its shape."""
     from eneo.assistants.api.assistant_models import AssistantUpdatePublic
 
     require_changeable(changes)
-    return AssistantUpdatePublic.model_validate(changes)
+    edited = {
+        key: value
+        for key, value in changes.items()
+        if key in _LIST_SETTINGS and isinstance(value, dict)
+    }
+    return ChangeRequest(
+        update=AssistantUpdatePublic.model_validate(
+            {key: value for key, value in changes.items() if key not in edited}
+        ),
+        edits=_ListEdits.model_validate(edited),
+    )
 
 
 def version_description(text: str | None) -> str:
@@ -1109,12 +1375,145 @@ def _model_value(model: Any) -> dict[str, str]:
     return {"id": str(model.id), "name": _model_name(model)}
 
 
-def assistant_settings_of(assistant: Any) -> dict[str, Any]:
+# The settings a change may name beyond the base ones, in the order a change
+# lists them.
+_MORE_SETTINGS: tuple[str, ...] = (
+    "groups",
+    "websites",
+    "integration_knowledge_list",
+    "rerank_model_id",
+    "mcp_servers",
+    "mcp_tools",
+    "enabled_capabilities",
+    "document_template",
+    "data_retention_days",
+    "insight_enabled",
+)
+
+# A function as a change names it: its purpose in words.
+_FUNCTION_NAMES: dict[str, str] = {
+    purpose: purpose.replace("_", " ") for purpose in _FUNCTIONS
+}
+
+
+@dataclass(frozen=True)
+class ChangeFacts:
+    """What a change is checked against and named with beyond the assistant,
+    its space and the policy: the person's rights, the functions a provider
+    is ready for in the space, the result ranking models (the names of all,
+    and the one the change chooses when the space may use it) and the
+    organisation's document templates. Each offers nothing unless prepared
+    (``_change_facts``), so a check that was not prepared refuses."""
+
+    rights: PersonRights = NO_RIGHTS
+    ready_functions: frozenset[str] = frozenset()
+    rerank_models: Mapping[UUID, str] = field(default_factory=dict[UUID, str])
+    selectable_rerank_models: frozenset[UUID] = frozenset()
+    document_templates: Mapping[UUID, str] = field(default_factory=dict[UUID, str])
+
+
+def _by_name(items: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Named entries in the order a person reads them: by name, then id, so
+    two lists with the same entries are equal."""
+    return sorted(
+        items, key=lambda item: ((item.get("name") or "").casefold(), item["id"])
+    )
+
+
+def _source_value(item: Any, key: str) -> dict[str, str]:
+    name = _website_name(item) if key == "websites" else item.name
+    return {"id": str(item.id), "name": name}
+
+
+def _server_value(server: Any) -> dict[str, str]:
+    return {"id": str(server.id), "name": server.name}
+
+
+def _tool_names(servers: Iterable[Any]) -> dict[UUID, str]:
+    """The tools of ``servers`` by id, with the names the editor shows."""
+    return {
+        tool.id: _tool_name(tool)
+        for server in servers
+        for tool in _loaded_tools(server)
+    }
+
+
+def _tools_value(
+    overrides: Mapping[UUID, bool], names: Mapping[UUID, str]
+) -> list[dict[str, Any]]:
+    """The assistant's own settings of single tools: each tool switched on or
+    off for it, with its name."""
+    return _by_name(
+        {"id": str(tool_id), "name": names.get(tool_id), "is_enabled": enabled}
+        for tool_id, enabled in overrides.items()
+    )
+
+
+def _functions_value(purposes: Iterable[str]) -> list[dict[str, str]]:
+    return _by_name(
+        {"id": purpose, "name": _FUNCTION_NAMES.get(purpose, purpose)}
+        for purpose in purposes
+    )
+
+
+def _rerank_value(
+    model_id: UUID | None, names: Mapping[UUID, str]
+) -> dict[str, Any] | None:
+    if model_id is None:
+        return None
+    return {"id": str(model_id), "name": names.get(model_id)}
+
+
+def _template_value(choice: Any, names: Mapping[UUID, str]) -> dict[str, Any]:
+    template_id = choice.template_id
+    return {
+        "mode": choice.mode,
+        "template_id": str(template_id) if template_id is not None else None,
+        "name": names.get(template_id) if template_id is not None else None,
+    }
+
+
+def _more_setting(assistant: Any, key: str, facts: ChangeFacts) -> Any:
+    """The value of ``key``, one of ``_MORE_SETTINGS``, as the assistant has
+    it."""
+    if key in ("groups", "websites", "integration_knowledge_list"):
+        items = {
+            "groups": assistant.collections,
+            "websites": assistant.websites,
+            "integration_knowledge_list": assistant.integration_knowledge_list,
+        }[key]
+        return _by_name(_source_value(item, key) for item in items)
+    if key == "rerank_model_id":
+        return _rerank_value(assistant.rerank_model_id, facts.rerank_models)
+    if key == "mcp_servers":
+        return _by_name(_server_value(server) for server in assistant.mcp_servers)
+    if key == "mcp_tools":
+        return _tools_value(
+            dict(assistant.mcp_tools), _tool_names(assistant.mcp_servers)
+        )
+    if key == "enabled_capabilities":
+        return _functions_value(assistant.enabled_capabilities)
+    if key == "document_template":
+        return _template_value(assistant.document_template, facts.document_templates)
+    if key == "data_retention_days":
+        return assistant.data_retention_days
+    if key == "insight_enabled":
+        return bool(assistant.insight_enabled)
+    raise KeyError(key)
+
+
+def assistant_settings_of(
+    assistant: Any, facts: ChangeFacts | None = None, *, more: Iterable[str] = ()
+) -> dict[str, Any]:
     """The settings the chat may change, as the assistant has them: the
-    values a change's before and after are taken from."""
+    values a change's before and after are taken from. The base settings
+    always, and of the others (``_MORE_SETTINGS``) those in ``more``, named
+    with ``facts``. A list setting is a list of ``{id, name}`` by name, and
+    the tool settings also carry ``is_enabled``; a credential, an address's
+    sign-in part or a server's configuration is never part of one."""
     model = assistant.completion_model
     kwargs = assistant.completion_model_kwargs or ModelKwargs()
-    return {
+    settings: dict[str, Any] = {
         "name": assistant.name,
         "description": assistant.description,
         "prompt": assistant.get_prompt_text(),
@@ -1128,6 +1527,11 @@ def assistant_settings_of(assistant: Any) -> dict[str, Any]:
         ),
         "inline_file_text": assistant.inline_file_text,
     }
+    wanted = set(more)
+    for key in _MORE_SETTINGS:
+        if key in wanted:
+            settings[key] = _more_setting(assistant, key, facts or ChangeFacts())
+    return settings
 
 
 def setting_changes(
@@ -1135,9 +1539,9 @@ def setting_changes(
 ) -> list[dict[str, Any]]:
     """Each setting whose value differs, with its value before and after."""
     return [
-        {"field": field, "before": value, "after": after[field]}
-        for field, value in before.items()
-        if after[field] != value
+        {"field": key, "before": value, "after": after[key]}
+        for key, value in before.items()
+        if after[key] != value
     ]
 
 
@@ -1146,21 +1550,35 @@ def undo_update(
 ) -> dict[str, Any]:
     """The update request that gives the changed settings their values from
     before. A chat model cannot be taken away by an update, so an assistant
-    that had none keeps the one it was given."""
+    that had none keeps the one it was given. A list setting gets its whole
+    list from before."""
     undo: dict[str, Any] = {}
     for change in changes:
-        field, before = change["field"], change["before"]
-        if field == "prompt":
+        key, before = change["field"], change["before"]
+        if key == "prompt":
             undo["prompt"] = {"text": before, "description": _RESTORED_WITH_UNDO}
-        elif field == "completion_model":
+        elif key == "completion_model":
             if before is not None:
                 undo["completion_model"] = {"id": before["id"]}
-        elif field.startswith("completion_model_kwargs."):
+        elif key.startswith("completion_model_kwargs."):
             undo["completion_model_kwargs"] = kwargs_before.model_dump(
                 mode="json", exclude_none=True
             )
+        elif key in (*_KNOWLEDGE_LISTS, "mcp_servers"):
+            undo[key] = [{"id": item["id"]} for item in before]
+        elif key == "mcp_tools":
+            undo[key] = [
+                {"tool_id": item["id"], "is_enabled": item["is_enabled"]}
+                for item in before
+            ]
+        elif key == "enabled_capabilities":
+            undo[key] = [item["id"] for item in before]
+        elif key == "rerank_model_id":
+            undo[key] = before["id"] if before is not None else None
+        elif key == "document_template":
+            undo[key] = {"mode": before["mode"], "template_id": before["template_id"]}
         else:
-            undo[field] = before
+            undo[key] = before
     return undo
 
 
@@ -1169,19 +1587,37 @@ class PlannedChange:
     """A change as the chat would make it: the settings now (``settings``,
     with the model settings whole in ``kwargs``), the update request that
     makes it (``update``, only what differs from now) and each setting it
-    changes with its value now and after (``changes``)."""
+    changes with its value now and after (``changes``). ``more`` and
+    ``facts`` say which settings beyond the base ones ``settings`` holds and
+    what named them, so the assistant after the change is read the same
+    way."""
 
     settings: dict[str, Any]
     kwargs: ModelKwargs
     update: dict[str, Any]
     changes: list[dict[str, Any]]
     published: bool
+    more: tuple[str, ...] = ()
+    facts: ChangeFacts = field(default_factory=ChangeFacts)
 
 
 def _policy_refusal(what: str) -> BadRequestException:
     return BadRequestException(
         f"An organisation policy sets {what} for this assistant, so it cannot be "
         "changed through the chat. Nothing was changed."
+    )
+
+
+def _role_refusal(
+    what: str, rights: PersonRights, *, in_personal_space: str | None = None
+) -> BadRequestException:
+    """The refusal of a change the person's role does not allow: who can make
+    it, or, for what a personal space does not use, that."""
+    if rights.personal_space and in_personal_space is not None:
+        return BadRequestException(f"{in_personal_space} Nothing was changed.")
+    return BadRequestException(
+        f"The person's role does not let them change {what}; {_WHO_CAN}, can. "
+        "Nothing was changed."
     )
 
 
@@ -1247,28 +1683,403 @@ def _chosen_model(space: Any, config: Any | None, model_id: UUID) -> Any:
     return space.get_completion_model(model_id)
 
 
+_T = TypeVar("_T")
+
+
+def _edited_list(
+    current: Sequence[_T],
+    whole: Sequence[_T] | None,
+    edit: tuple[Sequence[_T], Sequence[_T]] | None,
+) -> list[_T] | None:
+    """The whole list a change gives a list setting: the list it sends
+    (``whole``), or the list as stored now (``current``) with the additions
+    and without the removals of ``edit``; None when it leaves the setting
+    alone. An entry is kept once; one both added and removed is removed."""
+    if edit is not None:
+        added, removed = edit
+        gone = set(removed)
+        return list(
+            dict.fromkeys(
+                [
+                    *(item for item in current if item not in gone),
+                    *(item for item in added if item not in gone),
+                ]
+            )
+        )
+    if whole is not None:
+        return list(dict.fromkeys(whole))
+    return None
+
+
+def _edited_ids(current: Iterable[Any], whole: Any, edit: Any) -> list[UUID] | None:
+    """``_edited_list`` over items with ids: the assistant's current ones, a
+    sent list of ``{id}`` and additions and removals of ``{id}``."""
+    return _edited_list(
+        [item.id for item in current],
+        [item.id for item in whole] if whole is not None else None,
+        (
+            [item.id for item in edit.add],
+            [item.id for item in edit.remove],
+        )
+        if edit is not None
+        else None,
+    )
+
+
+def one_embedding_model(assistant: Any, lists: Mapping[str, Sequence[Any]]) -> bool:
+    """Whether the knowledge lists a change sets (``lists``, by request key)
+    keep the rule the assistant applies when its lists are set: a list that
+    is set uses one embedding model, and that is the one of the websites, or
+    without websites of the collections, the list is set beside. Collections
+    and websites given together are set as a pair, and the integration
+    sources are set last."""
+    collections = list(assistant.collections)
+    websites = list(assistant.websites)
+
+    def fits(items: Sequence[Any]) -> bool:
+        if not items:
+            return True
+        models = {item.embedding_model.id for item in items}
+        beside = websites or collections
+        return len(models) == 1 and (
+            not beside or beside[0].embedding_model.id in models
+        )
+
+    new_collections = lists.get("groups")
+    new_websites = lists.get("websites")
+    if new_collections is not None and new_websites is not None:
+        collections, websites = [], []
+    if new_collections is not None:
+        collections = []
+        if not fits(new_collections):
+            return False
+        collections = list(new_collections)
+    if new_websites is not None:
+        websites = []
+        if not fits(new_websites):
+            return False
+        websites = list(new_websites)
+    integrations = lists.get("integration_knowledge_list")
+    return integrations is None or fits(integrations)
+
+
+# What each knowledge list holds, one and several, as a person says it.
+_SOURCES: dict[str, tuple[str, str]] = {
+    "groups": ("collection", "collections"),
+    "websites": ("website", "websites"),
+    "integration_knowledge_list": ("integration source", "integration sources"),
+}
+
+
+def _plan_knowledge(
+    assistant: Any,
+    request: ChangeRequest,
+    space: Any,
+    after: dict[str, Any],
+    update: dict[str, Any],
+) -> None:
+    """The knowledge lists the change sets: only sources the space offers
+    (its own and the organisation's), all on one embedding model."""
+    stored = {
+        "groups": assistant.collections,
+        "websites": assistant.websites,
+        "integration_knowledge_list": assistant.integration_knowledge_list,
+    }
+    offered_by_space = {
+        "groups": space.collections,
+        "websites": space.websites,
+        "integration_knowledge_list": space.integration_knowledge_list,
+    }
+    changed: dict[str, list[Any]] = {}
+    for key in _KNOWLEDGE_LISTS:
+        current = list(stored[key])
+        ids = _edited_ids(
+            current, getattr(request.update, key), getattr(request.edits, key)
+        )
+        if ids is None or set(ids) == {item.id for item in current}:
+            continue
+        offered = {item.id: item for item in offered_by_space[key]}
+        known = {item.id: item for item in current}
+        one, several = _SOURCES[key]
+        for item_id in ids:
+            if item_id in offered:
+                continue
+            if item_id in known:
+                name = _source_value(known[item_id], key)["name"]
+                raise BadRequestException(
+                    f'The space no longer offers "{_short(name, 80)}", so the '
+                    f"{several} cannot be saved with it: remove it as well. "
+                    "Nothing was changed."
+                )
+            raise BadRequestException(
+                f"The space does not offer that {one}; read_options lists the "
+                f"{several} it offers. Nothing was changed."
+            )
+        changed[key] = [offered[item_id] for item_id in ids]
+    if not changed:
+        return
+    if not one_embedding_model(assistant, changed):
+        raise BadRequestException(
+            "All the knowledge of one assistant must use the same embedding "
+            "model, and these sources do not; read_options says which "
+            "embedding model each source uses. Nothing was changed."
+        )
+    for key, items in changed.items():
+        update[key] = [{"id": str(item.id)} for item in items]
+        after[key] = _by_name(_source_value(item, key) for item in items)
+
+
+def _plan_mcp(
+    assistant: Any,
+    request: ChangeRequest,
+    space: Any,
+    config: Any | None,
+    after: dict[str, Any],
+    update: dict[str, Any],
+) -> None:
+    """The MCP servers and the tool settings the change sets, by the rules
+    the update applies: no change under a policy that sets them, only
+    servers the space offers, switched on by an administrator and not a
+    function's provider, and tool settings only for tools of the servers the
+    assistant has after the change."""
+    governed = config is not None and config.mcp_enforced
+    current_servers = list(assistant.mcp_servers)
+    servers = current_servers
+    ids = _edited_ids(
+        current_servers, request.update.mcp_servers, request.edits.mcp_servers
+    )
+    servers_change = ids is not None and set(ids) != {
+        server.id for server in current_servers
+    }
+    if ids is not None and servers_change:
+        if governed:
+            raise _policy_refusal("the MCP servers and functions")
+        offered = {server.id: server for server in space.mcp_servers}
+        known = {server.id: server for server in current_servers}
+        for server_id in ids:
+            server = offered.get(server_id)
+            if server is None:
+                if server_id in known:
+                    raise BadRequestException(
+                        f'The space no longer offers "{known[server_id].name}", so '
+                        "the MCP servers cannot be saved with it: remove it as "
+                        "well. Nothing was changed."
+                    )
+                raise BadRequestException(
+                    "The space does not offer that MCP server; read_options "
+                    "lists the servers it offers. Nothing was changed."
+                )
+            if is_capability_purpose(server.purpose):
+                raise BadRequestException(
+                    f'"{server.name}" provides a function: switch functions on '
+                    "and off with enabled_capabilities. Nothing was changed."
+                )
+            if not server.is_enabled:
+                raise BadRequestException(
+                    f'"{server.name}" is turned off by an administrator, so the '
+                    "MCP servers cannot be saved with it"
+                    + (": remove it as well" if server_id in known else "")
+                    + ". Nothing was changed."
+                )
+        servers = [offered[server_id] for server_id in ids]
+        update["mcp_servers"] = [{"id": str(server.id)} for server in servers]
+        after["mcp_servers"] = _by_name(_server_value(server) for server in servers)
+
+    current = dict(assistant.mcp_tools)
+    # A server that goes takes the assistant's settings of its tools along.
+    staying = {server.id for server in servers}
+    gone = _tool_names(server for server in current_servers if server.id not in staying)
+    kept = {tool_id: on for tool_id, on in current.items() if tool_id not in gone}
+    tool_edit = request.edits.mcp_tools
+    tool_list = request.update.mcp_tools
+    if tool_edit is not None:
+        overrides = dict(kept)
+        overrides.update({item.tool_id: item.is_enabled for item in tool_edit.add})
+        for item in tool_edit.remove:
+            overrides.pop(item.tool_id, None)
+    elif tool_list is not None:
+        overrides = {item.tool_id: item.is_enabled for item in tool_list}
+    else:
+        overrides = kept
+    if overrides == current:
+        return
+    if governed:
+        raise _policy_refusal("the MCP servers and functions")
+    reachable = _tool_names(servers)
+    if any(
+        tool_id not in reachable
+        for tool_id, on in overrides.items()
+        if current.get(tool_id) != on
+    ):
+        raise BadRequestException(
+            "That tool is not a tool of the assistant's MCP servers; "
+            "read_options lists each server's tools with their ids. Nothing was "
+            "changed."
+        )
+    if tool_edit is not None or tool_list is not None:
+        update["mcp_tools"] = [
+            {"tool_id": str(tool_id), "is_enabled": on}
+            for tool_id, on in overrides.items()
+        ]
+    after["mcp_tools"] = _tools_value(
+        overrides, _tool_names([*current_servers, *servers])
+    )
+
+
+def _plan_functions(
+    assistant: Any,
+    request: ChangeRequest,
+    space: Any,
+    config: Any | None,
+    facts: ChangeFacts,
+    after: dict[str, Any],
+    update: dict[str, Any],
+) -> None:
+    """The functions the change sets: none under a policy that sets them,
+    and only functions the space offers and a provider is ready for are
+    switched on; switching one off is always allowed."""
+    current = list(assistant.enabled_capabilities)
+    edit = request.edits.enabled_capabilities
+    purposes = _edited_list(
+        current,
+        request.update.enabled_capabilities,
+        (edit.add, edit.remove) if edit is not None else None,
+    )
+    if purposes is None or set(purposes) == set(current):
+        return
+    if config is not None and config.mcp_enforced:
+        raise _policy_refusal("the MCP servers and functions")
+    added = [purpose for purpose in purposes if purpose not in current]
+
+    def named(found: list[str]) -> str:
+        return _listing([_FUNCTION_NAMES.get(purpose, purpose) for purpose in found])
+
+    not_offered = [p for p in added if p not in space.enabled_capabilities]
+    if not_offered:
+        raise BadRequestException(
+            f"The space does not offer {named(not_offered)}; read_options lists "
+            "the functions it offers. Nothing was changed."
+        )
+    not_ready = [p for p in added if p not in facts.ready_functions]
+    if not_ready:
+        raise BadRequestException(
+            f"No provider is ready for {named(not_ready)}, so "
+            f"{'it' if len(not_ready) == 1 else 'they'} cannot be switched on. "
+            "Nothing was changed."
+        )
+    chosen = sorted(set(purposes))
+    update["enabled_capabilities"] = chosen
+    after["enabled_capabilities"] = _functions_value(chosen)
+
+
+def _plan_choices(
+    assistant: Any,
+    request: ChangeRequest,
+    facts: ChangeFacts,
+    after: dict[str, Any],
+    update: dict[str, Any],
+) -> None:
+    """The result ranking model, the document template, the retention and
+    the insights switch the change sets: a ranking model the space may use,
+    one of the organisation's templates, and retention and insights only
+    when the person's role allows it."""
+    from eneo.document_templates.domain import DocumentTemplateChoice
+
+    if request.names("rerank_model_id"):
+        chosen = request.update.rerank_model_id
+        if chosen != assistant.rerank_model_id:
+            if chosen is not None and chosen not in facts.selectable_rerank_models:
+                raise BadRequestException(
+                    "The space cannot use that result ranking model; "
+                    "read_options lists those it can. Nothing was changed."
+                )
+            update["rerank_model_id"] = str(chosen) if chosen is not None else None
+            after["rerank_model_id"] = _rerank_value(chosen, facts.rerank_models)
+
+    sent = request.update.document_template
+    if sent is not None:
+        try:
+            choice = DocumentTemplateChoice(
+                mode=sent.mode, template_id=sent.template_id
+            )
+        except ValueError:
+            raise BadRequestException(
+                'A template is chosen with "mode": "selected" and its '
+                "template_id, and only then is a template_id given. Nothing "
+                "was changed."
+            ) from None
+        if choice != assistant.document_template:
+            if (
+                choice.template_id is not None
+                and choice.template_id not in facts.document_templates
+            ):
+                raise BadRequestException(
+                    "The organisation has no such document template; "
+                    "read_options lists them. Nothing was changed."
+                )
+            update["document_template"] = {
+                "mode": choice.mode,
+                "template_id": (
+                    str(choice.template_id) if choice.template_id is not None else None
+                ),
+            }
+            after["document_template"] = _template_value(
+                choice, facts.document_templates
+            )
+
+    if request.names("data_retention_days"):
+        days = request.update.data_retention_days
+        if days != assistant.data_retention_days:
+            if not facts.rights.edit_retention:
+                raise _role_refusal("how long conversations are kept", facts.rights)
+            update["data_retention_days"] = after["data_retention_days"] = days
+
+    insight = request.update.insight_enabled
+    if insight is not None and insight != bool(assistant.insight_enabled):
+        if not facts.rights.toggle_insight:
+            raise _role_refusal(
+                "whether insights are on",
+                facts.rights,
+                in_personal_space=_PERSONAL_INSIGHTS,
+            )
+        update["insight_enabled"] = after["insight_enabled"] = insight
+
+
 def plan_change(
     assistant: Any,
     changes: dict[str, Any],
     *,
     space: Any,
     effective_config: Any | None,
+    facts: ChangeFacts | None = None,
 ) -> PlannedChange:
     """The change ``changes`` makes to ``assistant``, checked as far as it
     can be without saving it: only settings the chat may change, the shape
     the assistant's update request takes, what an organisation policy
-    decides, whether the space offers a chosen model and whether the model
-    offers the model settings. A setting given the value it already has is
-    left out, so it is not saved again.
+    decides, what the person's role allows (``facts``), whether the space
+    offers a chosen model, knowledge source, MCP server, tool, function,
+    ranking model or template, whether the model offers the model settings
+    and whether the knowledge shares one embedding model. A setting given
+    the value it already has is left out, so it is not saved again.
 
     A field left out keeps its value, and so does null, except where the
-    update request clears it: null clears the description, and null model
+    update request clears it: null clears the description, the result
+    ranking and the retention (which then follows the space), and null model
     settings return every setting to the model's default. Within the model
-    settings, a setting left out keeps its value."""
-    request = changes_request(changes)
+    settings, a setting left out keeps its value. A list setting is built
+    whole from the assistant as stored now: the list sent, or the stored one
+    with the additions and removals sent."""
+    parsed = changes_request(changes)
+    request = parsed.update
+    facts = facts or ChangeFacts()
     config = effective_config
     sent = request.model_fields_set
-    before = assistant_settings_of(assistant)
+    more = tuple(
+        key
+        for key in _MORE_SETTINGS
+        if parsed.names(key) or (key == "mcp_tools" and parsed.names("mcp_servers"))
+    )
+    before = assistant_settings_of(assistant, facts, more=more)
     after = dict(before)
     update: dict[str, Any] = {}
 
@@ -1343,12 +2154,67 @@ def plan_change(
             request.inline_file_text
         )
 
+    if more:
+        _plan_knowledge(assistant, parsed, space, after, update)
+        _plan_mcp(assistant, parsed, space, config, after, update)
+        _plan_functions(assistant, parsed, space, config, facts, after, update)
+        _plan_choices(assistant, parsed, facts, after, update)
+
     return PlannedChange(
         settings=before,
         kwargs=stored,
         update=update,
         changes=setting_changes(before, after),
         published=bool(assistant.published),
+        more=more,
+        facts=facts,
+    )
+
+
+async def _change_facts(
+    container: Any, space: Any, request: ChangeRequest
+) -> ChangeFacts:
+    """What ``plan_change`` checks ``request`` against beyond the assistant
+    and its space, read only for the settings the request names, through
+    what the update itself checks them with: the person's actor in the space,
+    the providers' readiness (``capability_availability``, which the update's
+    ``validate_capability_additions`` reads), the ranking model's
+    ``RerankService.selectable`` and the organisation's live templates."""
+    from eneo.mcp_servers.application.capability_resolver import (
+        capability_availability,
+    )
+
+    ready: frozenset[str] = frozenset()
+    if request.names("enabled_capabilities"):
+        states = await capability_availability(
+            container.session(),
+            container.user().tenant_id,
+            space.security_classification,
+        )
+        ready = frozenset(state.purpose for state in states if state.available)
+    rerank_models: dict[UUID, str] = {}
+    selectable: frozenset[UUID] = frozenset()
+    if request.names("rerank_model_id"):
+        models = await container.rerank_model_crud_service().get_rerank_models()
+        rerank_models = {model.id: _model_name(model) for model in models}
+        chosen = request.update.rerank_model_id
+        if isinstance(chosen, UUID) and await container.rerank_service().selectable(
+            chosen, space.security_classification
+        ):
+            selectable = frozenset({chosen})
+    templates: dict[UUID, str] = {}
+    if request.names("document_template"):
+        templates = {
+            item.id: item.name for item in await _document_templates(container)
+        }
+    return ChangeFacts(
+        rights=PersonRights.of(
+            container.actor_manager().get_space_actor_from_space(space=space)
+        ),
+        ready_functions=ready,
+        rerank_models=rerank_models,
+        selectable_rerank_models=selectable,
+        document_templates=templates,
     )
 
 
@@ -1358,7 +2224,7 @@ async def _planned_change(
     """The change ``changes`` makes to the chat's assistant as it is now.
     Changes the chat may not make, or of the wrong shape, are refused before
     anything is read."""
-    changes_request(changes)
+    request = changes_request(changes)
     (
         assistant,
         _,
@@ -1367,7 +2233,13 @@ async def _planned_change(
         chat.target_id
     )
     space = await container.space_service().get_space(chat.space_id)
-    return plan_change(assistant, changes, space=space, effective_config=config)
+    return plan_change(
+        assistant,
+        changes,
+        space=space,
+        effective_config=config,
+        facts=await _change_facts(container, space, request),
+    )
 
 
 _MODES = {
@@ -1377,35 +2249,115 @@ _MODES = {
 _FILES = {True: "put whole in the prompt", False: "looked up when needed"}
 
 
+# What a list setting holds, as the editor names it.
+_LISTS: dict[str, str] = {
+    "groups": "collections",
+    "websites": "websites",
+    "integration_knowledge_list": "integration sources",
+    "mcp_servers": "MCP servers",
+    "enabled_capabilities": "functions",
+}
+
+
+def _list_line(
+    label: str, before: list[dict[str, Any]], after: list[dict[str, Any]]
+) -> str:
+    old = {item["id"]: item["name"] for item in before}
+    new = {item["id"]: item["name"] for item in after}
+
+    def names(found: Iterable[Any]) -> str:
+        return _listing([f'"{_short(name or "", 80)}"' for name in found])
+
+    parts = [
+        f"{verb} {names(found)}"
+        for verb, found in (
+            ("added", [new[key] for key in new if key not in old]),
+            ("removed", [old[key] for key in old if key not in new]),
+        )
+        if found
+    ]
+    return f"{label} ({'; '.join(parts)})"
+
+
+def _tools_line(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> str:
+    old = {item["id"]: item for item in before}
+    new = {item["id"]: item for item in after}
+    parts: list[str] = []
+    for key in dict.fromkeys([*new, *old]):
+        now, then = new.get(key), old.get(key)
+        name = _short(((now or then) or {}).get("name") or "a tool", 80)
+        if now is None:
+            parts.append(f"{name} back to its server's setting")
+        elif then is None or then["is_enabled"] != now["is_enabled"]:
+            parts.append(f"{name} {'on' if now['is_enabled'] else 'off'}")
+    return f"MCP tools ({', '.join(parts)})"
+
+
+def _choice_line(key: str, before: Any, after: Any) -> str:
+    """A change of the result ranking, the document template, the retention
+    or the insights switch."""
+
+    def shown(value: Any) -> str:
+        if key == "rerank_model_id":
+            return "none" if value is None else value["name"] or "another model"
+        if key == "document_template":
+            if value["mode"] == "default":
+                return "the organisation's default"
+            if value["mode"] == "builtin":
+                return "Eneo's built-in look"
+            return value["name"] or "a template"
+        if key == "data_retention_days":
+            return "following the space" if value is None else f"{value} days"
+        return "on" if value else "off"
+
+    label = {
+        "rerank_model_id": "result ranking",
+        "document_template": "document template",
+        "data_retention_days": "conversation retention",
+    }.get(key, "insights")
+    return f"{label} (from {shown(before)} to {shown(after)})"
+
+
 def _change_line(change: dict[str, Any], *, saved: bool) -> str:
     """One change for the model: the setting as the editor calls it, with
     its values when they are short. Never an id, and never the text of the
     instructions or the description."""
-    field, before, after = change["field"], change["before"], change["after"]
-    if field == "prompt":
+    key, before, after = change["field"], change["before"], change["after"]
+    if key == "prompt":
         return (
             "instructions (a new version)"
             if saved
             else f"instructions (new text of {len(after or ''):,} characters)"
         )
-    if field == "description":
+    if key == "description":
         return "description (cleared)" if not after else "description"
-    if field == "name":
+    if key == "name":
         return f'name (from "{_short(before, 80)}" to "{_short(after, 80)}")'
-    if field == "completion_model":
+    if key == "completion_model":
         old = before["name"] if before else "none"
         return f"chat model (from {old} to {after['name']})"
-    if field == "knowledge_mode":
+    if key == "knowledge_mode":
         return (
             f"knowledge mode (from {_MODES.get(before, before)} to "
             f"{_MODES.get(after, after)})"
         )
-    if field == "inline_file_text":
+    if key == "inline_file_text":
         return (
             f"files uploaded in a chat (from {_FILES[bool(before)]} to "
             f"{_FILES[bool(after)]})"
         )
-    label = dict(_SETTINGS).get(field.removeprefix("completion_model_kwargs."), field)
+    if key in _LISTS:
+        return _list_line(_LISTS[key], before, after)
+    if key == "mcp_tools":
+        return _tools_line(before, after)
+    if key in (
+        "rerank_model_id",
+        "document_template",
+        "data_retention_days",
+        "insight_enabled",
+    ):
+        return _choice_line(key, before, after)
+    label = dict(_SETTINGS).get(key.removeprefix("completion_model_kwargs."), key)
 
     def shown(value: Any) -> str:
         return "the model's default" if value is None else str(value)
@@ -1480,10 +2432,12 @@ def _unchanged(target_id: UUID, *, proposal: bool) -> CallToolResult:
         "Propose a change to the assistant this chat is about, without saving "
         "anything: the person applies it with the button on the proposal, as "
         "their own save. " + _CHANGES_TAKE + " The proposal is checked as far "
-        "as it can be without saving (what a policy decides, whether the space "
-        "offers a model and the model its settings); applying it can still be "
-        "refused, for example when the instructions and files no longer fit "
-        "the model. A refusal says why and proposes nothing."
+        "as it can be without saving (what a policy decides, what the person's "
+        "role allows, whether the space offers a model, knowledge source, MCP "
+        "server or tool, function, ranking model or template, and the model its "
+        "settings); applying it can still be refused, for example when the "
+        "instructions and files no longer fit the model. A refusal says why and "
+        "proposes nothing."
     ),
 )
 async def propose_changes(ctx: Context, changes: dict[str, Any]) -> CallToolResult:
@@ -1560,7 +2514,10 @@ async def update_assistant(ctx: Context, changes: dict[str, Any]) -> CallToolRes
             },
         )
         after, _ = await container.assistant_service().get_assistant(chat.target_id)
-        changed = setting_changes(planned.settings, assistant_settings_of(after))
+        changed = setting_changes(
+            planned.settings,
+            assistant_settings_of(after, planned.facts, more=planned.more),
+        )
         if not changed:
             return _unchanged(chat.target_id, proposal=False)
         return CallToolResult(
@@ -1584,9 +2541,176 @@ async def update_assistant(ctx: Context, changes: dict[str, Any]) -> CallToolRes
     return await _call(ctx, operation, editing=True)
 
 
+# --- read_prompt_history -----------------------------------------------------
+
+# How much of each saved version the list shows: its first lines, flattened.
+_PREVIEW_LINES = 3
+_PREVIEW_CHARS = 200
+
+
+def _when(moment: datetime | None) -> str:
+    if moment is None:
+        return "at an unknown time"
+    if moment.tzinfo is not None:
+        moment = moment.astimezone(UTC)
+    return moment.strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _author(prompt: Any) -> str:
+    """Who the version history names for a version: the user the prompt
+    belongs to, as the editor's version list shows them."""
+    user = prompt.user
+    if user is None:
+        return "unknown"
+    return user.username or user.email
+
+
+def _version_head(prompt: Any) -> str:
+    return (
+        f"saved {_when(prompt.created_at)}"
+        + (" (in use now)" if prompt.is_selected else "")
+        + f"; author: {_author(prompt)}; {len(prompt.text or ''):,} characters"
+    )
+
+
+def history_lines(prompts: Sequence[Any], version: int | None) -> list[str]:
+    """The lines ``read_prompt_history`` pages through: every saved version
+    of the instructions, newest first, numbered from 1, with its head, its
+    description and how it begins; or, with ``version``, that version whole."""
+    if version is not None:
+        if not 1 <= version <= len(prompts):
+            raise BadRequestException(
+                f"version must be from 1 to {len(prompts)}, a number from the "
+                "list read_prompt_history gives without a version."
+                if prompts
+                else "No versions of the instructions are saved."
+            )
+        prompt = prompts[version - 1]
+        return [
+            f"Version {version} of {len(prompts)}, {_version_head(prompt)}",
+            f"Description: {_short(prompt.description) or 'none'}",
+            "Text:",
+            *_wrapped(prompt.text or ""),
+        ]
+    if not prompts:
+        return ["No versions of the instructions are saved."]
+    lines: list[str] = []
+    for number, prompt in enumerate(prompts, start=1):
+        first = [line for line in (prompt.text or "").splitlines() if line.strip()]
+        lines += [
+            f"{number}. {_version_head(prompt)}",
+            f"   description: {_short(prompt.description) or 'none'}",
+            "   begins: "
+            + (_short(" / ".join(first[:_PREVIEW_LINES]), _PREVIEW_CHARS) or "(empty)"),
+        ]
+    return lines
+
+
+@mcp.tool(annotations=_READS)
+async def read_prompt_history(
+    ctx: Context, offset: int = 0, version: int | None = None
+) -> CallToolResult:
+    """Read the saved versions of the assistant's instructions, newest
+    first, as the editor's version history lists them: when each was saved,
+    whether it is the one in use, its author, its description and how it
+    begins. To read one version whole, call again with version set to its
+    number in that list (1 is the newest); read the list again first when
+    the instructions may have changed since. A long read comes in parts:
+    when the text says more follows, call again with the offset it gives."""
+
+    async def operation(container, chat):
+        prompts = await container.assistant_service().get_prompts_by_assistant(
+            chat.target_id
+        )
+        lines = history_lines(prompts, version)
+        return page_lines(
+            lines,
+            tool="read_prompt_history",
+            section="history",
+            offset=offset,
+            assistant_id=chat.target_id,
+            title=(
+                "The saved versions of the instructions, newest first"
+                if version is None
+                else f"Version {version} of the instructions"
+            ),
+            again="" if version is None else f"version={version}",
+        )
+
+    return await _call(ctx, operation)
+
+
+# --- publish_assistant -------------------------------------------------------
+
+
+def publish_text(published: bool) -> str:
+    """What the model is told when the assistant was published or
+    unpublished."""
+    if published:
+        return (
+            "Published: the assistant is now published. The card shows the "
+            "change and has no undo; to unpublish it, the person asks for that."
+        )
+    return (
+        "Unpublished: the assistant is no longer published. The card shows the "
+        "change and has no undo; to publish it again, the person asks for that."
+    )
+
+
+@mcp.tool(annotations=_ACTS)
+async def publish_assistant(ctx: Context, published: bool) -> CallToolResult:
+    """Publish the assistant (published true) or unpublish it (false), only
+    in "Redigera" and only when the person asks for it. The person approves
+    each call in the chat before it runs; a call they decline changed
+    nothing, so do not repeat it unless they ask again. Refused when the
+    person's role does not let them publish, or when the assistant already
+    is published or unpublished as asked."""
+
+    async def operation(container, chat):
+        from eneo.assistants.application.assistant_publish_operation import (
+            apply_assistant_publish,
+        )
+
+        assistant, _ = await container.assistant_service().get_assistant(chat.target_id)
+        rights = await _person_rights(container, chat.space_id)
+        if not rights.publish:
+            raise _role_refusal(
+                "whether this assistant is published",
+                rights,
+                in_personal_space=_PERSONAL_PUBLISHING,
+            )
+        before = bool(assistant.published)
+        if before == published:
+            raise BadRequestException(
+                "The assistant is already "
+                + ("published" if published else "unpublished")
+                + ". Nothing was changed."
+            )
+        applied = await apply_assistant_publish(
+            container,
+            assistant_id=chat.target_id,
+            published=published,
+            audit_context={
+                "origin": HELPER_CHAT_ORIGIN,
+                "session_id": str(chat.session_id),
+            },
+        )
+        after = bool(applied.assistant.published)
+        return CallToolResult(
+            content=[TextContent(type="text", text=publish_text(after))],
+            structuredContent={
+                "target_id": str(chat.target_id),
+                "changes": [{"field": "published", "before": before, "after": after}],
+                "undo": None,
+            },
+        )
+
+    return await _call(ctx, operation, editing=True)
+
+
 # --- The server of one turn --------------------------------------------------
 
-EDIT_MODE_TOOLS: frozenset[str] = frozenset({"update_assistant"})
+EDIT_MODE_TOOLS: frozenset[str] = frozenset({"update_assistant", "publish_assistant"})
 """The tools ``_call`` refuses outside edit mode. A turn in view mode does not
 offer them, so the model never calls what would be refused; it proposes a
 change instead."""
@@ -1600,10 +2724,7 @@ async def build_assistant_settings_mcp_server(
     return await build_ephemeral_server(
         mcp,
         name=ASSISTANT_SERVER_NAME,
-        description=(
-            "Read the assistant this chat is about and what its space offers, "
-            "propose changes, and in edit mode make them."
-        ),
+        description=_SERVER_DESCRIPTION,
         token=token,
         tenant_id=tenant_id,
         exclude_tools=() if editing else EDIT_MODE_TOOLS,

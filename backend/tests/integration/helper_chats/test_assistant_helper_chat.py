@@ -4,6 +4,7 @@ goes or moves."""
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
@@ -24,10 +25,17 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import AssistantMCPServers, Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.capabilities_table import SpaceCapabilities
+from eneo.database.tables.document_templates_table import DocumentTemplates
 from eneo.database.tables.helper_chats_table import HelperChats
-from eneo.database.tables.mcp_server_table import MCPServers, SpacesMCPServers
+from eneo.database.tables.mcp_server_table import (
+    MCPServers,
+    MCPServerTools,
+    SpacesMCPServers,
+)
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.websites_table import Websites
 from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
 from eneo.internal_mcp import assistant_settings
 from eneo.main.models import ModelId
@@ -313,7 +321,14 @@ async def test_the_persons_turn_reaches_the_model_with_the_assistant_tools(
 
     assert asked.status_code == 200, asked.text
     assert attached == [
-        {"assistant": ["propose_changes", "read_assistant", "read_options"]}
+        {
+            "assistant": [
+                "propose_changes",
+                "read_assistant",
+                "read_options",
+                "read_prompt_history",
+            ]
+        }
     ]
 
 
@@ -544,7 +559,14 @@ async def test_a_turn_in_edit_mode_gets_the_tool_that_changes_the_assistant(
 
     assert asked.status_code == 200, asked.text
     assert attached == [
-        ["propose_changes", "read_assistant", "read_options", "update_assistant"]
+        [
+            "propose_changes",
+            "publish_assistant",
+            "read_assistant",
+            "read_options",
+            "read_prompt_history",
+            "update_assistant",
+        ]
     ]
 
 
@@ -998,3 +1020,513 @@ async def test_instructions_a_policy_sets_are_neither_changed_nor_proposed(
             "An organisation policy sets the instructions for this assistant"
         )
     assert await _stored(db_container, default_id) == stored
+
+
+# --- Knowledge, tools, functions, ranking, template, retention, insights ------
+
+
+@dataclass(frozen=True)
+class Offered:
+    """What the space offers beyond what a new space has, and the secrets
+    its server and website hold."""
+
+    groups: tuple[str, str]
+    website_id: str
+    server_id: str
+    tools: dict[str, str]
+    ranker_id: str
+    template_id: str
+    secrets: tuple[str, ...]
+
+
+@pytest.fixture
+async def offered(
+    client, setup: Setup, db_container, admin_user, rerank_model_factory
+) -> Offered:
+    """Two collections, a website with a password in its address, an MCP
+    server with a sign-in token and two tools, a ready web search provider
+    the space offers, a result ranking model and a document template."""
+    groups: list[str] = []
+    embedding_model_id = None
+    for name in ("Rutiner", "Gamla rutiner"):
+        created = await client.post(
+            f"/api/v1/spaces/{setup.space_id}/knowledge/groups/",
+            headers=setup.headers,
+            json={"name": name},
+        )
+        assert created.status_code == 201, created.text
+        groups.append(created.json()["id"])
+        embedding_model_id = created.json()["embedding_model"]["id"]
+    token, url_key = f"tok-{uuid4().hex}", f"key-{uuid4().hex}"
+    password = f"pw-{uuid4().hex}"
+    async with db_container() as container:
+        session = container.session()
+        website = Websites(
+            name="Intranätet",
+            url=f"https://reader:{password}@intra.example.org/docs",
+            download_files=False,
+            crawl_type="crawl",
+            update_interval="never",
+            size=0,
+            tenant_id=admin_user.tenant_id,
+            user_id=admin_user.id,
+            embedding_model_id=UUID(embedding_model_id),
+            space_id=UUID(setup.space_id),
+        )
+        server = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Ärendesystemet",
+            description="Läser ärenden.",
+            http_url=f"https://cases.example.org/mcp?key={url_key}",
+            http_auth_type="bearer",
+            http_auth_config_schema={"token": token},
+            is_enabled=True,
+        )
+        search = MCPServers(
+            tenant_id=admin_user.tenant_id,
+            name="Webbsökningen",
+            purpose="web_search",
+            http_url="https://search.example.org/mcp",
+            http_auth_type="none",
+            is_enabled=True,
+        )
+        session.add_all([website, server, search])
+        await session.flush()
+        tools = {
+            name: MCPServerTools(
+                mcp_server_id=row.id,
+                name=name,
+                description=name,
+                input_schema={"type": "object"},
+                is_enabled_by_default=True,
+                requires_approval=False,
+                removed_from_remote=False,
+            )
+            for row, name in (
+                (server, "search_cases"),
+                (server, "create_case"),
+                (search, "search"),
+            )
+        }
+        session.add_all(tools.values())
+        session.add(
+            SpacesMCPServers(space_id=UUID(setup.space_id), mcp_server_id=server.id)
+        )
+        await session.execute(
+            sa.delete(SpaceCapabilities).where(
+                SpaceCapabilities.space_id == UUID(setup.space_id)
+            )
+        )
+        session.add(
+            SpaceCapabilities(space_id=UUID(setup.space_id), purpose="web_search")
+        )
+        template = DocumentTemplates(
+            tenant_id=admin_user.tenant_id,
+            name="Kommunmall",
+            filename="kommunmall.docx",
+            content=b"docx",
+            sha256="0" * 64,
+            size_bytes=4,
+            syntax="none",
+            placeholders=[],
+            checks={},
+            status="ready",
+            is_default=False,
+        )
+        session.add(template)
+        ranker = await rerank_model_factory(session, "Rankaren")
+        await session.flush()
+        offered = Offered(
+            groups=(groups[0], groups[1]),
+            website_id=str(website.id),
+            server_id=str(server.id),
+            tools={name: str(tool.id) for name, tool in tools.items()},
+            ranker_id=str(ranker.id),
+            template_id=str(template.id),
+            secrets=(token, url_key, password, "cases.example.org", "reader"),
+        )
+    return offered
+
+
+def _added_settings(assistant: dict) -> dict:
+    """The settings beside the base ones, as the assistant endpoint gives
+    them."""
+    return {
+        "groups": sorted(item["id"] for item in assistant["groups"]),
+        "websites": sorted(item["id"] for item in assistant["websites"]),
+        "mcp_servers": sorted(item["id"] for item in assistant["mcp_servers"]),
+        "mcp_tools": sorted(
+            (item["tool_id"], item["is_enabled"]) for item in assistant["mcp_tools"]
+        ),
+        "enabled_capabilities": sorted(assistant["enabled_capabilities"]),
+        "rerank_model_id": assistant["rerank_model_id"],
+        "document_template": assistant["document_template"],
+        "data_retention_days": assistant["data_retention_days"],
+        "insight_enabled": assistant["insight_enabled"],
+    }
+
+
+def _every_added_setting(offered: Offered, insight_enabled: bool) -> dict:
+    return {
+        "groups": {"add": [{"id": offered.groups[0]}, {"id": offered.groups[1]}]},
+        "websites": {"add": [{"id": offered.website_id}]},
+        "mcp_servers": {"add": [{"id": offered.server_id}]},
+        "mcp_tools": {
+            "add": [{"tool_id": offered.tools["create_case"], "is_enabled": False}]
+        },
+        "enabled_capabilities": {"add": ["web_search"]},
+        "rerank_model_id": offered.ranker_id,
+        "document_template": {"mode": "selected", "template_id": offered.template_id},
+        "data_retention_days": 30,
+        "insight_enabled": insight_enabled,
+    }
+
+
+def _expected(before: dict, offered: Offered, insight_enabled: bool) -> dict:
+    return {
+        "groups": sorted(offered.groups),
+        "websites": [offered.website_id],
+        "mcp_servers": [offered.server_id],
+        "mcp_tools": [(offered.tools["create_case"], False)],
+        "enabled_capabilities": sorted({*before["enabled_capabilities"], "web_search"}),
+        "rerank_model_id": offered.ranker_id,
+        "document_template": {"mode": "selected", "template_id": offered.template_id},
+        "data_retention_days": 30,
+        "insight_enabled": insight_enabled,
+    }
+
+
+def _holds_no_secret(result, offered: Offered) -> None:
+    told = result.content[0].text + json.dumps(result.structuredContent)
+    for secret in offered.secrets:
+        assert secret not in told
+
+
+async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_save(
+    client, setup: Setup, db_container, admin_user, offered: Offered, queued
+):
+    before = _added_settings(await _read(client, setup))
+    insight = not before["insight_enabled"]
+    chat = await _open(client, setup)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    stored = await _stored(db_container, setup.assistant_id)
+    queued.clear()
+
+    result = await assistant_settings.propose_changes(
+        ctx, changes=_every_added_setting(offered, insight)
+    )
+
+    assert not result.isError, result.content[0].text
+    assert await _stored(db_container, setup.assistant_id) == stored
+    assert _added_settings(await _read(client, setup)) == before
+    assert queued == []
+    _holds_no_secret(result, offered)
+    assert _UUID.search(result.content[0].text) is None
+    proposal = result.structuredContent["proposal"]
+    assert {change["field"] for change in proposal["changes"]} == {
+        "groups",
+        "websites",
+        "rerank_model_id",
+        "mcp_servers",
+        "mcp_tools",
+        "enabled_capabilities",
+        "document_template",
+        "data_retention_days",
+        "insight_enabled",
+    }
+    tools = next(
+        change for change in proposal["changes"] if change["field"] == "mcp_tools"
+    )
+    assert tools["after"] == [
+        {"id": offered.tools["create_case"], "name": "create_case", "is_enabled": False}
+    ]
+
+    applied = await _saved(client, setup, proposal["update"])
+    assert _added_settings(applied) == _expected(before, offered, insight)
+
+
+async def test_the_added_settings_are_changed_audited_and_undone_in_edit_mode(
+    client, setup: Setup, db_container, admin_user, offered: Offered, queued
+):
+    before = _added_settings(await _read(client, setup))
+    insight = not before["insight_enabled"]
+    chat = await _open(client, setup)
+    await _edit_mode(client, setup, chat)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    stored = await _stored(db_container, setup.assistant_id)
+    queued.clear()
+
+    result = await assistant_settings.update_assistant(
+        ctx, changes=_every_added_setting(offered, insight)
+    )
+
+    assert not result.isError, result.content[0].text
+    assert _added_settings(await _read(client, setup)) == _expected(
+        before, offered, insight
+    )
+    _holds_no_secret(result, offered)
+    assert _UUID.search(result.content[0].text) is None
+    # One entry, the one a person's own save writes, saved with the change.
+    saved = await _stored(db_container, setup.assistant_id)
+    new_entries = saved.audit[len(stored.audit) :]
+    assert [entry[:3] for entry in new_entries] == [
+        (ActionType.ASSISTANT_UPDATED.value, admin_user.id, "user")
+    ]
+    extra = new_entries[0][3]["extra"]
+    assert extra["origin"] == "helper_chat"
+    assert extra["session_id"] == chat["session_id"]
+    assert _updated(queued, setup.assistant_id) == []
+
+    undo = result.structuredContent["undo"]
+    assert undo["groups"] == [] and undo["mcp_servers"] == []
+    undone = await _saved(client, setup, undo)
+    assert _added_settings(undone) == before
+
+
+async def test_what_the_space_does_not_offer_is_refused_by_both_tools(
+    client, setup: Setup, db_container, admin_user, offered: Offered
+):
+    async with db_container() as container:
+        outside = await container.session().scalar(
+            sa.insert(MCPServers)
+            .values(
+                tenant_id=admin_user.tenant_id,
+                name="Utanför",
+                http_url="https://outside.example.org/mcp",
+                http_auth_type="none",
+                is_enabled=True,
+            )
+            .returning(MCPServers.id)
+        )
+        await container.session().execute(
+            sa.delete(SpaceCapabilities).where(
+                SpaceCapabilities.space_id == UUID(setup.space_id)
+            )
+        )
+    chat = await _open(client, setup)
+    await _edit_mode(client, setup, chat)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    stored = await _stored(db_container, setup.assistant_id)
+    stranger = str(uuid4())
+
+    for changes, refusal in (
+        ({"groups": {"add": [{"id": stranger}]}}, "does not offer that collection"),
+        ({"mcp_servers": {"add": [{"id": str(outside)}]}}, "that MCP server"),
+        (
+            {
+                "mcp_tools": {
+                    "add": [{"tool_id": offered.tools["search"], "is_enabled": False}]
+                }
+            },
+            "not a tool of the assistant's MCP servers",
+        ),
+        ({"enabled_capabilities": {"add": ["web_search"]}}, "not offer web search"),
+        ({"rerank_model_id": stranger}, "cannot use that result ranking model"),
+        (
+            {"document_template": {"mode": "selected", "template_id": stranger}},
+            "no such document template",
+        ),
+    ):
+        for tool in (
+            assistant_settings.propose_changes,
+            assistant_settings.update_assistant,
+        ):
+            result = await tool(ctx, changes=changes)
+
+            assert result.isError, changes
+            assert refusal in result.content[0].text
+            assert _UUID.search(result.content[0].text) is None
+    assert await _stored(db_container, setup.assistant_id) == stored
+
+
+async def _person_ctx(db_container, chat: dict) -> SimpleNamespace:
+    """The tool context of the person whose chat ``chat`` is."""
+    async with db_container() as container:
+        person = await container.session().scalar(
+            sa.select(Sessions.user_id).where(Sessions.id == UUID(chat["session_id"]))
+        )
+        email = (await container.user_repo().get_user_by_id(person)).email
+    return await _ctx(
+        db_container,
+        SimpleNamespace(email=email),
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+
+
+async def test_what_an_editors_role_withholds_is_named_and_refused_by_both_tools(
+    client, setup: Setup, db_container, admin_user, queued
+):
+    colleague = await _member_headers(
+        db_container, admin_user.tenant_id, setup.space_id, SpaceRoleValue.EDITOR
+    )
+    chat = await _open(client, replace(setup, headers=colleague))
+    await _edit_mode(client, setup, chat, headers=colleague)
+    ctx = await _person_ctx(db_container, chat)
+    before = await _read(client, setup)
+    stored = await _stored(db_container, setup.assistant_id)
+    queued.clear()
+
+    read = await assistant_settings.read_assistant(ctx)
+    assert not read.isError, read.content[0].text
+    text = read.content[0].text
+    assert "Not the person's to change (their role does not allow it):" in text
+    others = "someone with more rights in the space, such as its administrators, can"
+    assert f"- conversation retention: {others}" in text
+    assert f"- insights (turning them on or off): {others}" in text
+    # An editor publishes assistants in a shared space.
+    assert "- publishing" not in text
+
+    for tool in (
+        assistant_settings.propose_changes,
+        assistant_settings.update_assistant,
+    ):
+        for changes, what in (
+            ({"data_retention_days": 30}, "how long conversations are kept"),
+            (
+                {"insight_enabled": not before["insight_enabled"]},
+                "whether insights are on",
+            ),
+        ):
+            result = await tool(ctx, changes=changes)
+
+            assert result.isError
+            assert result.content[0].text.startswith(
+                f"The person's role does not let them change {what}; {others}."
+            )
+
+    assert await _stored(db_container, setup.assistant_id) == stored
+    after = await _read(client, setup)
+    assert (after["data_retention_days"], after["insight_enabled"]) == (
+        before["data_retention_days"],
+        before["insight_enabled"],
+    )
+    assert queued == []
+
+
+async def test_publishing_and_insights_are_refused_in_a_personal_space(
+    client, setup: Setup, db_container, admin_user, queued
+):
+    async with db_container() as container:
+        personal = await container.space_init_service().get_personal_space()
+    created = await client.post(
+        "/api/v1/assistants/",
+        headers=setup.headers,
+        json={"name": "Min egen", "space_id": str(personal.id)},
+    )
+    assert created.status_code == 200, created.text
+    own = Setup(
+        headers=setup.headers,
+        space_id=str(personal.id),
+        assistant_id=created.json()["id"],
+        url=f"/api/v1/assistants/{created.json()['id']}/helper-chat/",
+    )
+    chat = await _open(client, own)
+    await _edit_mode(client, own, chat)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    before = await _read(client, own)
+    stored = await _stored(db_container, own.assistant_id)
+    queued.clear()
+
+    read = await assistant_settings.read_assistant(ctx, section="access")
+    text = read.content[0].text
+    assert "- insights (turning them on or off): not used in a personal space" in text
+    assert (
+        "- publishing (publishing or unpublishing it): not used in a personal space"
+        in (text)
+    )
+    assert "- conversation retention" not in text
+
+    published = await assistant_settings.publish_assistant(ctx, published=True)
+    assert published.isError
+    assert published.content[0].text == (
+        "An assistant in a personal space is not published. Nothing was changed."
+    )
+    for tool in (
+        assistant_settings.propose_changes,
+        assistant_settings.update_assistant,
+    ):
+        result = await tool(
+            ctx, changes={"insight_enabled": not before["insight_enabled"]}
+        )
+        assert result.isError
+        assert result.content[0].text == (
+            "Insights are not used for an assistant in a personal space. "
+            "Nothing was changed."
+        )
+
+    assert await _stored(db_container, own.assistant_id) == stored
+    after = await _read(client, own)
+    assert (after["published"], after["insight_enabled"]) == (
+        before["published"],
+        before["insight_enabled"],
+    )
+    assert queued == []
+
+
+async def test_publishing_from_the_chat_needs_edit_mode_and_is_audited_as_the_person(
+    client, setup: Setup, db_container, admin_user, queued
+):
+    chat = await _open(client, setup)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    in_view_mode = await assistant_settings.publish_assistant(ctx, published=True)
+    assert in_view_mode.isError
+    assert in_view_mode.content[0].text.startswith("Turn on edit mode")
+    assert (await _read(client, setup))["published"] is False
+    await _edit_mode(client, setup, chat)
+    stored = await _stored(db_container, setup.assistant_id)
+    queued.clear()
+
+    result = await assistant_settings.publish_assistant(ctx, published=True)
+
+    assert not result.isError, result.content[0].text
+    assert result.structuredContent == {
+        "target_id": setup.assistant_id,
+        "changes": [{"field": "published", "before": False, "after": True}],
+        "undo": None,
+    }
+    assert (await _read(client, setup))["published"] is True
+    new_entries = (await _stored(db_container, setup.assistant_id)).audit[
+        len(stored.audit) :
+    ]
+    assert [entry[:3] for entry in new_entries] == [
+        (ActionType.ASSISTANT_PUBLISHED.value, admin_user.id, "user")
+    ]
+    assert new_entries[0][3]["extra"] == {
+        "published": True,
+        "action": "published",
+        "origin": "helper_chat",
+        "session_id": chat["session_id"],
+    }
+    assert queued == []
+
+    again = await assistant_settings.publish_assistant(ctx, published=True)
+    assert again.isError
+    assert again.content[0].text == (
+        "The assistant is already published. Nothing was changed."
+    )
