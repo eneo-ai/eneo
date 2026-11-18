@@ -339,13 +339,6 @@ jobs:
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
 
-  # Preserve the existing required CI gate during rollout. Remove this caller
-  # and its aggregate references once the standalone User-facing section check
-  # is required in GitHub (see the What's new PLAYBOOK).
-  user-facing:
-    name: User-facing section (CI transition)
-    uses: ./.github/workflows/user-facing.yml
-
   frontend:
     name: Frontend checks
     needs: changes
@@ -879,7 +872,6 @@ jobs:
     needs:
       - changes
       - security
-      - user-facing
       - backend-quality
       - backend-tests
       - frontend
