@@ -101,7 +101,8 @@ The rules are public at
   the team before queueing them, and that Core Maintainers agree on their own
   changes together; GitHub does not require a formal approval for either.
 - **Into a release.** A pull request into a `release/vX.Y` branch, or into
-  `main`, needs an approval from a Core Maintainer other than its author.
+  `main`, needs an approval from someone with write access other than its
+  author, in practice another Core Maintainer.
   When no second maintainer is available, a Core Maintainer can bypass the
   approval for a single pull request; GitHub records the bypass. Only Core
   Maintainers can create release branches, and they authorise every `v*` tag.
@@ -122,7 +123,7 @@ The rules are public at
 - **New releases wait before they can enter a lockfile.** When a lockfile is
   resolved or updated, npm and PyPI releases younger than 7 days are ignored,
   which leaves time for a malicious release to be found and removed. An urgent
-  security fix can be excepted for one release. See
+  security fix can be excepted. See
   [Cooldown for new releases](/contributing/security#cooldown-for-new-releases).
 - **AI code review.** A maintainer can ask our self-hosted
   [Review Agent](https://github.com/CCimen/review-agent) for a second opinion
