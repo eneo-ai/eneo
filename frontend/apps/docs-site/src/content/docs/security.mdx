@@ -119,6 +119,11 @@ The rules are public at
   call it, or the application refuses to start. GitHub secret scanning with
   push protection blocks known credential formats.
 
+- **New releases wait before they can enter a lockfile.** When a lockfile is
+  resolved or updated, npm and PyPI releases younger than 7 days are ignored,
+  which leaves time for a malicious release to be found and removed. An urgent
+  security fix can be excepted for one release. See
+  [Cooldown for new releases](/contributing/security#cooldown-for-new-releases).
 - **AI code review.** A maintainer can ask our self-hosted
   [Review Agent](https://github.com/CCimen/review-agent) for a second opinion
   on a pull request by commenting `/review`. The review is advisory: it cannot
