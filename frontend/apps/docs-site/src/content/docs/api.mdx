@@ -63,6 +63,13 @@ spaces, assistant read access alone is insufficient; a caller without insight
 access receives `403`.
 Personal-space question history requires the `insights` role permission.
 
+Insight figures and lists count conversations from every source: signed-in
+users, service API keys and web widget visitors. Listed conversations and
+questions carry `source` (`user`, `api_key` or `widget`), and
+`conversation-insights/`, `conversation-insights/sessions/` and the
+assistant's `questions/` and `feedback/` endpoints take a `source` parameter
+to count one source only. User counts cover signed-in users.
+
 Contributors must [declare and test endpoint access](/contributing/security#declare-access-on-every-endpoint)
 when adding or changing an endpoint.
 
