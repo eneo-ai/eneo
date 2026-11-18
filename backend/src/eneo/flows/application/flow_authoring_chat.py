@@ -683,7 +683,6 @@ class _FlowTarget:
     edit mode while the person may edit it and the flow is not published."""
 
     target_type = HelperChatTargetType.FLOW
-    instructions = AUTHORING_INSTRUCTIONS
     audit = HelperChatAudit(
         entity_type=EntityType.FLOW,
         chat_created=HelperChatAuditEvent(
@@ -703,6 +702,10 @@ class _FlowTarget:
         ),
     )
     refusals = _FlowChatRefusals()
+
+    def instructions(self, container: Container) -> str:
+        # The same for every organisation.
+        return AUTHORING_INSTRUCTIONS
 
     async def require_available(self, container: Container) -> None:
         await require_flows_enabled(

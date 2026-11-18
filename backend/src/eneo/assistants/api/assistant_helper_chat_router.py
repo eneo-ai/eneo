@@ -89,13 +89,19 @@ def _response(
 
 _FORBIDDEN = _response(
     "The caller may not edit the assistant, or it does not exist or cannot be "
-    "read: the three answer alike. An API key gets 403 too "
+    "read: the three answer alike. The organisation has turned the helper chat "
+    "off (`helper_chat_disabled`). An API key gets 403 too "
     "(`session_auth_required`): the chat takes a signed-in session.",
     _error(
         AssistantHelperChatErrorCode.NO_EDIT_RIGHTS,
         "You do not have permission to edit this assistant.",
         eneo_error_code=ErrorCodes.UNAUTHORIZED,
         context={"resource_type": "assistant", "action": "update"},
+    ),
+    _error(
+        AssistantHelperChatErrorCode.DISABLED,
+        "Your organisation has turned off the helper chat.",
+        eneo_error_code=ErrorCodes.UNAUTHORIZED,
     ),
 )
 _NOT_FOUND = _response(
@@ -168,13 +174,15 @@ class AssistantHelperChatUpdateRequest(BaseModel):
         "the caller's own in the assistant's space, whose tools reach only "
         "this assistant; send its questions to `assistant_id`. Each user has "
         "one chat per assistant; calling again returns it with its current "
-        "conversation and gives its assistant the current instructions and "
-        "the model in force: the caller's own choice, else the organisation's "
-        "default for helper chats when the space allows it, else the space's "
-        "default among models that support tools. A new chat starts in view "
-        "mode. Refused for an assistant the caller may not edit and for one "
-        "configured elsewhere (a helper chat's own, a help assistant, a flow "
-        "step's)."
+        "conversation and gives its assistant the current instructions (with "
+        "the organisation's guidance for helper chats after the base persona) "
+        "and the model in force: the caller's own choice, else the "
+        "organisation's default for helper chats when the space allows it, "
+        "else the space's default among models that support tools. A new chat "
+        "starts in view mode. "
+        "Refused while the organisation has turned the helper chat off, for an "
+        "assistant the caller may not edit and for one configured elsewhere (a "
+        "helper chat's own, a help assistant, a flow step's)."
     ),
     responses={
         200: {"content": {"application/json": {"example": _CHAT_EXAMPLE}}},
@@ -352,6 +360,10 @@ async def start_assistant_helper_chat_conversation(
                         "no_edit_rights": {
                             "summary": "The caller may not edit the assistant",
                             "value": {"available": False, "reason": "no_edit_rights"},
+                        },
+                        "disabled": {
+                            "summary": "The organisation has turned the chat off",
+                            "value": {"available": False, "reason": "disabled"},
                         },
                     }
                 }

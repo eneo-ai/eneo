@@ -52,6 +52,12 @@ from eneo.flows.flow_runtime_policy import (
     resolve_flow_runtime_policy,
 )
 from eneo.flows.flow_settings import normalize_flow_settings_object
+from eneo.helper_chats.policy import (
+    HELPER_CHAT_GUIDANCE_MAX_LENGTH,
+    HelperChatPolicyErrorCode,
+    apply_helper_chat_policy_patch,
+    resolve_helper_chat_policy,
+)
 from eneo.main.config import get_settings as get_app_settings
 from eneo.main.exceptions import (
     BadRequestException,
@@ -78,6 +84,8 @@ from eneo.settings.settings import (
     FlowRetentionPolicyUpdate,
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
+    HelperChatPolicyPublic,
+    HelperChatPolicyUpdate,
     SettingsBase,
     SettingsInDB,
     SettingsPublic,
@@ -112,6 +120,18 @@ FLOW_SETTINGS_INVALID_PAYLOAD_CODE = "flow_settings_invalid_payload"
 
 
 _UPLOAD_ABANDONMENT_DAYS_COLUMN = "flow_runtime_upload_abandonment_days"
+
+
+def _helper_chat_policy_public(
+    flow_settings: Mapping[str, Any] | None,
+) -> HelperChatPolicyPublic:
+    policy = resolve_helper_chat_policy(flow_settings)
+    return HelperChatPolicyPublic(
+        enabled=policy.enabled,
+        guidance=policy.guidance,
+        guidance_max_length=HELPER_CHAT_GUIDANCE_MAX_LENGTH,
+        completion_model_id=resolve_flow_authoring_chat_model_id(flow_settings),
+    )
 
 
 def _flow_runtime_policy_public(policy: FlowRuntimePolicy) -> FlowRuntimePolicyPublic:
@@ -945,11 +965,8 @@ class SettingService:
     ) -> FlowAuthoringChatPolicyPublic:
         model_id = payload.completion_model_id
         if model_id is not None:
-            models = await self.ai_models_service.get_completion_models(
-                id_list=[model_id]
-            )
-            model = next((model for model in models if model.id == model_id), None)
-            if model is None or not model.can_access:
+            model = await self._accessible_completion_model(model_id)
+            if model is None:
                 raise FlowBadRequestException(
                     "The model is not one of the organisation's enabled models.",
                     code=FlowApiErrorCode.AUTHORING_MODEL_UNAVAILABLE,
@@ -987,6 +1004,84 @@ class SettingService:
         return FlowAuthoringChatPolicyPublic(
             completion_model_id=resolve_flow_authoring_chat_model_id(change.after)
         )
+
+    async def _accessible_completion_model(
+        self, model_id: UUID
+    ) -> CompletionModelPublic | None:
+        """The organisation's completion model when it is enabled and may be
+        used, else None."""
+        models = await self.ai_models_service.get_completion_models(id_list=[model_id])
+        model = next((model for model in models if model.id == model_id), None)
+        return model if model is not None and model.can_access else None
+
+    @validate_permissions(Permission.ADMIN)
+    async def get_helper_chat_policy(self) -> HelperChatPolicyPublic:
+        tenant = await self._get_tenant_for_flow_settings()
+        return _helper_chat_policy_public(getattr(tenant, "flow_settings", None))
+
+    @validate_permissions(Permission.ADMIN)
+    async def update_helper_chat_policy(
+        self,
+        payload: HelperChatPolicyUpdate,
+    ) -> HelperChatPolicyPublic:
+        """Change the fields the payload carries. The default model is the
+        one every helper chat shares, the flow chat's included, so it is
+        checked as the flow chat policy checks it."""
+        patch = payload.model_dump(exclude_unset=True)
+        if not patch:
+            raise BadRequestException(
+                "Send enabled, guidance or completion_model_id.",
+                code=HelperChatPolicyErrorCode.INVALID_PAYLOAD,
+            )
+        model_set = "completion_model_id" in patch
+        model_id = payload.completion_model_id
+        if model_id is not None:
+            model = await self._accessible_completion_model(model_id)
+            if model is None:
+                raise BadRequestException(
+                    "The model is not one of the organisation's enabled models.",
+                    code=HelperChatPolicyErrorCode.MODEL_UNAVAILABLE,
+                    context={"completion_model_id": str(model_id)},
+                )
+            if not model.supports_tool_calling:
+                raise BadRequestException(
+                    "The helper chat needs a model that supports tools.",
+                    code=HelperChatPolicyErrorCode.MODEL_WITHOUT_TOOLS,
+                    context={"completion_model_id": str(model_id)},
+                )
+
+        def transform(current: dict[str, Any] | None) -> dict[str, Any]:
+            settings = apply_helper_chat_policy_patch(
+                current,
+                enabled=payload.enabled,
+                guidance=payload.guidance,
+                default_model_set=model_set,
+            )
+            if model_set:
+                settings = apply_flow_authoring_chat_policy_patch(
+                    settings, completion_model_id=model_id
+                )
+            return settings
+
+        change = await self._update_flow_settings(transform)
+        previous = _helper_chat_policy_public(change.before).model_dump(mode="json")
+        updated = _helper_chat_policy_public(change.after)
+        current = updated.model_dump(mode="json")
+        await self.audit_service.log_async(
+            tenant_id=self.user.tenant_id,
+            user=self.user,
+            action=ActionType.TENANT_SETTINGS_UPDATED,
+            entity_type=EntityType.TENANT_SETTINGS,
+            entity_id=self.user.tenant_id,
+            description="Updated the helper chat settings",
+            metadata={
+                "setting": "helper_chat_policy",
+                "changes": {
+                    key: {"old": previous[key], "new": current[key]} for key in patch
+                },
+            },
+        )
+        return updated
 
     @validate_permissions(Permission.ADMIN)
     async def get_flow_evidence_policy(self) -> FlowEvidencePolicyPublic:

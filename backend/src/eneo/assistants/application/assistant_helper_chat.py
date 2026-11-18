@@ -33,6 +33,10 @@ from eneo.flows.domain.flow_authoring_chat_policy import (
 from eneo.helper_chats.application import helper_chat_service
 from eneo.helper_chats.application.helper_chat_service import OpenedChat
 from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
+from eneo.helper_chats.personas.organisation_guidance import (
+    with_organisation_guidance,
+)
+from eneo.helper_chats.policy import HelperChatPolicy, resolve_helper_chat_policy
 from eneo.helper_chats.targets import (
     HelperChatAudit,
     HelperChatAuditEvent,
@@ -63,14 +67,15 @@ class AssistantHelperChatErrorCode(StrEnum):
     MODEL_BELOW_CLASSIFICATION = "helper_chat_model_below_classification"
     MODEL_NOT_IN_SPACE = "helper_chat_model_not_in_space"
     REASONING_EFFORT_UNSUPPORTED = "helper_chat_reasoning_effort_unsupported"
+    DISABLED = "helper_chat_disabled"
 
 
-# Why the person gets no chat on an assistant: the space has no model the chat
-# can answer with; the person may not edit the assistant, or it does not exist
-# or cannot be read, which are told apart from nothing else; or the assistant
-# is configured elsewhere (a helper chat's own, a help assistant, a flow
-# step's).
-UnavailableReason = Literal["no_model", "no_edit_rights", "not_supported"]
+# Why the person gets no chat on an assistant: the organisation has turned the
+# chat off; the space has no model the chat can answer with; the person may
+# not edit the assistant, or it does not exist or cannot be read, which are
+# told apart from nothing else; or the assistant is configured elsewhere (a
+# helper chat's own, a help assistant, a flow step's).
+UnavailableReason = Literal["disabled", "no_model", "no_edit_rights", "not_supported"]
 
 
 class AssistantHelperChatPublic(BaseModel):
@@ -122,13 +127,23 @@ class AssistantHelperChatAvailability(BaseModel):
     reason: UnavailableReason | None = Field(
         default=None,
         description=(
-            "Why not: `no_model` when the space has no model that supports "
-            "tools; `no_edit_rights` when the caller may not edit the "
+            "Why not: `disabled` when the organisation has turned the helper "
+            "chat off (checked first); `no_model` when the space has no model "
+            "that supports tools; `no_edit_rights` when the caller may not edit the "
             "assistant, which is also the answer for one that does not exist "
             "or cannot be read; `not_supported` for an assistant that is "
             "configured elsewhere (a helper chat's own, a help assistant or a "
             "flow step's). Null when available."
         ),
+    )
+
+
+def _policy(container: Container) -> HelperChatPolicy:
+    """The caller's organisation's settings for the chat, as the caller was
+    read for this request."""
+    tenant = getattr(container.user(), "tenant", None)
+    return resolve_helper_chat_policy(
+        cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
     )
 
 
@@ -189,6 +204,8 @@ class _AssistantChatRefusals:
         return NotFoundException("Assistant not found.")
 
     def unavailable(self, reason: UnavailableReason) -> Exception:
+        if reason == "disabled":
+            return self.disabled()
         if reason == "not_supported":
             return BadRequestException(
                 "This assistant is configured elsewhere, so it has no helper chat.",
@@ -204,6 +221,12 @@ class _AssistantChatRefusals:
                 "action": "update",
                 "auth_layer": "domain_policy",
             },
+        )
+
+    def disabled(self) -> Exception:
+        return UnauthorizedException(
+            "Your organisation has turned off the helper chat.",
+            code=AssistantHelperChatErrorCode.DISABLED,
         )
 
     def not_editing(self) -> Exception:
@@ -262,10 +285,11 @@ class _AssistantTarget:
     """An assistant's chat: it reads the assistant while the person may read
     it, and is opened and put in edit mode while the person may edit it. An
     assistant has no draft, so nothing fences a mode change and every chat
-    starts in view mode."""
+    starts in view mode. The organisation's settings
+    (``helper_chats.policy``) turn the chat off and add their guidance to its
+    persona."""
 
     target_type = HelperChatTargetType.ASSISTANT
-    instructions = ASSISTANT_INSTRUCTIONS
     audit = HelperChatAudit(
         entity_type=EntityType.ASSISTANT,
         chat_created=HelperChatAuditEvent(
@@ -286,8 +310,16 @@ class _AssistantTarget:
     )
     refusals = _AssistantChatRefusals()
 
+    def instructions(self, container: Container) -> str:
+        return with_organisation_guidance(
+            ASSISTANT_INSTRUCTIONS, _policy(container).guidance
+        )
+
     async def require_available(self, container: Container) -> None:
-        return None
+        # Turned off, an existing chat can be neither opened nor continued: its
+        # turns and tool calls load it through here.
+        if not _policy(container).enabled:
+            raise self.refusals.disabled()
 
     def target_exists(self, tenant_id: UUID) -> sa.ColumnElement[bool]:
         return sa.exists().where(
@@ -440,7 +472,8 @@ async def assistant_chat_availability(
     """Whether opening the caller's chat on the assistant would succeed, by
     the gates ``get_or_create_assistant_chat`` passes, without creating or
     changing anything."""
-    await ASSISTANT_TARGET.require_available(container)
+    if not _policy(container).enabled:
+        return _unavailable("disabled")
     editable = await _editable(container, request, assistant_id)
     if isinstance(editable, str):
         return _unavailable(editable)
