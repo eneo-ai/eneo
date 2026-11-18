@@ -27,7 +27,7 @@ from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContents,
 )
-from eneo.files.file_models import FileContentVariant, FileInfo, FileType
+from eneo.files.file_models import FileContentVariant, FileInfo, FileOrigin, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
 from eneo.files.file_service import FileService
 from eneo.files.transcriber import TranscribedAudio
@@ -1687,3 +1687,42 @@ async def test_committed_transcript_survives_failure_and_output_replacement(
         )
         == reference
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_transcript_over_the_limit_records_the_runs_origin(
+    transcript_spill_runtime, db_container, admin_user
+):
+    # The worker binds the run's File service to the run's origin; the
+    # transcript the run writes over the inline limit carries it.
+    case = transcript_spill_runtime
+    async with db_container() as container:
+        space_id = await container.flow_repo().get_space_id(
+            flow_id=case.run.flow_id, tenant_id=case.run.tenant_id
+        )
+    assert space_id is not None
+    origin = FileOrigin(
+        space_id=space_id, flow_id=case.run.flow_id, flow_run_id=case.run.id
+    )
+    case.executor.file_service = case.executor.file_service.with_origin(origin)
+
+    await case.executor._execute_step(
+        step=case.step,
+        run=case.run,
+        state=_state(),
+        attempt_no=1,
+        version_metadata=case.metadata,
+    )
+
+    reference = await _read_committed_transcript(
+        case=case, db_container=db_container, admin_user=admin_user
+    )
+    async with db_container() as container:
+        stored = await container.file_repo().get_by_id_for_lifecycle(reference.file_id)
+    assert stored is not None
+    assert (
+        stored.origin_space_id,
+        stored.origin_flow_id,
+        stored.origin_flow_run_id,
+    ) == (space_id, case.run.flow_id, case.run.id)

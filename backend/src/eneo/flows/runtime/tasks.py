@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from eneo.audit.application.guaranteed_delivery import GuaranteedAuditDeliveryResult
 from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import sessionmanager
+from eneo.files.file_models import FileOrigin
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
     dispatch_flow_run_recoverably_after_commit,
@@ -386,9 +387,19 @@ async def _execute_flow_run_async_traced(
                 rag_evidence_policy = resolve_flow_rag_evidence_policy(
                     tenant.flow_settings
                 )
+                # Every File the run creates records the run's space, flow and
+                # run. A deleted flow keeps its space; the executor decides
+                # what such a run does.
+                space_id = await runtime_container.flow_repo().get_space_id(
+                    flow_id=flow_id, tenant_id=tenant_id, include_deleted=True
+                )
+                if space_id is None:
+                    raise RuntimeError("Flow execution task flow not found.")
                 runtime_file_service = runtime_container.file_service(
                     user=None,
                     owner=run_actor.principal.file_owner(tenant_id=tenant_id),
+                ).with_origin(
+                    FileOrigin(space_id=space_id, flow_id=flow_id, flow_run_id=run_id)
                 )
 
                 executor = FlowRunExecutor(

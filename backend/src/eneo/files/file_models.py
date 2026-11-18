@@ -190,6 +190,16 @@ class FileOwner:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class FileOrigin:
+    """Where a Flow file came from: a fact recorded on the File row when it is
+    created, never an access grant. A file a run creates also names the run."""
+
+    space_id: UUID
+    flow_id: UUID
+    flow_run_id: UUID | None = None
+
+
 class FileMetadataCreate(BaseModel):
     name: str
     file_type: FileType

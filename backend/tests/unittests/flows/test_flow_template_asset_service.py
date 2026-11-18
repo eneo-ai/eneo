@@ -16,6 +16,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileInfo,
     FileMetadata,
+    FileOrigin,
     FileType,
 )
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
@@ -309,6 +310,7 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     file_service = MagicMock()
     file_service.prepare_document_upload.return_value = _prepared_context(prepared)
     file_service.save_prepared_file = AsyncMock(return_value=saved_file)
+    file_service.with_origin.return_value = file_service
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
@@ -326,6 +328,10 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     )
 
     file_service.prepare_document_upload.assert_called_once_with(upload)
+    # The template is saved with the flow it was uploaded to as its origin.
+    file_service.with_origin.assert_called_once_with(
+        FileOrigin(space_id=flow.space_id, flow_id=flow.id)
+    )
     # The saver must receive the inspected bytes again: inspection drained the
     # one-pass original stream, so the persisted original re-serves them.
     file_service.save_prepared_file.assert_awaited_once()
