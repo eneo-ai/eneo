@@ -66,6 +66,29 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+**Already have a clone of `eneo-ai/eneo`?**
+
+You do not need to clone again. A push to `eneo-ai/eneo` is refused with 403
+for everyone outside Core Maintainers, so point `origin` at your fork and keep
+the main repository as `upstream`:
+
+```bash
+# With the GitHub CLI: creates the fork if you have none, makes it origin
+# and renames the existing remote to upstream
+gh repo fork --remote
+
+# Or by hand, after forking on GitHub
+git remote rename origin upstream
+git remote add origin https://github.com/YOUR_USERNAME/eneo.git
+
+# Push your branch to the fork
+git push -u origin feature/your-feature-name
+```
+
+Fork to your personal account rather than an organisation's. GitHub offers
+**Allow edits by maintainers** only for forks owned by a user account, and it
+lets a maintainer push a small fix to your pull request.
+
 **Browser calls from the dev server**
 
 The web app on `http://localhost:3000` calls the backend on

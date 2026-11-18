@@ -57,7 +57,14 @@ agencies (`@eneo-ai/collaborators`). They:
 - report, discuss and organise issues
 - review each other's work and share what their organisations need
 
-A Core Maintainer reviews and approves their pull requests.
+Collaborators work from a fork like everyone else, and a Core Maintainer
+reviews and approves their pull requests. What the role adds is a shorter path
+to a reviewable pull request:
+
+- With Triage, they label their own pull requests, so the PR label check
+  passes without waiting for a maintainer.
+- As members of the `eneo-ai` organisation, their CI and Dependency Review runs
+  start without a maintainer approving them first.
 
 ### Everyone else
 
@@ -241,6 +248,18 @@ workflows from their own branches with the repository's token. That token can
 publish container images, and deployments consume those images. Keeping write
 access with one accountable team protects every organisation that runs Eneo.
 Working from a fork gives you the same ability to propose and test changes.
+
+### Why is my push to `eneo-ai/eneo` refused with 403?
+
+Only Core Maintainers have write access, so GitHub refuses a push to
+`eneo-ai/eneo` from everyone else. That includes Collaborators, also if you
+could push branches here before. You are still a member of the organisation
+and of your team.
+
+Push your branch to a fork and open the pull request from there. In a clone of
+`eneo-ai/eneo`, `gh repo fork --remote` creates the fork, makes it `origin` and
+keeps this repository as `upstream`. The steps are in
+[Fork and set up](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment).
 
 ### Can I review other people's pull requests?
 
