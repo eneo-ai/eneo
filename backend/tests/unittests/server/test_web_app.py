@@ -102,7 +102,7 @@ def _app(
     monkeypatch.setattr(web_app, "WEB_APP_DIST", dist)
     _settings(**updates)
     if documented:
-        app = FastAPI()
+        app = FastAPI(docs_url=None)
         app.mount("/scim/v2", scim_app)
     else:
         app = FastAPI(docs_url=None, redoc_url=None)
@@ -696,7 +696,8 @@ def test_get_application_with_web_app_enabled_validates(
     missing = client.get("/api/v1/does-not-exist")
     assert missing.status_code == 404
     assert missing.json()["message"] == "Not Found"
-    assert client.get("/docs").status_code == 404
+    assert client.get("/docs").status_code == 200
+    assert "https://cdn" not in client.get("/docs").text
     assert client.get("/scim/v2/redoc").status_code == 404
     assert client.get("/openapi.json").status_code == 200
     endpoints = {
@@ -757,7 +758,7 @@ def test_healthz_alias_requires_api_healthz(
     _settings()
 
     with pytest.raises(RuntimeError, match="/api/healthz"):
-        install_browser_platform(FastAPI())
+        install_browser_platform(FastAPI(docs_url=None))
 
 
 def test_healthz_absent_when_disabled(monkeypatch: pytest.MonkeyPatch, dist: Path):
@@ -767,8 +768,6 @@ def test_healthz_absent_when_disabled(monkeypatch: pytest.MonkeyPatch, dist: Pat
 
 
 DOCUMENTATION_PAGES = (
-    "/docs",
-    "/docs/oauth2-redirect",
     "/redoc",
     "/scim/v2/docs",
     "/scim/v2/docs/oauth2-redirect",

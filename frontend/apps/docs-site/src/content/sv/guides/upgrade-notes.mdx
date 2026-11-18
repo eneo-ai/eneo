@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@fb6e7cc9d1a4
+translationSource: guides/upgrade-notes.mdx@48e43636809e
 ---
 
 import { Callout } from "nextra/components";
@@ -31,6 +31,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 10. Planera driftstopp för `db-init`: migreringen `202611091200` låser `sessions` medan den skriver om varje rad, och flera migreringar bygger index samtidigt med drift. Om `db-init` avbryts, kör den igen. Se [Migreringen `202611091200`](#sessions-migration).
 11. Exportera granskningsloggen först om du behöver filnamnen: uppgraderingen tar bort dem för gott. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
 12. Kör kontrollen av sessioner mot databasen från 2.3: en session som har både användare och API-nyckel, eller ingen av dem, stoppar `db-init`. Se [Webbwidgetar](#widgets).
+13. Ersätt API-nycklar som integrationer eller moduler fortfarande använder men som har statusen Utgången, eller som policyn för oanvända nycklar kommer att låta gå ut: de slutar fungera vid den första nattliga körningen. Se [API-nycklar som borde ha gått ut](#api-keys-expire). Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna; punkten gäller när de har slagits på.
 
 **Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
@@ -135,6 +136,7 @@ flowchart TB
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
 | [Insikter räknar alla konversationskällor](#insights-count-every-source) | Administratörer som följer insikternas siffror; API-konsumenter av `/api/v1/analysis/` | Räkna med högre summor; skicka `source=user` för det tidigare urvalet |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
+| [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar. Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna; det gäller när de har slagits på |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]
 
@@ -347,6 +349,19 @@ Insikter och statistiken under `/api/v1/analysis/` räknade bara inloggade anvä
 Konversationerna och frågorna som listas har fältet `source`: `user`, `api_key` eller `widget`. `GET /api/v1/analysis/conversation-insights/`, dess lista `sessions/` och assistentens `questions/` och `feedback/` tar en parameter `source`. `/api/v1/analysis/counts/` och `metadata-statistics` har inget sådant filter.
 
 **Gör:** räkna med högre summor när ni jämför med siffror som exporterats före uppgraderingen. Skicka `source=user` där ni vill ha det tidigare urvalet. En klient med en fast svarsmodell godtar det nya fältet `source`.
+
+### API-nycklar som borde ha gått ut slutar fungera [#api-keys-expire]
+
+Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna, så de avslutar inte åtkomsten för någon nyckel som inloggningen fortfarande godtar. Avsnittet gäller när stegen har slagits på.
+
+När policyn för oanvända nycklar (`auto_expire_unused_days`) lät en nyckel gå ut registrerade nattens underhåll den som utgången men behöll dess senare slutdatum, och inloggningen läser bara datumen. En sådan nyckel, eller en utan slutdatum, fortsatte att fungera. Från den första körningen efter uppgraderingen (kl. 01:00 UTC) avslutar jobbet åtkomsten för:
+
+- nycklar med statusen Utgången som fortfarande loggar in, oavsett vad policyn säger nu;
+- nycklar som policyn låter gå ut, också tjänstenycklar som modulernas, och nycklar utan slutdatum.
+
+En körning tar högst 500 nycklar ur varje urval: nycklar efter sitt slutdatum, nycklar registrerade som utgångna men fortfarande öppna, nycklar vars rotationsfrist har gått ut, och oanvända nycklar per organisation. Nycklar utöver gränsen väntar till en senare natt. En oanvänd nyckel, eller en som är registrerad som utgången men fortfarande öppen, fungerar till dess; en nyckel efter sitt slutdatum eller sin rotationsfrist nekas redan vid inloggningen, och bara det registrerade läget och granskningsraden väntar. Jobbets granskningsrader (`api_key_expired`, och `api_key_revoked` efter en rotation) skrivs nu också när organisationen har stängt av granskningsloggen eller åtgärden.
+
+**Gör:** före uppgraderingen, leta i **Admin > API-nycklar** upp nycklarna med statusen Utgången som en integration eller modul fortfarande använder, och nycklarna som policyn kommer att låta gå ut. Skapa en ny nyckel och lägg in den i integrationen, eller i modulens konfiguration för en moduls tjänstenyckel. Sätt policyns antal dagar längre än det längsta uppehållet för en tjänst som använder en nyckel. En nyckel som har gått ut kommer inte tillbaka när policyn stängs av. Se [Nattligt underhåll](/docs/api-key-management#nightly-maintenance).
 
 ## Detaljer: gallring, loggar och lagring [#details-retention]
 

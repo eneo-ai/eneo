@@ -319,6 +319,30 @@ def test_owner_cannot_edit_personal_space(
     )
 
 
+def test_personal_space_owner_manages_its_api_keys(
+    owner_user: MockUser, personal_space: MockSpace
+):
+    """A personal space cannot be edited and has no admin role, so its owner
+    is who may hold a key for it."""
+    actor = _actor(owner_user, personal_space)
+    assert not actor.can_edit_space()
+    assert actor.can_manage_api_keys()
+
+
+def test_nobody_else_manages_a_personal_spaces_api_keys(
+    admin_user: MockUser, personal_space: MockSpace
+):
+    assert Permission.ADMIN in admin_user.permissions
+    assert not _actor(admin_user, personal_space).can_manage_api_keys()
+
+
+def test_shared_space_api_keys_stay_with_the_space_admin(
+    admin_user: MockUser, editor_user: MockUser, shared_space: MockSpace
+):
+    assert _actor(admin_user, shared_space).can_manage_api_keys()
+    assert not _actor(editor_user, shared_space).can_manage_api_keys()
+
+
 def test_admin_can_edit_shared_space(admin_user: MockUser, shared_space: MockSpace):
     actor = _actor(admin_user, shared_space)
     assert (
@@ -990,6 +1014,26 @@ def test_personal_space_owner_with_write_key_can_edit_but_not_delete():
     assert actor.can_create_assistants()
     assert actor.can_edit_assistants()
     assert not actor.can_delete_assistants()
+
+
+@pytest.mark.parametrize(
+    ("permission", "ownership", "can_manage"),
+    [
+        ("read", "user", False),
+        ("write", "user", True),
+        ("admin", "user", True),
+        ("admin", "service", False),
+    ],
+)
+def test_personal_space_api_key_management_through_a_key(
+    permission, ownership, can_manage
+):
+    """The owner's own key keeps its read/write ceiling; a service key is not
+    the owner, whatever its permission."""
+    key = MockServiceKey("space", "personal-s1", permission, ownership=ownership)
+    user = MockServiceUser(id=42, active_api_key=key)
+    space = MockSpace(user_id=42, personal=True, id="personal-s1")
+    assert _actor(user, space).can_manage_api_keys() is can_manage
 
 
 # Integration Knowledge Permission Tests - Shared Spaces

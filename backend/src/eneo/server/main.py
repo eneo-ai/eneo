@@ -442,6 +442,7 @@ def get_application():
     app = FastAPI(
         lifespan=app_lifespan,
         dependencies=[Depends(require_endpoint_access)],
+        docs_url=None,
     )
     declare_framework_documentation_access(app)
 

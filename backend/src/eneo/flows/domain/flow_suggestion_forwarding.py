@@ -15,8 +15,8 @@ Pure functions over the draft's reads (``DraftReads``) and the content-free
   ``broad_all_previous_steps`` the draft already proves about the same two
   reads.
 - ``deterministic_candidate``: a model step whose output is its inputs
-  copied verbatim with little of its own, which a ``compose_text`` step puts
-  together without a model.
+  copied verbatim with little of its own, which a ``compose_text`` step
+  could put together without a model.
 
 What a run counts for: a finding counts the runs whose attempt of the step
 has facts the worker measured (``measured: true``) for what it judges: an
@@ -739,8 +739,9 @@ def deterministic_candidates(
     ``DETERMINISTIC_MIN_VERBATIM_RATIO`` or more found verbatim in its
     inputs, with at most ``DETERMINISTIC_MAX_OWN_BYTES`` of its own, and
     whose verbatim part is ``DETERMINISTIC_MIN_INPUT_SHARE`` or more of the
-    inputs it copies from: a compose_text step puts that together without
-    a model. Only for a ``pass_through`` step with text output (what
+    inputs it copies from: unless its own part matters (a correction, a
+    decision), a compose_text step could put that together without a
+    model. Only for a ``pass_through`` step with text output (what
     compose_text writes), and only over calls whose every input was
     measured (an input the worker did not hold, such as a file, may be what
     the model's own part came from). ``tokens_per_run`` is what the step
@@ -816,7 +817,8 @@ def _candidate_suggestion(
             f"In {len(tally.held)} of the last {tally.run_count} runs, "
             f"{_percent(ratio)} % of step {step.step_order}'s output was its "
             f"input copied word for word, with about {own_bytes} bytes of its "
-            "own; a compose_text step puts that together without a model."
+            "own; if that part is not needed, a compose_text step without a "
+            "model is worth trying."
         ),
         level="medium",
         fix=FlowSuggestionFix(kind="assisted"),
