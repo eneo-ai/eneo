@@ -1338,6 +1338,9 @@ async def test_add_step_offers_kinds_and_closed_values_in_its_schema():
     # Its parts are inline, so the shape reads without references.
     upload = values["properties"]["upload"]["anyOf"][0]
     assert upload["properties"]["format"]["enum"] == ["document", "file"]
+    # Long material is given as it is saved.
+    long_material = values["properties"]["long_material"]["anyOf"][0]
+    assert long_material["properties"]["mode"]["enum"] == ["digest"]
     assert "$ref" not in json.dumps(values)
     assert "runtime_input" not in (tool.description or "")
     assert "configuration" not in schema["properties"]
@@ -2833,6 +2836,22 @@ def test_each_configuration_example_is_saved_and_published():
         assert all("HTTP_MISSING_AUTH" in str(refusal) for refusal in publish), publish
 
 
+def test_an_example_shown_as_a_value_of_add_step_is_a_value_it_takes():
+    from eneo.flows.domain.step_kinds import (
+        FlowStepKind,
+        StepKindValues,
+        check_step_kind_values,
+    )
+
+    examples = flow_authoring_chat.CONFIGURATION_EXAMPLES
+
+    values = StepKindValues.model_validate(
+        {"instruction": "Läs.", "long_material": examples["long_material"]}
+    )
+
+    check_step_kind_values(FlowStepKind.AI, values)
+
+
 @pytest.mark.parametrize(
     ("name", "broken"),
     [
@@ -3088,6 +3107,12 @@ async def test_read_step_kinds_says_which_kinds_may_stand_first_and_why_not(
     assert review["review"] is True
     assert kinds["structured"]["needs"] == ["instruction", "example"]
     assert "upload" in kinds["structured"]["may_take"]
+    # Long material is a value of the kinds whose model reads the input.
+    assert [
+        kind
+        for kind, item in kinds.items()
+        if "long_material" in item.get("may_take", ())
+    ] == ["ai", "structured"]
     # Allowed here is not saved: the space's checks come with the save.
     assert "checked when the step is saved" in answer["note"]
 

@@ -2030,6 +2030,40 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
     assert (word["output_mode"], word["output_type"]) == ("template_fill", "docx")
 
 
+async def test_a_step_added_with_an_upload_and_long_material_is_saved_with_both(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Sammanfatta",
+        FlowStepKind.AI,
+        values={
+            "instruction": "Sammanfatta underlaget.",
+            "upload": {"format": "document"},
+            "long_material": {"mode": "digest"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    (step,) = (await client.get(base + "/", headers=headers)).json()["steps"]
+    assert step["input_type"] == "document"
+    # The upload and the long material stand in one input_config.
+    assert step["input_config"] == {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "input_format": "document",
+        },
+        "long_material": {"mode": "digest"},
+    }
+
+
 async def test_a_speaker_step_is_added_with_the_run_form_field_it_reads(
     client, enabled_flow, db_container, admin_user
 ):

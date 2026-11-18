@@ -21,6 +21,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.flows.domain.contract_from_example import contract_from_example
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.long_material import LONG_MATERIAL_KEY, LongMaterialConfig
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -131,6 +132,13 @@ class StepKindValues(BaseModel):
             "step but the first."
         ),
     )
+    long_material: LongMaterialConfig | None = Field(
+        default=None,
+        description=(
+            "How the step reads input larger than its model's window, as "
+            "input_config.long_material is saved."
+        ),
+    )
     format: Literal["docx", "pdf"] | None = Field(
         default=None,
         description="The file the document step gives; docx when left out.",
@@ -178,13 +186,20 @@ class StepKindValues(BaseModel):
 
 # The values each kind takes, those it cannot do without first.
 STEP_KIND_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
-    FlowStepKind.AI: ("instruction", "input_bindings", "review", "upload"),
+    FlowStepKind.AI: (
+        "instruction",
+        "input_bindings",
+        "review",
+        "upload",
+        "long_material",
+    ),
     FlowStepKind.STRUCTURED: (
         "instruction",
         "example",
         "input_bindings",
         "review",
         "upload",
+        "long_material",
     ),
     FlowStepKind.COMPOSE: ("input_bindings",),
     FlowStepKind.DOCUMENT: ("input_bindings", "format"),
@@ -282,15 +297,20 @@ def step_kind_configuration(
         configuration["input_type"] = FlowInputType.TEXT
     if (review := given("review")) is not None:
         configuration["review_policy"] = dump_flow_step_review_policy(review)
+    # An upload and long material are keys of one input_config: each is laid
+    # beside the other, and the save's rules judge what goes together.
+    input_config: FlowPersistedJsonObject = {}
     if (upload := given("upload")) is not None:
         configuration["input_type"] = FlowInputType(upload.format)
-        configuration["input_config"] = {
-            "runtime_input": {
-                "enabled": True,
-                "required": upload.required,
-                "input_format": upload.format,
-            }
+        input_config["runtime_input"] = {
+            "enabled": True,
+            "required": upload.required,
+            "input_format": upload.format,
         }
+    if (long_material := given("long_material")) is not None:
+        input_config[LONG_MATERIAL_KEY] = long_material.model_dump(mode="json")
+    if input_config:
+        configuration["input_config"] = input_config
     if (example := given("example")) is not None:
         text = example if isinstance(example, str) else json.dumps(example)
         configuration["output_contract"] = contract_from_example(text).contract

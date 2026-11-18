@@ -211,10 +211,13 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
     assert "A first step that is already saved gets an upload with update_step" in (
         instructions
     )
+    # Long material is a new step's value too, so the upload it is added with
+    # is not replaced by a second call; the raw field is a saved step's.
     assert (
-        "can set, with update_step once the step is added, "
-        "input_config.long_material" in " ".join(instructions.split())
+        'gets long_material {"mode": "digest"} in add_step (on a saved step: '
+        "input_config.long_material)" in instructions
     )
+    assert "once the step is added" not in instructions
     assert "in add_step, the value bindings" in " ".join(instructions.split())
 
 
@@ -510,7 +513,7 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
 
     assert "they reach this flow only" in instructions
     assert "follow next_offset until it is null" in instructions
-    assert 'input_config.long_material to {"mode": "digest"}' in instructions
+    assert 'long_material {"mode": "digest"} in add_step' in instructions
     assert "partial coverage fails the step unless it has a review" in instructions
     assert "A change to input_config or output_config replaces it whole" in (
         instructions

@@ -613,6 +613,38 @@ async def test_a_first_step_reads_an_upload_only_when_asked(
     }
 
 
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [
+        (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+        (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+    ],
+    ids=["ai", "structured"],
+)
+async def test_long_material_is_saved_beside_the_upload_it_is_given_with(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digest = {"long_material": {"mode": "digest"}}
+
+    first = await _added(
+        _flow([]),
+        kind,
+        {**needs, "upload": {"format": "document"}, **digest},
+        monkeypatch,
+    )
+    later = await _added(_flow([_step(1)]), kind, {**needs, **digest}, monkeypatch)
+
+    # One input_config carries both values: neither replaces the other.
+    assert first.input_type == "document"
+    assert first.input_config == {**_DOCUMENT_UPLOADS, **digest}
+    assert later.input_config == digest
+
+
+def test_long_material_takes_only_the_modes_a_saved_step_takes() -> None:
+    with pytest.raises(ValidationError):
+        StepKindValues.model_validate({"long_material": {"mode": "summary"}})
+
+
 def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
     first = _step(1, input_type="json")
     flow = _flow([first])
@@ -638,6 +670,11 @@ def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
             "not use url",
         ),
         (FlowStepKind.COMPOSE, {"review": {"mode": "edit"}}, "not use review"),
+        (
+            FlowStepKind.COMPOSE,
+            {"long_material": {"mode": "digest"}},
+            "not use long_material",
+        ),
         (FlowStepKind.DOCUMENT, {"instruction": "Skriv."}, "not use instruction"),
         (FlowStepKind.TEMPLATE, {"instruction": "Fyll i."}, "not use instruction"),
         (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),

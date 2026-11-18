@@ -180,8 +180,8 @@ uploading it, also add a text field to the run form and make the upload not
 required. A first step that is already saved gets an upload with update_step:
 input_config.runtime_input with its input_type (document or file) as
 input_format, for example ${runtime_input}.
-An AI step whose input may exceed its model's window can set, with update_step
-once the step is added, input_config.long_material to ${long_material}: such input is read in parts
+An AI step whose input may exceed its model's window gets long_material
+${long_material} in add_step (on a saved step: input_config.long_material): such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
 result records the coverage, and partial coverage fails the step unless it has
 a review. A change to input_config or output_config replaces it whole, so send
