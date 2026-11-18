@@ -1663,6 +1663,31 @@ async def add_step(
         except ExampleProblemError as error:
             raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
         require_safe_model_configuration(change.configuration, {})
+        # A change cannot be read on from an offset: when the page cannot
+        # carry even the least this addition answers with, nothing is saved.
+        orders = {step.id: step.step_order for step in flow.steps}
+        least = _least_receipt(
+            UUID(int=0),
+            place,
+            [
+                {
+                    "step_id": str(step_id),
+                    # Numbered as after the step is added before it.
+                    "step_order": orders[step_id] + (orders[step_id] >= place),
+                    "changes": changes,
+                }
+                for step_id, changes in change.step_edits
+            ],
+        )
+        if (size := len(_serialized(least))) > _page_size():
+            # A page is a quarter of the page cap, which is half the limit.
+            raise BadRequestException(
+                "The step was not added: this server's limit on a tool's "
+                "answer is too small for the answer to an addition, which "
+                "cannot be read in parts. MCP_TOOL_OUTPUT_MAX_CHARS must be at "
+                f"least {size * 8}; say so to the person, an administrator "
+                "sets it."
+            )
         definition = settings or {}
         if isinstance(definition.get("metadata_json"), dict):
             definition = _merged_settings(definition, flow.metadata_json)
@@ -1745,6 +1770,23 @@ _RECEIPT_STEP_FIELDS = (
 )
 
 
+def _least_receipt(
+    step_id: UUID, step_order: int, hand_over: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """The least add_step answers with: that the step was saved, its id, each
+    step it took over from (id, order and changes, never the name) and where
+    to read the step in full. add_step sizes it before it saves."""
+    return {
+        "saved": True,
+        "step_id": str(step_id),
+        "hand_over": [
+            {key: value for key, value in step.items() if key != "name"}
+            for step in hand_over
+        ],
+        "in_full": f"read_flow steps=[{step_order}] gives the step in full.",
+    }
+
+
 def _addition_receipt(
     added: Any, details: dict[str, Any], hand_over: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -1754,27 +1796,20 @@ def _addition_receipt(
     over from one step at most) are always there. What is only shown gives
     way until the answer fits a page: the step's details as the overview
     gives them and the names of the steps it took over from, cut short; else
-    the step in short, of fixed size, and where to read it in full; else, on
-    a page too small for that, neither the step in short nor the names."""
+    the step in short, of fixed size, and where to read it in full; else
+    neither the step in short nor the names (``_least_receipt``, which
+    add_step has made sure the page carries)."""
     receipt = {
         "saved": True,
         "step_id": str(added.id),
         "step": details,
         "hand_over": hand_over,
     }
+    least = _least_receipt(added.id, added.step_order, hand_over)
     short = {
         **receipt,
         "step": {key: details[key] for key in _RECEIPT_STEP_FIELDS if key in details},
-        "in_full": f"read_flow steps=[{added.step_order}] gives the step in full.",
-    }
-    bare = {
-        "saved": True,
-        "step_id": str(added.id),
-        "hand_over": [
-            {key: value for key, value in step.items() if key != "name"}
-            for step in hand_over
-        ],
-        "in_full": short["in_full"],
+        "in_full": least["in_full"],
     }
     return next(
         (
@@ -1782,7 +1817,7 @@ def _addition_receipt(
             for shape in (receipt, short)
             if len(_serialized(shape)) <= _page_size()
         ),
-        bare,
+        least,
     )
 
 

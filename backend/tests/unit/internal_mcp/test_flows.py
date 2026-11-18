@@ -1175,6 +1175,52 @@ async def test_an_addition_answers_whole_in_one_page(
         assert "read_flow steps=[1]" in content["in_full"]
 
 
+async def test_an_addition_is_saved_only_when_its_answer_fits_the_output_limit(
+    monkeypatch,
+):
+    from eneo.internal_mcp import foundation
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    async def add_under(limit):
+        settings = foundation.get_settings().model_copy(
+            update={"mcp_tool_output_max_chars": limit}
+        )
+        monkeypatch.setattr(foundation, "get_settings", lambda: settings)
+        # A Word step before a first step that reads JSON and whose name is
+        # all quotes: the hand-over changes what that step reads and as what.
+        first = _step(1, input_type="json", user_description='"' * 200)
+        save = _adding_chat(monkeypatch, [first])
+        result, page = await _add(name="Beslut", kind="template", position=1)
+        return save, result, page
+
+    save, result, page = await add_under(2048)
+
+    # Refused before anything is saved, naming the setting and what it needs.
+    assert result.isError is True, page
+    save.assert_not_awaited()
+    assert "MCP_TOOL_OUTPUT_MAX_CHARS must be at least" in page["message"]
+    (least,) = map(int, re.findall(r"at least (\d+)", page["message"]))
+    for limit in (1, 255, least - 1):
+        save, result, page = await add_under(limit)
+        assert result.isError is True, limit
+        save.assert_not_awaited()
+    # From the limit it names, the answer is whole: a change is not read on.
+    for limit in (least, least + 1, 4096):
+        save, result, page = await add_under(limit)
+        assert result.isError is not True, (limit, page)
+        save.assert_awaited_once()
+        assert page["next_offset"] is None, limit
+        content = json.loads(page["content"])
+        assert content["saved"] is True
+        assert content["step_id"] == str(_ADDED_ID)
+        (handed,) = content["hand_over"]
+        assert handed["step_order"] == 2
+        assert handed["changes"] == {
+            "input_source": "previous_step",
+            "input_type": "text",
+        }
+
+
 async def test_a_step_is_added_together_with_the_run_form_field_it_reads(
     monkeypatch,
 ):
