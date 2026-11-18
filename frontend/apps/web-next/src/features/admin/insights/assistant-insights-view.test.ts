@@ -64,7 +64,7 @@ describe("assistant insight URL period", () => {
       )
     ).toEqual({ from: "2026-09-01", to: "2026-09-30", source: "api_key", compare: "1" });
   });
-  it("keeps the open finding and the inbox's filter in the address beside the filters", () => {
+  it("keeps the open finding, the inbox's filter and the analysis in the address beside the filters", () => {
     const query = insightFindingSearch("knowledge_missed", "?from=2026-09-01&to=2026-09-30");
     expect(readInsightFindingSearch(new URLSearchParams(query))).toBe("knowledge_missed");
     expect(new URLSearchParams(query).get("from")).toBe("2026-09-01");
@@ -98,5 +98,12 @@ describe("assistant insight URL period", () => {
     expect(
       validateInsightViewSearch({ from: "2026-09-01", to: "2026-09-30", feedback: "x" }, fallback)
     ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+    // And the analysis open over the view.
+    expect(
+      validateInsightViewSearch(
+        { from: "2026-09-01", to: "2026-09-30", analysis: "open" },
+        fallback
+      )
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30", analysis: "open" });
   });
 });

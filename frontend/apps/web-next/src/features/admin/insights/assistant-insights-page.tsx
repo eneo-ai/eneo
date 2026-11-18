@@ -64,10 +64,12 @@ function FilledFrame({ children }: { children: ReactNode }) {
  * An assistant's or group chat's insights in the administration: its name
  * with the way back to the organisation's insights, over the same insights
  * view as the chat page's Insikter tab. The filters, the finding open in
- * place of the overview and the feedback inbox's filter live in the address
- * (`?from=&to=&source=&compare=&finding=&feedback=`), so a link or a reload
- * keeps them; an opened finding and "Läs kommentarerna" are history entries
- * of their own (`useInsightViewUrl`).
+ * place of the overview, the feedback inbox's filter and the analysis open
+ * over the view live in the address
+ * (`?from=&to=&source=&compare=&finding=&feedback=&analysis=`), so a link or
+ * a reload keeps them; an opened finding, "Läs kommentarerna" and the
+ * analysis over the view are history entries of their own
+ * (`useInsightViewUrl`).
  * The editor's links are there for a caller who may edit the target. A
  * target with insights switched off, or whose insights the caller may not
  * see, says so instead of asking for them.
@@ -121,7 +123,7 @@ function TargetInsightsPage({
   }
 
   return (
-    // An opened finding or the inbox's filter keeps the analysis mounted: its leave guard does not ask.
+    // A change of where the insights view is keeps the analysis mounted: its leave guard does not ask.
     <ViewSearchParams value={INSIGHT_VIEW_PARAMS}>
       <FilledFrame>
         <AssistantInsights

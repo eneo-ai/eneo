@@ -10,6 +10,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { useSearchParams } from "@/lib/navigation";
 import { renderWithRouter } from "@/test/router";
+import { observedElements, reportResize } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 
 vi.unmock("@/lib/link");
@@ -272,4 +273,43 @@ it('returns from "Läs kommentarerna" to the overview with the inbox\'s filter a
     expect(filter(/^Dåliga med kommentar/).getAttribute("aria-checked")).toBe("true")
   );
   await waitFor(() => expect(document.activeElement).toBe(heading));
+});
+
+it("puts the analysis that covers the view in the browser's history", async () => {
+  const { router } = await renderChat();
+  fireEvent.click(tab("Insikter"));
+  const ask = await screen.findByRole("button", { name: "Fråga analysen" });
+  // A narrow window: the analysis would leave the overview less than 480 px, so it covers it.
+  act(() => {
+    for (const region of observedElements().filter((element) => element.contains(ask))) {
+      reportResize(region, { width: 400, height: 700 });
+    }
+  });
+  const overview = router.state.location.state.__TSR_index;
+  const analysis = () => screen.queryByRole("complementary", { name: "Insiktsanalys" });
+
+  act(() => ask.focus());
+  fireEvent.click(ask);
+  await waitFor(() => expect(router.state.location.search).toMatchObject({ analysis: "open" }));
+  expect(router.state.location.state.__TSR_index).toBe(overview + 1);
+  const field = await within(analysis()!).findByRole("textbox", { name: "Fråga om användningen" });
+  fireEvent.change(field, { target: { value: "Vad frågar folk om?" } });
+
+  // Back closes it, on the page and without a question, with focus on what opened it.
+  act(() => history.back());
+  await waitFor(() => expect(analysis()).toBeNull());
+  expect(router.state.location.pathname).toBe("/chat");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await waitFor(() => expect(document.activeElement).toBe(ask));
+
+  // Forward opens the same analysis with its draft; closing it returns to the entry behind.
+  act(() => history.forward());
+  await waitFor(() => expect(analysis()).not.toBeNull());
+  expect(within(analysis()!).getByRole("textbox", { name: "Fråga om användningen" })).toBe(field);
+  expect((field as HTMLTextAreaElement).value).toBe("Vad frågar folk om?");
+  fireEvent.click(within(analysis()!).getByRole("button", { name: "Stäng analysen" }));
+  await waitFor(() => expect(analysis()).toBeNull());
+  expect(router.state.location.state.__TSR_index).toBe(overview);
+  expect(router.state.location.search).not.toHaveProperty("analysis");
+  await waitFor(() => expect(document.activeElement).toBe(ask));
 });

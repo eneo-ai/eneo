@@ -1,6 +1,7 @@
 import { calendarDate, type IsoDate } from "@/lib/calendar-date";
 import { parseInsightSource, type InsightFilters } from "@/features/insights/insight-figures";
 import {
+  readInsightAnalysisSearch,
   readInsightFeedbackSearch,
   readInsightFindingSearch
 } from "@/features/insights/insight-view-url";
@@ -61,6 +62,7 @@ export function validateInsightViewSearch(
   compare?: string;
   finding?: string;
   feedback?: string;
+  analysis?: string;
 } {
   const reader: SearchReader = {
     get: (key) => {
@@ -78,6 +80,7 @@ export function validateInsightViewSearch(
     ...(filters.source ? { source: filters.source } : {}),
     ...(filters.compare ? { compare: "1" } : {}),
     ...(finding ? { finding } : {}),
-    ...(feedback === "all" ? {} : { feedback })
+    ...(feedback === "all" ? {} : { feedback }),
+    ...(readInsightAnalysisSearch(reader) ? { analysis: "open" } : {})
   };
 }

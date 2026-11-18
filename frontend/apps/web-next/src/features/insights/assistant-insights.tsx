@@ -54,9 +54,6 @@ const PANEL_MIN_WIDTH = 360;
 /** Astryx's ResizeHandle with a divider takes 1 px of the row. */
 const PANEL_HANDLE_WIDTH = 1;
 
-/** The analysis panel's whereabouts: not yet opened (not mounted), open, or closed (kept). */
-type PanelState = "unopened" | "open" | "closed";
-
 /** The question offered to the analysis for the finding on screen. */
 type FindingSuggestion = AnalysisSuggestion & { kind: OpenableFindingKind };
 
@@ -137,7 +134,10 @@ function NoConversations({
  * "Fråga analysen" opens the analysis in a side panel (Insiktsanalys): beside
  * the overview where the overview keeps 480 px (decision 14, measured on the
  * view's row, with a handle to resize it as on the flow page), and over the
- * view otherwise. Asked from a finding, it offers the finding's question: in
+ * view otherwise. Over the view it is a place of its own in the address
+ * (`view.analysis`), so the browser's Back closes it; beside the overview it
+ * is the view's layout and Back is not involved. Asked from a finding, it
+ * offers the finding's question: in
  * the composer of an analysis not yet started with nothing typed, otherwise
  * as a suggestion in the panel to use. Nothing is sent without a click. The
  * analysis stays mounted when the panel closes, so opening it again shows the
@@ -160,7 +160,7 @@ export function AssistantInsights({
   partner: InsightsPartner;
   filters: InsightFilters;
   onFiltersChange: (filters: InsightFilters) => void;
-  /** The finding open in place of the overview and the inbox's filter, kept in the address. */
+  /** Where the view is (a finding, the inbox's filter, the analysis over it), kept in the address. */
   view: InsightView;
   /** The target's editor, where the viewer may edit it; null otherwise. */
   editorHref?: string | null;
@@ -181,9 +181,14 @@ export function AssistantInsights({
   const findingHeading = useRef<HTMLHeadingElement>(null);
   const inboxHeading = useRef<HTMLHeadingElement>(null);
   const [explore, setExplore] = useState<{ sessionId: string | null } | null>(null);
-  const [panel, setPanel] = useState<PanelState>("unopened");
+  // The analysis is open beside the overview (the view's own layout) or over
+  // the view (the address's). It mounts when first opened and then stays, so
+  // closing and opening it again shows the same analysis.
+  const [openBeside, setOpenBeside] = useState(false);
+  const open = openBeside || view.analysis;
+  const [analysisMounted, setAnalysisMounted] = useState(open);
+  if (open && !analysisMounted) setAnalysisMounted(true);
   const [suggestion, setSuggestion] = useState<FindingSuggestion | null>(null);
-  const open = panel === "open";
   const { finding } = view;
   const { range } = filters;
   // A new source or comparison keeps the figures on screen until the new ones are in.
@@ -226,24 +231,25 @@ export function AssistantInsights({
   const covered = open && !beside;
 
   // Focus moves into the panel when it opens and back to what opened it
-  // ("Fråga analysen") when it closes. A panel that comes to cover the view
-  // (a narrower window) takes the focus the overview had: the overview is
-  // inert under it.
-  const wasOpen = useRef(false);
+  // ("Fråga analysen") when it closes, Back and Forward included. A panel
+  // that comes to cover the view (a narrower window, an address opening it)
+  // takes the focus the overview had: the overview is inert under it. Focus
+  // stays where it is while the view is not on screen.
+  const wasOpen = useRef(open);
   useEffect(() => {
-    if (open && !wasOpen.current) aside.current?.focus();
-    if (!open && wasOpen.current) {
-      (opener.current?.isConnected ? opener.current : trigger.current)?.focus();
-    }
+    const was = wasOpen.current;
     wasOpen.current = open;
-  }, [open]);
+    if (hidden || was === open) return;
+    if (open) aside.current?.focus();
+    else (opener.current?.isConnected ? opener.current : trigger.current)?.focus();
+  }, [open, hidden]);
   useEffect(() => {
-    if (!covered) return;
+    if (!covered || hidden) return;
     const active = document.activeElement;
     if (active === null || active === document.body || main.current?.contains(active)) {
       aside.current?.focus();
     }
-  }, [covered]);
+  }, [covered, hidden]);
 
   // A finding opened here moves focus to its title; its way back returns
   // focus to the finding's button. Back from "Läs kommentarerna" returns
@@ -264,9 +270,16 @@ export function AssistantInsights({
     }
   }, [finding, isReadingComments, hidden]);
 
+  /** Opens the analysis: beside the overview where it fits, otherwise over the view as an entry of its own. */
   function openPanel() {
     if (open) aside.current?.focus();
-    else setPanel("open");
+    else if (beside) setOpenBeside(true);
+    else view.openAnalysis();
+  }
+
+  function closePanel() {
+    setOpenBeside(false);
+    view.closeAnalysis();
   }
 
   /** "Fråga analysen": from a finding, with the finding's question offered. */
@@ -462,7 +475,7 @@ export function AssistantInsights({
             resizable={resizable.props}
           />
         )}
-        {panel !== "unopened" && (
+        {analysisMounted && (
           <aside
             ref={aside}
             aria-label={t("insights_chat_partner_name")}
@@ -484,7 +497,7 @@ export function AssistantInsights({
               hidden={hidden || !open}
               // The finding's question, while that finding is on screen.
               suggestion={suggestion && suggestion.kind === finding ? suggestion : null}
-              onClose={() => setPanel("closed")}
+              onClose={closePanel}
             />
           </aside>
         )}

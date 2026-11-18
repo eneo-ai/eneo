@@ -17,12 +17,13 @@ type SearchReader = Pick<URLSearchParams, "get">;
 
 /**
  * The address's parameters that only choose a view of the insights: the
- * finding open in place of the overview (`finding`) and the feedback inbox's
- * filter (`feedback`). A page showing the insights counts them among its view
- * parameters (`ViewSearchParams`), keeps them while the insights are on screen
- * and drops them when it leaves them.
+ * finding open in place of the overview (`finding`), the feedback inbox's
+ * filter (`feedback`) and the analysis open over the view (`analysis`). A
+ * page showing the insights counts them among its view parameters
+ * (`ViewSearchParams`), keeps them while the insights are on screen and
+ * drops them when it leaves them.
  */
-export const INSIGHT_VIEW_PARAMS = ["finding", "feedback"] as const;
+export const INSIGHT_VIEW_PARAMS = ["finding", "feedback", "analysis"] as const;
 
 /** The finding open in place of the overview (`finding`); anything unknown is none. */
 export function readInsightFindingSearch(params: SearchReader): OpenableFindingKind | null {
@@ -50,6 +51,19 @@ export function insightFeedbackSearch(feedback: FeedbackFilter, current = ""): s
   return `?${params.toString()}`;
 }
 
+/** The analysis open over the view (`analysis=open`). */
+export function readInsightAnalysisSearch(params: SearchReader): boolean {
+  return params.get("analysis") === "open";
+}
+
+/** The address's query with the analysis open over the view or not; other parameters stay. */
+export function insightAnalysisSearch(open: boolean, current = ""): string {
+  const params = new URLSearchParams(current);
+  if (open) params.set("analysis", "open");
+  else params.delete("analysis");
+  return `?${params.toString()}`;
+}
+
 /** Where the insights view is, as the address keeps it, and the ways to move. */
 export type InsightView = {
   finding: OpenableFindingKind | null;
@@ -62,6 +76,12 @@ export type InsightView = {
   onFeedbackChange: (feedback: FeedbackFilter) => void;
   /** "Läs kommentarerna": the inbox filtered to the bad ratings with a comment. */
   readComments: () => void;
+  /** The analysis is open over the view, as a place of its own. */
+  analysis: boolean;
+  /** Opens the analysis over the view. */
+  openAnalysis: () => void;
+  /** Closes the analysis opened over the view, showing what is under it. */
+  closeAnalysis: () => void;
 };
 
 /**
@@ -81,6 +101,13 @@ export type InsightView = {
  * with the filter it had. Asked again from that entry it sets the filter in
  * place, and where the inbox already shows them there is nothing to undo.
  * The inbox's own filter control changes the address in place.
+ *
+ * The analysis opened over the view (a narrow window, a phone: it covers
+ * the view like a pushed screen) is an entry of its own, so Back closes it
+ * and Forward opens it again; a reload or a link opens it too. Closing it
+ * returns to the entry its opening pushed while the address is still that
+ * one's with the analysis in it, and closes it in place otherwise. The
+ * analysis beside the view is the view's own layout, not an entry.
  */
 export function useInsightViewUrl(): InsightView {
   const pathname = usePathname();
@@ -89,6 +116,8 @@ export function useInsightViewUrl(): InsightView {
   const feedback = readInsightFeedbackSearch(searchParams);
   const isReadingComments = readUrlState().insightCommentsFromFinding === true;
   const overview = pathname + insightFindingSearch(null, search);
+  const analysis = readInsightAnalysisSearch(searchParams);
+  const underAnalysis = pathname + insightAnalysisSearch(false, search);
 
   function onFindingChange(next: OpenableFindingKind | null) {
     if (next) {
@@ -116,12 +145,36 @@ export function useInsightViewUrl(): InsightView {
     }
   }
 
+  function openAnalysis() {
+    if (analysis) return;
+    // The view under it stays what it was, "Läs kommentarerna"'s included.
+    pushUrl(pathname + insightAnalysisSearch(true, search), {
+      state: {
+        insightAnalysisFrom: underAnalysis,
+        insightCommentsFromFinding: readUrlState().insightCommentsFromFinding
+      },
+      ignoreBlocker: true
+    });
+  }
+
+  function closeAnalysis() {
+    if (!analysis) return;
+    if (readUrlState().insightAnalysisFrom === underAnalysis) {
+      goHistory(-1, { ignoreBlocker: true });
+    } else {
+      replaceUrl(underAnalysis, { state: { insightAnalysisFrom: undefined }, ignoreBlocker: true });
+    }
+  }
+
   return {
     finding: readInsightFindingSearch(searchParams),
     feedback,
     isReadingComments,
     onFindingChange,
     onFeedbackChange,
-    readComments
+    readComments,
+    analysis,
+    openAnalysis,
+    closeAnalysis
   };
 }

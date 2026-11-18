@@ -724,7 +724,10 @@ describe("ChatPage while an answer streams", () => {
     expect(composer()).toBeTruthy();
     expect(document.getElementById(CHAT_PANEL_IDS.insights)?.hidden).toBe(true);
 
+    // Over the view the analysis is a place of Insikter's own, left with the
+    // tab: Insikter opens on its overview, and the analysis comes back as it was.
     fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen" }));
     expect(within(screen.getByRole("log")).getByText("Mest om parkering.")).toBeTruthy();
     expect(within(screen.getByRole("log")).getByText("Vad frågar folk om?")).toBeTruthy();
   });
