@@ -442,6 +442,28 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
     assert "or a change is refused because edit mode is off" in instructions
 
 
+async def test_the_flow_chat_does_not_follow_the_helper_chat_settings() -> None:
+    """The organisation's switch and guidance for the helper chat on
+    assistants leave the flow chat's persona and availability alone."""
+    container = MagicMock()
+    container.user.return_value = SimpleNamespace(
+        tenant_id=uuid4(),
+        tenant=SimpleNamespace(
+            flow_settings={
+                "helper_chat": {"enabled": False, "guidance": "Ange alltid källan."}
+            }
+        ),
+    )
+    container.feature_flag_service.return_value.check_is_feature_enabled = AsyncMock(
+        return_value=True
+    )
+
+    assert flow_authoring_chat.FLOW_TARGET.instructions(container) == (
+        AUTHORING_INSTRUCTIONS
+    )
+    assert await flow_authoring_chat.FLOW_TARGET.require_available(container) is None
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),

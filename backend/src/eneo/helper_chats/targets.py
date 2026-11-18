@@ -85,9 +85,10 @@ class HelperChatTarget(Protocol[RecordT]):
     @property
     def target_type(self) -> HelperChatTargetType: ...
 
-    @property
-    def instructions(self) -> str:
-        """The persona the chat's assistant answers with."""
+    def instructions(self, container: Container) -> str:
+        """The persona the chat's assistant answers with, as the caller's
+        organisation has it. It is written onto the chat's assistant when the
+        chat is opened or changed."""
         ...
 
     @property
@@ -98,7 +99,8 @@ class HelperChatTarget(Protocol[RecordT]):
 
     async def require_available(self, container: Container) -> None:
         """Refuse when the target's kind is not offered to the caller's
-        tenant, before any chat is read."""
+        tenant, before any chat is read. Opening and changing a chat, a turn
+        and every tool call ask first."""
         ...
 
     def target_exists(self, tenant_id: UUID) -> sa.ColumnElement[bool]:

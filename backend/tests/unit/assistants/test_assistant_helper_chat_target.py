@@ -21,6 +21,10 @@ from eneo.assistants.application.assistant_helper_chat import (
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.helper_chats_table import HelperChats
+from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
+from eneo.helper_chats.personas.organisation_guidance import (
+    with_organisation_guidance,
+)
 from eneo.helper_chats.targets import HelperChatTargetType, target_for
 from eneo.internal_mcp.foundation import request_for_bound_space
 from eneo.main.config import get_settings
@@ -269,6 +273,57 @@ def test_the_organisation_default_is_the_one_helper_chats_share():
     )
 
     assert ASSISTANT_TARGET.organisation_default_model_id(container) == model_id
+
+
+def _in_organisation(container: MagicMock, helper_chat: dict) -> MagicMock:
+    """``container`` with a caller whose organisation has these helper chat
+    settings."""
+    caller = container.user.return_value
+    container.user.return_value = SimpleNamespace(
+        **vars(caller),
+        tenant=SimpleNamespace(flow_settings={"helper_chat": helper_chat}),
+    )
+    return container
+
+
+async def test_turned_off_by_the_organisation_no_chat_is_offered_or_opened():
+    # Off answers first, whatever else would stand in the way.
+    container = _in_organisation(_container(permissions=[]), {"enabled": False})
+
+    with pytest.raises(UnauthorizedException) as refused:
+        await ASSISTANT_TARGET.require_available(container)
+
+    assert refused.value.code == AssistantHelperChatErrorCode.DISABLED
+    assert await _reason(container) == "disabled"
+    container.assistant_service.return_value.get_assistant.assert_not_called()
+    unavailable = ASSISTANT_TARGET.refusals.unavailable("disabled")
+    assert isinstance(unavailable, UnauthorizedException)
+    assert unavailable.code == AssistantHelperChatErrorCode.DISABLED
+
+
+async def test_the_chat_is_on_unless_the_organisation_turned_it_off():
+    for container in (
+        _container(),
+        _in_organisation(_container(), {}),
+        _in_organisation(_container(), {"enabled": True}),
+    ):
+        assert await ASSISTANT_TARGET.require_available(container) is None
+
+
+def test_the_persona_carries_the_organisations_guidance():
+    guidance = "Tilltala alltid personen med du."
+
+    assert ASSISTANT_TARGET.instructions(
+        _in_organisation(_container(), {"guidance": guidance})
+    ) == with_organisation_guidance(ASSISTANT_INSTRUCTIONS, guidance)
+    # Without guidance the persona is the code's own, to the byte.
+    assert ASSISTANT_TARGET.instructions(_container()) == ASSISTANT_INSTRUCTIONS
+    assert (
+        ASSISTANT_TARGET.instructions(
+            _in_organisation(_container(), {"guidance": "", "enabled": False})
+        )
+        == ASSISTANT_INSTRUCTIONS
+    )
 
 
 def test_the_target_assistant_is_checked_apart_from_the_chats_own():

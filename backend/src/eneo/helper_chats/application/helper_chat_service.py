@@ -278,8 +278,9 @@ async def _sync_assistant(
         raise target.refusals.no_model()
     assistant = space.get_assistant(assistant_id=chat.assistant_id)
     changes: dict[str, Any] = {}
-    if assistant.get_prompt_text() != target.instructions:
-        changes["prompt"] = PromptCreate(text=target.instructions)
+    instructions = target.instructions(container)
+    if assistant.get_prompt_text() != instructions:
+        changes["prompt"] = PromptCreate(text=instructions)
     model_changes = (
         assistant.completion_model is None or assistant.completion_model.id != model.id
     )

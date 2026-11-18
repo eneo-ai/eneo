@@ -30,6 +30,7 @@ from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MIN_LIMIT_BYTES,
 )
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.helper_chats.policy import HELPER_CHAT_GUIDANCE_MAX_LENGTH
 from eneo.main.models import InDB
 from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES
 from eneo.skills.domain.skill import (
@@ -696,6 +697,108 @@ class FlowAuthoringChatPolicyUpdate(BaseModel):
             "tools, or null to remove the default."
         ),
     )
+
+
+_HELPER_CHAT_POLICY_EXAMPLE: JsonDict = {
+    "enabled": True,
+    "guidance": "Tilltala alltid personen med du. Ange alltid källan.",
+    "completion_model_id": "00000000-0000-0000-0000-000000000401",
+}
+
+
+class HelperChatPolicyPublic(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                **_HELPER_CHAT_POLICY_EXAMPLE,
+                "guidance_max_length": HELPER_CHAT_GUIDANCE_MAX_LENGTH,
+            }
+        }
+    )
+
+    enabled: bool = Field(
+        description=(
+            "Whether people may open and continue a helper chat on an "
+            "assistant. Off refuses opening, changing and continuing every "
+            "chat, its turns and its tool calls; conversations already held "
+            "are kept. The flow chat does not follow it."
+        ),
+    )
+    guidance: str = Field(
+        description=(
+            "The organisation's own rules for the helper, added to its persona "
+            "after the base rules and under a heading that says they cannot "
+            "change what the helper's tools may do. Empty: none. A chat takes "
+            "a change the next time it is opened."
+        ),
+    )
+    guidance_max_length: int = Field(
+        description="The longest guidance the organisation can save, in characters.",
+    )
+    completion_model_id: UUID | None = Field(
+        default=None,
+        description=(
+            "The organisation's default model for every helper chat, on flows "
+            "and on assistants: the flow chat policy's own value. A "
+            "chat whose user has not chosen a model answers with it where the "
+            "space allows it, and with the space's default among models that "
+            "support tools otherwise. Null: always the space's default."
+        ),
+    )
+
+
+class HelperChatPolicyUpdate(BaseModel):
+    """Omit a field to keep it unchanged; null is not a value of `enabled` or
+    `guidance`."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={"example": _HELPER_CHAT_POLICY_EXAMPLE},
+    )
+
+    enabled: bool | SkipJsonSchema[None] = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+        description="Turn the helper chat on or off for the organisation.",
+    )
+    guidance: str | SkipJsonSchema[None] = Field(
+        default=None,
+        max_length=HELPER_CHAT_GUIDANCE_MAX_LENGTH,
+        json_schema_extra=_strip_json_schema_default,
+        description=(
+            "The organisation's rules for the helper, in plain words. "
+            "Surrounding whitespace is dropped; send an empty string to remove "
+            "the guidance."
+        ),
+    )
+    completion_model_id: UUID | None = Field(
+        default=None,
+        json_schema_extra=_strip_json_schema_default,
+        description=(
+            "An enabled completion model of the organisation that supports "
+            "tools, or null to remove the default. It is the flow chat's "
+            "default too."
+        ),
+    )
+
+    @field_validator("enabled", "guidance", mode="before")
+    @classmethod
+    def reject_null(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Send a value, or omit the field to leave it unchanged.")
+        return value
+
+    @field_validator("guidance", mode="before")
+    @classmethod
+    def strip_guidance(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("guidance")
+    @classmethod
+    def refuse_nul(cls, value: str | None) -> str | None:
+        if value is not None and "\x00" in value:
+            raise ValueError("The guidance holds a NUL character.")
+        return value
 
 
 class FlowEvidencePolicyPublic(BaseModel):

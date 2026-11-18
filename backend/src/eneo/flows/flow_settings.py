@@ -31,6 +31,10 @@ from eneo.flows.flow_retention_policy import (
     validate_flow_retention_policy_object,
 )
 from eneo.flows.flow_runtime_policy import validate_flow_runtime_policy_object
+from eneo.helper_chats.policy import (
+    HELPER_CHAT_SETTINGS_KEY,
+    validate_helper_chat_policy_object,
+)
 from eneo.main.exceptions import BadRequestException
 from eneo.main.logging import get_logger
 
@@ -44,6 +48,9 @@ FLOW_SETTINGS_RETENTION_POLICY_KEY: Final[str] = "retention_policy"
 FLOW_SETTINGS_MAPPED_EXECUTION_KEY: Final[str] = "mapped_execution"
 FLOW_SETTINGS_RAG_EVIDENCE_KEY: Final[str] = "rag_evidence"
 FLOW_SETTINGS_AUTHORING_CHAT_KEY: Final[str] = FLOW_AUTHORING_CHAT_SETTINGS_KEY
+# The helper chat on assistants keeps its settings here too, beside the flow
+# chat's default model that every helper chat shares.
+FLOW_SETTINGS_HELPER_CHAT_KEY: Final[str] = HELPER_CHAT_SETTINGS_KEY
 
 FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
     {
@@ -55,6 +62,7 @@ FLOW_SETTINGS_TOP_LEVEL_KEYS: Final[frozenset[str]] = frozenset(
         FLOW_SETTINGS_MAPPED_EXECUTION_KEY,
         FLOW_SETTINGS_RAG_EVIDENCE_KEY,
         FLOW_SETTINGS_AUTHORING_CHAT_KEY,
+        FLOW_SETTINGS_HELPER_CHAT_KEY,
     }
 )
 
@@ -179,6 +187,12 @@ def validate_flow_settings_object(value: object | None) -> dict[str, Any]:
     if FLOW_SETTINGS_AUTHORING_CHAT_KEY in settings:
         validate_flow_authoring_chat_policy_object(
             settings[FLOW_SETTINGS_AUTHORING_CHAT_KEY]
+        )
+    if FLOW_SETTINGS_HELPER_CHAT_KEY in settings:
+        _translate_value_error(
+            lambda: validate_helper_chat_policy_object(
+                settings[FLOW_SETTINGS_HELPER_CHAT_KEY]
+            )
         )
 
     return settings
