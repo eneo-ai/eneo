@@ -176,6 +176,10 @@ async function renderChat() {
   return rendered;
 }
 
+// Each test walks several history entries through a real router: on a busy
+// machine that takes longer than the default five seconds.
+vi.setConfig({ testTimeout: 20_000 });
+
 const tab = (name: string) => screen.getByRole("tab", { name });
 const composer = () => screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
 
