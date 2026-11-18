@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import en from "@/lib/i18n/messages/en.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 
@@ -104,5 +105,11 @@ it("tells the admin when unused keys expire and that service keys count", async 
   expect(description).toContain("går ut vid nattens underhåll kl. 01:00 UTC");
   expect(description).toContain("tjänstenycklar, till exempel modulernas");
   expect(description).toContain("fler dagar än sitt längsta uppehåll");
+  expect(description).toContain(
+    "Inte påslaget än: i den här versionen låter nattens underhåll inte oanvända nycklar gå ut"
+  );
+  expect(en.api_keys_admin_policy_auto_expire_desc).toContain(
+    "Not applied yet: in this version, the nightly maintenance does not expire unused keys"
+  );
   await expectNoAxeViolations(dialog);
 });

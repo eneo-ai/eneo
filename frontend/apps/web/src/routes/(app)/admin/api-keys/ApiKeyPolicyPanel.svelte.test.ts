@@ -17,6 +17,11 @@ vi.mock("$lib/core/Eneo", () => ({
 
 afterEach(() => vi.clearAllMocks());
 
+const notAppliedYet = {
+  sv: "Inte påslaget än: i den här versionen låter nattens underhåll inte oanvända nycklar gå ut",
+  en: "Not applied yet: in this version, the nightly maintenance does not expire unused keys"
+};
+
 describe("ApiKeyPolicyPanel", () => {
   it.each([
     ["sv", ["går ut vid nattens underhåll kl\\. 01:00 UTC", "tjänstenycklar", "längsta uppehåll"]],
@@ -33,6 +38,7 @@ describe("ApiKeyPolicyPanel", () => {
       for (const phrase of phrases) {
         await expect.element(days).toHaveAccessibleDescription(new RegExp(phrase));
       }
+      await expect.element(days).toHaveAccessibleDescription(new RegExp(notAppliedYet[locale]));
       await expectNoAxeViolations(document.body);
     }
   );
