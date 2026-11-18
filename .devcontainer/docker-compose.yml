@@ -33,6 +33,18 @@ services:
       # Admin > Tools offers "Add bundled compute" at this URL.
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://localhost:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-local-development-only-tool-runtime-token}
+    # The dev servers, published on the host's loopback address: out of reach
+    # from the network, like the VS Code forwards they replace, and on the
+    # address VS Code forwards to, so a forward cannot sit in front of the
+    # published port (on macOS a 127.0.0.1 listener takes localhost traffic
+    # from a port published on every interface). Set a variable in
+    # .devcontainer/.env when something else on the host already uses its
+    # default port.
+    ports:
+      - "127.0.0.1:${ENEO_WEB_PORT:-3000}:3000"
+      - "127.0.0.1:${ENEO_API_PORT:-8123}:8123"
+      # The React/Vite beta (bun run dev:web-next).
+      - "127.0.0.1:${ENEO_WEB_NEXT_PORT:-3101}:3101"
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it

@@ -5,11 +5,18 @@
 	"dockerComposeFile": "docker-compose.yml",
 	"service": "eneo",
 	"workspaceFolder": "/workspace",
-	"forwardPorts": [
-		3000, // Frontend
-		3101, // React beta (apps/web-next, Vite)
-		8123
-	],
+	// Docker publishes the dev server ports (docker-compose.yml), so they are
+	// not in forwardPorts: VS Code's forwarder can leave a browser's requests
+	// unanswered when a dev server restarts, and six of them block
+	// localhost:<port> in that browser until it is restarted. Where the
+	// published port is out of reach (Codespaces, a remote host), VS Code
+	// still forwards a port it sees listening; "silent" keeps that from
+	// raising a notification beside the published port.
+	"portsAttributes": {
+		"3000": { "label": "Frontend", "onAutoForward": "silent" },
+		"3101": { "label": "React beta (apps/web-next, Vite)", "onAutoForward": "silent" },
+		"8123": { "label": "Backend", "onAutoForward": "silent" }
+	},
 	"features": {
 		"ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
 			"version": "latest",
