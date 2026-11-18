@@ -115,7 +115,7 @@ vulnerability is already public.
   the fix for every affected line in the advisory's temporary private fork or
   on unpublished local branches. Then land it the normal way: ordinary pull
   requests into `develop` (required checks and merge queue) and into each
-  release branch (second approval), followed by the patch
+  release branch (approved by someone other than the author), followed by the patch
   releases and the advisory, naming the affected and patched versions. The
   first public pull request discloses the fix, so open them only when every
   line is ready, and keep the time from the first public pull request to the
@@ -231,7 +231,7 @@ The repository uses GitHub security features and CI to prevent regressions:
   trusted-publication boundary, with a deployment branch policy that allows
   only `develop`; the workflow enforces the same rule in code, and the
   environment policy is the backstop. No pull-request workflow publishes
-  images. Fork pull requests get a read-only token; the tool runtime image job
+  images. Jobs that run code from a fork get a read-only token; the tool runtime image job
   still requests package write, OIDC, and attestation permissions on
   same-repository pull requests although it publishes only when the
   coordinator calls it. Do not make the
@@ -300,8 +300,9 @@ on the documentation site.
   change the ruleset temporarily; restore it straight away and record the
   change in a GitHub issue. The release branch and tag rulesets keep Core
   Maintainers as bypass actors because cutting releases requires it.
-- **Workflow trust.** Pull requests from forks run with a read-only
-  `GITHUB_TOKEN` and without repository secrets. Workflows started from
+- **Workflow trust.** Jobs that run code from a fork get a read-only
+  `GITHUB_TOKEN` and no repository secrets. Project intake and the PR label
+  check run trusted code from the base branch. Workflows started from
   branches in this repository can request package write permissions, which is
   why write access stays with the Core Maintainers and the organisation owners. Keep repository
   and organisation secrets limited to those referenced by workflows; when a

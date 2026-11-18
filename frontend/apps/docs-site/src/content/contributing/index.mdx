@@ -34,11 +34,11 @@ Everything in this table works with an ordinary GitHub account.
 Everyone contributes through pull requests, and Core Maintainers decide what is
 merged. The steps below are the same for all; this is what differs:
 
-| You are                                                                             | You work from              | Labels and checks                                                                                                                  |
-| ----------------------------------------------------------------------------------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| Anyone with a GitHub account                                                        | A fork                     | A maintainer adds the labels during review and approves the CI, Dependency Review and User-facing workflow runs before they start. |
-| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | With Triage access you label your own pull request. As a member of the `eneo-ai` organisation, your checks start without approval. |
-| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.                                           |
+| You are                                                                             | You work from              | Labels and checks                                                                                                                                     |
+| ----------------------------------------------------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anyone with a GitHub account                                                        | A fork                     | A maintainer approves the CI, Dependency Review and User-facing runs before they start, and adds the labels unless you have been given Triage access. |
+| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | With Triage access you label your own pull request. As a member of the `eneo-ai` organisation, your checks start without approval.                    |
+| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.                                                              |
 
 [Governance and Roles](/contributing/governance) explains the roles, why Core
 Maintainers is the only team with write access, and
@@ -172,8 +172,9 @@ runs straight away.
 If you have Triage access, as Collaborators do, add the labels yourself.
 Otherwise a maintainer adds them during review, and the PR label check turns
 green when they do. A ready pull request
-into `develop` that links no issue gets a `needs:task-link` label until you
-add `Fixes #123`.
+into `develop` that closes no issue gets a `needs:task-link` label until the
+intake sees a closing link; [Project Roadmap](/contributing/project-roadmap)
+lists the two ways to add one.
 
 ### Review and merge
 

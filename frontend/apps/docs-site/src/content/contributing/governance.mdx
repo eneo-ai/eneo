@@ -92,8 +92,8 @@ from a fork, the same way Collaborators do, only without Triage rights.
    checks are green, the pull request enters the merge queue, which tests it
    against the latest `develop` and squash-merges it.
 6. **Release.** Core Maintainers cut a release branch. Every pull request into
-   it needs a second approval, normally from another Core Maintainer, and the
-   release is
+   it needs one approval from someone with write access other than its author,
+   normally another Core Maintainer, and the release is
    published from a `v*` tag that Core Maintainers authorise.
 
 Core Maintainers' own pull requests into `develop` skip the formal approval in
@@ -125,7 +125,7 @@ changes within the team are our own procedures; the list says which is which.
   the merge queue for every pull request and has no bypass. Merging from a
   security advisory's private fork would skip them, so our procedure is not to
   use it.
-- **A second approval on release changes.** A pull request into a release
+- **Release changes are approved by someone other than the author.** A pull request into a release
   branch or `main` needs an approval from someone with write access other
   than its author, in practice another Core Maintainer, and new commits
   dismiss an earlier approval. When no second
@@ -202,7 +202,7 @@ flowchart LR
 ```
 
 To propose a fix for a released version, open a pull request against the
-affected `release/vX.Y` branch. A second Core Maintainer approves it before it
+affected `release/vX.Y` branch. Someone other than the author approves it before it
 is merged, and a Core Maintainer releases it. The full flow is described in
 [DEPLOYMENT_WORKFLOW.md](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md),
 and the release artefacts in [Release SBOMs](/docs/release-sboms).
@@ -211,8 +211,8 @@ and the release artefacts in [Release SBOMs](/docs/release-sboms).
 
 An urgent fix follows the rules for its target branch. On `develop`, it is an
 ordinary pull request that must pass the required checks and the merge queue;
-there is no bypass. On a release branch, it needs a second approval, normally
-from another Core Maintainer. If none is available, a Core Maintainer can
+there is no bypass. On a release branch, it needs one approval from someone
+with write access other than its author, normally another Core Maintainer. If none is available, a Core Maintainer can
 bypass the approval for that pull request and states the reason in it.
 
 <Callout type="warning">
@@ -279,9 +279,10 @@ problems early and speed that up.
 
 ### Does CI run on my pull request from a fork?
 
-Yes. The same checks run, with a read-only token and without secrets. For
-contributors outside the `eneo-ai` organisation, a Core Maintainer approves the
-workflow runs before they start.
+Yes. The same checks run. Jobs that run your code get a read-only token and no
+repository secrets. For contributors outside the `eneo-ai` organisation, a
+Core Maintainer approves the CI, Dependency Review and User-facing runs before
+they start; PR labels runs straight away.
 
 ### Why is the PR label check red on my pull request?
 
@@ -297,7 +298,7 @@ Maintainers decide on each merge and are accountable for what is released.
 ### How do I get a fix into a released version?
 
 Open a pull request against the affected `release/vX.Y` branch, or ask in the
-issue for a backport. A second Core Maintainer approves it, it is merged and
+issue for a backport. Someone other than the author approves it, it is merged and
 carried over to `develop`, and a Core Maintainer publishes a patch release.
 
 ### Can Core Maintainers merge their own changes without review?
@@ -306,8 +307,8 @@ On `develop`, without a formal approval, yes. The team works together and
 agrees on each change before one of them chooses **Merge when ready**, so it is
 not slowed down waiting for approvals. They ask for a written review when a
 change is large or risky, and the required checks and the merge queue always
-apply. On release branches and `main`, another Core Maintainer approves the
-pull request. When none is available, a Core Maintainer can bypass that
+apply. On release branches and `main`, someone with write access other than
+the author approves the pull request, normally another Core Maintainer. When none is available, a Core Maintainer can bypass that
 approval for a single pull request, and GitHub records it.
 
 ### Can a pull request be merged with failing checks?

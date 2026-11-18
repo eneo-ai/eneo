@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="462" viewBox="0 0 900 462" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
   <title id="title">How a change reaches Eneo</title>
-  <desc id="desc">Three lanes. Contributors, meaning Collaborators and anyone with a GitHub account, agree on a change in an issue, build it in a fork and open a pull request. GitHub runs the required pull request checks. Core Maintainers at Sundsvalls kommun approve the pull request and add it to the merge queue into develop. Changes into a release branch get a second approval, and Core Maintainers authorise the release. GitHub rulesets ensure that only people with write access can merge into develop, and that only Core Maintainers can update release branches and authorise v tags. CI on pull requests from forks runs with a read-only token and without secrets.</desc>
+  <desc id="desc">Three lanes. Contributors, meaning Collaborators and anyone with a GitHub account, agree on a change in an issue, build it in a fork and open a pull request. GitHub runs the required pull request checks. Core Maintainers at Sundsvalls kommun approve the pull request and add it to the merge queue into develop. Changes into a release branch are approved by someone other than their author, and Core Maintainers authorise the release. GitHub rulesets ensure that only people with write access can merge into develop, and that only Core Maintainers can update release branches and authorise v tags. CI on pull requests from forks runs with a read-only token and without secrets.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
@@ -73,7 +73,7 @@
   <!-- 6 Release -->
   <rect x="760" y="286" width="106" height="76" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
   <text x="770" y="308" fill="#1a1a1a" font-size="12" font-weight="700">6 Release</text>
-  <text x="770" y="328" fill="#455a64" font-size="11">Second approval</text>
+  <text x="770" y="328" fill="#455a64" font-size="11">One approval,</text>
   <text x="770" y="344" fill="#455a64" font-size="11">then release</text>
 
   <!-- Enforcement -->

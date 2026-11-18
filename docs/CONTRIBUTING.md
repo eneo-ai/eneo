@@ -201,7 +201,7 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 Core Maintainers is the only team with write access, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
-**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so every ordinary pull request into `develop` passes the required checks and the merge queue. Pull requests into `release/*` and `main` need an approval from another Core Maintainer, or a recorded bypass when none is available.
+**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so every ordinary pull request into `develop` passes the required checks and the merge queue. Pull requests into `release/*` and `main` need one approval from someone with write access other than its author, normally another Core Maintainer, or a recorded bypass by a Core Maintainer when none is available.
 
 ---
 
@@ -914,7 +914,7 @@ Eneo follows [Semantic Versioning](https://semver.org/):
 ### Contributing to Releases
 
 - A release is stabilised on its `release/vX.Y` branch through RC tags, while `develop` continues
-- Fixes reach the release branch through pull requests that a second Core Maintainer approves
+- Fixes reach the release branch through pull requests approved by someone with write access other than the author
 - Core Maintainers decide what enters the merge queue, cut release branches and publish releases
 - User-facing notes go in `frontend/packages/whats-new/releases.json`; operator notes go in the GitHub release
 

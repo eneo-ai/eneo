@@ -65,7 +65,7 @@ Backflow (patches):
 - All version tags (`v1.X.Y`) live here
 - Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
-- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs a second approval, normally from another Core Maintainer, or a recorded bypass when none is available. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
+- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs one approval from someone with write access other than its author, normally another Core Maintainer, or a recorded bypass by a Core Maintainer when none is available. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
 
 ### Supporting Branches
 
@@ -249,7 +249,7 @@ RC tags also live on the release branch. Create the release branch from `develop
 develop ──► create release/v1.8
                  │
                  ├──► v1.8.0-rc.1 (tag, pre-release) → deploy to test env
-                 ├──► fix via PR (a second Core Maintainer approves)
+                 ├──► fix via PR (approved by someone other than its author)
                  ├──► v1.8.0-rc.2 (tag, pre-release)
                  └──► v1.8.0 (final release)
 ```
@@ -275,7 +275,7 @@ CI rejects a `next` block on a release branch and an undated release block on `d
 5. Check **Set as pre-release**
 6. Click **Publish release**
 
-**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs a second approval, normally from another Core Maintainer; direct pushes are rejected. If no second maintainer is available, a Core Maintainer can bypass the approval for that pull request and states the reason in it.
+**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs one approval from someone with write access other than its author, normally another Core Maintainer; direct pushes are rejected. If no second maintainer is available, a Core Maintainer can bypass the approval for that pull request and states the reason in it.
 
 **4. Create subsequent RCs** the same way via GitHub Releases (tag `v1.8.0-rc.2`, target `release/v1.8`, mark as pre-release)
 
@@ -295,7 +295,7 @@ flowchart TB
     A[Production Bug Found] --> B[Create hotfix from release/v1.X]
     B --> C[Fix Bug]
     C --> D[PR to release/v1.X]
-    D --> D2[Second Core Maintainer approves]
+    D --> D2[Approved by someone other than the author]
     D2 --> E[Merge to release/v1.X]
     E --> F[Tag new patch version]
     F --> G[Build versioned image]
@@ -321,9 +321,9 @@ git push origin hotfix/fix-critical-bug
 gh pr create --base release/v1.7 --head hotfix/fix-critical-bug
 ```
 
-Another Core Maintainer approves the pull request. Squash-merge it, so the fix is one commit on the release branch.
+Someone with write access other than the author approves the pull request, normally another Core Maintainer. Squash-merge it, so the fix is one commit on the release branch.
 
-**2. After PR merge, create the patch release via GitHub UI:**
+**2. After PR merge, publish the patch release.** Where managed publication is enabled, use [Prepare and Publish Release](#creating-a-production-release), which creates the tag. Otherwise create it via GitHub UI:
 
 1. Go to **Releases** → **Draft a new release**
 2. Click **Choose a tag** → type `v1.7.4` → select **Create new tag**
@@ -359,7 +359,7 @@ gh pr create --base develop --head fix/carry-xyz
 
 - **Source commit.** Take the commit from the fix's pull request, not the latest commit on the branch (another pull request may have landed since) and not the commits on your `hotfix/*` branch, which do not survive its deletion. Squash-merge fix pull requests so that this one commit is the whole fix. A rebase-merged pull request lands several commits; carry each of them, in order, or squash it instead.
 - **Into `develop`.** The pull request needs the required checks and the merge queue; Core Maintainers agree on it together, with no formal approval.
-- **Into a release branch.** Another Core Maintainer approves the pull request. Several fixes for the same release can go in one pull request.
+- **Into a release branch.** Someone with write access other than the author approves the pull request, normally another Core Maintainer. Several fixes for the same release can go in one pull request.
 
 ## Backporting
 
@@ -382,7 +382,7 @@ For a private report:
 
 Order matters: **oldest → newest → develop**. This minimizes merge conflicts since newer branches are closer to develop. Before each step, re-read the SHA of the commit the previous pull request landed on its branch.
 
-**Example: security fix needed on v1.6, v1.7, and v1.8. Create releases for each branch via GitHub UI:**
+**Example: security fix needed on v1.6, v1.7, and v1.8.** Publish each patch with the procedure for that line's publication mode, described under [Creating a Production Release](#creating-a-production-release):
 
 | Tag | Target | Pre-release? |
 |-----|--------|-------------|
@@ -390,15 +390,15 @@ Order matters: **oldest → newest → develop**. This minimizes merge conflicts
 | `v1.7.5` | `release/v1.7` | No |
 | `v1.8.1` | `release/v1.8` | No |
 
-For each: **Releases** → **Draft a new release** → set tag, target, and release notes → **Publish release**.
+Where managed publication is not enabled, for each: **Releases** → **Draft a new release** → set tag, target, and release notes → **Publish release**.
 
 ## Backflow: Release to Develop
 
-**Every fix that lands on a release branch must also be cherry-picked to `develop`.** If you skip this, the fix will be missing in the next release.
+**Every fix that lands on a release branch must also reach `develop`.** If it is missing there, it will be missing in the next release. A fix that was backported from `develop` is already there.
 
-After merging a hotfix PR to a release branch, **immediately** carry the fix to `develop` with [the procedure above](#carrying-a-fix-to-another-branch), using the commit on the release branch as the source. A security patch for several releases is the exception: it reaches `develop` last in [that sequence](#security-patches-across-multiple-releases).
+After merging a hotfix PR that originated on a release branch, **immediately** carry the fix to `develop` with [the procedure above](#carrying-a-fix-to-another-branch), using the commit on the release branch as the source. A privately reported fix for several releases is carried to `develop` once, after the affected release branches, as described under [Security Patches Across Multiple Releases](#security-patches-across-multiple-releases).
 
-This applies to all fixes on release branches — hotfixes, RC stabilization fixes, backported patches, and security fixes.
+This applies to fixes that start on a release branch: hotfixes, RC stabilization fixes and privately prepared security fixes.
 
 ## Support / Maintenance Policy
 
@@ -486,7 +486,7 @@ move at release time.
 - Bug fixes → increment PATCH
 
 ### Q: What if I need to patch an old version?
-**A:** Use the same hotfix flow — create a `hotfix/*` branch from the relevant `release/v1.X`, PR to the release branch, get another Core Maintainer's approval, merge, tag. No special handling needed.
+**A:** Use the same hotfix flow — create a `hotfix/*` branch from the relevant `release/v1.X`, PR to the release branch, get an approval from someone other than the author, merge, and publish the patch release. No special handling needed.
 
 ### Q: What if I need to test something quickly?
 **A:** Create a feature branch and PR to develop. Once merged, it auto-deploys to dev environment.
@@ -532,14 +532,14 @@ git push origin release/v1.8
 # Hotfix any version
 git checkout release/v1.7 && git pull
 git checkout -b hotfix/critical-fix
-# ... fix, push, PR to release/v1.7, second approval, merge ...
-# Then tag via GitHub UI (see below)
+# ... fix, push, PR to release/v1.7, approval from someone else, merge ...
+# Then publish the patch release (see below)
 # Carry the fix to develop through a PR (see "Carrying a Fix to Another Branch")
 ```
 
 ### Creating tags (GitHub UI)
 
-Always create tags through **GitHub Releases** rather than the CLI. This gives you release notes, pre-release marking, and a consistent audit trail.
+This applies to release candidates, and to final releases where managed publication is not enabled; a managed final release gets its tag from [Prepare and Publish Release](#creating-a-production-release). Create these tags through **GitHub Releases** rather than the CLI. This gives you release notes, pre-release marking, and a consistent audit trail.
 
 | Action | Tag | Target branch | Pre-release? |
 |--------|-----|--------------|-------------|
