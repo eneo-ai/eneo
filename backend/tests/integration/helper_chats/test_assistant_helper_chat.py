@@ -20,6 +20,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.assistants.assistant import Assistant
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import AssistantMCPServers, Assistants
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
@@ -202,6 +203,47 @@ async def test_the_person_changes_mode_model_and_conversation_of_their_chat(
     assert started.status_code == 200, started.text
     assert started.json()["session_id"] != chat["session_id"]
     assert started.json()["assistant_id"] == chat["assistant_id"]
+
+
+async def test_what_the_person_does_with_their_chat_is_audited_in_their_name(
+    client, setup: Setup, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    entries: list[dict] = []
+    log_async = AuditService.log_async
+
+    async def record(self, **kwargs):
+        entries.append(kwargs)
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+
+    chat = await _open(client, setup)
+    url = setup.url + chat["session_id"] + "/"
+    editing = await client.patch(url, headers=setup.headers, json={"editing": True})
+    assert editing.status_code == 200, editing.text
+    chosen = await client.patch(
+        url,
+        headers=setup.headers,
+        json={"completion_model_id": chat["default_completion_model_id"]},
+    )
+    assert chosen.status_code == 200, chosen.text
+    started = await client.post(url + "conversations/", headers=setup.headers)
+    assert started.status_code == 200, started.text
+
+    about_the_chat = [
+        entry for entry in entries if entry["action"].value.startswith("helper_chat_")
+    ]
+    assert [entry["action"] for entry in about_the_chat] == [
+        ActionType.HELPER_CHAT_CREATED,
+        ActionType.HELPER_CHAT_MODE_CHANGED,
+        ActionType.HELPER_CHAT_MODEL_CHANGED,
+        ActionType.HELPER_CHAT_CONVERSATION_STARTED,
+    ]
+    # Each entry is the person's own and names the assistant the chat is about.
+    for entry in about_the_chat:
+        assert entry["actor_id"] == admin_user.id
+        assert entry["entity_type"] == EntityType.ASSISTANT
+        assert entry["entity_id"] == UUID(setup.assistant_id)
 
 
 async def _cannot_reach(client, setup: Setup, chat: dict, headers) -> None:
