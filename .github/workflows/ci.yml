@@ -508,6 +508,13 @@ jobs:
           BUILD_MEMORY_BUDGET_MB: "7680"
         run: node .github/scripts/ci-build-memory.mjs "$RUNNER_TEMP/frontend-build-resources.txt"
 
+      # The same build also writes adapter-node's build/. Start it with `node build`,
+      # as a deployment does, and check that a path that is not valid
+      # percent-encoding gets 400 while the process keeps answering. No backend.
+      - name: Check the built server's answer to malformed paths
+        working-directory: frontend/apps/web
+        run: node --test scripts/built-server.test.mjs
+
       - name: Wait for the E2E stack
         run: |
           for _ in $(seq 1 300); do
