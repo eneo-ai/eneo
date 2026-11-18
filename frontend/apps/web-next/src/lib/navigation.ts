@@ -52,6 +52,11 @@ export type UrlState = {
    * entry immediately behind it, for its way back to the overview.
    */
   insightFindingFrom?: string;
+  /**
+   * A finding's "Läs kommentarerna" set the insights' feedback filter here,
+   * with the overview it came from in the entry immediately behind.
+   */
+  insightCommentsFromFinding?: boolean;
 };
 
 export type UrlOptions = {
@@ -68,6 +73,7 @@ declare module "@tanstack/react-router" {
     settingsSectionFromIndex?: UrlState["settingsSectionFromIndex"];
     flowStepDepth?: UrlState["flowStepDepth"];
     insightFindingFrom?: UrlState["insightFindingFrom"];
+    insightCommentsFromFinding?: UrlState["insightCommentsFromFinding"];
   }
 }
 

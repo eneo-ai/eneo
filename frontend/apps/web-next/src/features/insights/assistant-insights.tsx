@@ -16,7 +16,7 @@ import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "@/features/chat/side-pa
 import { InsightsAnalysis, type AnalysisSuggestion } from "./chat/insights-analysis";
 import { InsightCitationsContext } from "./chat/insight-citations";
 import { ExploreConversationsDialog } from "./explore-conversations-dialog";
-import { FeedbackInbox, type FeedbackFilter } from "./feedback-inbox";
+import { FeedbackInbox } from "./feedback-inbox";
 import { FINDING_SUGGESTION, FindingView } from "./finding-view";
 import {
   feedbackCounts,
@@ -24,7 +24,12 @@ import {
   type InsightFilters,
   type OpenableFindingKind
 } from "./insight-figures";
-import { findingTrigger, insightEditorLinks, InsightFindings } from "./insight-findings";
+import {
+  findingTrigger,
+  insightEditorLinks,
+  InsightFindings,
+  readCommentsTrigger
+} from "./insight-findings";
 import {
   insightActivityQueryOptions,
   insightFindingsQueryOptions,
@@ -34,6 +39,7 @@ import {
   insightTopQuestionsQueryOptions,
   isInsightRefusal
 } from "./insight-stats";
+import type { InsightView } from "./insight-view-url";
 import { InsightsOverview } from "./insights-overview";
 import { InsightsRangePicker } from "./insights-range-picker";
 import { KnowledgeUseCard } from "./knowledge-use";
@@ -120,10 +126,13 @@ function NoConversations({
  * while the filters change and fails on its own. A period without
  * conversations shows one empty state in their place, under the filters.
  *
- * A finding with examples opens in place of the overview (`finding`, kept
- * where the mount keeps the filters), with the filters above it; its way back
- * returns focus to the finding's button. Its links to the knowledge and the
- * editor are there only where the viewer may edit the target (`editorHref`).
+ * Where the view is, is the address's (`view`, `useInsightViewUrl`): a
+ * finding with examples opens in place of the overview, with the filters
+ * above it, and its way back returns focus to the finding's button. Its links
+ * to the knowledge and the editor are there only where the viewer may edit
+ * the target (`editorHref`). "Läs kommentarerna" filters the feedback inbox
+ * to the bad ratings with a comment and moves focus to the inbox; going back
+ * from there returns the filter it had and focus to the button.
  *
  * "Fråga analysen" opens the analysis in a side panel (Insiktsanalys): beside
  * the overview where the overview keeps 480 px (decision 14, measured on the
@@ -142,8 +151,7 @@ export function AssistantInsights({
   partner,
   filters,
   onFiltersChange,
-  finding = null,
-  onFindingChange,
+  view,
   editorHref = null,
   header,
   framed = false,
@@ -152,9 +160,8 @@ export function AssistantInsights({
   partner: InsightsPartner;
   filters: InsightFilters;
   onFiltersChange: (filters: InsightFilters) => void;
-  /** The finding open in place of the overview; none for the overview. */
-  finding?: OpenableFindingKind | null;
-  onFindingChange: (finding: OpenableFindingKind | null) => void;
+  /** The finding open in place of the overview and the inbox's filter, kept in the address. */
+  view: InsightView;
   /** The target's editor, where the viewer may edit it; null otherwise. */
   editorHref?: string | null;
   /** The page's own header, above the filters (the administration's page header). */
@@ -175,9 +182,9 @@ export function AssistantInsights({
   const inboxHeading = useRef<HTMLHeadingElement>(null);
   const [explore, setExplore] = useState<{ sessionId: string | null } | null>(null);
   const [panel, setPanel] = useState<PanelState>("unopened");
-  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackFilter>("all");
   const [suggestion, setSuggestion] = useState<FindingSuggestion | null>(null);
   const open = panel === "open";
+  const { finding } = view;
   const { range } = filters;
   // A new source or comparison keeps the figures on screen until the new ones are in.
   const summary = useQuery({
@@ -239,16 +246,23 @@ export function AssistantInsights({
   }, [covered]);
 
   // A finding opened here moves focus to its title; its way back returns
-  // focus to the finding's button. One open in the address at load is left
-  // where it is.
-  const shownFinding = useRef(finding);
+  // focus to the finding's button. Back from "Läs kommentarerna" returns
+  // focus to that button, Forward to the inbox. What the address shows at
+  // load is left where it is, and so is focus while the view is not on screen.
+  const isReadingComments = view.isReadingComments;
+  const shown = useRef({ finding, isReadingComments });
   useEffect(() => {
-    const was = shownFinding.current;
-    shownFinding.current = finding;
-    if (was === finding) return;
-    if (finding) findingHeading.current?.focus();
-    else if (was) (findingTrigger(main.current, was) ?? trigger.current)?.focus();
-  }, [finding]);
+    const was = shown.current;
+    shown.current = { finding, isReadingComments };
+    if (hidden) return;
+    if (was.finding !== finding) {
+      if (finding) findingHeading.current?.focus();
+      else if (was.finding) (findingTrigger(main.current, was.finding) ?? trigger.current)?.focus();
+    } else if (was.isReadingComments !== isReadingComments) {
+      if (isReadingComments) inboxHeading.current?.focus();
+      else (readCommentsTrigger(main.current) ?? trigger.current)?.focus();
+    }
+  }, [finding, isReadingComments, hidden]);
 
   function openPanel() {
     if (open) aside.current?.focus();
@@ -267,12 +281,12 @@ export function AssistantInsights({
 
   function showFinding(next: OpenableFindingKind | null) {
     setSuggestion(null);
-    onFindingChange(next);
+    view.onFindingChange(next);
   }
 
   /** "Läs kommentarerna": the inbox, filtered to the bad ratings with a comment. */
   function readComments() {
-    setFeedbackFilter("bad_commented");
+    view.readComments();
     inboxHeading.current?.focus();
   }
 
@@ -405,8 +419,8 @@ export function AssistantInsights({
                   <FeedbackInbox
                     partner={partner}
                     filters={filters}
-                    filter={feedbackFilter}
-                    onFilterChange={setFeedbackFilter}
+                    filter={view.feedback}
+                    onFilterChange={view.onFeedbackChange}
                     counts={summary.data ? feedbackCounts(summary.data.period) : null}
                     headingRef={inboxHeading}
                     onOpenConversation={openConversation}

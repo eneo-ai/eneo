@@ -97,6 +97,14 @@ vi.mock("@/lib/api/browser", () => ({
               examples: [],
               sources: null,
               tool: null
+            },
+            {
+              kind: "negative_ratings",
+              affected: 1,
+              base: 4,
+              examples: [],
+              sources: null,
+              tool: null
             }
           ]
         },
@@ -223,4 +231,45 @@ it("keeps the conversation open since when Back returns to an earlier tab", asyn
   await waitFor(() => expect(router.state.location.search).toEqual({ session_id: "s-2" }));
   expect(screen.getByText("Svar i s-2")).toBeTruthy();
   expect(spies.detailCalls).toEqual(["s-1", "s-2"]);
+});
+
+it('returns from "Läs kommentarerna" to the overview with the inbox\'s filter as it was', async () => {
+  const { router } = await renderChat();
+  fireEvent.click(tab("Insikter"));
+  const inbox = await screen.findByRole("region", { name: "Återkoppling från användarna" });
+  const heading = within(inbox).getByRole("heading", { name: "Återkoppling från användarna" });
+  const filter = (name: RegExp) => within(inbox).getByRole("radio", { name });
+
+  // The inbox's own filter changes the address in place.
+  fireEvent.click(filter(/^Bra/));
+  await waitFor(() => expect(router.state.location.search).toMatchObject({ feedback: "good" }));
+  const overview = router.state.location.state.__TSR_index;
+
+  const read = await screen.findByRole("button", { name: "Läs kommentarerna" });
+  act(() => read.focus());
+  fireEvent.click(read);
+  await waitFor(() =>
+    expect(router.state.location.search).toMatchObject({ feedback: "bad_commented" })
+  );
+  expect(router.state.location.state.__TSR_index).toBe(overview + 1);
+  expect(filter(/^Dåliga med kommentar/).getAttribute("aria-checked")).toBe("true");
+  expect(document.activeElement).toBe(heading);
+
+  // Back: the overview as it was, with focus on the button, still on the page.
+  act(() => history.back());
+  await waitFor(() => expect(filter(/^Bra/).getAttribute("aria-checked")).toBe("true"));
+  expect(router.state.location.pathname).toBe("/chat");
+  expect(router.state.location.search).toEqual({
+    session_id: "s-1",
+    tab: "insights",
+    feedback: "good"
+  });
+  await waitFor(() => expect(document.activeElement).toBe(read));
+
+  // Forward: the comments again, with focus on the inbox.
+  act(() => history.forward());
+  await waitFor(() =>
+    expect(filter(/^Dåliga med kommentar/).getAttribute("aria-checked")).toBe("true")
+  );
+  await waitFor(() => expect(document.activeElement).toBe(heading));
 });

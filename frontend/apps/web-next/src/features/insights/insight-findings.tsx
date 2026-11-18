@@ -68,6 +68,11 @@ export function findingTrigger(
   return container?.querySelector<HTMLElement>(`[data-finding-trigger="${kind}"]`) ?? null;
 }
 
+/** "Läs kommentarerna", for focus to return to when its filter is undone. */
+export function readCommentsTrigger(container: HTMLElement | null): HTMLElement | null {
+  return container?.querySelector<HTMLElement>("[data-read-comments]") ?? null;
+}
+
 /** One finding per kind, and one per tool for failing tools. */
 function findingKey(finding: InsightFinding): string {
   const tool = finding.tool;
@@ -165,6 +170,7 @@ function FindingActions({
         size="sm"
         variant="secondary"
         label={t("insights_finding_read_comments")}
+        data-read-comments=""
         onClick={onReadComments}
       />
     );

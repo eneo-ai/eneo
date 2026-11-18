@@ -44,6 +44,20 @@ export function parseOpenableFinding(value: string | null | undefined): Openable
   return OPENABLE_FINDINGS.find((kind) => kind === value) ?? null;
 }
 
+/** The feedback inbox's filter: every rating, the bad ones someone explained, or the good ones. */
+export type FeedbackFilter = "all" | "bad_commented" | "good";
+
+const FEEDBACK_FILTERS = [
+  "all",
+  "bad_commented",
+  "good"
+] as const satisfies readonly FeedbackFilter[];
+
+/** The inbox's filter from an address or a control's value; anything unknown is every rating. */
+export function parseFeedbackFilter(value: string | null | undefined): FeedbackFilter {
+  return FEEDBACK_FILTERS.find((filter) => filter === value) ?? "all";
+}
+
 /**
  * What the insights view shows: the period, one source or all of them (null),
  * and whether each figure is set beside the previous period of equal length.

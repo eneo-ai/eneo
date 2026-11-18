@@ -8,7 +8,7 @@ import {
 import {
   insightFindingSearch,
   readInsightFindingSearch
-} from "@/features/insights/insight-finding-url";
+} from "@/features/insights/insight-view-url";
 import type { InsightRange } from "@/features/insights/insights-range";
 const fallback = { start: "2026-10-01", end: "2026-10-31" } as InsightRange;
 
@@ -64,7 +64,7 @@ describe("assistant insight URL period", () => {
       )
     ).toEqual({ from: "2026-09-01", to: "2026-09-30", source: "api_key", compare: "1" });
   });
-  it("keeps the open finding in the address beside the filters", () => {
+  it("keeps the open finding and the inbox's filter in the address beside the filters", () => {
     const query = insightFindingSearch("knowledge_missed", "?from=2026-09-01&to=2026-09-30");
     expect(readInsightFindingSearch(new URLSearchParams(query))).toBe("knowledge_missed");
     expect(new URLSearchParams(query).get("from")).toBe("2026-09-01");
@@ -87,6 +87,16 @@ describe("assistant insight URL period", () => {
         { from: "2026-09-01", to: "2026-09-30", finding: "tool_failures" },
         fallback
       )
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
+    // The inbox's filter too: every rating is no parameter, and an unknown one is every rating.
+    expect(
+      validateInsightViewSearch(
+        { from: "2026-09-01", to: "2026-09-30", feedback: "bad_commented" },
+        fallback
+      )
+    ).toEqual({ from: "2026-09-01", to: "2026-09-30", feedback: "bad_commented" });
+    expect(
+      validateInsightViewSearch({ from: "2026-09-01", to: "2026-09-30", feedback: "x" }, fallback)
     ).toEqual({ from: "2026-09-01", to: "2026-09-30" });
   });
 });

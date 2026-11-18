@@ -1,6 +1,9 @@
 import { calendarDate, type IsoDate } from "@/lib/calendar-date";
 import { parseInsightSource, type InsightFilters } from "@/features/insights/insight-figures";
-import { readInsightFindingSearch } from "@/features/insights/insight-finding-url";
+import {
+  readInsightFeedbackSearch,
+  readInsightFindingSearch
+} from "@/features/insights/insight-view-url";
 import {
   DEFAULT_INSIGHT_DAYS,
   insightRangeOfDays,
@@ -51,7 +54,14 @@ export function insightViewSearch(filters: InsightFilters, current = ""): string
 export function validateInsightViewSearch(
   search: Record<string, unknown>,
   fallback = insightRangeOfDays(DEFAULT_INSIGHT_DAYS)
-): { from: string; to: string; source?: string; compare?: string; finding?: string } {
+): {
+  from: string;
+  to: string;
+  source?: string;
+  compare?: string;
+  finding?: string;
+  feedback?: string;
+} {
   const reader: SearchReader = {
     get: (key) => {
       const value = search[key];
@@ -61,11 +71,13 @@ export function validateInsightViewSearch(
   };
   const filters = readInsightViewSearch(reader, fallback);
   const finding = readInsightFindingSearch(reader);
+  const feedback = readInsightFeedbackSearch(reader);
   return {
     from: filters.range.start,
     to: filters.range.end,
     ...(filters.source ? { source: filters.source } : {}),
     ...(filters.compare ? { compare: "1" } : {}),
-    ...(finding ? { finding } : {})
+    ...(finding ? { finding } : {}),
+    ...(feedback === "all" ? {} : { feedback })
   };
 }
