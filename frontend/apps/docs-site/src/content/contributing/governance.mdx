@@ -92,7 +92,8 @@ from a fork, the same way Collaborators do, only without Triage rights.
    checks are green, the pull request enters the merge queue, which tests it
    against the latest `develop` and squash-merges it.
 6. **Release.** Core Maintainers cut a release branch. Every pull request into
-   it needs an approval from a second Core Maintainer, and the release is
+   it needs a second approval, normally from another Core Maintainer, and the
+   release is
    published from a `v*` tag that Core Maintainers authorise.
 
 Core Maintainers' own pull requests into `develop` skip the formal approval in
@@ -135,9 +136,9 @@ changes within the team are our own procedures; the list says which is which.
   and, as the full suite, in the merge queue. Publishing `develop` reuses that
   full run for the exact commit and still runs a fresh security scan and scans
   the published images.
-- **Isolated CI for contributions.** Pull requests from forks run with a
-  read-only token and without secrets, and no pull request workflow publishes
-  anything. The project-board workflow, which needs a token, runs the base
+- **Isolated CI for contributions.** CI that runs code from a fork gets a
+  read-only token and no repository secrets, and no pull request workflow
+  publishes anything. The project-board workflow, which needs a token, runs the base
   branch's code and never the pull request's.
 - **Controlled releases.** Only Core Maintainers can create release branches.
   A `v*` tag is created by them or, for a managed final release they have
@@ -210,8 +211,8 @@ and the release artefacts in [Release SBOMs](/docs/release-sboms).
 
 An urgent fix follows the rules for its target branch. On `develop`, it is an
 ordinary pull request that must pass the required checks and the merge queue;
-there is no bypass. On a release branch, it needs an approval from a Core
-Maintainer other than its author. If none is available, a Core Maintainer can
+there is no bypass. On a release branch, it needs a second approval, normally
+from another Core Maintainer. If none is available, a Core Maintainer can
 bypass the approval for that pull request and states the reason in it.
 
 <Callout type="warning">

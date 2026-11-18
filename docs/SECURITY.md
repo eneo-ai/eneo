@@ -115,7 +115,7 @@ vulnerability is already public.
   the fix for every affected line in the advisory's temporary private fork or
   on unpublished local branches. Then land it the normal way: ordinary pull
   requests into `develop` (required checks and merge queue) and into each
-  release branch (second Core Maintainer approval), followed by the patch
+  release branch (second approval), followed by the patch
   releases and the advisory, naming the affected and patched versions. The
   first public pull request discloses the fix, so open them only when every
   line is ready, and keep the time from the first public pull request to the

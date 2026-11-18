@@ -193,15 +193,15 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 
 ### 6. Checks, Review and Merge
 
-- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, a maintainer approves the workflow runs before they start.
-- Collaborators add the labels themselves. For everyone else, a maintainer adds them during review and the PR label check turns green. A pull request that links no issue gets `needs:task-link` until you add `Fixes #123`.
+- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing workflow runs before they start; PR labels runs straight away.
+- If you have Triage access or higher, add the labels yourself. Otherwise a maintainer adds them during review and the PR label check turns green. A ready pull request into `develop` that closes no issue gets `needs:task-link`; add a closing reference such as `Fixes #123` to the description.
 - A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.
 - If you push new commits after that, GitHub cancels **Merge when ready** and a Core Maintainer looks at the change again.
 
 Core Maintainers is the only team with write access, so contributors always work from a fork. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance).
 
-**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so nothing reaches `develop` without passing the checks. Pull requests into `release/*` and `main` need an approval from another Core Maintainer, or a recorded bypass when none is available.
+**For Core Maintainers:** agree on the change as a team, then choose **Merge when ready** on your own pull request. It enters the merge queue when the checks are green; no formal approval from a colleague is required on `develop`, but ask for a written review when a change is large or risky. `gh pr merge` cannot add a pull request to the queue while the repository setting **Allow auto-merge** is off, also when the checks are green, so use the button. There is no bypass, so every ordinary pull request into `develop` passes the required checks and the merge queue. Pull requests into `release/*` and `main` need an approval from another Core Maintainer, or a recorded bypass when none is available.
 
 ---
 

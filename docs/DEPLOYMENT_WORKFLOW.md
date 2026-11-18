@@ -65,7 +65,7 @@ Backflow (patches):
 - All version tags (`v1.X.Y`) live here
 - Test via RC tags (`:1.8.0-rc.1`) before creating the final release
 - **Never merged back** — fixes flow to `develop` via cherry-pick only
-- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs an approval from a Core Maintainer other than its author. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
+- Protected: only members of `@eneo-ai/core-maintainers` can create, update or delete release branches and create `v*` tags, so the release steps below require Core Maintainer access. Changes arrive through pull requests, and each needs a second approval, normally from another Core Maintainer, or a recorded bypass when none is available. See [Governance and Roles](https://docs.eneo.ai/dev/contributing/governance)
 
 ### Supporting Branches
 
@@ -231,7 +231,7 @@ without its `v`):
 - `ghcr.io/eneo-ai/eneo-frontend:1.8.0`
 - `ghcr.io/eneo-ai/eneo-tool-runtime:1.8.0`
 
-Deploy to production from the release bundle (`release.json` and `release.env` on the GitHub release), which records the exact image digests. An image tag can exist before its release has passed every check; the bundle is attached only after they pass.
+Deploy to production from the release bundle (`release.json` and `release.env` on the GitHub release), which records the exact image digests. An image tag can exist before its release has passed its checks. The bundle is attached after image verification and the combined smoke test; SBOM generation and attestation follow, and a managed final release stays a draft until they succeed.
 
 ### Semantic Versioning
 
@@ -275,7 +275,7 @@ CI rejects a `next` block on a release branch and an undated release block on `d
 5. Check **Set as pre-release**
 6. Click **Publish release**
 
-**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs an approval from a Core Maintainer other than its author; direct pushes are rejected. If no second maintainer is available, a Core Maintainer can bypass the approval for that pull request and states the reason in it.
+**3. Fix issues** through `hotfix/*` pull requests into `release/v1.8`. Each one needs a second approval, normally from another Core Maintainer; direct pushes are rejected. If no second maintainer is available, a Core Maintainer can bypass the approval for that pull request and states the reason in it.
 
 **4. Create subsequent RCs** the same way via GitHub Releases (tag `v1.8.0-rc.2`, target `release/v1.8`, mark as pre-release)
 
@@ -363,7 +363,7 @@ gh pr create --base develop --head fix/carry-xyz
 
 ## Backporting
 
-When a bug is fixed on `develop` but also affects an older release, carry the fix to `release/v1.7` with the procedure above (base `release/v1.7`). After it lands on the release branch, tag via GitHub UI:
+When a bug is fixed on `develop` but also affects an older release, carry the fix to `release/v1.7` with the procedure above (base `release/v1.7`). After it lands on the release branch, publish the patch release. Where managed publication is enabled, use [Prepare and Publish Release](#creating-a-production-release). Otherwise tag via GitHub UI:
 
 1. Go to **Releases** → **Draft a new release**
 2. Tag: `v1.7.5`, Target: `release/v1.7`
@@ -372,7 +372,9 @@ When a bug is fixed on `develop` but also affects an older release, carry the fi
 
 ## Security Patches Across Multiple Releases
 
-When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability): prepare the fixes privately, then open the public pull requests only when every line is ready, because the first one discloses the fix, and publish the patch releases and the advisory as soon as practical after that.
+When a security fix must go to multiple supported releases, follow [Fixing a Vulnerability](SECURITY.md#fixing-a-vulnerability). A vulnerability that is already public is fixed on `develop` first and backported to the affected supported lines. For a private report, prepare the fix for every affected line before disclosure, then open the public pull requests, because the first one discloses the fix, and publish the patch releases and the advisory as soon as practical after that.
+
+For a private report:
 
 1. **Fix on the oldest affected release branch first**
 2. **Carry it forward** to each newer release branch, then to `develop`, with [the procedure above](#carrying-a-fix-to-another-branch)
@@ -394,7 +396,7 @@ For each: **Releases** → **Draft a new release** → set tag, target, and rele
 
 **Every fix that lands on a release branch must also be cherry-picked to `develop`.** If you skip this, the fix will be missing in the next release.
 
-After merging a hotfix PR to a release branch, **immediately** carry the fix to `develop` with [the procedure above](#carrying-a-fix-to-another-branch), using the commit on the release branch as the source.
+After merging a hotfix PR to a release branch, **immediately** carry the fix to `develop` with [the procedure above](#carrying-a-fix-to-another-branch), using the commit on the release branch as the source. A security patch for several releases is the exception: it reaches `develop` last in [that sequence](#security-patches-across-multiple-releases).
 
 This applies to all fixes on release branches — hotfixes, RC stabilization fixes, backported patches, and security fixes.
 

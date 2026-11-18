@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="900" height="470" viewBox="0 0 900 470" role="img" aria-labelledby="title desc" font-family="system-ui, -apple-system, Segoe UI, Roboto, sans-serif">
   <title id="title">From change to deployment</title>
-  <desc id="desc">Three lanes. People: a change starts as an issue and a pull request. GitHub runs CI, dependency audits and secret scanning. A Core Maintainer adds the pull request to the merge queue into develop. A pull request into a release branch is approved by a second Core Maintainer, and Core Maintainers authorise the v tag. GitHub then builds and checks the images and completes the release bundle; a separate job attaches SBOMs and their attestations after the bundle is complete. Operators verify the bundle and deploy it. Rulesets ensure that only people with write access can queue into develop, and that only Core Maintainers can update release branches and authorise tags. Deployments consume the completed release bundle, not a single image tag.</desc>
+  <desc id="desc">Three lanes. People: a change starts as an issue and a pull request. GitHub runs CI, dependency audits and secret scanning. A Core Maintainer adds the pull request to the merge queue into develop. A pull request into a release branch gets a second approval, and Core Maintainers authorise the v tag. GitHub then builds and checks the images and completes the release bundle; a separate job attaches SBOMs and their attestations after the bundle is complete. Operators verify the bundle and deploy it. Rulesets ensure that only people with write access can queue into develop, and that only Core Maintainers can update release branches and authorise tags. Deployments consume the completed release bundle, not a single image tag.</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
       <path d="M0 0 L10 5 L0 10 z" fill="#455a64"/>
@@ -56,8 +56,8 @@
   <!-- 4 Release review -->
   <rect x="524" y="86" width="106" height="84" rx="8" fill="#ffffff" stroke="#0e7c86" stroke-width="1.5"/>
   <text x="534" y="108" fill="#1a1a1a" font-size="12" font-weight="700">4 Approve</text>
-  <text x="534" y="128" fill="#455a64" font-size="11">A second Core</text>
-  <text x="534" y="144" fill="#455a64" font-size="11">Maintainer, on</text>
+  <text x="534" y="128" fill="#455a64" font-size="11">A second</text>
+  <text x="534" y="144" fill="#455a64" font-size="11">approval, on</text>
   <text x="534" y="160" fill="#455a64" font-size="11">release/vX.Y</text>
 
   <line x1="631" y1="128" x2="640" y2="128" stroke="#455a64" stroke-width="1.5" marker-end="url(#arrow)"/>
