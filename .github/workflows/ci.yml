@@ -164,7 +164,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
@@ -237,7 +237,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
@@ -338,13 +338,6 @@ jobs:
           ENEO_FILE_ICON_REHEARSAL_PROFILE: smoke
           TESTCONTAINERS_RYUK_DISABLED: "true"
           DOCKER_HOST: unix:///var/run/docker.sock
-
-  # Preserve the existing required CI gate during rollout. Remove this caller
-  # and its aggregate references once the standalone User-facing section check
-  # is required in GitHub (see the What's new PLAYBOOK).
-  user-facing:
-    name: User-facing section (CI transition)
-    uses: ./.github/workflows/user-facing.yml
 
   frontend:
     name: Frontend checks
@@ -742,7 +735,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
@@ -879,7 +872,6 @@ jobs:
     needs:
       - changes
       - security
-      - user-facing
       - backend-quality
       - backend-tests
       - frontend
