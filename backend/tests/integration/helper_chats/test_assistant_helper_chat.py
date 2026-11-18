@@ -1186,7 +1186,7 @@ def _expected(before: dict, offered: Offered, insight_enabled: bool) -> dict:
     return {
         "groups": sorted(offered.groups),
         "websites": [offered.website_id],
-        "mcp_servers": [offered.server_id],
+        "mcp_servers": sorted({*before["mcp_servers"], offered.server_id}),
         "mcp_tools": [(offered.tools["create_case"], False)],
         "enabled_capabilities": sorted({*before["enabled_capabilities"], "web_search"}),
         "rerank_model_id": offered.ranker_id,
@@ -1202,9 +1202,46 @@ def _holds_no_secret(result, offered: Offered) -> None:
         assert secret not in told
 
 
+async def _knowledge_and_a_server(
+    client, setup: Setup, db_container, admin_user, offered: Offered
+) -> str:
+    """Give the assistant the first collection and another MCP server the
+    space offers, so it has both knowledge and an MCP server, which the
+    editor keeps changeable on both sides; returns the server's id."""
+    async with db_container() as container:
+        server_id = await container.session().scalar(
+            sa.insert(MCPServers)
+            .values(
+                tenant_id=admin_user.tenant_id,
+                name="Diariet",
+                http_url="https://archive.example.org/mcp",
+                http_auth_type="none",
+                is_enabled=True,
+            )
+            .returning(MCPServers.id)
+        )
+        await container.session().execute(
+            sa.insert(SpacesMCPServers).values(
+                space_id=UUID(setup.space_id), mcp_server_id=server_id
+            )
+        )
+    await _saved(
+        client,
+        setup,
+        {
+            "groups": [{"id": offered.groups[0]}],
+            "mcp_servers": [{"id": str(server_id)}],
+        },
+    )
+    return str(server_id)
+
+
 async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_save(
     client, setup: Setup, db_container, admin_user, offered: Offered, queued
 ):
+    # Knowledge and MCP servers are added in one change only to an assistant
+    # that has both already.
+    await _knowledge_and_a_server(client, setup, db_container, admin_user, offered)
     before = _added_settings(await _read(client, setup))
     insight = not before["insight_enabled"]
     chat = await _open(client, setup)
@@ -1253,6 +1290,11 @@ async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_
 async def test_the_added_settings_are_changed_audited_and_undone_in_edit_mode(
     client, setup: Setup, db_container, admin_user, offered: Offered, queued
 ):
+    # Knowledge and MCP servers are added in one change only to an assistant
+    # that has both already.
+    archive = await _knowledge_and_a_server(
+        client, setup, db_container, admin_user, offered
+    )
     before = _added_settings(await _read(client, setup))
     insight = not before["insight_enabled"]
     chat = await _open(client, setup)
@@ -1288,7 +1330,8 @@ async def test_the_added_settings_are_changed_audited_and_undone_in_edit_mode(
     assert _updated(queued, setup.assistant_id) == []
 
     undo = result.structuredContent["undo"]
-    assert undo["groups"] == [] and undo["mcp_servers"] == []
+    assert undo["groups"] == [{"id": offered.groups[0]}]
+    assert undo["mcp_servers"] == [{"id": archive}]
     undone = await _saved(client, setup, undo)
     assert _added_settings(undone) == before
 
@@ -1352,6 +1395,73 @@ async def test_what_the_space_does_not_offer_is_refused_by_both_tools(
             assert refusal in result.content[0].text
             assert _UUID.search(result.content[0].text) is None
     assert await _stored(db_container, setup.assistant_id) == stored
+
+
+async def test_the_editors_rules_are_named_and_refused_by_both_tools(
+    client, setup: Setup, db_container, admin_user, offered: Offered, queued
+):
+    await _saved(client, setup, {"groups": [{"id": offered.groups[0]}]})
+    chat = await _open(client, setup)
+    await _edit_mode(client, setup, chat)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    before = await _read(client, setup)
+    stored = await _stored(db_container, setup.assistant_id)
+    queued.clear()
+    tools = (assistant_settings.propose_changes, assistant_settings.update_assistant)
+
+    read = await assistant_settings.read_assistant(ctx)
+    assert not read.isError, read.content[0].text
+    assert (
+        "- MCP servers: none can be added while the assistant has knowledge"
+        in read.content[0].text
+    )
+    add_server = {"mcp_servers": {"add": [{"id": offered.server_id}]}}
+    for tool in tools:
+        result = await tool(ctx, changes=add_server)
+        assert result.isError
+        assert result.content[0].text.startswith(
+            "Knowledge and MCP servers are not combined on one assistant, and this "
+            "one has knowledge, so no MCP server can be added to it."
+        )
+    # Knowledge that goes in the same change makes way for the server.
+    swapped = await assistant_settings.propose_changes(
+        ctx, changes={**add_server, "groups": []}
+    )
+    assert not swapped.isError, swapped.content[0].text
+    assert swapped.structuredContent["proposal"]["update"] == {
+        "groups": [],
+        "mcp_servers": [{"id": offered.server_id}],
+    }
+
+    # The model the assistant answers with stops calling tools.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == UUID(before["completion_model"]["id"]))
+            .values(supports_tool_calling=False)
+        )
+    read = await assistant_settings.read_assistant(ctx, section="tools")
+    assert (
+        "cannot use tools, so no MCP server or function can be turned on"
+        in read.content[0].text
+    )
+    for tool in tools:
+        result = await tool(
+            ctx, changes={"enabled_capabilities": {"add": ["web_search"]}}
+        )
+        assert result.isError
+        assert "cannot use tools, so web search cannot be switched on" in (
+            result.content[0].text
+        )
+
+    assert await _stored(db_container, setup.assistant_id) == stored
+    assert _added_settings(await _read(client, setup)) == _added_settings(before)
+    assert queued == []
 
 
 async def _person_ctx(db_container, chat: dict) -> SimpleNamespace:

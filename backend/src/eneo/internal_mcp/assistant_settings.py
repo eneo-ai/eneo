@@ -16,7 +16,9 @@ publishes or unpublishes it through the same publishing a person's own does
 (``apply_assistant_publish``), each audited with the person as actor. A
 setting the person's role does not let them change in the editor is refused
 by the tools that propose and change it, and named as such when the
-assistant is read.
+assistant is read. So is what the editor's own rules hold back while the
+assistant is set up as it is: knowledge beside MCP servers, and tools and
+functions for a chat model that cannot use tools.
 """
 
 from __future__ import annotations
@@ -46,6 +48,9 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.governance_policy.domain.policy_resolver import (
+    select_effective_completion_model,
+)
 from eneo.internal_mcp.constants import ASSISTANT_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -523,6 +528,91 @@ def policy_locks(config: Any | None) -> list[str]:
     return locks
 
 
+def answering_model(model: Any | None, config: Any | None) -> Any | None:
+    """The chat model an assistant whose own is ``model`` answers with: that
+    one, or the one a models policy steers it to, resolved as a question to
+    the assistant resolves it (``select_effective_completion_model``). None
+    when there is none."""
+    return select_effective_completion_model(
+        current_model=model, effective_config=config
+    )
+
+
+def _cannot_use_tools(model: Any | None) -> bool:
+    """Whether ``model`` is a chat model that cannot use tools: only one
+    marked as calling tools gets MCP servers and functions. No model holds
+    nothing back."""
+    return model is not None and not model.supports_tool_calling
+
+
+def _has_knowledge(assistant: Any) -> bool:
+    """Whether the assistant has knowledge as the editor counts it: a
+    collection, a website or an integration source. Attachments, the ranking
+    model and the knowledge mode do not count."""
+    return bool(
+        assistant.collections
+        or assistant.websites
+        or assistant.integration_knowledge_list
+    )
+
+
+def held_by_the_editor(assistant: Any, config: Any | None) -> list[tuple[str, str]]:
+    """What the editor's own rules hold back while the assistant is set up as
+    it is now, each with the section it belongs to: knowledge while the
+    assistant has MCP servers and no knowledge, MCP servers while it has
+    knowledge and no MCP server (one that has both stays changeable on both
+    sides), and MCP servers, their tools and functions while the chat model
+    it answers with cannot use tools. Where a policy sets the MCP servers
+    and functions, the policy's lock says so instead."""
+    held: list[tuple[str, str]] = []
+    knowledge = _has_knowledge(assistant)
+    servers = bool(assistant.mcp_servers)
+    governed = config is not None and config.mcp_enforced
+    if servers and not knowledge:
+        held.append(
+            (
+                "knowledge",
+                "knowledge: none can be added while the assistant has MCP "
+                "servers (the two are not combined); removing the MCP servers "
+                "comes first",
+            )
+        )
+    if knowledge and not servers and not governed:
+        held.append(
+            (
+                "tools",
+                "MCP servers: none can be added while the assistant has "
+                "knowledge (the two are not combined); removing its knowledge "
+                "comes first",
+            )
+        )
+    model = None if governed else answering_model(assistant.completion_model, config)
+    if _cannot_use_tools(model):
+        held.append(
+            (
+                "tools",
+                "MCP servers, their tools and functions: the chat model "
+                f"{_model_name(model)} cannot use tools, so no MCP server or "
+                "function can be turned on and no single tool switched on or "
+                "off; choosing a model that can use tools comes first",
+            )
+        )
+    return held
+
+
+def _held_lines(reading: AssistantReading, section: str | None = None) -> list[str]:
+    """The lines saying what the editor's rules hold back now: all of them
+    under a heading, or those of ``section`` as items of it."""
+    held = held_by_the_editor(reading.assistant, reading.effective_config)
+    if section is not None:
+        return [f"- {line}" for where, line in held if where == section]
+    if not held:
+        return []
+    return ["Held back by the editor's rules as the assistant is set up now:"] + [
+        f"- {line}" for _, line in held
+    ]
+
+
 def _overview(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
     model = assistant.completion_model
@@ -547,7 +637,13 @@ def _overview(reading: AssistantReading) -> list[str]:
             + (", ".join(assistant.enabled_capabilities) or "none")
         ),
     ]
-    return lines + _rights(reading) + _withheld_lines(reading) + _locks_lines(reading)
+    return (
+        lines
+        + _rights(reading)
+        + _withheld_lines(reading)
+        + _locks_lines(reading)
+        + _held_lines(reading)
+    )
 
 
 def _rights(reading: AssistantReading) -> list[str]:
@@ -678,7 +774,7 @@ def _knowledge(reading: AssistantReading) -> list[str]:
         )
         for item in attachments
     ]
-    return lines
+    return lines + _held_lines(reading, "knowledge")
 
 
 def _tools(reading: AssistantReading) -> list[str]:
@@ -715,11 +811,15 @@ def _tools(reading: AssistantReading) -> list[str]:
         name = reading.document_template_name or "a template"
         template = f"{name} [id {choice.template_id}]"
     lines.append(f"Document template: {template}")
-    return lines + [
-        f"- {lock}"
-        for lock in policy_locks(reading.effective_config)
-        if lock.startswith("MCP")
-    ]
+    return (
+        lines
+        + [
+            f"- {lock}"
+            for lock in policy_locks(reading.effective_config)
+            if lock.startswith("MCP")
+        ]
+        + _held_lines(reading, "tools")
+    )
 
 
 def _access(reading: AssistantReading) -> list[str]:
@@ -820,7 +920,10 @@ async def read_assistant(
     overview (default) is short: name, description, published, chat model,
     the length of the instructions, counts of knowledge and tools, what the
     person may do, what their role does not let them change and what an
-    organisation policy locks; suggest neither of the last two. Section
+    organisation policy locks (suggest neither), and what the editor's rules
+    hold back as the assistant is set up now (knowledge and MCP servers are
+    not combined, and tools need a chat model that can use them; explain
+    those instead of proposing around them). Section
     "instructions" gives the instructions whole; "model" the chat model with
     what it can do and its settings; "knowledge" the knowledge mode, sources,
     result ranking, file handling and attachments; "tools" the MCP servers
@@ -1206,7 +1309,12 @@ _CHANGES_TAKE = (
     '{"add": [{"id": ...}], "remove": [{"id": ...}]}; the rest of the list '
     'is kept. Use this form. A list in its place ([{"id": ...}, ...]) '
     "replaces the whole list, and whatever it leaves out is removed. All the "
-    "knowledge of one assistant must use the same embedding model. "
+    "knowledge of one assistant must use the same embedding model. Knowledge "
+    "and MCP servers are not combined: knowledge is added only to an "
+    "assistant without MCP servers and MCP servers only to one without "
+    "knowledge, unless it has both already. MCP servers and functions are "
+    "turned on, and single MCP tools switched, only while the chat model the "
+    "assistant answers with can use tools. "
     'enabled_capabilities (functions): {"add": ["web_search"], "remove": '
     '["charts"]} in the same way, or the whole list of functions. mcp_tools '
     "(single tools of the assistant's MCP servers): "
@@ -1621,6 +1729,42 @@ def _role_refusal(
     )
 
 
+_NOT_COMBINED = "Knowledge and MCP servers are not combined on one assistant"
+
+
+def _not_combined_refusal(
+    had_knowledge: bool, had_servers: bool
+) -> BadRequestException:
+    """The refusal of a change that would combine knowledge and MCP servers:
+    what the assistant has that stands in the way, and what can go instead."""
+    if had_servers:
+        text = (
+            f"{_NOT_COMBINED}, and this one has MCP servers, so no knowledge can "
+            "be added to it. If the person wants knowledge in their place, "
+            "remove the MCP servers in the same change."
+        )
+    elif had_knowledge:
+        text = (
+            f"{_NOT_COMBINED}, and this one has knowledge, so no MCP server can "
+            "be added to it. If the person wants MCP servers in its place, "
+            "remove its knowledge in the same change."
+        )
+    else:
+        text = f"{_NOT_COMBINED}, so both cannot be added: add one or the other."
+    return BadRequestException(f"{text} Nothing was changed.")
+
+
+def _tools_refusal(model: Any, what: str) -> BadRequestException:
+    """The refusal of what needs a chat model that can use tools, while the
+    one the assistant would answer with cannot."""
+    return BadRequestException(
+        f"The chat model the assistant would answer with, {_model_name(model)}, "
+        f"cannot use tools, so {what}. Choose a chat model that can use tools "
+        "first, or in the same change; read_options says which can. Nothing was "
+        "changed."
+    )
+
+
 def _merged_kwargs(stored: ModelKwargs, sent: ModelKwargs | None) -> ModelKwargs:
     """The model settings after a change: each setting sent replaces the
     stored one (null is the model's default), the rest are kept; ``None``
@@ -1771,6 +1915,49 @@ _SOURCES: dict[str, tuple[str, str]] = {
 }
 
 
+def _require_knowledge_or_mcp(
+    assistant: Any, request: ChangeRequest, config: Any | None
+) -> None:
+    """Refuse a change that leaves the assistant with both knowledge and MCP
+    servers when it does not have both now, as the editor's two pickers do:
+    knowledge is added only while the assistant has no MCP servers or has
+    knowledge already, and MCP servers only while it has no knowledge or has
+    an MCP server already. The change is judged on the assistant now and
+    after it, so one that removes one side and adds the other is planned, as
+    the editor allows it in two steps, and an assistant that has both now
+    stays changeable on both sides. A change of the MCP servers a policy sets
+    gets the policy's refusal instead."""
+    had_knowledge = _has_knowledge(assistant)
+    had_servers = bool(assistant.mcp_servers)
+    if had_knowledge and had_servers:
+        return
+
+    def after(current: Sequence[Any], key: str) -> set[Any]:
+        ids = _edited_ids(
+            current, getattr(request.update, key), getattr(request.edits, key)
+        )
+        return {item.id for item in current} if ids is None else set(ids)
+
+    knowledge = any(
+        after(items, key)
+        for key, items in (
+            ("groups", assistant.collections),
+            ("websites", assistant.websites),
+            ("integration_knowledge_list", assistant.integration_knowledge_list),
+        )
+    )
+    servers = after(assistant.mcp_servers, "mcp_servers")
+    if not (knowledge and servers):
+        return
+    if (
+        config is not None
+        and config.mcp_enforced
+        and servers != {server.id for server in assistant.mcp_servers}
+    ):
+        return
+    raise _not_combined_refusal(had_knowledge, had_servers)
+
+
 def _plan_knowledge(
     assistant: Any,
     request: ChangeRequest,
@@ -1834,6 +2021,7 @@ def _plan_mcp(
     request: ChangeRequest,
     space: Any,
     config: Any | None,
+    answering: Any | None,
     after: dict[str, Any],
     update: dict[str, Any],
 ) -> None:
@@ -1841,7 +2029,10 @@ def _plan_mcp(
     the update applies: no change under a policy that sets them, only
     servers the space offers, switched on by an administrator and not a
     function's provider, and tool settings only for tools of the servers the
-    assistant has after the change."""
+    assistant has after the change. By the editor's rule, while the chat
+    model the assistant would answer with (``answering``) cannot use tools,
+    no server is added and no tool's own setting changes, though a server
+    can go and take its tools' settings along."""
     governed = config is not None and config.mcp_enforced
     current_servers = list(assistant.mcp_servers)
     servers = current_servers
@@ -1881,6 +2072,10 @@ def _plan_mcp(
                     + (": remove it as well" if server_id in known else "")
                     + ". Nothing was changed."
                 )
+        if _cannot_use_tools(answering) and any(
+            server_id not in known for server_id in ids
+        ):
+            raise _tools_refusal(answering, "no MCP server can be added")
         servers = [offered[server_id] for server_id in ids]
         update["mcp_servers"] = [{"id": str(server.id)} for server in servers]
         after["mcp_servers"] = _by_name(_server_value(server) for server in servers)
@@ -1916,6 +2111,12 @@ def _plan_mcp(
             "read_options lists each server's tools with their ids. Nothing was "
             "changed."
         )
+    if overrides != kept and _cannot_use_tools(answering):
+        raise _tools_refusal(
+            answering,
+            "no single MCP tool can be switched on or off (an MCP server can "
+            "still be removed)",
+        )
     if tool_edit is not None or tool_list is not None:
         update["mcp_tools"] = [
             {"tool_id": str(tool_id), "is_enabled": on}
@@ -1932,12 +2133,15 @@ def _plan_functions(
     space: Any,
     config: Any | None,
     facts: ChangeFacts,
+    answering: Any | None,
     after: dict[str, Any],
     update: dict[str, Any],
 ) -> None:
     """The functions the change sets: none under a policy that sets them,
-    and only functions the space offers and a provider is ready for are
-    switched on; switching one off is always allowed."""
+    and only functions the space offers, while the chat model the assistant
+    would answer with (``answering``) can use tools, and a provider is ready
+    for are switched on, checked in the order the editor gives its reasons;
+    switching one off is always allowed."""
     current = list(assistant.enabled_capabilities)
     edit = request.edits.enabled_capabilities
     purposes = _edited_list(
@@ -1960,6 +2164,8 @@ def _plan_functions(
             f"The space does not offer {named(not_offered)}; read_options lists "
             "the functions it offers. Nothing was changed."
         )
+    if added and _cannot_use_tools(answering):
+        raise _tools_refusal(answering, f"{named(added)} cannot be switched on")
     not_ready = [p for p in added if p not in facts.ready_functions]
     if not_ready:
         raise BadRequestException(
@@ -2056,7 +2262,10 @@ def plan_change(
     """The change ``changes`` makes to ``assistant``, checked as far as it
     can be without saving it: only settings the chat may change, the shape
     the assistant's update request takes, what an organisation policy
-    decides, what the person's role allows (``facts``), whether the space
+    decides, what the person's role allows (``facts``), the editor's own
+    rules (knowledge and MCP servers are not combined, and MCP servers and
+    functions are turned on, and tool settings changed, only while the chat
+    model the assistant would answer with can use tools), whether the space
     offers a chosen model, knowledge source, MCP server, tool, function,
     ranking model or template, whether the model offers the model settings
     and whether the knowledge shares one embedding model. A setting given
@@ -2155,9 +2364,16 @@ def plan_change(
         )
 
     if more:
+        # The editor's rules judge what is turned on by the model the
+        # assistant answers with after the change: a model chosen in the same
+        # change counts, and so does the one a models policy steers it to.
+        answering = answering_model(model, config)
+        _require_knowledge_or_mcp(assistant, parsed, config)
         _plan_knowledge(assistant, parsed, space, after, update)
-        _plan_mcp(assistant, parsed, space, config, after, update)
-        _plan_functions(assistant, parsed, space, config, facts, after, update)
+        _plan_mcp(assistant, parsed, space, config, answering, after, update)
+        _plan_functions(
+            assistant, parsed, space, config, facts, answering, after, update
+        )
         _plan_choices(assistant, parsed, facts, after, update)
 
     return PlannedChange(
@@ -2433,9 +2649,11 @@ def _unchanged(target_id: UUID, *, proposal: bool) -> CallToolResult:
         "anything: the person applies it with the button on the proposal, as "
         "their own save. " + _CHANGES_TAKE + " The proposal is checked as far "
         "as it can be without saving (what a policy decides, what the person's "
-        "role allows, whether the space offers a model, knowledge source, MCP "
-        "server or tool, function, ranking model or template, and the model its "
-        "settings); applying it can still be refused, for example when the "
+        "role allows, the editor's rules on knowledge beside MCP servers and on "
+        "models that cannot use tools, whether the space offers a model, "
+        "knowledge source, MCP server or tool, function, ranking model or "
+        "template, and the model its settings); applying it can still be "
+        "refused, for example when the "
         "instructions and files no longer fit the model. A refusal says why and "
         "proposes nothing."
     ),

@@ -35,7 +35,12 @@ Knowledge and tools: say in plain words what each source or tool gives the
 assistant. More is not better: a source or tool off the assistant's topic
 makes its answers worse and its turns slower. All the knowledge of one
 assistant uses the same embedding model, so sources on different ones cannot
-be combined.
+be combined. Knowledge and MCP servers are not combined on one assistant, and
+MCP servers, their tools and functions are turned on only while the chat model
+can use tools; read_assistant says when one of these rules stands in the way.
+Then do not propose around it: explain the rule and what the person can do
+instead, such as removing the MCP servers or choosing a model that can use
+tools, and propose that only when they want it.
 
 You can change the name, the description, the instructions, the chat model
 and its settings, the knowledge and the ranking of its results, the knowledge
