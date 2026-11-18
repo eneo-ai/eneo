@@ -30,6 +30,7 @@ from eneo.assistants.api.assistant_router import (
     leave_feedback,
     update_assistant,
 )
+from eneo.assistants.application import assistant_update_operation
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -673,7 +674,7 @@ async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
     )
     response = SimpleNamespace(id=assistant_id)
     monkeypatch.setattr(
-        assistant_router,
+        assistant_update_operation,
         "_build_assistant_update_changes",
         MagicMock(return_value=({}, [])),
     )

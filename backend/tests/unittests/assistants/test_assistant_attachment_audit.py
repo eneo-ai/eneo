@@ -6,7 +6,9 @@ from types import SimpleNamespace
 from typing import Any, cast
 from uuid import uuid4
 
-from eneo.assistants.api.assistant_router import _build_assistant_update_changes
+from eneo.assistants.application.assistant_update_operation import (
+    _build_assistant_update_changes,
+)
 
 NAME = "Utredning Anna Svensson.pdf"
 
