@@ -31,6 +31,7 @@ class HelperChatTargetType(StrEnum):
     """The kinds of target, as ``helper_chats.target_type`` stores them."""
 
     FLOW = "flow"
+    ASSISTANT = "assistant"
 
 
 RecordT = TypeVar("RecordT")
@@ -45,13 +46,14 @@ class HelperChatAuditEvent:
 @dataclass(frozen=True)
 class HelperChatAudit:
     """How the audit log names what happens to a target's chats. Every entry
-    has the person as actor and the target as its entity."""
+    has the person as actor and the target as its entity. An event a target
+    has no action for (None) is not recorded."""
 
     entity_type: EntityType
-    chat_created: HelperChatAuditEvent
-    mode_changed: HelperChatAuditEvent
-    conversation_started: HelperChatAuditEvent
-    model_changed: HelperChatAuditEvent
+    chat_created: HelperChatAuditEvent | None
+    mode_changed: HelperChatAuditEvent | None
+    conversation_started: HelperChatAuditEvent | None
+    model_changed: HelperChatAuditEvent | None
 
 
 class HelperChatRefusals(Protocol):
@@ -174,8 +176,17 @@ def _flow_target() -> HelperChatTarget[Any]:
     return FLOW_TARGET
 
 
+def _assistant_target() -> HelperChatTarget[Any]:
+    # Lives with the assistants, which import this package, as the flow's
+    # lives with the flows.
+    from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
+
+    return ASSISTANT_TARGET
+
+
 _TARGETS: Mapping[HelperChatTargetType, Callable[[], HelperChatTarget[Any]]] = {
     HelperChatTargetType.FLOW: _flow_target,
+    HelperChatTargetType.ASSISTANT: _assistant_target,
 }
 
 

@@ -8,3 +8,6 @@ INSIGHTS_SERVER_NAME = "insights"
 IMAGE_GENERATION_SERVER_NAME = "image_generation"
 
 FLOWS_SERVER_NAME = "flows"
+# The settings of the assistant a helper chat is about; attached only by that
+# chat's turns.
+ASSISTANT_SERVER_NAME = "assistant"

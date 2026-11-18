@@ -130,6 +130,16 @@ class ResourceMoverService:
         if enable_model and model is not None:
             await self.space_repo.enable_completion_model(space_id, model.id)
         await self.assistant_repo.move(assistant_id, locked_source_space_id, space_id)
+        # A helper chat on the assistant lives in the space it was opened in,
+        # so the people's chats on it go with the move: their hidden
+        # assistants, and with them the conversations and the bindings.
+        from eneo.helper_chats.targets import HelperChatTargetType
+
+        await self.assistant_repo.delete_helper_chat_assistants(
+            target_type=HelperChatTargetType.ASSISTANT,
+            target_id=assistant_id,
+            tenant_id=self.user.tenant_id,
+        )
 
         if widgets:
             from eneo.widgets.application.widget_target_lifecycle import (

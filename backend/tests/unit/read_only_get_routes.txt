@@ -95,6 +95,7 @@ GET /api/v1/apps/{id}/prompts/
 GET /api/v1/apps/{id}/runs/
 GET /api/v1/assistants/
 GET /api/v1/assistants/{id}/
+GET /api/v1/assistants/{id}/helper-chat/availability
 GET /api/v1/assistants/{id}/mcp-servers/
 GET /api/v1/assistants/{id}/prompts/
 GET /api/v1/assistants/{id}/sessions/
