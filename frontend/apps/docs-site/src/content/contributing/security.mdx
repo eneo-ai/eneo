@@ -210,8 +210,11 @@ do, is not affected.
 | Tool runtime PDF helper (PyPI) | `exclude-newer` in `tool-runtime/uv.toml`         |
 
 The backend needs uv 0.13.7 or newer, which `required-version` in
-`backend/pyproject.toml` enforces. Keep the four settings on the same number of
-days; `scripts/tests/test_dependency_cooldown.py` fails when they differ.
+`backend/pyproject.toml` enforces. An older uv stops with a version error in
+`backend/`, also in a devcontainer created earlier: run `uv self update`.
+
+Keep the four settings on the same number of days;
+`scripts/tests/test_dependency_cooldown.py` fails when they differ.
 
 When a security fix cannot wait, add an exception for the required fix next to
 the setting:
