@@ -1,16 +1,13 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
-import {
-  FlowChatSettings,
-  NewConversationButton,
-  OptimizeFlowButton,
-  flowChatModelId
-} from "./flow-chat-controls";
-import { flowKeys, type FlowAuthoringChat } from "./flows-api";
+// The flow is the helper's one target so far: its endpoints stand in for any target's.
+import { flowHelperApi, flowKeys, type FlowAuthoringChat } from "@/features/flows/flows-api";
+import { HelperChatSettings, NewConversationButton, helperChatModelId } from "./helper-controls";
 
 type Reply = { data?: unknown; error?: unknown; response: Response };
 
@@ -97,10 +94,16 @@ function renderControls(chat: FlowAuthoringChat = CHAT) {
   const onRefused = vi.fn();
   const queryClient = testQueryClient();
   queryClient.setQueryData(flowKeys.authoringChat(chat.flow_id), chat);
+  const chatApi = flowHelperApi(chat.flow_id);
   const view = renderInApp(
     <div>
-      <FlowChatSettings chat={chat} onRefused={onRefused} />
-      <NewConversationButton chat={chat} onRefused={onRefused} />
+      <HelperChatSettings chat={chat} api={chatApi} onRefused={onRefused} />
+      <NewConversationButton
+        chat={chat}
+        api={chatApi}
+        description={messages.flows_chat_new_conversation_description}
+        onRefused={onRefused}
+      />
     </div>,
     { queryClient }
   );
@@ -113,18 +116,18 @@ async function openSettings() {
   return screen.findByRole("dialog", { name: "Chattinställningar" });
 }
 
-describe("flowChatModelId", () => {
+describe("helperChatModelId", () => {
   const models = [model("a", "A"), model("b", "B")] as never[];
 
   it("is the person's own model while the space offers it, else the default", () => {
     const chat = { completion_model_id: "b", default_completion_model_id: "a" };
-    expect(flowChatModelId(chat, models)).toBe("b");
-    expect(flowChatModelId({ ...chat, completion_model_id: "gone" }, models)).toBe("a");
-    expect(flowChatModelId({ ...chat, completion_model_id: null }, models)).toBe("a");
+    expect(helperChatModelId(chat, models)).toBe("b");
+    expect(helperChatModelId({ ...chat, completion_model_id: "gone" }, models)).toBe("a");
+    expect(helperChatModelId({ ...chat, completion_model_id: null }, models)).toBe("a");
   });
 });
 
-describe("FlowChatSettings", () => {
+describe("HelperChatSettings", () => {
   it("keeps the pickers behind one button in the narrow panel", async () => {
     const { container } = renderControls();
     const trigger = screen.getByRole("button", { name: "Chattinställningar" });
@@ -276,22 +279,5 @@ describe("NewConversationButton", () => {
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(api.POST).not.toHaveBeenCalled();
-  });
-});
-
-describe("OptimizeFlowButton", () => {
-  it("hands the prepared review request to the composer and sends nothing", async () => {
-    const onAskChat = vi.fn();
-    const { container } = renderInApp(<OptimizeFlowButton onAskChat={onAskChat} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "Optimera flödet" }));
-    expect(onAskChat).toHaveBeenCalledWith(
-      expect.stringMatching(/^Gå igenom flödets förslag och visa vad som kan göra det billigare/)
-    );
-    // The request is the person's own message: it names no tool.
-    expect(onAskChat).not.toHaveBeenCalledWith(expect.stringContaining("read_flow_suggestions"));
-    expect(api.POST).not.toHaveBeenCalled();
-    expect(api.PATCH).not.toHaveBeenCalled();
-    await expectNoAxeViolations(container);
   });
 });

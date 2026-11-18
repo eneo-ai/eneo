@@ -1,3 +1,4 @@
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import {
   DropdownMenu,
@@ -10,7 +11,6 @@ import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare, Pencil } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Banner } from "@astryxdesign/core/Banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -23,83 +23,40 @@ import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
-import type { ComposerInsert } from "@/features/chat/chat-references";
-import { flowChangeCardFor } from "./chat/flow-change-card";
-import { flowRunCardFor } from "./chat/flow-run-card";
-import { isFlowsToolCall } from "./chat/flows-tool-call";
-import { useFlowChatReferences } from "./chat/use-flow-chat-references";
-import { FlowChatSettings, NewConversationButton, OptimizeFlowButton } from "./flow-chat-controls";
-import {
-  authoringChatQueryOptions,
-  flowKeys,
-  setAuthoringMode,
-  type FlowAuthoringChat,
-  type FlowPublic
-} from "./flows-api";
-import { flowErrorText } from "./runs/run-messages";
-
-type ChatPanelProps = {
-  flow: FlowPublic;
-  /** A tool of the chat finished, or an answer ended: the flow may have changed. */
-  onFlowMayHaveChanged: () => void;
-  /** A refused mode change, shown with the page's other refusals. */
-  onRefused: (error: unknown, title: string) => void;
-  /**
-   * The chat's composer while it is on screen, or null: the page's
-   * FlowReferences (the one reference card of the page, for the chat and
-   * the definition alike) and "Fråga assistenten" put things into it.
-   */
-  onComposer: (composer: ComposerInsert | null) => void;
-  /**
-   * Puts a prepared request ("Optimera flödet") into the composer at the
-   * caret, never sending it nor changing the mode; absent until the
-   * composer is on the page.
-   */
-  onAskChat?: (text: string) => void;
-};
+import type { HelperAdapter, HelperChat } from "./helper-adapter";
+import { HelperChatSettings, NewConversationButton } from "./helper-controls";
 
 /**
- * The mode a message is sent in, picked beside the send button: Fråga
- * (the chat reads the flow) or Redigera (its tools may change the draft).
- * A change is fenced on the revision on screen, so one made while the flow
- * had changed is refused and the page reloads the flow. Redigera after a
- * pause may start a new conversation: the panel then switches to it and
- * says so. In Redigera the button is in the warning colour and says so in
- * words.
+ * The mode a message is sent in, picked beside the send button: Fråga (the
+ * chat reads the target) or Redigera (its tools may change it). Where the
+ * target has a revision, a change is fenced on the one on screen, so one
+ * made while the target had changed is refused. Redigera after a pause may
+ * start a new conversation: the panel then switches to it and says so. In
+ * Redigera the button is in the warning colour and says so in words.
  */
-function ModePicker({
-  chat,
-  published,
-  onRefused
-}: {
-  chat: FlowAuthoringChat;
-  /** A published flow has no draft to change: Redigera is off and cannot be picked. */
-  published: boolean;
-  onRefused: ChatPanelProps["onRefused"];
-}) {
+function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
-  const chatKey = flowKeys.authoringChat(chat.flow_id);
+  const { api, lock, revision, texts, onRefused } = adapter;
   // Whether the last saved switch started a new conversation.
   const restarted = useRef(false);
   const [savedEditing, setEditing] = useSettingSwitch(
-    `flow-authoring-mode:${chat.flow_id}`,
+    `helper-mode:${hashKey(api.key)}`,
     chat.editing,
     async (enabled) => {
       // A press queued behind a save that started a new conversation uses it.
-      const current = queryClient.getQueryData<FlowAuthoringChat>(chatKey) ?? chat;
-      const updated = await setAuthoringMode(current, {
+      const current = queryClient.getQueryData<HelperChat>(api.key) ?? chat;
+      const updated = await api.update(current.session_id, {
         editing: enabled,
         // The revision on screen when the switch was pressed, not one fetched later.
-        expectedRevision:
-          queryClient.getQueryData<FlowPublic>(flowKeys.flow(chat.flow_id))?.draft_revision ?? 0
+        ...(revision ? { expected_revision: revision() } : {})
       });
       restarted.current = updated.session_id !== current.session_id;
       // A read of the chat still on its way (after an answer, on the window's
       // focus) began before this change: it must not land after it.
-      await queryClient.cancelQueries({ queryKey: chatKey });
-      queryClient.setQueryData(chatKey, updated);
+      await queryClient.cancelQueries({ queryKey: api.key });
+      queryClient.setQueryData(api.key, updated);
       return updated;
     },
     {
@@ -108,16 +65,16 @@ function ModePicker({
           restarted.current
             ? t("flows_chat_new_conversation_after_pause")
             : enabled
-              ? t("flows_chat_editing_on")
-              : t("flows_chat_editing_off")
+              ? texts.editingOn
+              : texts.editingOff
         );
       },
       onError: (error) => onRefused(error, t("flows_notice_mode_not_changed"))
     }
   );
 
-  // A mode saved before the flow was published does not apply to it.
-  const editing = savedEditing && !published;
+  // A mode saved before the target was locked does not apply to it.
+  const editing = savedEditing && !lock;
   const label = editing ? t("flows_chat_mode_edit") : t("flows_chat_mode_ask");
   return (
     <DropdownMenu
@@ -152,16 +109,14 @@ function ModePicker({
         <DropdownMenuRadioItem
           value="ask"
           label={t("flows_chat_mode_ask")}
-          description={t("flows_chat_mode_ask_description")}
+          description={texts.modeDescription.ask}
           icon={<MessageSquare aria-hidden="true" />}
         />
         <DropdownMenuRadioItem
           value="edit"
           label={t("flows_chat_mode_edit")}
-          description={
-            published ? t("flows_chat_mode_edit_published") : t("flows_chat_mode_edit_description")
-          }
-          isDisabled={published}
+          description={lock ? lock.reason : texts.modeDescription.edit}
+          isDisabled={!!lock}
           icon={<Pencil aria-hidden="true" />}
         />
       </DropdownMenuRadioGroup>
@@ -170,29 +125,15 @@ function ModePicker({
 }
 
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
-function AuthoringConversation({
-  flow,
-  chat,
-  onFlowMayHaveChanged,
-  onRefused,
-  onComposer,
-  onAskChat
-}: Pick<ChatPanelProps, "onComposer" | "onAskChat"> & {
-  flow: FlowPublic;
-  chat: FlowAuthoringChat;
-  onFlowMayHaveChanged: () => void;
-  onRefused: ChatPanelProps["onRefused"];
-}) {
+function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const published = flow.published_version != null;
-  const { references, composer } = useFlowChatReferences(flow);
-  // The page's references (pills, the card, "Fråga assistenten") reach the composer through it.
-  useEffect(() => {
-    onComposer(composer);
-  }, [composer, onComposer]);
-  useEffect(() => () => onComposer(null), [onComposer]);
-  const { space, routeId } = useSpace();
+  const { api, lock, texts, references } = adapter;
+  // The composer leaves with the conversation: what the page puts into it
+  // has nowhere to go until a composer reports itself again.
+  const onComposer = references?.onComposer;
+  useEffect(() => () => onComposer?.(null), [onComposer]);
+  const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
   // The conversation shown first; a later one was started here ("Ny
@@ -242,26 +183,26 @@ function AuthoringConversation({
   }
 
   const model = assistant.data;
-  const editing = chat.editing && !published;
-  // The chat's assistant is hidden and named after the flow; the panel names
-  // it by what it does. A published flow has no draft to change (the panel's
-  // header says why); in Fråga the chat changes nothing either.
+  const editing = chat.editing && !lock;
+  // The chat's assistant is hidden and named after its target; the panel
+  // names it by what it does. A locked target cannot be changed (the
+  // panel's header says why); in Fråga the chat changes nothing either.
   const partner: ChatPartner = {
     type: "assistant",
     id: model.id,
-    name: t("flows_chat_partner_name"),
-    description: published
-      ? t("flows_chat_partner_description_published")
+    name: texts.partnerName,
+    description: lock
+      ? lock.partnerDescription
       : editing
-        ? t("flows_chat_partner_description")
-        : t("flows_chat_partner_description_ask"),
+        ? texts.partnerDescription.edit
+        : texts.partnerDescription.ask,
     allowedAttachments: model.allowed_attachments,
     insightEnabled: false,
     iconId: null,
     knowledge: [],
     spaceName,
     // The personal chat's lists ("Fortsätt", "Dina assistenter") are other
-    // conversations, not this flow's: the flow chat never shows them.
+    // conversations, not this chat's: the helper never shows them.
     personalSpace: false,
     securityClassification: space.security_classification?.name ?? null,
     mcpServers: model.mcp_servers ?? [],
@@ -282,22 +223,16 @@ function AuthoringConversation({
       onActivityChange={setActivity}
       startHeadingLevel={3}
       references={references}
-      // A run the chat starts shows in the answer, with its progress and
-      // result; a change shows the steps it touched, each field before and after.
-      toolCards={(call) =>
-        flowRunCardFor(call, flow, routeId, onAskChat) ?? flowChangeCardFor(call)
-      }
-      footerActions={<ModePicker chat={chat} published={published} onRefused={onRefused} />}
-      placeholder={editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")}
+      toolCards={adapter.toolCards}
+      footerActions={<ModePicker chat={chat} adapter={adapter} />}
+      placeholder={editing ? texts.placeholder.edit : texts.placeholder.ask}
       // Named by what a message does in the mode it is sent in.
-      composerLabel={editing ? t("flows_chat_composer_label_edit") : undefined}
-      onToolCallFinished={(call) => {
-        if (isFlowsToolCall(call)) onFlowMayHaveChanged();
-      }}
+      composerLabel={editing ? texts.composerLabelEdit : undefined}
+      onToolCallFinished={adapter.onToolCallFinished}
       onAnswerFinished={() => {
-        onFlowMayHaveChanged();
+        adapter.onAnswerFinished?.();
         // The turn's start may have left edit mode after a pause: show the mode the server holds.
-        void queryClient.invalidateQueries({ queryKey: flowKeys.authoringChat(flow.id) });
+        void queryClient.invalidateQueries({ queryKey: api.key });
       }}
     />
   );
@@ -307,30 +242,28 @@ function AuthoringConversation({
  * Says so when a read of the chat (after an answer, on the window's focus)
  * finds that the server left edit mode after a pause, politely and without
  * moving focus. The person's own changes are written into the cache, not
- * read, and announce themselves; a published flow shows Fråga either way.
+ * read, and announce themselves; a locked target shows Fråga either way.
  */
-function useAnnounceModeFallback(flowId: string, published: boolean) {
-  const t = useTranslations();
+function useAnnounceModeFallback(chatHash: string, locked: boolean, text: string) {
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (published) return;
-    const key = flowKeys.authoringChat(flowId);
-    const hash = hashKey(key);
-    let shown = queryClient.getQueryData<FlowAuthoringChat>(key);
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== "updated" || event.query.queryHash !== hash) return;
+    if (locked) return;
+    const cache = queryClient.getQueryCache();
+    let shown = cache.get<HelperChat>(chatHash)?.state.data;
+    return cache.subscribe((event) => {
+      if (event.type !== "updated" || event.query.queryHash !== chatHash) return;
       if (event.action.type !== "success") return;
-      const read = event.action.data as FlowAuthoringChat | undefined;
+      const read = event.action.data as HelperChat | undefined;
       const fellBack =
         !event.action.manual &&
         shown?.editing === true &&
         read?.editing === false &&
         read.session_id === shown.session_id;
       shown = read;
-      if (fellBack) announce(t("flows_chat_mode_ask_after_pause"));
+      if (fellBack) announce(text);
     });
-  }, [announce, flowId, published, queryClient, t]);
+  }, [announce, chatHash, locked, queryClient, text]);
 }
 
 type Unavailable = { status: "info" | "warning"; text: string };
@@ -342,47 +275,54 @@ type Unavailable = { status: "info" | "warning"; text: string };
  */
 function unavailableReason(
   error: unknown,
+  adapter: HelperAdapter,
   t: ReturnType<typeof useTranslations>
 ): Unavailable | null {
   if (!(error instanceof EneoApiError)) return null;
-  if (error.status === 403) return { status: "info", text: t("flows_chat_no_access") };
+  if (error.status === 403) return { status: "info", text: adapter.texts.noAccess };
   if (error.status !== 400) return null;
   if (error.reason === "unknown_model_capacity") {
     return { status: "warning", text: t("flows_chat_model_capacity_unknown") };
   }
-  if (error.reason === "flow_authoring_chat_no_model") {
-    return { status: "info", text: t("flows_chat_no_model") };
-  }
   return {
     status: "info",
     text:
-      flowErrorText(error.reason, t) ?? getErrorMessageForCode(error.code, t) ?? t("request_failed")
+      adapter.refusalText?.(error.reason) ??
+      getErrorMessageForCode(error.code, t) ??
+      t("request_failed")
   };
 }
 
 /**
- * The flow's chat: an ordinary conversation with an assistant whose tools
- * reach only this flow. It opens in view mode; the switch above it lets the
- * chat change the draft, and the page shows each change as the chat's tools
- * make it.
+ * A helper chat beside a page: an ordinary conversation with an assistant
+ * whose tools reach only the page's target. It opens in Fråga; the picker
+ * beside the send button lets the chat change the target, and the page
+ * shows each change as the chat's tools make it. The adapter says what the
+ * target is; everything else is the same on every page.
  */
-export function FlowChatPanel({
-  flow,
-  onFlowMayHaveChanged,
-  onRefused,
-  onComposer,
-  onAskChat
-}: ChatPanelProps) {
+export function HelperPanel({ adapter }: { adapter: HelperAdapter }) {
   const t = useTranslations();
-  // The chat needs edit access; without it the core would refuse it (a 403
-  // still says so, should the flag be out of date).
-  const mayEdit = flow.permissions.can_edit;
-  const chat = useQuery({ ...authoringChatQueryOptions(flow.id), enabled: mayEdit });
-  useAnnounceModeFallback(flow.id, flow.published_version != null);
-  const unavailable: Unavailable | null = !mayEdit
-    ? { status: "info", text: t("flows_chat_no_access") }
+  const { api, canUse, lock, texts } = adapter;
+  // The person's chat for the target, created on first use. Reading it
+  // again returns the same chat, but the server turns edit mode off when
+  // the chat has been idle: it is read again when the window regains focus
+  // (and after each answer), so a tab left open shows Fråga before the next
+  // message is typed.
+  const chat = useQuery<HelperChat>({
+    queryKey: api.key,
+    queryFn: () => api.open(),
+    staleTime: Infinity,
+    refetchOnWindowFocus: "always",
+    retry: false,
+    // Without access the core would refuse the chat (a 403 still says so,
+    // should the page's flag be out of date).
+    enabled: canUse
+  });
+  useAnnounceModeFallback(hashKey(api.key), !!lock, texts.askAfterPause);
+  const unavailable: Unavailable | null = !canUse
+    ? { status: "info", text: texts.noAccess }
     : chat.isError
-      ? unavailableReason(chat.error, t)
+      ? unavailableReason(chat.error, adapter, t)
       : null;
 
   return (
@@ -392,34 +332,30 @@ export function FlowChatPanel({
             buttons, and the chat's settings are behind one of them. */}
         <div className="flex items-center justify-between gap-2">
           <Heading level={2} weight="semibold" className="min-w-0 truncate text-lg">
-            {t("flows_chat_heading")}
+            {texts.heading}
           </Heading>
           {chat.data ? (
             <span className="-my-1 -me-2 flex shrink-0 items-center gap-0.5">
-              {onAskChat && flow.steps.length > 0 ? (
-                <OptimizeFlowButton onAskChat={onAskChat} />
-              ) : null}
-              <NewConversationButton chat={chat.data} onRefused={onRefused} />
-              <FlowChatSettings chat={chat.data} onRefused={onRefused} />
+              {adapter.headerActions}
+              <NewConversationButton
+                chat={chat.data}
+                api={api}
+                description={texts.newConversationDescription}
+                onRefused={adapter.onRefused}
+              />
+              <HelperChatSettings chat={chat.data} api={api} onRefused={adapter.onRefused} />
             </span>
           ) : null}
         </div>
-        {flow.published_version != null ? (
+        {lock ? (
           <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-            {t("flows_chat_published_intro")}
+            {lock.intro}
           </Text>
         ) : null}
       </div>
       {chat.data ? (
-        <AuthoringConversation
-          flow={flow}
-          chat={chat.data}
-          onFlowMayHaveChanged={onFlowMayHaveChanged}
-          onRefused={onRefused}
-          onComposer={onComposer}
-          onAskChat={onAskChat}
-        />
-      ) : mayEdit && !chat.isError ? (
+        <HelperConversation chat={chat.data} adapter={adapter} />
+      ) : canUse && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
       ) : (
         <div className="p-4">

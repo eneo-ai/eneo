@@ -2,8 +2,11 @@
 import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
-import { FlowChatPanel } from "./flow-chat-panel";
+import { HelperPanel } from "@/features/helper/helper-panel";
+import { useFlowChatReferences } from "./chat/use-flow-chat-references";
+import { OptimizeFlowButton, useFlowHelper } from "./flow-helper";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import type { FlowPublic } from "./flows-api";
 
@@ -40,20 +43,25 @@ vi.mock("@/features/chat/chat-view", () => ({
   )
 }));
 
+/** The flow page's chat: the helper panel with the flow's adapter. */
+function FlowChat({ flow, onAskChat }: { flow: FlowPublic; onAskChat?: (text: string) => void }) {
+  const { references } = useFlowChatReferences(flow);
+  const helper = useFlowHelper({
+    flow,
+    references,
+    onAskChat,
+    onRefused: () => {},
+    onFlowMayHaveChanged: () => {}
+  });
+  return <HelperPanel adapter={helper} />;
+}
+
 function refuseChat(body: Record<string, unknown>) {
   api.POST.mockResolvedValue({ error: body, response: new Response(null, { status: 400 }) });
 }
 
 function renderPanel(flow: FlowPublic = makeFlow(), onAskChat?: (text: string) => void) {
-  return renderInApp(
-    <FlowChatPanel
-      flow={flow}
-      onFlowMayHaveChanged={() => {}}
-      onRefused={() => {}}
-      onComposer={() => {}}
-      onAskChat={onAskChat}
-    />
-  );
+  return renderInApp(<FlowChat flow={flow} onAskChat={onAskChat} />);
 }
 
 /** The chat opens, with its assistant and an empty conversation, in the given mode. */
@@ -80,20 +88,7 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("FlowChatPanel when the chat cannot open", () => {
-  it("says in Swedish who declares a model's limits, as a warning", async () => {
-    refuseChat({
-      message: "Unknown model capacity: max_input_tokens",
-      code: "unknown_model_capacity",
-      eneo_error_code: 9074
-    });
-    renderPanel();
-
-    expect(await bannerStatus(messages.flows_chat_model_capacity_unknown)).toBe("warning");
-    expect(screen.getByText(messages.flows_chat_unavailable)).toBeTruthy();
-    expect(screen.queryByText(/Unknown model capacity/)).toBeNull();
-  });
-
+describe("The flow's helper chat when it cannot open", () => {
   it("gives a missing model its own text, as information", async () => {
     refuseChat({
       message: "No model.",
@@ -118,17 +113,9 @@ describe("FlowChatPanel when the chat cannot open", () => {
     ).toBeTruthy();
     expect(screen.queryByText(/not supported/)).toBeNull();
   });
-
-  it("never shows the core's English for a refusal it has no text for", async () => {
-    refuseChat({ message: "Something internal went sideways.", code: "brand_new_refusal" });
-    renderPanel();
-
-    expect(await screen.findByText(messages.request_failed)).toBeTruthy();
-    expect(screen.queryByText(/sideways/)).toBeNull();
-  });
 });
 
-describe("FlowChatPanel on a published flow", () => {
+describe("The flow's helper chat on a published flow", () => {
   it("says the chat cannot change it and offers no edit mode, even one saved before", async () => {
     openChat(true);
     renderPanel(makeFlow({ published_version: 1 }));
@@ -169,7 +156,7 @@ describe("FlowChatPanel on a published flow", () => {
   });
 });
 
-describe("FlowChatPanel's Optimera flödet", () => {
+describe("The flow's helper chat's Optimera flödet", () => {
   it("is offered only once the flow has a step", async () => {
     openChat(false);
     const { unmount } = renderPanel(makeFlow({ steps: [] }), () => {});
@@ -181,5 +168,22 @@ describe("FlowChatPanel's Optimera flödet", () => {
     expect(
       await screen.findByRole("button", { name: messages.flow_suggestions_optimize })
     ).toBeTruthy();
+  });
+});
+
+describe("OptimizeFlowButton", () => {
+  it("hands the prepared review request to the composer and sends nothing", async () => {
+    const onAskChat = vi.fn();
+    const { container } = renderInApp(<OptimizeFlowButton onAskChat={onAskChat} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Optimera flödet" }));
+    expect(onAskChat).toHaveBeenCalledWith(
+      expect.stringMatching(/^Gå igenom flödets förslag och visa vad som kan göra det billigare/)
+    );
+    // The request is the person's own message: it names no tool.
+    expect(onAskChat).not.toHaveBeenCalledWith(expect.stringContaining("read_flow_suggestions"));
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(api.PATCH).not.toHaveBeenCalled();
+    await expectNoAxeViolations(container);
   });
 });

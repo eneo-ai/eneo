@@ -3,7 +3,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, SlidersHorizontal, Sparkles } from "lucide-react";
+import { MessageSquarePlus, SlidersHorizontal } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
@@ -18,28 +18,23 @@ import {
 } from "@/features/chat/reasoning-effort";
 import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
 import { useSpace } from "@/features/spaces/use-space";
-import {
-  flowKeys,
-  startAuthoringConversation,
-  updateAuthoringChat,
-  type FlowAuthoringChat
-} from "./flows-api";
+import type { HelperAdapter, HelperChat, HelperChatApi, HelperChatUpdate } from "./helper-adapter";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
-type Refused = (error: unknown, title: string) => void;
+type Refused = HelperAdapter["onRefused"];
 
 /**
- * The models the flow chat may use: the space's own (enabled there and
+ * The models the helper chat may use: the space's own (enabled there and
  * meeting its classification) that support tools. The core checks the
  * choice again.
  */
-export function flowChatModels(models: readonly CompletionModel[]): CompletionModel[] {
+export function helperChatModels(models: readonly CompletionModel[]): CompletionModel[] {
   return models.filter((model) => model.supports_tool_calling && model.can_access !== false);
 }
 
 /** The model the chat answers with: the person's own while it is offered, else the default. */
-export function flowChatModelId(
-  chat: Pick<FlowAuthoringChat, "completion_model_id" | "default_completion_model_id">,
+export function helperChatModelId(
+  chat: Pick<HelperChat, "completion_model_id" | "default_completion_model_id">,
   models: readonly CompletionModel[]
 ): string | null {
   const own = chat.completion_model_id;
@@ -52,14 +47,13 @@ export function flowChatModelId(
  * shows it (and a new conversation, should the core have started one). The
  * chat's assistant follows the change, so the composer reads it again.
  */
-function useSaveChat(chat: FlowAuthoringChat) {
+function useSaveChat(chat: HelperChat, api: HelperChatApi) {
   const queryClient = useQueryClient();
-  return async (save: () => Promise<FlowAuthoringChat>) => {
+  return async (save: () => Promise<HelperChat>) => {
     const updated = await save();
-    const key = flowKeys.authoringChat(chat.flow_id);
     // A read of the chat still on its way began before this change: it must not land after it.
-    await queryClient.cancelQueries({ queryKey: key });
-    queryClient.setQueryData(key, updated);
+    await queryClient.cancelQueries({ queryKey: api.key });
+    queryClient.setQueryData(api.key, updated);
     void queryClient.invalidateQueries({ queryKey: ["assistants", chat.assistant_id] });
     return updated;
   };
@@ -70,15 +64,17 @@ function useSaveChat(chat: FlowAuthoringChat) {
  * panel is narrow: a popover with the model and reasoning-effort pickers the
  * ordinary chat has beside its composer, here as labelled fields. The model
  * list holds the space's models that support tools; "Använd standard"
- * follows the organisation's default for flow chats (or the space's), which
- * the list marks. A refused choice falls back and is shown with the page's
- * other refusals.
+ * follows the organisation's default for helper chats (or the space's),
+ * which the list marks. A refused choice falls back and is shown with the
+ * page's other refusals.
  */
-export function FlowChatSettings({
+export function HelperChatSettings({
   chat,
+  api,
   onRefused
 }: {
-  chat: FlowAuthoringChat;
+  chat: HelperChat;
+  api: HelperChatApi;
   onRefused: Refused;
 }) {
   const t = useTranslations();
@@ -92,7 +88,7 @@ export function FlowChatSettings({
       width={320}
       label={t("flows_chat_settings")}
       closeButtonLabel={t("close")}
-      content={<FlowChatSettingsFields chat={chat} onRefused={onRefused} />}
+      content={<HelperChatSettingsFields chat={chat} api={api} onRefused={onRefused} />}
     >
       <IconButton
         label={t("flows_chat_settings")}
@@ -105,20 +101,22 @@ export function FlowChatSettings({
   );
 }
 
-function FlowChatSettingsFields({
+function HelperChatSettingsFields({
   chat,
+  api,
   onRefused
 }: {
-  chat: FlowAuthoringChat;
+  chat: HelperChat;
+  api: HelperChatApi;
   onRefused: Refused;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const { space } = useSpace();
   const { tenant } = useAppContext();
-  const saveChat = useSaveChat(chat);
-  const models = flowChatModels(space.completion_models);
-  const effectiveId = flowChatModelId(chat, models);
+  const saveChat = useSaveChat(chat, api);
+  const models = helperChatModels(space.completion_models);
+  const effectiveId = helperChatModelId(chat, models);
   const effective = models.find((model) => model.id === effectiveId);
   const options = reasoningEffortOptions(effective);
   const nameOf = (id: string | null | undefined) => {
@@ -126,12 +124,9 @@ function FlowChatSettingsFields({
     return model ? modelDisplayName(model) : "";
   };
 
-  async function change(
-    body: Schema<"FlowAuthoringChatUpdateRequest">,
-    done: (updated: FlowAuthoringChat) => string
-  ) {
+  async function change(body: HelperChatUpdate, done: (updated: HelperChat) => string) {
     try {
-      const updated = await saveChat(() => updateAuthoringChat(chat, body));
+      const updated = await saveChat(() => api.update(chat.session_id, body));
       announce(done(updated));
     } catch (error) {
       onRefused(error, t("flows_chat_model_not_changed"));
@@ -196,19 +191,23 @@ function FlowChatSettingsFields({
 /**
  * "Ny konversation": after a confirmation the chat continues in a new, empty
  * conversation. The old one is kept for traceability but never answered or
- * shown again; the flow itself, its revisions and the audit log hold what
- * changed. The panel switches to the new conversation without a reload.
+ * shown again; `description` says what the target keeps. The panel switches
+ * to the new conversation without a reload.
  */
 export function NewConversationButton({
   chat,
+  api,
+  description,
   onRefused
 }: {
-  chat: FlowAuthoringChat;
+  chat: HelperChat;
+  api: HelperChatApi;
+  description: string;
   onRefused: Refused;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
-  const saveChat = useSaveChat(chat);
+  const saveChat = useSaveChat(chat, api);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -216,7 +215,7 @@ export function NewConversationButton({
     if (pending) return;
     setPending(true);
     try {
-      await saveChat(() => startAuthoringConversation(chat));
+      await saveChat(() => api.startConversation(chat.session_id));
       setOpen(false);
       announce(t("flows_chat_new_conversation_started"));
     } catch (error) {
@@ -241,32 +240,12 @@ export function NewConversationButton({
         open={open}
         onOpenChange={setOpen}
         title={t("flows_chat_new_conversation_title")}
-        description={t("flows_chat_new_conversation_description")}
+        description={description}
         confirmLabel={t("flows_chat_new_conversation_confirm")}
         variant="default"
         pending={pending}
         onConfirm={() => void start()}
       />
     </>
-  );
-}
-
-/**
- * "Optimera flödet": puts a prepared request in the composer that asks the
- * chat to review the flow with its suggestions tool and propose
- * improvements. The person reads it, edits it if they like, and sends it;
- * nothing is sent from here.
- */
-export function OptimizeFlowButton({ onAskChat }: { onAskChat: (text: string) => void }) {
-  const t = useTranslations();
-  return (
-    <IconButton
-      label={t("flow_suggestions_optimize")}
-      tooltip={t("flow_suggestions_optimize")}
-      variant="ghost"
-      size="sm"
-      icon={<Sparkles aria-hidden className="size-4" />}
-      onClick={() => onAskChat(t("flow_suggestions_optimize_request"))}
-    />
   );
 }

@@ -3,6 +3,7 @@ import { browserApi, type EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { hasPermission } from "@/lib/auth/permissions";
+import type { HelperChatApi } from "@/features/helper/helper-adapter";
 
 export type FlowPublic = Schema<"FlowPublic">;
 export type FlowSparse = Schema<"FlowSparsePublic">;
@@ -122,65 +123,34 @@ export function unpublishFlow(
 }
 
 /**
- * The caller's chat for the flow, created on first use (one per user and
- * flow). Reading it again returns the same chat, but the server turns edit
- * mode off when the chat has been idle: it is read again when the window
- * regains focus (and by the panel after each answer), so a tab left open
- * shows Fråga before the next message is typed.
+ * The flow's chat endpoints for the helper panel: the caller's chat for the
+ * flow, created on first use (one per user and flow), and its changes. A
+ * mode change carries the draft revision the caller has seen
+ * (`expected_revision`, which the panel adds); turning edit mode on after a
+ * pause may start a new conversation, and the answer then names another
+ * `session_id`.
  */
-export function authoringChatQueryOptions(flowId: string) {
-  return queryOptions({
-    queryKey: flowKeys.authoringChat(flowId),
-    queryFn: () =>
+export function flowHelperApi(flowId: string): HelperChatApi {
+  return {
+    key: flowKeys.authoringChat(flowId),
+    open: () =>
       unwrap(
         browserApi.POST("/api/v1/flows/{id}/authoring-chat/", { params: { path: { id: flowId } } })
       ),
-    staleTime: Infinity,
-    refetchOnWindowFocus: "always",
-    retry: false
-  });
-}
-
-/**
- * Turns the chat's edit mode on or off, fenced on the draft revision the
- * caller has seen. Turning it on after a pause may start a new conversation:
- * the answer then names another `session_id`.
- */
-export function setAuthoringMode(
-  chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">,
-  body: { editing: boolean; expectedRevision: number }
-): Promise<FlowAuthoringChat> {
-  return updateAuthoringChat(chat, {
-    editing: body.editing,
-    expected_revision: body.expectedRevision
-  });
-}
-
-/**
- * Changes the chat's edit mode, model or reasoning effort; a null model or
- * effort returns to the default.
- */
-export function updateAuthoringChat(
-  chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">,
-  body: Schema<"FlowAuthoringChatUpdateRequest">
-): Promise<FlowAuthoringChat> {
-  return unwrap(
-    browserApi.PATCH("/api/v1/flows/{id}/authoring-chat/{session_id}/", {
-      params: { path: { id: chat.flow_id, session_id: chat.session_id } },
-      body
-    })
-  );
-}
-
-/** Leaves the chat's conversation for a new, empty one with the same assistant. */
-export function startAuthoringConversation(
-  chat: Pick<FlowAuthoringChat, "flow_id" | "session_id">
-): Promise<FlowAuthoringChat> {
-  return unwrap(
-    browserApi.POST("/api/v1/flows/{id}/authoring-chat/{session_id}/conversations/", {
-      params: { path: { id: chat.flow_id, session_id: chat.session_id } }
-    })
-  );
+    update: (sessionId, body) =>
+      unwrap(
+        browserApi.PATCH("/api/v1/flows/{id}/authoring-chat/{session_id}/", {
+          params: { path: { id: flowId, session_id: sessionId } },
+          body
+        })
+      ),
+    startConversation: (sessionId) =>
+      unwrap(
+        browserApi.POST("/api/v1/flows/{id}/authoring-chat/{session_id}/conversations/", {
+          params: { path: { id: flowId, session_id: sessionId } }
+        })
+      )
+  };
 }
 
 /** Puts a flow the server returned into the cache and marks the space's list stale. */

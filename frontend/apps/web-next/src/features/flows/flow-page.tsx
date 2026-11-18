@@ -61,9 +61,11 @@ import {
 import { parseFlowSearch } from "./flow-search";
 import { describeChanges, diffFlowSteps, hasChanges, type StepChange } from "./flow-changes";
 import type { ComposerInsert } from "@/features/chat/chat-references";
+import { HelperPanel } from "@/features/helper/helper-panel";
 import { FlowReferences, insertMessage } from "./chat/reference-pill";
-import { FlowChatPanel } from "./flow-chat-panel";
+import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
+import { useFlowHelper } from "./flow-helper";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { producesLabel, stepLabel } from "./flow-labels";
 import { flowRefusalMessage, refusalStep, STALE_REVISION } from "./flow-refusals";
@@ -264,8 +266,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const [settingsRequest, setSettingsRequest] = useState<SettingsRequest>();
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [draftProblems, setDraftProblems] = useState<number | null>(null);
-  // The chat's composer while it is on screen (the chat panel reports it).
-  const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
+  // What the chat can refer to, and its composer while it is on screen (the
+  // composer reports itself through the references).
+  const { references: chatReferences, composer: chatComposer } = useFlowChatReferences(flow);
   const searchParams = useSearchParams();
   // The open step lives in ?step=, so a refresh or a shared link opens it
   // again (an id the flow does not have shows the list).
@@ -610,6 +613,14 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       // The next action reads the flow again; a failed reread is not news.
     }
   }, [announce, flowId, queryClient, t]);
+
+  const helper = useFlowHelper({
+    flow,
+    references: chatReferences,
+    onAskChat: askChat,
+    onRefused: (error, title) => refused(error, title, steps),
+    onFlowMayHaveChanged: () => void refreshFromChat()
+  });
 
   /**
    * Publishes the saved draft. A draft the page already knows cannot be
@@ -1164,13 +1175,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               view !== "chat" && "max-lg:hidden"
             )}
           >
-            <FlowChatPanel
-              flow={flow}
-              onFlowMayHaveChanged={() => void refreshFromChat()}
-              onRefused={(error, title) => refused(error, title, steps)}
-              onComposer={setChatComposer}
-              onAskChat={askChat}
-            />
+            <HelperPanel adapter={helper} />
           </section>
         </div>
 

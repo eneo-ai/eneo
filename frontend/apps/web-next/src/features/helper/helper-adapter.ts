@@ -1,0 +1,126 @@
+import type { QueryKey } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import type { ToolCards } from "@/features/chat/chat-message";
+import type { ChatReferences } from "@/features/chat/chat-references";
+import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
+
+/**
+ * A person's helper chat about one target, as every target's endpoints
+ * return it: the assistant that answers, the conversation on screen, the
+ * mode and the person's model choice for this chat.
+ */
+export type HelperChat = {
+  /** The chat's own assistant, hidden from lists, which answers its questions. */
+  assistant_id: string;
+  /**
+   * The current conversation. Starting a new one (explicitly, or Redigera
+   * after a pause) replaces it; earlier ones are never answered again.
+   */
+  session_id: string;
+  /** Redigera (the chat's tools may change the target) rather than Fråga. */
+  editing: boolean;
+  /** The person's model for this chat; null follows the default. */
+  completion_model_id?: string | null;
+  /** The person's reasoning effort; null uses the model's own default. */
+  reasoning_effort?: string | null;
+  /** The model the chat answers with while the person has chosen none. */
+  default_completion_model_id?: string | null;
+};
+
+/** A change to the chat; a null model or effort returns to the default. */
+export type HelperChatUpdate = {
+  editing?: boolean;
+  completion_model_id?: string | null;
+  reasoning_effort?: string | null;
+  /** The target revision a mode change is fenced on, for a target that has one. */
+  expected_revision?: number;
+};
+
+/** The chat's endpoints for one target. */
+export type HelperChatApi = {
+  /** Where the chat is cached; every change of it is written there. */
+  key: QueryKey;
+  /** The person's chat for the target, created on first use. */
+  open: () => Promise<HelperChat>;
+  /** Changes the chat's mode, model or reasoning effort. */
+  update: (sessionId: string, body: HelperChatUpdate) => Promise<HelperChat>;
+  /** Leaves the conversation for a new, empty one with the same assistant. */
+  startConversation: (sessionId: string) => Promise<HelperChat>;
+};
+
+/**
+ * The panel's words that name its target. The rest (the settings, "Ny
+ * konversation", the mode's name, loading and failures) are the same for
+ * every target and belong to the panel.
+ */
+export type HelperTexts = {
+  /** The panel's heading. */
+  heading: string;
+  /** What the conversation calls its partner. */
+  partnerName: string;
+  /** The partner's welcome in each mode. */
+  partnerDescription: { ask: string; edit: string };
+  /** The composer's placeholder in each mode. */
+  placeholder: { ask: string; edit: string };
+  /** The composer's name in Redigera; in Fråga it is named by its partner. */
+  composerLabelEdit: string;
+  /** What each mode does, under its name in the picker. */
+  modeDescription: { ask: string; edit: string };
+  /** Said when the person turns Redigera on or off. */
+  editingOn: string;
+  editingOff: string;
+  /** Said when a read of the chat finds the server left Redigera after a pause. */
+  askAfterPause: string;
+  /** Why the chat is not open to the person: no edit access. */
+  noAccess: string;
+  /** What starting a new conversation keeps and drops, in its confirmation. */
+  newConversationDescription: string;
+};
+
+/**
+ * The target cannot be changed now (a published flow): Redigera cannot be
+ * picked, a mode saved before does not apply, and these say why.
+ */
+export type HelperLock = {
+  /** Under Redigera in the picker. */
+  reason: string;
+  /** Under the panel's heading. */
+  intro: string;
+  /** The partner's welcome, in place of the mode's. */
+  partnerDescription: string;
+};
+
+/**
+ * What a page hands the helper panel about its target. Everything else (the
+ * chat's loading, its conversation, the mode picker, the settings, a new
+ * conversation, the announcements) is the panel's and the same for every
+ * target.
+ */
+export type HelperAdapter = {
+  api: HelperChatApi;
+  /** Whether the person may use the chat; without it the chat is not asked for. */
+  canUse: boolean;
+  texts: HelperTexts;
+  /** Set while the target cannot be changed. */
+  lock?: HelperLock | null;
+  /**
+   * The target revision on screen, for a target whose changes are fenced on
+   * one: a mode change sends it, so one made against a changed target is
+   * refused. Read when the change is saved.
+   */
+  revision?: () => number;
+  /** The target's own words for a refusal to open the chat (the 400's `reason`), or null. */
+  refusalText?: (reason: string | undefined) => string | null;
+  /** Shows a refused change of the chat (mode, model, new conversation) with the page's other refusals. */
+  onRefused: (error: unknown, title: string) => void;
+  /** What the conversation can refer to. */
+  references?: ChatReferences;
+  /** Cards the page draws for the target's tool calls in answers. */
+  toolCards?: ToolCards;
+  /** The target's own actions in the panel's title row, before the chat's. */
+  headerActions?: ReactNode;
+  /** A tool call of this visit finished; the page knows whether it can have changed the target. */
+  onToolCallFinished?: (call: ToolCallRecord) => void;
+  /** An answer ended: the target may have changed. */
+  onAnswerFinished?: () => void;
+};
