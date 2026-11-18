@@ -5,7 +5,7 @@ test.describe("production chunk recovery", () => {
   test("shares one reload between a missing feature chunk and a later missing route", async ({
     page
   }) => {
-    const featureChunk = productionAsset("src/features/admin/insights/usage-area-chart.tsx");
+    const featureChunk = productionAsset("src/features/insights/insights-activity-chart.tsx");
     const routeChunk = productionAsset("src/routes/_app/account/index.tsx?tsr-split=component");
     const missing = new Set([featureChunk, routeChunk]);
     const missingRequests = new Map<string, number>();

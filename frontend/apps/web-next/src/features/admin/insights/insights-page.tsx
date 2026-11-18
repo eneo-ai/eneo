@@ -1,107 +1,102 @@
-import { useQuery } from "@tanstack/react-query";
-import Link from "@/lib/link";
+import { Card } from "@astryxdesign/core/Card";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useFormatter, useTranslations } from "use-intl";
-import { lazy, Suspense, useState } from "react";
-import { LoadingState } from "@/components/composites/loading-state";
+import Link from "@/lib/link";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { Card } from "@astryxdesign/core/Card";
-import { Switch } from "@astryxdesign/core/Switch";
-import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
-import { insightRangeOfDays, type InsightRange } from "@/features/insights/insights-range";
-import { tokenUsageQueryOptions } from "@/features/admin/usage/usage";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { tokenUsageQueryOptions } from "@/features/admin/usage/usage";
+import { ActivityCard } from "@/features/insights/activity-card";
+import { countChange, INSIGHT_SOURCES } from "@/features/insights/insight-figures";
+import { Tile } from "@/features/insights/insight-tile";
+import { InsightsFilterRow } from "@/features/insights/insights-filter-row";
+import type { InsightRange } from "@/features/insights/insights-range";
+import { PeriodChange } from "@/features/insights/period-change";
+import { useSourceSplit } from "@/features/insights/source-tag";
 import {
-  insightActivityQueryOptions,
-  insightAggregatedQueryOptions,
   insightPeriod,
-  previousInsightRange,
-  periodTotals,
-  insightTrend
-} from "@/features/admin/insights/insights";
+  insightTargetsActivityQueryOptions,
+  insightTargetsSummaryQueryOptions
+} from "./insights";
 import { InsightTargets } from "./insight-targets";
+import {
+  insightsPageSearch,
+  readInsightsPageSearch,
+  type InsightsPageState
+} from "./insights-page-search";
 
-const CHART_HEIGHT = 320;
-const UsageAreaChart = lazy(() =>
-  import("./usage-area-chart").then((module) => ({ default: module.UsageAreaChart }))
-);
-
-function Stat({
-  label,
-  value,
-  children
-}: {
-  label: string;
-  value: string;
-  children?: React.ReactNode;
-}) {
-  return (
-    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start sm:p-6">
-      <span className="text-ax-text-secondary text-sm">{label}</span>
-      <span className="text-2xl font-semibold tabular-nums sm:text-3xl">{value}</span>
-      {children}
-    </Card>
-  );
-}
-
-function PercentageDelta({ current, previous }: { current: number; previous: number }) {
+/**
+ * "Nyckeltal" for the whole organisation: conversations by source,
+ * questions, the signed-in users who asked and the assistants and group
+ * chats that were used, each change against the previous period when
+ * compared (not the used ones). Read from the target list unfiltered, so the
+ * table's search, filter and sort never move them; they count by the
+ * table's rules.
+ */
+function OrganisationTiles({ range, compare }: { range: InsightRange; compare: boolean }) {
   const t = useTranslations();
   const format = useFormatter();
-  const percent = insightTrend(current, previous);
-  return (
-    <span className="text-ax-text-secondary text-sm">
-      {percent === null
-        ? t("compare_new_activity_tooltip")
-        : t("insights_period_change", {
-            percent: format.number(percent / 100, { style: "percent", signDisplay: "exceptZero" })
-          })}
-    </span>
-  );
-}
-
-function PeriodOverview({ range, compare }: { range: InsightRange; compare: boolean }) {
-  const t = useTranslations();
-  const format = useFormatter();
-  const query = useQuery(insightAggregatedQueryOptions(browserApi, insightPeriod(range)));
-  const previous = useQuery({
-    ...insightAggregatedQueryOptions(browserApi, insightPeriod(previousInsightRange(range))),
-    enabled: compare
+  const sourceSplit = useSourceSplit();
+  // A new period or comparison keeps the figures on screen until the new ones are in.
+  const summary = useQuery({
+    ...insightTargetsSummaryQueryOptions(browserApi, range, compare),
+    placeholderData: keepPreviousData
   });
   return (
-    <QueryStateBoundary query={query} rows={3} height={CHART_HEIGHT}>
-      {(data) => {
-        const totals = periodTotals(data);
-        const prior = compare && previous.data ? periodTotals(previous.data) : null;
+    <QueryStateBoundary query={summary} rows={2}>
+      {({ totals, users, counts }) => {
+        const previous = compare ? totals.previous : null;
+        const conversations = totals.conversations.total;
+        const perConversation = conversations > 0 ? totals.questions / conversations : null;
+        const change = (current: number, before: number | null | undefined) =>
+          compare ? <PeriodChange change={countChange(current, before)} unit="percent" /> : null;
         return (
-          <>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              {(
-                [
-                  ["assistants", "assistants_created"],
-                  ["sessions", "conversations_started"],
-                  ["questions", "questions_asked"]
-                ] as const
-              ).map(([metric, label]) => (
-                <Stat key={metric} label={t(label)} value={format.number(totals[metric])}>
-                  {prior ? (
-                    <PercentageDelta current={totals[metric]} previous={prior[metric]} />
-                  ) : null}
-                </Stat>
-              ))}
-            </div>
-            {compare ? (
-              <QueryStateBoundary query={previous} rows={1}>
-                {() => null}
-              </QueryStateBoundary>
-            ) : null}
-            <Card className="flex min-w-0 flex-col gap-4 p-4 sm:p-6">
-              <h2 className="font-semibold">{t("assistant_usage")}</h2>
-              <Suspense fallback={<LoadingState rows={1} height={CHART_HEIGHT} />}>
-                <UsageAreaChart key={`${range.start}|${range.end}`} data={data} range={range} />
-              </Suspense>
-            </Card>
-          </>
+          // Columns by the page's own width: four across where each keeps room
+          // for its lines, else two by two; one per row on a phone.
+          <section aria-label={t("insights_tiles_label")} className="@container">
+            <dl className="grid grid-cols-1 gap-3 @min-[26rem]:grid-cols-2 @min-[48rem]:grid-cols-4">
+              <Tile
+                label={t("insights_tile_conversations")}
+                value={{ text: format.number(conversations) }}
+                change={change(conversations, previous?.conversations.total)}
+                details={[sourceSplit(totals.conversations)]}
+              />
+              <Tile
+                label={t("questions")}
+                value={{ text: format.number(totals.questions) }}
+                change={change(totals.questions, previous?.questions)}
+                details={[
+                  perConversation === null
+                    ? null
+                    : t.markup("insights_shape_questions_per_conversation", {
+                        value: format.number(perConversation, { maximumFractionDigits: 1 }),
+                        strong: (chunks) => chunks
+                      })
+                ]}
+              />
+              <Tile
+                label={t("active_users")}
+                value={{ text: format.number(users.current) }}
+                change={change(users.current, users.previous)}
+                details={[t("insights_org_users_detail")]}
+              />
+              <Tile
+                label={t("active_assistants")}
+                value={{
+                  text: t("insights_org_active_targets", {
+                    active: counts.all - counts.unused,
+                    total: counts.all
+                  })
+                }}
+                details={[
+                  t("insights_org_unused_targets", { count: counts.unused }),
+                  t("insights_org_targets_note")
+                ]}
+              />
+            </dl>
+          </section>
         );
       }}
     </QueryStateBoundary>
@@ -150,86 +145,52 @@ function TokensCard({ range }: { range: InsightRange }) {
   );
 }
 
-function Delta({ current, prior }: { current: number; prior?: number }) {
-  const format = useFormatter();
-  if (prior == null) return null;
-  const diff = current - prior;
-  if (diff === 0) return <span className="text-muted-foreground text-xs">±0</span>;
-  const up = diff > 0;
-  return (
-    <span className={up ? "text-success text-xs" : "text-destructive text-xs"}>
-      {up ? "▲" : "▼"} {format.number(Math.abs(diff))}
-    </span>
-  );
-}
-
-function ActivityCards({ range, compare }: { range: InsightRange; compare: boolean }) {
-  const t = useTranslations();
-  const format = useFormatter();
-  const { data, isPending } = useQuery(
-    insightActivityQueryOptions(browserApi, insightPeriod(range))
-  );
-  const prior = useQuery({
-    ...insightActivityQueryOptions(browserApi, insightPeriod(previousInsightRange(range))),
-    enabled: compare
-  });
-  if (isPending) return <LoadingState rows={1} height={96} />;
-  if (!data) return null;
-  const priorData = compare ? prior.data : undefined;
-
-  return (
-    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Card className="flex flex-col gap-1 p-4 sm:p-6">
-        <span className="text-muted-foreground text-sm">{t("active_assistants")}</span>
-        <span className="flex items-baseline gap-2">
-          <span className="text-3xl font-semibold tabular-nums">
-            {format.number(data.active_assistant_count)} /{" "}
-            {format.number(data.total_trackable_assistants)}
-          </span>
-          <Delta current={data.active_assistant_count} prior={priorData?.active_assistant_count} />
-        </span>
-      </Card>
-      <Card className="flex flex-col gap-1 p-4 sm:p-6">
-        <span className="text-muted-foreground text-sm">{t("active_users")}</span>
-        <span className="flex items-baseline gap-2">
-          <span className="text-3xl font-semibold tabular-nums">
-            {format.number(data.active_user_count)}
-          </span>
-          <Delta current={data.active_user_count} prior={priorData?.active_user_count} />
-        </span>
-      </Card>
-      <Stat label={t("total_assistants")} value={format.number(data.total_trackable_assistants)} />
-    </div>
-  );
-}
-
 /**
- * Organization activity over whole viewer-local days, and every assistant
- * and group chat with its use in the period ("Assistenter och gruppchattar").
- * The period and "Jämför" drive both.
+ * The organisation's insights: its figures, its activity per day and every
+ * assistant and group chat with its use in the period ("Assistenter och
+ * gruppchattar"), counted by one set of rules, and the tokens for an admin.
+ * The period and the comparison drive all of it. They, "Oanvända", the name
+ * search and the table's sort are kept in the address in place (no history
+ * entries), so the way back from an assistant's insights finds the page as
+ * it was.
  */
 export function InsightsPage() {
   const t = useTranslations();
   const { can } = useAppContext();
-  const [range, setRange] = useState<InsightRange>(() => insightRangeOfDays(30));
-  const [compare, setCompare] = useState(false);
+  const searchParams = useSearchParams();
+  const state = readInsightsPageSearch(searchParams);
+  const { range, compare } = state;
+  const update = (next: Partial<InsightsPageState>) =>
+    replaceUrl(insightsPageSearch({ ...state, ...next }));
+  const activity = useQuery({
+    ...insightTargetsActivityQueryOptions(browserApi, range),
+    placeholderData: keepPreviousData
+  });
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-6">
-      <PageHeader title={t("insights")} />
-      <Card className="flex flex-wrap items-end gap-4 p-4 sm:p-6">
-        <div className="min-w-0 flex-1">
-          <InsightsRangePicker value={range} onChange={setRange} />
-        </div>
-        <Switch label={t("compare")} value={compare} onChange={setCompare} />
-      </Card>
-      <PeriodOverview range={range} compare={compare} />
+      <PageHeader title={t("insights")} description={t("insights_org_description")} />
+      <section aria-label={t("insights_filters_label")}>
+        <InsightsFilterRow
+          range={range}
+          onRangeChange={(next) => update({ range: next })}
+          compare={compare}
+          onCompareChange={(next) => update({ compare: next })}
+        />
+      </section>
+      <OrganisationTiles range={range} compare={compare} />
+      <ActivityCard activity={activity} range={range} sources={INSIGHT_SOURCES} />
+      <InsightTargets
+        range={range}
+        compare={compare}
+        sort={state.sort}
+        onSortChange={(sort) => update({ sort })}
+        unusedOnly={state.unusedOnly}
+        onUnusedOnlyChange={(unusedOnly) => update({ unusedOnly })}
+        search={state.search}
+        onSearchChange={(search) => update({ search })}
+      />
       {can("admin") ? <TokensCard range={range} /> : null}
-      <div className="flex flex-col gap-3">
-        <h2 className="font-semibold">{t("insights_assistant_activity")}</h2>
-        <ActivityCards range={range} compare={compare} />
-      </div>
-      <InsightTargets range={range} compare={compare} />
     </div>
   );
 }

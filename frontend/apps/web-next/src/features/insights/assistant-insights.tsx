@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Switch } from "@astryxdesign/core/Switch";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Lock, MessagesSquare, MessageSquareText } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -41,7 +40,7 @@ import {
 } from "./insight-stats";
 import type { InsightView } from "./insight-view-url";
 import { InsightsOverview } from "./insights-overview";
-import { InsightsRangePicker } from "./insights-range-picker";
+import { InsightsFilterRow } from "./insights-filter-row";
 import { KnowledgeUseCard } from "./knowledge-use";
 import { ToolUseCard } from "./tool-use";
 import { TopQuestionsCard } from "./top-questions";
@@ -345,14 +344,12 @@ export function AssistantInsights({
             */}
             <section aria-label={t("insights_filters_label")} className="@container">
               <div className="flex flex-col gap-3 @min-[26rem]:flex-row @min-[26rem]:items-start">
-                <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
-                  <div className="min-w-0 flex-1 basis-56 sm:max-w-80">
-                    <InsightsRangePicker
-                      value={range}
-                      onChange={(next) => change({ range: next })}
-                      compact
-                    />
-                  </div>
+                <InsightsFilterRow
+                  range={range}
+                  onRangeChange={(next) => change({ range: next })}
+                  compare={filters.compare}
+                  onCompareChange={(compare) => change({ compare })}
+                >
                   <div className="max-w-full min-w-0">
                     <SegmentedControl
                       label={t("insights_source_label")}
@@ -365,15 +362,7 @@ export function AssistantInsights({
                       <SegmentedControlItem value="api_key" label={t("insights_source_api_key")} />
                     </SegmentedControl>
                   </div>
-                  {/* As tall as the controls beside it, with the switch on their centre line. */}
-                  <div className="flex min-h-(--size-element-md) items-center">
-                    <Switch
-                      label={t("insights_compare_previous")}
-                      value={filters.compare}
-                      onChange={(compare) => change({ compare })}
-                    />
-                  </div>
-                </div>
+                </InsightsFilterRow>
                 <div className="@min-[26rem]:shrink-0 @min-[26rem]:pt-[calc(var(--text-label-size)*var(--text-label-leading)+var(--spacing-1))]">
                   <Button
                     ref={trigger}

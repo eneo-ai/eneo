@@ -28,45 +28,41 @@ test("uses native period statistics, question logs and the question's conversati
   await askChatQuestion(page, question);
   await expect(conversationLog(page)).toContainText(MOCK_REPLY);
 
-  const seriesResponse = page.waitForResponse(
+  const pathOf = (response: { url(): string }) => new URL(response.url()).pathname;
+  // The tiles read the target list unfiltered and one row long.
+  const summaryResponse = page.waitForResponse(
     (response) =>
-      new URL(response.url()).pathname === "/api/v1/analysis/metadata-statistics/aggregated/" &&
+      pathOf(response) === "/api/v1/analysis/targets/" &&
+      new URL(response.url()).searchParams.get("limit") === "1" &&
       response.ok()
   );
+  const activityResponse = page.waitForResponse(
+    (response) => pathOf(response) === "/api/v1/analysis/targets/activity/" && response.ok()
+  );
   await page.goto("/admin/insights");
-  const aggregatedResponse = await seriesResponse;
-  expect(new URL(aggregatedResponse.url()).searchParams.get("time_zone")).toBe(
+  const summary: components["schemas"]["InsightTargetPage"] = await (await summaryResponse).json();
+  expect(new URL((await activityResponse).url()).searchParams.get("timezone")).toBe(
     await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone)
   );
-  const series: components["schemas"]["MetadataStatisticsAggregated"] =
-    await aggregatedResponse.json();
-  const sessionCount = series.sessions.reduce((total, point) => total + point.count, 0);
-  const questionsCount = series.questions.reduce((total, point) => total + point.count, 0);
-  await expect(
-    page.getByText("Konversationer startade", { exact: true }).locator("..")
-  ).toContainText(new Intl.NumberFormat("sv-SE").format(sessionCount));
-  await expect(page.getByText("Frågor ställda", { exact: true }).locator("..")).toContainText(
-    new Intl.NumberFormat("sv-SE").format(questionsCount)
+  const tiles = page.getByRole("region", { name: "Nyckeltal" });
+  await expect(tiles.getByText("Konversationer", { exact: true }).locator("..")).toContainText(
+    new Intl.NumberFormat("sv-SE").format(summary.totals.conversations.total)
   );
+  await expect(tiles.getByText("Frågor", { exact: true }).locator("..")).toContainText(
+    new Intl.NumberFormat("sv-SE").format(summary.totals.questions)
+  );
+  // The chart's figures as a table for screen readers.
+  await expect(page.getByRole("table", { name: "Aktivitet per dag" })).toBeAttached();
   await expect(page.getByRole("link", { name: "Visa tokenanvändning" })).toHaveAttribute(
     "href",
     /\/admin\/usage\?tab=tokens&from=.*&to=/
   );
   await expect(page.getByRole("button", { name: /^Period:/ })).toBeVisible();
-  await page.getByRole("switch", { name: "Jämför", exact: true }).click();
-  await expect(
-    page.getByText(/jämfört med föregående period|Ny aktivitet utan tidigare data/).first()
-  ).toBeVisible();
-  await page.getByRole("radio", { name: "Ny fråga", exact: true }).click();
-  await page.getByRole("radio", { name: "Efter timme", exact: true }).click();
-  await expect(
-    page.getByRole("table", { name: "Assistentanvändning" }).getByRole("row")
-  ).toHaveCount(25);
-  await page.getByRole("radio", { name: "Efter veckodag", exact: true }).click();
-  await expect(
-    page.getByRole("table", { name: "Assistentanvändning" }).getByRole("row")
-  ).toHaveCount(8);
+  await page.getByRole("switch", { name: "Jämför med föregående period", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]compare=1/);
+  await expect(page.getByText(/jämfört med föregående period/).first()).toBeVisible();
   expect(requested.includes("/api/v1/analysis/counts/")).toBe(false);
+  expect(requested.includes("/api/v1/analysis/metadata-statistics/aggregated/")).toBe(false);
   await page.screenshot({ path: testInfo.outputPath("overview.png"), fullPage: true });
 
   const today = await page.evaluate(() => {
@@ -130,41 +126,28 @@ test("keeps a direct link's period in sync with browser Back and Forward", async
 });
 
 for (const colorScheme of ["light", "dark"] as const) {
-  test.describe(`chart controls on a phone in ${colorScheme} mode`, () => {
+  test.describe(`the overview on a phone in ${colorScheme} mode`, () => {
     test.use({
       viewport: { width: 320, height: 800 },
       hasTouch: true,
       isMobile: true,
       colorScheme
     });
-    test("contains metric/grouping controls and the empty state", async ({ page }, testInfo) => {
-      // An empty endpoint fixture isolates the responsive/empty chart interaction.
-      await page.route("**/api/v1/analysis/metadata-statistics/aggregated/**", (route) =>
+    test("shows an empty period's chart without scrolling sideways", async ({ page }, testInfo) => {
+      // An empty endpoint fixture isolates the responsive empty chart.
+      await page.route("**/api/v1/analysis/targets/activity/**", (route) =>
         route.fulfill({
           status: 200,
           headers: sessionResponseHeaders(route),
-          json: { assistants: [], sessions: [], questions: [] }
+          json: { timezone: "UTC", source: null, start: "", end: "", days: [] }
         })
       );
       await page.goto("/admin/insights");
       await expect(page.getByText("Ingen aktivitet", { exact: true })).toBeVisible();
-      await page.getByRole("radio", { name: "Efter timme", exact: true }).click();
-      await expect(page.getByRole("radio", { name: "Efter timme", exact: true })).toBeChecked();
+      await expect(page.getByRole("region", { name: "Nyckeltal" })).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
         320
       );
-      expect(
-        (await page.getByRole("radio", { name: "Efter timme", exact: true }).boundingBox())!.height
-      ).toBeGreaterThanOrEqual(44);
-      for (const control of await page.getByRole("radio").all()) {
-        expect(
-          await control.evaluate((element) => {
-            const bounds = element.getBoundingClientRect();
-            const figure = element.closest("figure")!.getBoundingClientRect();
-            return bounds.left >= figure.left && bounds.right <= figure.right;
-          })
-        ).toBe(true);
-      }
       await page.getByText("Ingen aktivitet", { exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath("phone-empty.png"), fullPage: true });
     });

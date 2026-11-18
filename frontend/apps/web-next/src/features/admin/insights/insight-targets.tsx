@@ -6,7 +6,7 @@ import { pixel, proportional, useTableSortable, type TableColumn } from "@astryx
 import { keepPreviousData, useInfiniteQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Table } from "@/components/astryx/table";
 import { TextInput } from "@/components/astryx/text-input";
@@ -24,16 +24,15 @@ import {
 } from "@/features/insights/insight-figures";
 import type { InsightRange } from "@/features/insights/insights-range";
 import { PeriodChange } from "@/features/insights/period-change";
-import { SOURCE_STYLE, SourceLegend, useSourceSplit } from "@/features/insights/source-tag";
+import { SOURCE_STYLE, SourceLegend } from "@/features/insights/source-tag";
 import {
   fetchInsightTargets,
-  INSIGHT_TARGETS_SEARCH_MAX,
   nextTargetOffset,
   type InsightPersonalUsage,
   type InsightTarget,
-  type InsightTargetPage,
   type InsightTargetSort
 } from "./insights";
+import { insightTargetSearch } from "./insights-page-search";
 
 /**
  * A row of the table: a listed target, or the personal spaces' assistants
@@ -98,45 +97,6 @@ function SourceBar({ counts }: { counts: SourceCounts }) {
   );
 }
 
-/**
- * What the organisation used in the period, split by source in the words the
- * insights view uses, with its change when compared: "Konversationer i
- * perioden: 9 412, varav 6 120 från användare, 2 870 via widget och 422 via
- * API". Only for the unfiltered list: a search or "Oanvända" narrows the
- * listed targets but not the personal spaces' part of the totals.
- */
-function TargetTotals({
-  totals,
-  compare
-}: {
-  totals: InsightTargetPage["totals"];
-  compare: boolean;
-}) {
-  const t = useTranslations();
-  const format = useFormatter();
-  const sourceSplit = useSourceSplit();
-  const { conversations } = totals;
-  const split = sourceSplit(conversations);
-  const total = format.number(conversations.total);
-  const counted =
-    split === null
-      ? total
-      : sourceParts(conversations).length === 1
-        ? split
-        : t("insights_split_of_total", { total, split });
-  return (
-    <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-      <span>{t("insights_conversations_in_period", { conversations: counted })}</span>
-      {compare ? (
-        <PeriodChange
-          change={countChange(conversations.total, totals.previous?.conversations.total)}
-          unit="percent"
-        />
-      ) : null}
-    </p>
-  );
-}
-
 /** Good answer ratings of all of them; usage only where insights are off. */
 function RatingsCell({ target }: { target: InsightTarget }) {
   const t = useTranslations();
@@ -175,21 +135,46 @@ function RatingsCell({ target }: { target: InsightTarget }) {
  * The personal spaces' assistants are one row, "Personliga assistenter",
  * with their use together and nothing that names a person: first whatever
  * the sort, not a link, and only in the unfiltered list (no search,
- * "Alla"), as is the organisation's total above the table. "Visar x av y"
- * counts the listed targets.
+ * "Alla"). "Visar x av y" counts the listed targets; "Alla" and "Oanvända"
+ * say how many the search finds.
+ *
+ * The sort, "Oanvända" and the search are the page's (`sort`, `unusedOnly`,
+ * `search`, kept in its address); the field answers at once and hands the
+ * search on once typing pauses.
  */
-export function InsightTargets({ range, compare }: { range: InsightRange; compare: boolean }) {
+export function InsightTargets({
+  range,
+  compare,
+  sort,
+  onSortChange,
+  unusedOnly,
+  onUnusedOnlyChange,
+  search,
+  onSearchChange
+}: {
+  range: InsightRange;
+  compare: boolean;
+  sort: InsightTargetSort;
+  onSortChange: (sort: InsightTargetSort) => void;
+  unusedOnly: boolean;
+  onUnusedOnlyChange: (unusedOnly: boolean) => void;
+  /** The name search as sent. */
+  search: string;
+  onSearchChange: (search: string) => void;
+}) {
   const t = useTranslations();
   const format = useFormatter();
   const announce = useAnnounce();
   const headingId = useId();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const tableRef = useRef<HTMLTableElement>(null);
-  const [sort, setSort] = useState<InsightTargetSort>({ by: "conversations", order: "desc" });
-  const [unusedOnly, setUnusedOnly] = useState(false);
-  const [searchInput, setSearchInput] = useState("");
-  // The name search is sent once typing pauses.
-  const search = useDebouncedValue(searchInput.trim().slice(0, INSIGHT_TARGETS_SEARCH_MAX));
+  const [searchInput, setSearchInput] = useState(search);
+  // The name search is handed on once typing pauses.
+  const typed = useDebouncedValue(insightTargetSearch(searchInput));
+  const handOn = useEffectEvent((next: string) => {
+    if (next !== search) onSearchChange(next);
+  });
+  useEffect(() => handOn(typed), [typed]);
 
   const targets = useInfiniteQuery({
     queryKey: ["admin-insights-targets", range, compare, sort, search, unusedOnly],
@@ -220,6 +205,10 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
   }));
   const total = pages?.[0]?.total_count ?? listed.length;
   const shown = t("insights_shown_of_total", { shown: listed.length, total });
+  // The targets the search finds, whatever "Oanvända" says.
+  const counts = pages?.[0]?.counts;
+  const filterLabel = (label: string, count: number | undefined) =>
+    count === undefined ? label : t("insights_feedback_filter_count", { label, count });
   // The organisation as a whole: the controls and the rows on screen both unfiltered.
   const organisation =
     searchInput.trim() === "" && !unusedOnly && pages?.[0]?.filtered === false ? pages[0] : null;
@@ -263,7 +252,7 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
     onSortChange: ([next]) => {
       if (!next) return;
       // A new column starts with names A to Z and figures largest first.
-      setSort(
+      onSortChange(
         next.sortKey !== sort.by
           ? { by: next.sortKey, order: next.sortKey === "name" ? "asc" : "desc" }
           : { by: next.sortKey, order: next.direction === "ascending" ? "asc" : "desc" }
@@ -388,11 +377,14 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
             <SegmentedControl
               label={t("insights_targets_filter_label")}
               value={unusedOnly ? "unused" : "all"}
-              onChange={(value) => setUnusedOnly(value === "unused")}
+              onChange={(value) => onUnusedOnlyChange(value === "unused")}
               size="sm"
             >
-              <SegmentedControlItem value="all" label={t("all")} />
-              <SegmentedControlItem value="unused" label={t("insights_targets_unused")} />
+              <SegmentedControlItem value="all" label={filterLabel(t("all"), counts?.all)} />
+              <SegmentedControlItem
+                value="unused"
+                label={filterLabel(t("insights_targets_unused"), counts?.unused)}
+              />
             </SegmentedControl>
             <div className="min-w-0 flex-1 basis-56">
               <TextInput
@@ -410,7 +402,6 @@ export function InsightTargets({ range, compare }: { range: InsightRange; compar
             </div>
           </div>
         </div>
-        {organisation ? <TargetTotals totals={organisation.totals} compare={compare} /> : null}
         <QueryStateBoundary query={targets} rows={5} height={56}>
           {() =>
             rows.length === 0 ? (

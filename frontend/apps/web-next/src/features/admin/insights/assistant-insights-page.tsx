@@ -13,6 +13,7 @@ import { groupChatQueryOptions } from "@/features/group-chats/use-group-chat";
 import { AssistantInsights, type InsightsPartner } from "@/features/insights/assistant-insights";
 import { INSIGHT_VIEW_PARAMS, useInsightViewUrl } from "@/features/insights/insight-view-url";
 import { insightViewSearch, readInsightViewSearch } from "./assistant-insights-view";
+import { insightsPageHref } from "./insights-page-search";
 
 /**
  * The height from the top of `frame` to the end of the page panel (main),
@@ -62,7 +63,8 @@ function FilledFrame({ children }: { children: ReactNode }) {
 
 /**
  * An assistant's or group chat's insights in the administration: its name
- * with the way back to the organisation's insights, over the same insights
+ * with the way back to the organisation's insights (on the same period and
+ * comparison), over the same insights
  * view as the chat page's Insikter tab. The filters, the finding open in
  * place of the overview, the feedback inbox's filter and the analysis open
  * over the view live in the address
@@ -95,7 +97,8 @@ function TargetInsightsPage({
       title={partner.name}
       actions={
         <Button
-          href="/admin/insights"
+          // The way back keeps the period and the comparison.
+          href={insightsPageHref(filters.range, filters.compare)}
           label={t("insights")}
           icon={<BarChart3 className="size-4" aria-hidden="true" />}
         />

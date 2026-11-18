@@ -3277,9 +3277,29 @@ export interface paths {
     };
     /**
      * Get Insight Targets
-     * @description Every assistant people see and every group chat of the tenant outside personal spaces, with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. Targets in personal spaces are never rows: personal gives their number and usage together, without ratings, the same on every page and whatever q and activity say. totals is everything the organisation used: every listed target that matches the filters, not only the page, plus the personal usage.
+     * @description Every assistant people see and every group chat of the tenant outside personal spaces, with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. Targets in personal spaces are never rows: personal gives their number and usage together, without ratings, the same on every page and whatever q and activity say. totals is everything the organisation used: every listed target that matches the filters, not only the page, plus the personal usage. counts gives the listed targets q finds, whatever activity says; users the signed-in users with a question on any target people see, whatever the filters.
      */
     get: operations["get_insight_targets_api_v1_analysis_targets__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/targets/activity/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Targets Activity
+     * @description Conversations and questions per local day for the whole organisation, split by source: every assistant people see and every group chat, listed and in personal spaces, counted by the rules of the target list. A conversation counts on every day it had a question, so the days of a period can add up to more conversations than the target list's totals. source is always null.
+     */
+    get: operations["get_insight_targets_activity_api_v1_analysis_targets_activity__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -32619,8 +32639,26 @@ export interface components {
       /** Space Name */
       space_name: string;
     };
+    /**
+     * InsightTargetCounts
+     * @description The targets outside personal spaces whose name matches q, whatever
+     *     activity says.
+     */
+    InsightTargetCounts: {
+      /**
+       * All
+       * @description Every one of them.
+       */
+      all: number;
+      /**
+       * Unused
+       * @description Those without a conversation with a question in the period.
+       */
+      unused: number;
+    };
     /** InsightTargetPage */
     InsightTargetPage: {
+      counts: components["schemas"]["InsightTargetCounts"];
       /**
        * Items
        * @description The page of targets outside personal spaces.
@@ -32638,6 +32676,7 @@ export interface components {
        */
       total_count: number;
       totals: components["schemas"]["InsightTargetTotals"];
+      users: components["schemas"]["InsightTargetUsers"];
     };
     /**
      * InsightTargetTotals
@@ -32659,6 +32698,25 @@ export interface components {
       conversations: components["schemas"]["SourceCounts"];
       /** Questions */
       questions: number;
+    };
+    /**
+     * InsightTargetUsers
+     * @description Distinct signed-in users with a question in the period on any target
+     *     people see, listed or in a personal space, whatever q and activity say.
+     *     API keys and widget visitors are not users; hidden sessions and hidden
+     *     assistants' conversations are left out, as for the usage.
+     */
+    InsightTargetUsers: {
+      /**
+       * Current
+       * @description In the period.
+       */
+      current: number;
+      /**
+       * Previous
+       * @description In the previous period of equal length, when compare was asked for.
+       */
+      previous: number | null;
     };
     /**
      * InsightToolUsage
@@ -56665,6 +56723,60 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InsightTargetPage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_insight_targets_activity_api_v1_analysis_targets_activity__get: {
+    parameters: {
+      query?: {
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description IANA time zone for local days; 400 invalid_timezone when unknown. */
+        timezone?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightActivity"];
         };
       };
       /** @description Bad Request */
