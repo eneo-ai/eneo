@@ -103,6 +103,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.uv]
+# The relative `exclude-newer` below needs a uv that writes it to uv.lock as a
+# span. Older versions reject it or record a timestamp that changes on each lock.
+required-version = ">=0.13.7"
+# Resolve only versions uploaded to PyPI at least 7 days ago.
+# Exceptions go in `exclude-newer-package`, one package each, set to the upload
+# time of the exact release that is needed, with an advisory link and a removal
+# date at most 7 days out. Never `false`, which would lift the limit for every
+# future release of that package. Example:
+#   exclude-newer-package = { example = "2026-11-18T09:30:00Z" }
+exclude-newer = "7 days"
 # LiteLLM's <4 cap excludes the fixes for UnixFileLock and SoftFileLock used
 # by huggingface-hub. Remove this override when LiteLLM permits patched 4.x.
 override-dependencies = ["filelock==4.2.4"]

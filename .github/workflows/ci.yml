@@ -143,6 +143,7 @@ jobs:
             .github/scripts/fetch-backend-audit-severities.test.mjs \
             frontend/scripts/audit-dependencies.test.mjs
           node --test --test-concurrency=1 .github/scripts/ci-contract.test.mjs
+          node --test --test-concurrency=1 .github/scripts/dependency-cooldown.test.mjs
           node .github/scripts/check-user-facing.mjs --self-test
           node scripts/collect_user_facing.mjs --self-test
           node scripts/export_github_roadmap.mjs --self-test
@@ -164,7 +165,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
@@ -237,7 +238,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
@@ -742,7 +743,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6
         with:
-          version: "0.8.22"
+          version: "0.13.7"
           enable-cache: true
 
       - name: Set up Python
