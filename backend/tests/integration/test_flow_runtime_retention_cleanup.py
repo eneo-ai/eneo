@@ -16,7 +16,6 @@ from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
@@ -35,6 +34,7 @@ from eneo.database.tables.flow_tables import (
     FlowTemplateAssets,
     FlowVersions,
 )
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.object_content_table import (
     FileContentReferences,
     InlineContentPayloads,
@@ -1242,13 +1242,14 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         session.add(authoring_session)
         await session.flush()
         session.add(
-            FlowAuthoringChats(
+            HelperChats(
                 session_id=authoring_session.id,
                 assistant_id=authoring_assistant.id,
                 tenant_id=tenant.id,
                 space_id=space.id,
                 user_id=user.id,
-                flow_id=flow_id,
+                target_type="flow",
+                target_id=flow_id,
             )
         )
         await session.flush()
@@ -1377,7 +1378,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             is not None
         )
         assert await session.get(Sessions, authoring_session_id) is not None
-        assert await session.get(FlowAuthoringChats, authoring_session_id) is not None
+        assert await session.get(HelperChats, authoring_session_id) is not None
         # Readable, not only referenced: the reader refuses content that is no
         # longer AVAILABLE although its reference remains.
         for file_id, payload in (

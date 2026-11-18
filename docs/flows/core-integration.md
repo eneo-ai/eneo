@@ -218,9 +218,10 @@ Changing a published flow or one of its step assistants is refused with
 
 ### The authoring chat's model and conversations
 
-`flow_authoring_chats` keeps the person's own `completion_model_id` and
-`reasoning_effort` (migration `202610221100`; null follows the default) and
-`mode_changed_at`. `PATCH /flows/{id}/authoring-chat/{session_id}/` (operation
+`helper_chats` (a flow's chat has `target_type` `flow` and the flow as
+`target_id`; migration `202611181200`) keeps the person's own
+`completion_model_id` and `reasoning_effort` (migration `202610221100`; null
+follows the default) and `mode_changed_at`. `PATCH /flows/{id}/authoring-chat/{session_id}/` (operation
 `update_flow_authoring_chat`) takes them next to `editing`; the model is
 refused unless the space allows it the way it allows an assistant's model
 (`space.is_completion_model_available`, the space's classification split) and
@@ -229,7 +230,8 @@ it supports tool calling, with `flow_authoring_model_not_in_space`,
 `flow_authoring_model_without_tools` and
 `flow_authoring_reasoning_effort_unsupported`. The organisation default lives in
 `tenants.flow_settings["authoring_chat"]` (`/settings/flow-authoring-chat-policy`,
-refused without tool calling). `_sync_assistant` runs when a chat is opened and
+refused without tool calling). `_sync_assistant`
+(`helper_chats/application/helper_chat_service.py`) runs when a chat is opened and
 after every PATCH: the hidden assistant gets the core's instructions, the model
 in force (own choice, else the organisation default where the space allows it,
 else `space.select_default_completion_model` over the space's tool models) and

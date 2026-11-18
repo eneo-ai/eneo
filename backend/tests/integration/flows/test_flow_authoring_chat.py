@@ -18,8 +18,8 @@ from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import Flows
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.security_classifications_table import (
@@ -95,7 +95,7 @@ async def test_chat_bootstrap_is_idempotent_scoped_and_builds_an_empty_draft(
             assistant_id=UUID(chat["assistant_id"]),
             flow_id=UUID(flow["id"]),
         )
-        assert str(loaded.flow_id) == flow["id"]
+        assert str(loaded.target_id) == flow["id"]
         with pytest.raises(NotFoundException):
             await load_authoring_chat(
                 container, session_id=UUID(chat["session_id"]), assistant_id=uuid4()
@@ -1245,8 +1245,8 @@ async def _add_question(
 async def _set_mode_changed(db_container, chat: dict, *, age: timedelta) -> None:
     async with db_container() as container:
         await container.session().execute(
-            sa.update(FlowAuthoringChats)
-            .where(FlowAuthoringChats.session_id == UUID(chat["session_id"]))
+            sa.update(HelperChats)
+            .where(HelperChats.session_id == UUID(chat["session_id"]))
             .values(mode_changed_at=datetime.now(timezone.utc) - age)
         )
 
@@ -1422,8 +1422,8 @@ async def test_a_turn_after_a_pause_on_a_tab_left_open_is_in_view_mode(
     assert audited.count(ActionType.FLOW_AUTHORING_MODE_CHANGED) == 1
     async with db_container() as container:
         mode = await container.session().scalar(
-            sa.select(FlowAuthoringChats.editing).where(
-                FlowAuthoringChats.session_id == UUID(editing["session_id"])
+            sa.select(HelperChats.editing).where(
+                HelperChats.session_id == UUID(editing["session_id"])
             )
         )
     assert mode is False
@@ -1574,7 +1574,7 @@ async def test_a_flow_deleted_while_its_chat_waits_for_the_flow_gets_no_chat(
     async with db_container() as container:
         chats = await container.session().scalar(
             sa.select(sa.func.count())
-            .select_from(FlowAuthoringChats)
-            .where(FlowAuthoringChats.flow_id == UUID(flow["id"]))
+            .select_from(HelperChats)
+            .where(HelperChats.target_id == UUID(flow["id"]))
         )
     assert chats == 0

@@ -32,7 +32,6 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import FlowSteps
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
@@ -41,6 +40,7 @@ from eneo.database.tables.group_chats_table import (
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.info_blobs_table import InfoBlobs, active_info_blob_version
 from eneo.database.tables.integration_table import IntegrationKnowledge
 from eneo.database.tables.integration_table import (
@@ -600,10 +600,10 @@ class AssistantRepository:
         )
         return {row.id: row.icon_id for row in rows}
 
-    async def delete_flow_authoring_chat_assistants(
-        self, *, flow_id: UUID, tenant_id: UUID
+    async def delete_helper_chat_assistants(
+        self, *, target_type: str, target_id: UUID, tenant_id: UUID
     ) -> list[UUID]:
-        """Delete the hidden assistants of ``flow_id``'s authoring chats.
+        """Delete the hidden assistants of the helper chats on one target.
 
         The database removes what hangs on them: their conversations with
         the questions in them, and the chat bindings. Returns the deleted
@@ -613,9 +613,10 @@ class AssistantRepository:
             sa.delete(Assistants)
             .where(
                 sa.exists().where(
-                    FlowAuthoringChats.assistant_id == Assistants.id,
-                    FlowAuthoringChats.flow_id == flow_id,
-                    FlowAuthoringChats.tenant_id == tenant_id,
+                    HelperChats.assistant_id == Assistants.id,
+                    HelperChats.target_type == target_type,
+                    HelperChats.target_id == target_id,
+                    HelperChats.tenant_id == tenant_id,
                 )
             )
             .where(Assistants.hidden.is_(True))

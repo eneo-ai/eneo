@@ -35,11 +35,11 @@ and restricted to rows that carry the link.
 ## Hidden assistants are another rule
 
 `Assistants.hidden` marks an assistant that answers only where it was made
-for, such as a flow authoring chat's. It decides which assistants are shown:
+for, such as a helper chat's (a flow authoring chat is one). It decides which assistants are shown:
 the chat partner list and the assistant counts leave hidden assistants out.
 Their conversations are not hidden sessions: they stay in the session and
-question figures, which measure model use, and a flow authoring chat is
-reached through its own `flow_authoring_chats` row.
+question figures, which measure model use, and a helper chat is reached
+through its own `helper_chats` row.
 
 ## Sources are another rule
 

@@ -1,23 +1,22 @@
-"""Human-owned chat bindings; flow definitions remain in the reference schema."""
+"""Human-owned chat bindings: a person's helper chat on one target."""
 
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import TIMESTAMP, ForeignKey, UniqueConstraint
+from sqlalchemy import TIMESTAMP, ForeignKey, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.base_class import BaseCrossReference
-from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
 
 
-class FlowAuthoringChats(BaseCrossReference):
+class HelperChats(BaseCrossReference):
     session_id: Mapped[UUID] = mapped_column(
         ForeignKey(Sessions.id, ondelete="CASCADE"), primary_key=True
     )
@@ -29,10 +28,14 @@ class FlowAuthoringChats(BaseCrossReference):
     )
     space_id: Mapped[UUID] = mapped_column(ForeignKey(Spaces.id, ondelete="CASCADE"))
     user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
-    flow_id: Mapped[UUID] = mapped_column(ForeignKey(Flows.id, ondelete="CASCADE"))
+    # What the chat helps with: a kind (``HelperChatTargetType``) and the id of
+    # that kind's row. The id has no foreign key, since it names rows of
+    # different tables; the target's own deletion removes its chats.
+    target_type: Mapped[str] = mapped_column(Text)
+    target_id: Mapped[UUID] = mapped_column()
     editing: Mapped[bool] = mapped_column(default=False, server_default="false")
     # The person's own model for the chat; null follows the organisation's
-    # default for flow chats, then the space's.
+    # default for the target's chats, then the space's.
     completion_model_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(CompletionModels.id, ondelete="SET NULL"), nullable=True
     )
@@ -44,6 +47,10 @@ class FlowAuthoringChats(BaseCrossReference):
     )
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "user_id", "flow_id", name="uq_flow_authoring_chat_owner"
+            "tenant_id",
+            "user_id",
+            "target_type",
+            "target_id",
+            name="uq_helper_chat_owner",
         ),
     )

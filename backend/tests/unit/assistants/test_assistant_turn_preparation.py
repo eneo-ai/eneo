@@ -27,6 +27,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+from eneo.helper_chats.binding import HelperChatBinding
 from eneo.main.exceptions import (
     NotFoundException,
     SecurityClassificationMismatchException,
@@ -281,8 +282,12 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
 ):
     turn.assistant.hidden = True
     flow_id = uuid4()
-    bound = AsyncMock(return_value=(flow_id, True))
-    turn.service._authoring_chat_binding = bound
+    bound = AsyncMock(
+        return_value=HelperChatBinding(
+            target_type="flow", target_id=flow_id, editing=True
+        )
+    )
+    turn.service._helper_chat_binding = bound
 
     with pytest.raises(NotFoundException):
         await turn.service._prepare_turn(
@@ -299,8 +304,8 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
     bound.assert_awaited_once_with(
         session_id=turn.session.id, assistant_id=turn.assistant.id
     )
-    assert prepared.authoring_flow_id == flow_id
-    assert prepared.authoring_editing is True
+    assert prepared.helper_chat.target_id == flow_id
+    assert prepared.helper_chat.editing is True
 
 
 async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixture):
@@ -310,7 +315,7 @@ async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixtur
         session_id=turn.session.id,
     )
 
-    assert prepared.authoring_flow_id is None
+    assert prepared.helper_chat is None
 
 
 async def test_prepare_does_not_start_inference_or_create_conversation(

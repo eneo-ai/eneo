@@ -23,8 +23,8 @@ from eneo.assistants.assistant_service import AssistantService
 from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.ai_models_table import TranscriptionModels
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import FlowRuns, Flows, FlowSteps
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -371,13 +371,14 @@ async def _authoring_chat(
             )
         )
         session.add(
-            FlowAuthoringChats(
+            HelperChats(
                 session_id=conversation.id,
                 assistant_id=assistant_id,
                 tenant_id=admin_user.tenant_id,
                 space_id=space_id,
                 user_id=admin_user.id,
-                flow_id=flow_id,
+                target_type="flow",
+                target_id=flow_id,
             )
         )
         await session.flush()
@@ -433,8 +434,8 @@ async def test_deleting_a_flow_deletes_its_authoring_chats_and_their_conversatio
         ) == {kept_session}
         assert set(
             await session.scalars(
-                sa.select(FlowAuthoringChats.flow_id).where(
-                    FlowAuthoringChats.flow_id.in_([flow.id, other.id])
+                sa.select(HelperChats.target_id).where(
+                    HelperChats.target_id.in_([flow.id, other.id])
                 )
             )
         ) == {other.id}

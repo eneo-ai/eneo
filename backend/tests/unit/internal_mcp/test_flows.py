@@ -155,7 +155,7 @@ def _tool_context(container: MagicMock, session_id=None):
 async def test_failed_mutation_rolls_back_before_its_error_is_converted(monkeypatch):
     order: list[str] = []
     container = _transaction_container(order)
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     load = AsyncMock(return_value=chat)
     monkeypatch.setattr(flow_authoring_chat, "load_authoring_chat", load)
@@ -181,7 +181,7 @@ def _stale_chat(monkeypatch, order: list[str], current_revision):
     from eneo.flows.flow_api_exceptions import FlowBadRequestException
 
     container = _transaction_container(order)
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     load = AsyncMock(return_value=chat)
     monkeypatch.setattr(flow_authoring_chat, "load_authoring_chat", load)
@@ -222,7 +222,7 @@ async def test_a_stale_change_tells_the_model_the_revision_to_read_again_at(
     # transaction of its own, for the chat's own flow.
     assert order == ["write", "rollback", "commit"]
     assert load.await_args.kwargs.get("lock", False) is False
-    assert read.await_args.args[0] == chat.flow_id
+    assert read.await_args.args[0] == chat.target_id
 
 
 async def test_a_stale_change_whose_revision_cannot_be_read_is_still_reported(
@@ -279,7 +279,7 @@ async def test_runtime_and_draft_tools_refuse_an_invalid_configuration_alike(
 async def test_a_saved_change_is_audited_after_its_commit(monkeypatch):
     order: list[str] = []
     container = _transaction_container(order)
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
@@ -289,7 +289,7 @@ async def test_a_saved_change_is_audited_after_its_commit(monkeypatch):
     async def operation(*_):
         order.append("write")
         flow_authoring_operations._change_audit(container)[0].add(action="saved")  # pyright: ignore[reportPrivateUsage]
-        return flows.page_result({"saved": True}, flow_id=chat.flow_id)
+        return flows.page_result({"saved": True}, flow_id=chat.target_id)
 
     result = await flows._call(MagicMock(), operation, editing=True)
     assert result.isError is not True
@@ -392,7 +392,7 @@ def _suggestions_chat(monkeypatch, *, may_trace: bool = False):
     )
     from eneo.roles.permissions import Permission
 
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=False)
     container = _transaction_container([])
     container.user.return_value = SimpleNamespace(
         permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_MANAGE]
@@ -405,7 +405,7 @@ def _suggestions_chat(monkeypatch, *, may_trace: bool = False):
     edit = AsyncMock()
     monkeypatch.setattr(flow_authoring_chat, "require_authoring_edit", edit)
     answer = FlowSuggestionsPublic.model_validate(
-        {**FLOW_SUGGESTIONS_EXAMPLE, "flow_id": str(chat.flow_id)}
+        {**FLOW_SUGGESTIONS_EXAMPLE, "flow_id": str(chat.target_id)}
     )
     read = AsyncMock(return_value=answer)
     monkeypatch.setattr(flow_suggestions_router, "read_flow_suggestions_answer", read)
@@ -421,7 +421,7 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
 
     assert result.isError is not True
     page = json.loads(result.content[0].text)
-    assert page["flow_id"] == str(chat.flow_id)
+    assert page["flow_id"] == str(chat.target_id)
     assert page["draft_revision"] == answer.draft_revision
     assert '"code":"duplicate_read"' in page["content"]
     # Dismissed suggestions are left out, and the page says how many.
@@ -429,7 +429,7 @@ async def test_read_flow_suggestions_reports_the_drafts_suggestions_in_view_mode
     assert read.await_args.kwargs.get("include_dismissed", False) is False
     # A read: the tool asks for this chat's flow, judged from the definition
     # alone, and needs no edit mode.
-    assert read.await_args.kwargs["id"] == chat.flow_id
+    assert read.await_args.kwargs["id"] == chat.target_id
     assert read.await_args.kwargs["runs"] == 0
     edit.assert_not_awaited()
 
@@ -462,7 +462,7 @@ async def test_include_runs_without_trace_permission_is_static_with_a_note(
 def _apply_chat(monkeypatch, *, editing: bool):
     from eneo.flows.application import flow_suggestion_apply
 
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=editing)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=editing)
     monkeypatch.setattr(
         flows, "internal_tool_context", _tool_context(_transaction_container([]))
     )
@@ -508,7 +508,7 @@ async def test_apply_flow_suggestions_applies_the_batch_in_edit_mode(monkeypatch
         "applied": ["a"],
         "skipped": ["b"],
     }
-    assert apply.await_args.args[0] == chat.flow_id
+    assert apply.await_args.args[0] == chat.target_id
     assert apply.await_args.kwargs["fingerprints"] == ["a", "b"]
     assert apply.await_args.kwargs["expected_revision"] == 4
 
@@ -533,7 +533,7 @@ def _dismissing_chat(monkeypatch, *, editing: bool):
     from eneo.flows.application import flow_suggestion_dismissals
     from eneo.flows.domain.flow_suggestion_dismissal import FlowSuggestionDismissal
 
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=editing)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=editing)
     monkeypatch.setattr(
         flows, "internal_tool_context", _tool_context(_transaction_container([]))
     )
@@ -583,7 +583,7 @@ async def test_dismiss_flow_suggestion_dismisses_in_edit_mode(monkeypatch):
         "fingerprint": _FINGERPRINT,
         "code": "duplicate_read",
     }
-    assert dismiss.await_args.args[0] == chat.flow_id
+    assert dismiss.await_args.args[0] == chat.target_id
     assert dismiss.await_args.kwargs["fingerprint"] == _FINGERPRINT
     assert dismiss.await_args.kwargs["code"] is FlowSuggestionCode.DUPLICATE_READ
 
@@ -651,7 +651,7 @@ def _changing_chat(
     container.flow_suggestion_dismissal_repo.return_value.list_for_flow = AsyncMock(
         return_value=dismissed or {}
     )
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
@@ -1268,7 +1268,7 @@ def _reading_chat(monkeypatch):
         )
     }
     container = _transaction_container([])
-    chat = SimpleNamespace(flow_id=public.id, space_id=uuid4(), editing=False)
+    chat = SimpleNamespace(target_id=public.id, space_id=uuid4(), editing=False)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
@@ -1624,7 +1624,7 @@ _SAVED_METADATA = {
 def _settings_chat(monkeypatch):
     """A chat in edit mode over a flow saved with ``_SAVED_METADATA``."""
     container = _transaction_container([])
-    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=True)
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), editing=True)
     monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
     monkeypatch.setattr(
         flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
