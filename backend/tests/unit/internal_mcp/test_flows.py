@@ -1464,6 +1464,51 @@ async def test_an_upload_of_another_shape_is_refused_unsaved_with_what_it_takes(
     save.assert_not_awaited()
 
 
+@pytest.mark.parametrize(
+    "review", [{}, True, {"enabled": True}], ids=["empty", "true", "enabled"]
+)
+async def test_a_step_added_with_a_review_without_a_mode_gets_the_default_review(
+    monkeypatch, review
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Sammanfatta.", "review": review},
+    )
+
+    assert result.isError is not True, page
+    (new_step,) = save.await_args.args[2].new_steps
+    assert new_step.configuration.review_policy.mode == "edit"
+    assert json.loads(page["content"])["step"]["review"] is True
+
+
+async def test_a_review_given_as_text_is_refused_unsaved_with_the_shape_it_takes(
+    monkeypatch,
+):
+    from tests.unit.flows.application.test_flow_step_kinds import _step
+
+    save = _adding_chat(monkeypatch, [_step(1)])
+
+    result, page = await _add(
+        name="Sammanfatta",
+        kind="ai",
+        values={"instruction": "Sammanfatta.", "review": "MARKOR-7"},
+    )
+
+    assert result.isError is True
+    assert page["code"] == "flow_step_kind_values_invalid"
+    # Where it was wrong and the shape it takes, never what was sent.
+    (error,) = page["errors"]
+    assert error["loc"] == ["review"]
+    assert '{"mode": "edit"}' in error["msg"]
+    assert "MARKOR-7" not in result.content[0].text
+    save.assert_not_awaited()
+
+
 async def _through_the_server(tool_name, /, **arguments):
     """The text a tool call answers with when the tool server takes it: the
     server checks the arguments before the tool runs."""

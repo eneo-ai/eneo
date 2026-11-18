@@ -589,6 +589,75 @@ async def test_a_speaker_step_is_saved_with_its_choices_and_a_review(
     assert step.review_policy is not None
 
 
+_MODEL_KINDS = [
+    (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+    (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [*_MODEL_KINDS, (FlowStepKind.REVIEW, {})],
+    ids=["ai", "structured", "review"],
+)
+@pytest.mark.parametrize(
+    "review", [{}, True, {"enabled": True}], ids=["empty", "true", "enabled"]
+)
+async def test_a_review_asked_for_without_a_mode_is_the_default_review(
+    kind: FlowStepKind,
+    needs: dict[str, Any],
+    review: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step = await _added(
+        _flow([_step(1)]), kind, {**needs, "review": review}, monkeypatch
+    )
+
+    assert step.model_dump(mode="json")["review_policy"] == {
+        "mode": "edit",
+        "expires_after_seconds": None,
+    }
+
+
+@pytest.mark.parametrize(("kind", "needs"), _MODEL_KINDS, ids=["ai", "structured"])
+async def test_a_step_given_no_review_has_none(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step = await _added(_flow([_step(1)]), kind, needs, monkeypatch)
+
+    assert step.review_policy is None
+
+
+@pytest.mark.parametrize(
+    "review",
+    ["edit", "", False, {"enabled": False}, {"enabled": True, "note": "kort"}],
+    ids=["text", "empty text", "false", "turned off", "another key"],
+)
+def test_a_review_of_another_shape_is_refused_with_the_shape_it_takes(
+    review: object,
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": review})
+
+    (error,) = refused.value.errors()
+    assert error["loc"] == ("review",)
+    assert '{"mode": "edit"}' in error["msg"]
+    assert '{"mode": "view"}' in error["msg"]
+
+
+def test_a_review_with_a_mode_is_judged_by_the_review_policy_itself() -> None:
+    from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": {"mode": "ändra"}})
+
+    assert [error["loc"] for error in refused.value.errors()] == [("review", "mode")]
+    # The default is the kinds' own: the policy a saved step has still needs
+    # its mode.
+    with pytest.raises(ValidationError):
+        FlowStepReviewPolicy.model_validate({})
+
+
 async def test_a_first_step_reads_an_upload_only_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

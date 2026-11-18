@@ -199,6 +199,25 @@ class StepKindValues(BaseModel):
         description="The tool: mcp_server_id, tool_id and arguments.",
     )
 
+    @field_validator("review", mode="before")
+    @classmethod
+    def _review_with_the_default_mode(cls, value: object) -> object:
+        """A review asked for without a mode ({}, true or {"enabled": true})
+        is the review a review step has. The saved step's own policy is left
+        as strict as it is: this is the kinds' reading of the value. Anything
+        else that names no mode is told the shape, never what was sent."""
+        if value is None or isinstance(value, FlowStepReviewPolicy):
+            return value
+        if value is True or value in ({}, {"enabled": True}):
+            return {"mode": "edit"}
+        if isinstance(value, Mapping) and "mode" in value:
+            return cast(object, value)
+        raise ValueError(
+            'review takes an object with a mode: {"mode": "edit"} lets the '
+            'reviewer edit the result, {"mode": "view"} only approve it. '
+            "Left out, an ai or structured step has no review."
+        )
+
 
 # The values each kind takes, those it cannot do without first.
 STEP_KIND_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
