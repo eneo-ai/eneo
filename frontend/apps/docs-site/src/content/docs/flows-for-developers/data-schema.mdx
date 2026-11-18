@@ -49,6 +49,27 @@ terminalization.
 These are database constraints as well as service-layer checks. Do not replace a
 composite ownership constraint with an application-only assertion.
 
+## File origin
+
+A file created for a flow records where it came from on its own `files` row:
+`origin_space_id`, `origin_flow_id` and, for a file a run created,
+`origin_flow_run_id`. An upload to a published step and a Word template, whether
+uploaded to a draft or brought in by a package import, record the space and the
+flow. A run's rendered documents, filled templates, and text or transcripts
+stored as files because they exceed the inline limit also record the run. A
+derived file, such as a page image, records the origin of the file it came from.
+A template made from a file that is already attached reuses that file's row and
+records nothing new.
+
+The values are written when the file is created and never change. They have no
+foreign keys, so a file keeps its origin after its run, flow or space is gone.
+NULL means that no origin was recorded, for example for a file uploaded outside
+Flows or created before revision `202611181900`. It does not mean the file is
+unrelated to a flow.
+
+The origin is a fact for tracing a file, not an ownership record. It grants no
+access, and no read, change or deletion checks it.
+
 ## Lifecycle integrity
 
 The schema enforces the invariants that must survive process crashes:
