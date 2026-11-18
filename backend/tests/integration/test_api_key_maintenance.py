@@ -50,11 +50,7 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.main.container.container import Container
 from eneo.sessions.session import SessionAdd, SessionInDB
 from eneo.tenants.tenant import TenantBase
-from tests.integration.fixtures.locks import (
-    finishes_beside,
-    wait_until_blocked,
-    wait_until_blocked_by,
-)
+from tests.integration.fixtures.locks import settle, wait_until_blocked, waits_for
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
@@ -1128,7 +1124,9 @@ async def test_a_revocation_taking_the_keys_in_the_other_order_does_not_deadlock
             revoking.append(
                 asyncio.create_task(revoke_the_assistants_keys(revoker_pid))
             )
-            await wait_until_blocked_by(self.session, revoking[0], revoker_pid)
+            assert await waits_for(self.session, revoking[0], revoker_pid), (
+                f"the revocation did not wait for the run: {revoking[0]!r}"
+            )
         return keys
 
     monkeypatch.setattr(
@@ -1210,12 +1208,15 @@ async def test_a_conversation_is_created_while_its_key_is_renamed(
             creating = asyncio.create_task(
                 create_conversation(db_container, key_id, pid)
             )
-            conversation = await finishes_beside(renaming.session(), creating, pid)
+            assert not await waits_for(renaming.session(), creating, pid), (
+                "the conversation waits for the rename"
+            )
+            conversation = creating.result()
             assert await conversation_owner(db_container, conversation.id) == key_id
     finally:
         # A failure releases the rename first, so the conversation can finish.
         if creating is not None:
-            await asyncio.wait({creating}, timeout=10)
+            await settle(creating)
 
     assert (await read_key(db_container, key_id)).name == "renamed"
 
@@ -1238,13 +1239,20 @@ async def test_a_rotation_waiting_on_a_revocation_is_refused(db_container, admin
             )
             await container.api_key_lifecycle_service().rotate_key(key_id=key_id)
 
-    async with db_container() as revoking:
-        await revoking.api_key_lifecycle_service().revoke_key(key_id=key_id)
-        rotating = asyncio.create_task(rotate())
-        await wait_until_blocked_by(revoking.session(), rotating, pid)
+    rotating: asyncio.Task[None] | None = None
+    try:
+        async with db_container() as revoking:
+            await revoking.api_key_lifecycle_service().revoke_key(key_id=key_id)
+            rotating = asyncio.create_task(rotate())
+            assert await waits_for(revoking.session(), rotating, pid), (
+                f"the rotation did not wait for the revocation: {rotating!r}"
+            )
 
-    with pytest.raises(ApiKeyValidationError) as refused:
-        await rotating
+        with pytest.raises(ApiKeyValidationError) as refused:
+            await asyncio.wait_for(rotating, timeout=10)
+    finally:
+        if rotating is not None:
+            await settle(rotating)
     assert refused.value.status_code == 401
     assert (await read_key(db_container, key_id)).revoked_at is not None
     async with db_container() as container:
@@ -1280,22 +1288,27 @@ async def test_a_conversation_waits_for_its_key_being_deleted(
         creating.append(
             asyncio.create_task(create_conversation(db_container, key_id, pid))
         )
-        await wait_until_blocked_by(self.session, creating[0], pid)
+        assert await waits_for(self.session, creating[0], pid), (
+            f"the conversation did not wait for the deletion: {creating[0]!r}"
+        )
         return await delete(self, **kwargs)
 
     monkeypatch.setattr(ApiKeysV2Repository, "delete", delete_once_a_conversation_waits)
-    with contextlib.suppress(_RollBack):
-        async with db_container() as deleting:
-            await deleting.api_key_lifecycle_service().purge_key(key_id=key_id)
-            if not committed:
-                raise _RollBack
-    [conversation] = creating
+    try:
+        with contextlib.suppress(_RollBack):
+            async with db_container() as deleting:
+                await deleting.api_key_lifecycle_service().purge_key(key_id=key_id)
+                if not committed:
+                    raise _RollBack
+        [conversation] = creating
 
-    if committed:
-        with pytest.raises(IntegrityError, match="violates foreign key constraint"):
-            await asyncio.wait_for(conversation, timeout=10)
-        async with db_container() as container:
-            assert await container.session().get(ApiKeysV2, key_id) is None
-    else:
-        created = await asyncio.wait_for(conversation, timeout=10)
-        assert await conversation_owner(db_container, created.id) == key_id
+        if committed:
+            with pytest.raises(IntegrityError, match="violates foreign key constraint"):
+                await asyncio.wait_for(conversation, timeout=10)
+            async with db_container() as container:
+                assert await container.session().get(ApiKeysV2, key_id) is None
+        else:
+            created = await asyncio.wait_for(conversation, timeout=10)
+            assert await conversation_owner(db_container, created.id) == key_id
+    finally:
+        await settle(*creating)

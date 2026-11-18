@@ -43,8 +43,9 @@ class ApiKeysV2Repository:
         for_update: bool | Literal["no_key"] = False,
     ) -> Optional[ApiKeyV2InDB]:
         """Return the key; with ``for_update`` the row stays locked until the
-        surrounding transaction completes, so another transaction that locks or
-        changes the key waits and then reads it as this one left it.
+        surrounding transaction completes. Another transaction that needs a
+        conflicting lock on the row, as every change to the row does, waits
+        and then reads the key as this transaction left it.
 
         ``"no_key"`` takes FOR NO KEY UPDATE, for a change that keeps the row
         and does not write its key columns (``id``, ``key_hash``,
