@@ -211,14 +211,16 @@ do, is not affected.
 
 The backend needs uv 0.13.7 or newer, which `required-version` in
 `backend/pyproject.toml` enforces. Keep the four settings on the same number of
-days; `.github/scripts/dependency-cooldown.test.mjs` fails when they differ.
+days; `scripts/tests/test_dependency_cooldown.py` fails when they differ.
 
 When a security fix cannot wait, add an exception for the exact release next to
 the setting:
 
 - Bun: `"package@x.y.z"` in `minimumReleaseAgeExcludes`.
-- uv: the release's upload time in `exclude-newer-package`, for example
-  `{ example = "2026-11-18T09:30:00Z" }`.
+- uv: a time just after the last file of the release was uploaded, in
+  `exclude-newer-package`, for example `{ example = "2026-11-18T09:30:00Z" }`.
+  PyPI shows the upload time of each file. uv admits that package's releases
+  up to that time; a time at or before an upload excludes that file.
 
 Add a comment with the advisory link and a removal date at most 7 days out, and
 remove the entry when the release clears the cooldown. Never except a whole
