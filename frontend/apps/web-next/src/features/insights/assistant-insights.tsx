@@ -7,6 +7,7 @@ import { ArrowLeft, Lock, MessagesSquare, MessageSquareText } from "lucide-react
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
+import { PAGE_COLUMN } from "@/components/composites/page-frame";
 import type { ChatPartner } from "@/lib/chat/types";
 import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { cn } from "@/lib/utils";
@@ -276,14 +277,15 @@ export function AssistantInsights({
   }
 
   const openConversation = (sessionId: string) => setExplore({ sessionId });
-  const column = cn(
-    "flex w-full min-w-0 flex-col gap-6",
-    framed ? "pe-4 pb-2" : "wide:px-6 max-w-4xl p-4"
-  );
+  // In a page frame the frame insets the view and holds the pages' shared
+  // column. On the chat page the view does both: the chat's inset, and the
+  // shared column centred in what the analysis leaves of the row.
+  const inset = framed ? "pe-4 pb-2" : "wide:px-6 p-4";
+  const column = cn("flex w-full min-w-0 flex-col gap-6", !framed && PAGE_COLUMN);
 
   if (isInsightRefusal(summary.error)) {
     return (
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+      <div className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto", inset)}>
         <div className={column}>
           {header}
           <EmptyState
@@ -299,7 +301,11 @@ export function AssistantInsights({
   return (
     <InsightCitationsContext value={openConversation}>
       <div ref={row} className="relative flex min-h-0 min-w-0 flex-1">
-        <div ref={main} inert={covered} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+        <div
+          ref={main}
+          inert={covered}
+          className={cn("min-h-0 min-w-0 flex-1 overflow-y-auto", inset)}
+        >
           <div className={column}>
             {header}
             {/*
@@ -332,11 +338,14 @@ export function AssistantInsights({
                       <SegmentedControlItem value="api_key" label={t("insights_source_api_key")} />
                     </SegmentedControl>
                   </div>
-                  <Switch
-                    label={t("insights_compare_previous")}
-                    value={filters.compare}
-                    onChange={(compare) => change({ compare })}
-                  />
+                  {/* As tall as the controls beside it, with the switch on their centre line. */}
+                  <div className="flex min-h-(--size-element-md) items-center">
+                    <Switch
+                      label={t("insights_compare_previous")}
+                      value={filters.compare}
+                      onChange={(compare) => change({ compare })}
+                    />
+                  </div>
                 </div>
                 <div className="@min-[26rem]:shrink-0 @min-[26rem]:pt-[calc(var(--text-label-size)*var(--text-label-leading)+var(--spacing-1))]">
                   <Button

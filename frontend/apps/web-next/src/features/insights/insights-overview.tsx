@@ -27,13 +27,13 @@ import {
 } from "./insight-figures";
 import { Tile } from "./insight-tile";
 import { PeriodChange } from "./period-change";
-import { useSourceSplit } from "./source-tag";
+import { SourceLegend, useSourceSplit } from "./source-tag";
 
 const ActivityChart = lazy(() =>
   import("./insights-activity-chart").then((module) => ({ default: module.ActivityChart }))
 );
-/** The chart's height (`ACTIVITY_CHART_HEIGHT`) and its legend, for the skeleton. */
-const ACTIVITY_SKELETON_HEIGHT = 272;
+/** The chart's height (`ACTIVITY_CHART_HEIGHT`), for the skeleton. */
+const ACTIVITY_SKELETON_HEIGHT = 240;
 
 /**
  * "Nyckeltal": conversations, answered questions, good answers by rating and
@@ -172,7 +172,10 @@ function ConversationShape({ period }: { period: InsightPeriodSummary }) {
   );
 }
 
-/** "Aktivitet per dag": the chart of the period's days, and under it how conversations go. */
+/**
+ * "Aktivitet per dag": the chart of the period's days, with the sources'
+ * colours named beside the heading, and under it how conversations go.
+ */
 function ActivityCard({
   activity,
   summary,
@@ -185,18 +188,26 @@ function ActivityCard({
   const t = useTranslations();
   const headingId = useId();
   const sources = filters.source ? [filters.source] : INSIGHT_SOURCES;
+  // The days the chart draws. The legend goes with the bars, and is there
+  // while they load (a period shown here has conversations), so the chart
+  // does not push it in.
+  const days = activity.data ? activityDays(activity.data.days, filters.range) : [];
+  const hasLegend = activity.data ? days.some((day) => day.total > 0) : activity.isPending;
   return (
     <Card>
       <section aria-labelledby={headingId} className="flex min-w-0 flex-col gap-4">
-        <h2 id={headingId} className="text-base font-semibold">
-          {t("insights_activity_heading")}
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <h2 id={headingId} className="text-base font-semibold">
+            {t("insights_activity_heading")}
+          </h2>
+          {hasLegend ? <SourceLegend sources={sources} /> : null}
+        </div>
         <QueryStateBoundary query={activity} rows={1} height={ACTIVITY_SKELETON_HEIGHT}>
-          {(data) => (
+          {() => (
             <Suspense fallback={<LoadingState rows={1} height={ACTIVITY_SKELETON_HEIGHT} />}>
               <ActivityChart
                 key={`${filters.range.start}|${filters.range.end}`}
-                days={activityDays(data.days, filters.range)}
+                days={days}
                 sources={sources}
               />
             </Suspense>

@@ -4,7 +4,7 @@ import { useId, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import type { ActivityDay, InsightSource } from "./insight-figures";
-import { SOURCE_STYLE, SourceLegend } from "./source-tag";
+import { SOURCE_STYLE } from "./source-tag";
 
 export const ACTIVITY_CHART_HEIGHT = 240;
 
@@ -13,9 +13,9 @@ const WINDOW_DAYS = 92;
 
 /**
  * "Aktivitet per dag": conversations per local day, stacked by source, with
- * a legend, a tooltip and the same figures as a table for screen readers. A
- * period longer than 92 days is shown a window at a time, so the table stays
- * small too.
+ * a tooltip and the same figures as a table for screen readers (the card's
+ * heading row names the colours). A period longer than 92 days is shown a
+ * window at a time, so the table stays small too.
  */
 export function ActivityChart({
   days,
@@ -55,7 +55,6 @@ export function ActivityChart({
         </div>
       ) : (
         <>
-          <SourceLegend sources={sources} />
           <ResponsiveContainer width="100%" height={ACTIVITY_CHART_HEIGHT}>
             <BarChart data={visible} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -92,6 +91,9 @@ export function ActivityChart({
                   name={label(source)}
                   stackId="sources"
                   fill={SOURCE_STYLE[source].fill}
+                  // An edge in the card's colour parts the stacked segments.
+                  stroke="var(--color-background-card)"
+                  strokeWidth={1}
                   maxBarSize={32}
                   isAnimationActive={false}
                 />

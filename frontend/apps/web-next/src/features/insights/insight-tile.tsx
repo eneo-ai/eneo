@@ -34,7 +34,7 @@ export function Tile({
 }) {
   return (
     <div className="border-ax-border rounded-ax-container flex min-w-0 flex-col gap-1 border p-4">
-      <dt className="text-ax-text-secondary flex flex-wrap items-center gap-2 text-sm">
+      <dt className="text-ax-text-secondary flex flex-wrap items-center justify-between gap-2 text-sm">
         {label}
         {isIndicative ? <IndicativeTag /> : null}
       </dt>

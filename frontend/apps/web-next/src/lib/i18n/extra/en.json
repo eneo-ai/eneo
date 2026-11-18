@@ -4650,6 +4650,7 @@
   "insights_feedback_open": "Read the conversation",
   "insights_feedback_empty": "No feedback in the period",
   "insights_show_more": "Show more",
+  "insights_show_fewer": "Show fewer",
   "insights_shown_of_total": "Showing {shown, number} of {total, number}",
   "insights_targets_heading": "Assistants and group chats",
   "insights_targets_filter_label": "Show",

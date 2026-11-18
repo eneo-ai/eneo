@@ -310,6 +310,7 @@
     --eneo-color-background-sunken: light-dark(#F8F9FB, #0D1014);
     --eneo-color-text-tertiary: light-dark(#646A77, #939BA8);
     --eneo-color-border-control: light-dark(#7E8593, #747C8B);
+    --eneo-color-data-amber: light-dark(#D17A00, #F1B45C);
     --eneo-color-segment-selected: light-dark(#FFFFFF, rgba(255, 255, 255, 0.14));
     --eneo-color-segment-selected-edge: light-dark(rgba(0, 0, 0, 0), var(--eneo-color-border-control));
   }

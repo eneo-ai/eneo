@@ -10692,6 +10692,7 @@
   "insights_feedback_open": "Läs konversationen",
   "insights_feedback_empty": "Ingen återkoppling i perioden",
   "insights_show_more": "Visa fler",
+  "insights_show_fewer": "Visa färre",
   "insights_shown_of_total": "Visar {shown, number} av {total, number}",
   "insights_targets_heading": "Assistenter och gruppchattar",
   "insights_targets_filter_label": "Visa",

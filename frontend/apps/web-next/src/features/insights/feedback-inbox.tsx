@@ -52,23 +52,22 @@ function RatingRow({
   return (
     <ListItem
       data-rating-row={ratingKey(rating)}
-      align="start"
+      // What was said on the left; where it came from, when, and the way to
+      // the conversation at the row's end, under it where the row is narrow.
       label={
-        rating.comment ? (
-          <span className="block font-medium break-words whitespace-normal">
-            {t("insights_feedback_comment", { comment: rating.comment })}
-          </span>
-        ) : (
-          <span className="text-ax-text-secondary block">{t("insights_feedback_no_comment")}</span>
-        )
-      }
-      description={
-        <span className="flex flex-col gap-1.5">
-          <span id={questionId} className="break-words whitespace-normal">
-            {t("insights_feedback_question", { question: rating.question })}
-          </span>
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="inline-flex items-center gap-1.5">
+        <span className="flex flex-wrap items-center gap-x-5 gap-y-2">
+          <span className="flex min-w-0 flex-[999_1_29rem] flex-col gap-1 break-words whitespace-normal">
+            {rating.comment ? (
+              <span className="font-medium">
+                {t("insights_feedback_comment", { comment: rating.comment })}
+              </span>
+            ) : (
+              <span className="text-ax-text-secondary">{t("insights_feedback_no_comment")}</span>
+            )}
+            <span id={questionId} className="text-ax-text-secondary text-sm">
+              {t("insights_feedback_question", { question: rating.question })}
+            </span>
+            <span className="text-ax-text-secondary inline-flex items-center gap-1.5 text-sm">
               <Icon
                 aria-hidden="true"
                 className={good ? "text-ax-success size-4" : "text-ax-error size-4"}
@@ -78,21 +77,21 @@ function RatingRow({
                 kind: rating.kind
               })}
             </span>
+          </span>
+          <span className="text-ax-text-secondary flex flex-wrap items-center gap-3 text-sm">
             <SourceTag source={rating.source} />
             <ClientTime value={rating.created_at} format="date" />
+            <Button
+              size="sm"
+              variant="secondary"
+              label={t("insights_feedback_open")}
+              icon={<MessagesSquare className="size-4" aria-hidden="true" />}
+              aria-haspopup="dialog"
+              aria-describedby={questionId}
+              onClick={() => onOpenConversation(rating.session_id)}
+            />
           </span>
         </span>
-      }
-      endContent={
-        <Button
-          size="sm"
-          variant="secondary"
-          label={t("insights_feedback_open")}
-          icon={<MessagesSquare className="size-4" aria-hidden="true" />}
-          aria-haspopup="dialog"
-          aria-describedby={questionId}
-          onClick={() => onOpenConversation(rating.session_id)}
-        />
       }
     />
   );

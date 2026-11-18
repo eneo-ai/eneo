@@ -4,13 +4,14 @@ import { cn } from "@/lib/utils";
 import { sourceParts, type InsightSource, type SourceCounts } from "./insight-figures";
 
 /**
- * Each source's name, and its colour as a tag, in the activity chart and in a
- * source bar. The colours are the theme's tokens, which flip with the colour
- * mode. User and widget differ in hue (blue against amber, which the common
- * colour-vision deficiencies keep apart); API is the neutral control-boundary
- * grey, lighter than both in light mode and darker than both in dark mode,
- * and 3:1 against the card in either. A legend, a tooltip or a text always
- * names them, so colour is never the only signal.
+ * Each source's name, its colour as a tag, and its colour as a mark in the
+ * activity chart and in a source bar. The colours are the theme's tokens,
+ * which flip with the colour mode. User is the dark categorical blue and
+ * widget the data amber, a lighter, warmer mark beside it (blue against
+ * amber, which the common colour-vision deficiencies keep apart); API is the
+ * neutral control-boundary grey. All three are 3:1 against the card and the
+ * surface in both modes. A legend, a tooltip or a text always names them, so
+ * colour is never the only signal.
  */
 export const SOURCE_STYLE = {
   user: {
@@ -22,8 +23,8 @@ export const SOURCE_STYLE = {
   widget: {
     label: "insights_source_widget",
     token: "orange",
-    fill: "var(--color-text-orange)",
-    fillClass: "bg-ax-orange"
+    fill: "var(--eneo-color-data-amber)",
+    fillClass: "bg-ax-data-amber"
   },
   api_key: {
     label: "insights_source_api_key",

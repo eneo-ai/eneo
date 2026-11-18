@@ -3,7 +3,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { Token } from "@astryxdesign/core/Token";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId } from "react";
+import { Fragment, useId } from "react";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import type { Schema } from "@/lib/api/models";
 import { cn } from "@/lib/utils";
@@ -22,36 +22,48 @@ function KindTag({ kind }: { kind: InsightKnowledgeSource["kind"] }) {
 }
 
 /**
- * A cited source: its name and kind, how many answers cited it, and a bar of
- * that against the most cited source. The count says it in words; the bar
- * only repeats it. A source no longer attached says so.
+ * A cited source: its name on the left and, on the right, its kind, that it
+ * is no longer attached where so, and how many answers cited it; under them
+ * a bar of the count against the most cited source. The count says it in
+ * words; the bar only repeats it. The facts are parted by a dot on screen
+ * and by a comma for a screen reader, which would read the dot out.
  */
 function CitedSource({ source, most }: { source: InsightKnowledgeSource; most: number }) {
   const t = useTranslations();
+  const facts = [
+    t(KIND_LABEL[source.kind]),
+    source.attached ? null : t("insights_knowledge_detached"),
+    t("insights_knowledge_answers", { count: source.answers })
+  ].filter((fact): fact is string => fact !== null);
   return (
     <ListItem
-      align="start"
-      label={<span className="block font-medium break-words whitespace-normal">{source.name}</span>}
-      description={
-        <span className="flex flex-col gap-2">
-          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <KindTag kind={source.kind} />
-            {source.attached ? null : <span>{t("insights_knowledge_detached")}</span>}
-          </span>
-          <span
-            aria-hidden="true"
-            className="bg-ax-muted block h-2 w-full overflow-hidden rounded-full"
-          >
-            <span
-              className="bg-ax-accent block h-full rounded-full"
-              style={{ width: `${(share(source.answers, most) ?? 0) * 100}%` }}
-            />
+      label={
+        <span className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+          <span className="min-w-0 font-medium break-words whitespace-normal">{source.name}</span>
+          <span className="text-ax-text-secondary text-sm tabular-nums">
+            {facts.map((fact, index) => (
+              <Fragment key={fact}>
+                {index > 0 ? (
+                  <>
+                    <span aria-hidden="true"> · </span>
+                    <span className="sr-only">, </span>
+                  </>
+                ) : null}
+                {fact}
+              </Fragment>
+            ))}
           </span>
         </span>
       }
-      endContent={
-        <span className="text-ax-text-secondary text-sm whitespace-nowrap tabular-nums">
-          {t("insights_knowledge_answers", { count: source.answers })}
+      description={
+        <span
+          aria-hidden="true"
+          className="bg-ax-muted mt-1 block h-2 w-full overflow-hidden rounded-full"
+        >
+          <span
+            className="bg-ax-accent block h-full rounded-full"
+            style={{ width: `${(share(source.answers, most) ?? 0) * 100}%` }}
+          />
         </span>
       }
     />
@@ -95,7 +107,8 @@ export function KnowledgeUseCard({
             return (
               <div className="flex flex-col gap-4">
                 {sources.length > 0 ? (
-                  <List hasDividers edge="bleed" aria-labelledby={headingId}>
+                  // The bars part the rows: no dividers between them.
+                  <List edge="bleed" aria-labelledby={headingId}>
                     {sources.map((source) => (
                       <CitedSource
                         key={`${source.kind}:${source.id}`}

@@ -192,7 +192,7 @@ function FindingActions({
     );
   }
   if (actions.length === 0) return null;
-  return <span className="flex flex-wrap gap-2 pt-1">{actions}</span>;
+  return <span className="flex flex-wrap gap-2">{actions}</span>;
 }
 
 /**
@@ -243,15 +243,14 @@ export function InsightFindings({
                   return (
                     <ListItem
                       key={findingKey(finding)}
-                      align="start"
+                      // The finding on the left, its actions at the row's end
+                      // beside it; under it where the row has no room for both.
                       label={
-                        <span className="block font-medium break-words whitespace-normal">
-                          {title}
-                        </span>
-                      }
-                      description={
-                        <span className="flex flex-col gap-1.5">
-                          <span className="break-words whitespace-normal">{evidence}</span>
+                        <span className="flex flex-wrap items-center gap-x-5 gap-y-3">
+                          <span className="flex min-w-0 flex-[999_1_26rem] flex-col gap-0.5 break-words whitespace-normal">
+                            <span className="font-medium">{title}</span>
+                            <span className="text-ax-text-secondary text-sm">{evidence}</span>
+                          </span>
                           <FindingActions
                             finding={finding}
                             targetKind={targetKind}

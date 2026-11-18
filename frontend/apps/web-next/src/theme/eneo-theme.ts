@@ -207,6 +207,11 @@ export const eneoTheme = defineTheme({
     // tracks): 3:1 on every surface, WCAG 1.4.11. The emphasized border above
     // stays the lighter, decorative edge.
     "--eneo-color-border-control": ["#7E8593", "#747C8B"],
+    // Amber for marks in charts and bars (a source's share of the
+    // conversations): brighter than the categorical orange text, which reads
+    // as brown in a filled mark, and 3:1 on the surfaces charts sit on (WCAG
+    // 1.4.11). Not for text.
+    "--eneo-color-data-amber": ["#D17A00", "#F1B45C"],
     // The selected option of a segmented control or the legacy tabs: a plate
     // raised above its track, lighter than it in both modes. Light mode keeps
     // the white plate with no edge; in dark mode a white lift composes over

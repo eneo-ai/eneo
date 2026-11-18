@@ -3,7 +3,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useFormatter, useTranslations } from "use-intl";
-import { useId } from "react";
+import { useId, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import type { Schema } from "@/lib/api/models";
@@ -16,13 +16,18 @@ import {
 
 type GroupRow = InsightQuestionGroup & { key: string };
 
+/** The questions listed at first; "Visa fler" shows the rest of those fetched. */
+const TOP_QUESTIONS_SHOWN = 5;
+
 /**
  * "Vanligaste frågorna": the period's commonest questions, grouped by their
  * wording, with how often each was asked, the share of its answers that did
  * not say they cannot answer, its answers' ratings and, for a target with
  * knowledge, the share that found something usable there. Both shares are
- * indicative, and the note under the table says so. A question opens one of
- * its conversations read-only in "Utforska konversationer".
+ * indicative, and the note under the table says so. The first five are
+ * listed; "Visa fler" under the table shows the rest of those fetched and
+ * "Visa färre" hides them again, the button keeping the focus. A question
+ * opens one of its conversations read-only in "Utforska konversationer".
  */
 export function TopQuestionsCard({
   questions,
@@ -36,6 +41,7 @@ export function TopQuestionsCard({
   const t = useTranslations();
   const format = useFormatter();
   const headingId = useId();
+  const [isExpanded, setIsExpanded] = useState(false);
   const percent = (value: number | null) =>
     value === null ? null : format.number(value, { style: "percent" });
 
@@ -58,7 +64,7 @@ export function TopQuestionsCard({
       {
         key: "occurrences",
         header: t("insights_top_questions_count"),
-        width: pixel(88),
+        width: pixel(72),
         align: "end",
         renderCell: (group) => (
           <span className="tabular-nums">{format.number(group.occurrences)}</span>
@@ -67,7 +73,7 @@ export function TopQuestionsCard({
       {
         key: "answered",
         header: t("insights_top_questions_answered"),
-        width: pixel(120),
+        width: pixel(104),
         align: "end",
         renderCell: (group) => (
           <span className="tabular-nums">{percent(groupAnsweredShare(group))}</span>
@@ -76,7 +82,7 @@ export function TopQuestionsCard({
       {
         key: "ratings",
         header: t("insights_top_questions_ratings"),
-        width: pixel(160),
+        width: pixel(144),
         renderCell: ({ ratings }) =>
           ratings.positive + ratings.negative === 0 ? (
             <span className="text-ax-text-secondary">{t("insights_no_ratings")}</span>
@@ -95,7 +101,7 @@ export function TopQuestionsCard({
       shown.push({
         key: "knowledge",
         header: t("insights_tile_knowledge"),
-        width: pixel(160),
+        width: pixel(144),
         align: "end",
         renderCell: (group) => {
           const hits = percent(groupKnowledgeHitShare(group));
@@ -127,13 +133,23 @@ export function TopQuestionsCard({
               <>
                 <Table
                   aria-labelledby={headingId}
-                  data={groups.map((group, index) => ({ ...group, key: `${index}` }))}
+                  data={(isExpanded ? groups : groups.slice(0, TOP_QUESTIONS_SHOWN)).map(
+                    (group, index) => ({ ...group, key: `${index}` })
+                  )}
                   columns={columns(groups)}
                   idKey="key"
                   verticalAlign="top"
                   pinnedColumn="question"
                   className="[--table-sticky-background:var(--color-ax-card)]"
                 />
+                {groups.length > TOP_QUESTIONS_SHOWN ? (
+                  <div className="flex justify-center">
+                    <Button
+                      label={isExpanded ? t("insights_show_fewer") : t("insights_show_more")}
+                      onClick={() => setIsExpanded(!isExpanded)}
+                    />
+                  </div>
+                ) : null}
                 <p className="text-ax-text-secondary text-sm">{t("insights_top_questions_note")}</p>
               </>
             )

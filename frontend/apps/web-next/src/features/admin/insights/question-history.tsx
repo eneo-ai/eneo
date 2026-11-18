@@ -109,6 +109,23 @@ export function QuestionHistory({
     announce(countLabel);
   }, [announce, countLabel, deferredSearch, settled]);
 
+  // "Ladda fler frågor": once the page it asked for renders, focus that
+  // page's first question (the button itself goes away with the last page).
+  const tableRef = useRef<HTMLTableElement>(null);
+  const focusPage = useRef<number | null>(null);
+  const pages = query.data?.pages;
+  const pageCount = pages?.length ?? 0;
+  useEffect(() => {
+    const page = focusPage.current;
+    if (page === null || pageCount <= page) return;
+    focusPage.current = null;
+    const first = pages?.[page]?.items[0];
+    if (!first) return;
+    tableRef.current
+      ?.querySelector<HTMLElement>(`[data-question-id="${CSS.escape(first.id)}"]`)
+      ?.focus();
+  }, [pageCount, pages]);
+
   const columns: TableColumn<AssistantInsightQuestion>[] = [
     {
       key: "created_at",
@@ -126,6 +143,7 @@ export function QuestionHistory({
           variant="ghost"
           label={item.question || t("untitled")}
           className="max-w-full text-left whitespace-normal"
+          data-question-id={item.id}
           onClick={(event) => {
             questionTrigger.current = event.currentTarget;
             setSelected(item);
@@ -192,6 +210,7 @@ export function QuestionHistory({
               </p>
             ) : (
               <Table
+                ref={tableRef}
                 aria-labelledby={headingId}
                 data={items}
                 columns={columns}
@@ -207,7 +226,14 @@ export function QuestionHistory({
             {t("loaded_all_questions", { total })}
           </span>
         ) : null}
-        <LoadMore query={query} label={t("load_more_questions")} />
+        <LoadMore
+          query={query}
+          label={t("load_more_questions")}
+          onLoad={() => {
+            focusPage.current = pageCount;
+            void query.fetchNextPage();
+          }}
+        />
       </section>
       {selected ? (
         <QuestionDetails

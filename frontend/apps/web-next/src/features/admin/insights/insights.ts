@@ -23,7 +23,8 @@ export type AssistantInsightFilters = InsightsRange & {
   source?: InsightSource | null;
 };
 
-export const ASSISTANT_INSIGHT_QUESTION_LIMIT = 100;
+/** The question history's page: as many as the feedback inbox and a finding's examples show. */
+export const ASSISTANT_INSIGHT_QUESTION_LIMIT = 20;
 
 /**
  * Logs are loaded only while their details dialog is mounted. Backend resource access stays authoritative.
