@@ -92,17 +92,23 @@ handling, LLM provider credentials, SSRF, RCE, or deserialization take priority.
 
 ## Supported Versions
 
-Supported release branches are any release branches that are currently deployed
-or explicitly maintained by the Eneo maintainers. Older tags and inactive
-branches are not guaranteed to receive security fixes. This section is the
-canonical support policy; other guides link here.
+Our policy is to provide security fixes for two release lines: the latest one
+and the one before it. With 2.3 as the latest release, that is 2.3 and 2.2, and
+a fix ships as a patch release on each affected line, for example 2.3.1 and
+2.2.1.
+
+Older release lines receive a fix only when we decide to maintain them for a
+specific issue. If you run an older line, plan to upgrade.
+
+This is a policy, not a guarantee: a fix can be delayed or replaced by a
+mitigation. This section is the canonical support policy; other guides link
+here.
 
 ## Fixing a Vulnerability
 
 Our policy is to prepare a fix or mitigation for `develop` and each affected
-supported `release/vX.Y` branch, and to record any delayed fix or accepted risk
-under [Tracking and Exceptions](#tracking-and-exceptions). How the fix is
-prepared depends on whether the vulnerability is already public.
+supported release line. How the fix is prepared depends on whether the
+vulnerability is already public.
 
 - **Reported privately.** Keep the work private until it is ready. Confirm and
   rate the report in a private GitHub Security Advisory, and prepare and review
