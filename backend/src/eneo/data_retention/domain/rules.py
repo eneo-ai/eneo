@@ -62,6 +62,31 @@ def rule_task(rule: RetentionRule) -> RuleTask:
     return disposition
 
 
+class RetentionExceedsSpaceError(Exception):
+    """A period longer than the cap where it is written.
+
+    The cap is in days. `cap_origin` is the level that chose it, also when an
+    inner level inherits it: a space without its own period passes on its
+    organisation's, so the origin is the organisation (`Resolved.bound_origin`).
+    """
+
+    code = "retention_exceeds_space"
+    CAP_ORIGINS = frozenset(
+        {PolicyLevel.ORGANIZATION, PolicyLevel.SPACE, PolicyLevel.FLOW}
+    )
+
+    def __init__(self, *, cap_days: int, cap_origin: PolicyLevel) -> None:
+        if cap_origin not in self.CAP_ORIGINS:
+            raise ValueError(f"No retention cap comes from {cap_origin.value}.")
+        super().__init__(
+            "The retention period is longer than the limit that applies here."
+        )
+        self.context: dict[str, object] = {
+            "cap_days": cap_days,
+            "cap_origin": cap_origin.value,
+        }
+
+
 def fewer_days(candidate: int, current: int) -> bool:
     return candidate < current
 

@@ -3,7 +3,12 @@
 import pytest
 import sqlalchemy as sa
 
-from eneo.data_retention.domain.rules import RetentionRule, RuleTask, rule_task
+from eneo.data_retention.domain.rules import (
+    RetentionExceedsSpaceError,
+    RetentionRule,
+    RuleTask,
+    rule_task,
+)
 from eneo.data_retention.infrastructure.retention_rule_sql import (
     rule_period,
 )
@@ -30,3 +35,16 @@ def test_an_exempt_rule_has_no_period_to_resolve():
     """Mutant: an exempt rule resolves as if a task removed it."""
     with pytest.raises(ValueError):
         rule_task(RetentionRule.WIDGET_CONVERSATIONS)
+
+
+@pytest.mark.parametrize(
+    "level",
+    [PolicyLevel.INSTALLATION, PolicyLevel.ASSISTANT_OR_APP, PolicyLevel.FLOW_STEP],
+)
+def test_only_an_organization_a_space_or_a_flow_caps_a_retention_period(
+    level: PolicyLevel,
+):
+    """Mutant: the refusal names a level no cap comes from, so a client is
+    told to shorten a period to a limit nobody set."""
+    with pytest.raises(ValueError):
+        RetentionExceedsSpaceError(cap_days=30, cap_origin=level)
