@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { AssistantEditor } from "@/features/assistants/editor/assistant-editor";
 import { assistantHelperAvailabilityQueryOptions } from "@/features/assistants/editor/assistant-helper-api";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
@@ -15,8 +15,8 @@ export const Route = createFileRoute("/_app/spaces/$spaceId/assistants/$assistan
       const assistant = await notFoundOn404(
         readFresh(context.queryClient, assistantQueryOptions(browserApi, params.assistantId))
       );
-      if (assistant.is_help_assistant)
-        throw redirect({ href: "/admin/help-assistants", replace: true });
+      // A help assistant has no page here, as in the chat pages.
+      if (assistant.is_help_assistant) throw notFound();
       warmQuery(
         context.queryClient,
         promptGuideAvailabilityQueryOptions(browserApi, params.assistantId)

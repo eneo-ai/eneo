@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import {
   PENDING_IMPORTS_STORAGE_KEY,
@@ -77,9 +77,15 @@ vi.mock("@/lib/api/browser", () => ({
   }
 }));
 
+/**
+ * The mocked GET's calls. Read through a plain mock type: typed as the
+ * client's own GET, the mock is checked against every route of the API,
+ * which is more than the compiler instantiates.
+ */
+const getCalls = () => (browserApi.GET as unknown as Mock).mock.calls as unknown[][];
+
 /** The GET calls made so far to one API path. */
-const callsTo = (path: string) =>
-  (vi.mocked(browserApi.GET).mock.calls as unknown[][]).filter(([called]) => called === path);
+const callsTo = (path: string) => getCalls().filter(([called]) => called === path);
 
 beforeEach(() => {
   api.items = [job];
@@ -109,7 +115,7 @@ it("reports a pushed job update without waiting for a poll", async () => {
     </JobsProvider>
   );
   await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
-  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+  const polls = getCalls().length;
 
   await act(async () => {
     fake.latest().open();
@@ -137,7 +143,7 @@ it("finishes a crawl from the feed, refreshing its website without a poll", asyn
   );
   await screen.findByRole("button", { name: "Aviseringar, 1 pågår" });
   await act(async () => fake.latest().open());
-  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+  const polls = getCalls().length;
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
 
   await act(async () => fake.latest().job({ ...crawl, status: "complete" }));
@@ -480,7 +486,7 @@ it("checks the list every two minutes while the feed is open, and every 30 s onc
   const fake = (await import("./job-events.test-support")).installFakeEventSource();
   api.items = [];
   // The jobs list is the only read here.
-  const polls = () => vi.mocked(browserApi.GET).mock.calls.length;
+  const polls = () => getCalls().length;
   const { queryClient } = renderInApp(
     <JobsProvider>
       <JobIndicator />
@@ -559,7 +565,7 @@ it("catches every job of calls made together, and checks the list once for them"
     </JobsProvider>
   );
   await waitFor(() => expect(queryClient.getQueryData(["jobs"])).toHaveLength(2));
-  const polls = vi.mocked(browserApi.GET).mock.calls.length;
+  const polls = getCalls().length;
 
   fireEvent.click(screen.getByRole("button", { name: "Track" }));
 

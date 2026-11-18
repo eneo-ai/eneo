@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { HELPER_CHAT_POLICY_KEY } from "@/features/admin/helper-chat/helper-chat-policy";
+import { renderInApp, testQueryClient } from "@/test/render";
 import type { FlowSettings } from "./flow-settings";
 import { flowSettingsFixture } from "./flow-settings-fixtures";
 import { FlowSettingsPage } from "./flow-settings-page";
@@ -149,6 +150,38 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     ]);
     // Said in the save bar and announced politely.
     expect(await screen.findAllByText("Flödesinställningarna är sparade.")).not.toHaveLength(0);
+  });
+
+  it("has the helper's settings read the shared default model again once it is saved", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(HELPER_CHAT_POLICY_KEY, {
+      enabled: true,
+      guidance: "",
+      guidance_max_length: 4000,
+      completion_model_id: null
+    });
+    const helperPolicy = () => queryClient.getQueryState(HELPER_CHAT_POLICY_KEY);
+    await show({ queryClient });
+
+    // Another section's save leaves them be.
+    enter("Antal filer per körning", "40");
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    expect(await screen.findAllByText("Flödesinställningarna är sparade.")).not.toHaveLength(0);
+    expect(helperPolicy()?.isInvalidated).toBe(false);
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Modell för flödesassistenten / }));
+    const search = await screen.findByRole("combobox", { name: "Sökalternativ" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    fireEvent.click(await screen.findByRole("option", { name: /Stark modell/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenLastCalledWith("/api/v1/settings/flow-authoring-chat-policy", {
+        body: { completion_model_id: "gpt-strong" }
+      })
+    );
+    await waitFor(() => expect(helperPolicy()?.isInvalidated).toBe(true));
   });
 
   it("saves the flow chat's default model from the models that can use tools", async () => {

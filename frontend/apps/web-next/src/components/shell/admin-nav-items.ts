@@ -128,11 +128,7 @@ export function adminNavGroups({
         { href: "/admin/users", icon: Users, labelKey: "users" },
         { href: "/admin/user-groups", icon: Group, labelKey: "user_groups" },
         { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
-        {
-          href: "/admin/help-assistants",
-          icon: LifeBuoy,
-          labelKey: "admin_help_assistants_nav_label"
-        },
+        { href: "/admin/help-assistants", icon: LifeBuoy, labelKey: "admin_helper_title" },
         { href: "/admin/storage", icon: Database, labelKey: "storage_settings_nav" },
         { href: "/admin/crawler", icon: Globe, labelKey: "admin_crawler_title" },
         { href: "/admin/settings", icon: Settings, labelKey: "settings" }
