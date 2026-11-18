@@ -359,7 +359,11 @@ def test_the_instructions_show_the_expected_result_without_doing_the_work() -> N
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "say in a few lines what its result will look like" in instructions
-    assert "Derive it from the steps' results and contracts as saved." in instructions
+    assert (
+        "Derive it from the steps' results and contracts as saved, and mark what "
+        "is not saved yet as a proposal." in instructions
+    )
+    assert "mark what is not saved yet as a proposal" in instructions
     assert "Use placeholders for content" in instructions
     assert "Describing the result's shape this way is always allowed" in instructions
     assert "filling it with content is doing the work the flow is for" in instructions
@@ -371,19 +375,18 @@ def test_the_instructions_describe_the_result_after_the_build_in_the_same_answer
 ):
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
-    # In edit mode the build comes first: a description in its place ends the
-    # turn with nothing built.
+    # The build comes first: a description in its place ends the turn with
+    # nothing built.
     assert (
-        "In edit mode, after building a flow or changing what it delivers, and in "
-        "the same answer, say in a few lines what its result will look like"
-        in instructions
+        "After building a flow or changing what it delivers, and in the same "
+        "answer, say in a few lines what its result will look like" in instructions
     )
     assert "Before building a flow" not in instructions
-    # With edit mode off nothing is built, so the result is described with the
-    # steps that are proposed.
+    # Where nothing can be saved, the result is described with the change the
+    # chat would make.
     assert (
-        "When edit mode is off, say it with the steps you would build, as a "
-        "proposal." in instructions
+        'In "Fråga" or on a published flow, say it with what you would change.'
+        in instructions
     )
     # A question that shapes the flow is still asked before the build, and
     # outside edit mode the steps are still described.
