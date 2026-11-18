@@ -64,6 +64,12 @@ def uv_image_tags(dockerfile: str) -> list[str]:
     return re.findall(r"ghcr\.io/astral-sh/uv:(\S+)", dockerfile)
 
 
+def tag_version(tag: str) -> str | None:
+    """The uv version a tag names: 0.13.7 and 0.13.7-python3.11-trixie-slim do, a bare variant does not."""
+    match = re.match(r"(\d+\.\d+\.\d+)(?:-|$)", tag)
+    return match[1] if match else None
+
+
 def dockerfiles() -> list[Path]:
     """Every tracked Dockerfile, so other checkouts under the repository are not read."""
     tracked = subprocess.run(
@@ -79,10 +85,10 @@ def dockerfiles() -> list[Path]:
 def pinned_uv_versions() -> list[tuple[str, str]]:
     """The uv version of every setup-uv step, uv image and pre-commit hook that names one."""
     pins = [
-        (str(file.relative_to(ROOT)), tag)
+        (str(file.relative_to(ROOT)), named)
         for file in dockerfiles()
         for tag in uv_image_tags(file.read_text())
-        if re.fullmatch(r"[\d.]+", tag)
+        if (named := tag_version(tag))
     ]
     files = [*sorted((ROOT / ".github/workflows").glob("*.yml")), ROOT / ".pre-commit-config.yaml"]
     for file in files:
@@ -149,10 +155,11 @@ class DependencyCooldownTests(unittest.TestCase):
         # A floating tag such as python3.11-bookworm-slim can stop following uv releases.
         for file in dockerfiles():
             for tag in uv_image_tags(file.read_text()):
-                self.assertRegex(tag, r"^[\d.]+$", f"{file.relative_to(ROOT)} builds on uv:{tag}")
+                self.assertIsNotNone(tag_version(tag), f"{file.relative_to(ROOT)} builds on uv:{tag}")
         floating = "FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder"
-        self.assertEqual(uv_image_tags(floating), ["python3.11-bookworm-slim"])
+        self.assertEqual([tag_version(tag) for tag in uv_image_tags(floating)], [None])
         self.assertEqual(uv_image_tags("COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/"), ["0.13.7"])
+        self.assertEqual(tag_version("0.14.0-python3.11-trixie-slim"), "0.14.0")
 
 
 if __name__ == "__main__":
