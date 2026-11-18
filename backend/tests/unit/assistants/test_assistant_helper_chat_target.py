@@ -311,4 +311,8 @@ async def test_a_turn_gets_the_assistant_settings_tools():
     )
 
     assert server.name == "assistant"
-    assert {tool.name for tool in server.tools} == {"read_assistant", "read_options"}
+    assert {tool.name for tool in server.tools} == {
+        "read_assistant",
+        "read_options",
+        "propose_changes",
+    }

@@ -34,7 +34,9 @@ def test_the_basics_keep_the_answer_brief_plain_and_in_the_persons_language():
         basics
     )
     assert 'In "Fråga" you read, explain and suggest, and change nothing' in basics
+    assert "a proposal that the person applies with a click" in basics
     assert 'switches "Fråga" to "Redigera"' in basics
+    assert "as a proposal where you can show one" in basics
     assert "Ask only when the answer changes what you do" in basics
     assert "with the question tool" in basics
     assert "never repeat one" in basics
@@ -51,11 +53,31 @@ def test_prompt_writing_has_no_protocol_of_its_own():
     assert "When an organisation policy locks the instructions" in writing
 
 
-def test_the_assistant_fragment_says_nothing_can_be_changed_yet():
+def test_the_assistant_fragment_proposes_in_view_mode_and_changes_in_edit_mode():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
-    assert "You cannot change this assistant yet, in either mode" in fragment
-    assert "switching mode does not change that" in fragment
-    assert "the whole new text" in fragment
+    assert 'In "Fråga", when the person wants one of these changed, show the' in (
+        fragment
+    )
+    assert "a proposal with propose_changes" in fragment
+    assert "do not also paste them into your answer" in fragment
+    assert 'In "Redigera", make the change with update_assistant' in fragment
+    assert "say in one sentence what you changed" in fragment
+    assert "a short description in the person's language" in fragment
     assert "read_options before you suggest a choice" in fragment
     assert "never suggest changing it" in fragment
+
+
+def test_the_assistant_fragment_names_a_published_assistant_once():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "applies at once for everyone who uses it" in fragment
+    assert "Say so once, the first time" in fragment
+    assert "not every time" in fragment
+
+
+def test_the_assistant_fragment_sends_the_rest_to_the_editor():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert "Everything else you cannot change, in either mode" in fragment
+    assert "say where in the editor they change it" in fragment
