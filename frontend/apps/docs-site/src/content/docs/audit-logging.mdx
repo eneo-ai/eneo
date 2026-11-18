@@ -1,8 +1,14 @@
 # Audit Logging (Technical)
 
-Audit logging is a first-class subsystem in Eneo for security, compliance, and traceability. It records actions across the platform, stores them in PostgreSQL, and exposes controlled access for admins.
+The audit log records who did what, and when, in each tenant. This page explains how events are written, stored, read, kept and exported. For the administrator's guide, see [Audit Logging](/guides/audit-logging); for how the audit log fits with Eneo's other security controls, see [Security at Eneo](/docs/security).
 
-For admin-facing guidance, see the [Audit Logging Guide](/guides/audit-logging).
+**In short**
+
+- Events are written through `AuditService` (`log_async` is preferred and queues an ARQ job) and stored in the PostgreSQL table `audit_logs`.
+- Logging is switched on or off per tenant with the `audit_logging_enabled` feature flag, with category and action overrides. Changes apply to new events only. Required Flow events are always logged.
+- Reading the log requires an access justification session (`POST /api/v1/audit/access-session`). A session lasts one hour, and a user can open at most five per hour.
+- Retention is set per tenant; the default is 365 days (range 1–2555), and a daily job deletes older entries.
+- A synchronous export stops at 50,000 records (at most 100,000 with `max_records`) and marks a cut-off result with the `X-Records-Truncated` header. For more, request an async export; its files are kept for 24 hours.
 
 ## High-level architecture
 
@@ -66,7 +72,7 @@ Key fields include:
 - `metadata` (JSONB)
 - `outcome`, `timestamp`
 
-Metadata follows a consistent schema via `AuditMetadata` to prevent drift. It stores actor and target snapshots so log entries remain meaningful even if users or entities are renamed or deleted.
+Metadata varies by event. The shared `AuditMetadata` helpers add actor and target snapshots where an event records them, so those entries remain meaningful even if users or entities are renamed or deleted.
 
 Eneo does not copy names that retention removes into a log. A log about a file records the file by its id, with its size and MIME type where known, under a fixed description for each action and the target name `file`; an upload to a collection names the collection, not the file. A log about a conversation (a tool view's call, a document export or a saved document version) names its target `conversation`, and an assistant update records attached files by id, scope and mode. Logs stored before this behaviour are changed the same way on upgrade. The justification and search text an auditor enters are the auditor's own input: they are kept with the log of that access, under the audit log's retention.
 ### Actor attribution
@@ -576,8 +582,6 @@ For a completed export, the admin-protected status response includes `download_u
 
 ## UI behavior notes
 
-- Free-text search matches the audit log description. Include names or identifiers in descriptions if you want them to be searchable.
-- Access to the audit log view is guarded by an access justification session.
 - The Actor column shows the recorded actor name. A recorded actor without a name (already deleted when the event happened) is shown as **Deleted user** or **Deleted key**; **System** is shown only for system actors and rows without an actor.
 
 ## Implementation example
@@ -618,6 +622,9 @@ await audit_service.log_async(
 )
 ```
 
-## Roadmap
+## Related pages
 
-We plan to add optional external audit log storage (e.g., SIEM or analytics sink) to reduce long-term load on the primary database while keeping the same access controls and retention guarantees.
+- [Audit Logging guide](/guides/audit-logging) for administrators
+- [API Key Management](/docs/api-key-management) for key lifecycle events
+- [Module Authentication](/docs/module-authentication) for module ticket and configuration events
+- [Authentication Architecture](/docs/authentication-architecture) for user provisioning and federation events
