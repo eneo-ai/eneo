@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@9dee9a6dddbc
+translationSource: guides/upgrade-notes.mdx@62bd9f053595
 ---
 
 import { Callout } from "nextra/components";
@@ -31,7 +31,7 @@ Varje punkt kan hindra backend från att starta, stoppa inloggningen eller förl
 10. Planera driftstopp för `db-init`: migreringen `202611091200` låser `sessions` medan den skriver om varje rad, och flera migreringar bygger index samtidigt med drift. Om `db-init` avbryts, kör den igen. Se [Migreringen `202611091200`](#sessions-migration).
 11. Exportera granskningsloggen först om du behöver filnamnen: uppgraderingen tar bort dem för gott. Se [Exportera granskningsloggar](/guides/audit-logging#exporting-audit-logs).
 12. Kör kontrollen av sessioner mot databasen från 2.3: en session som har både användare och API-nyckel, eller ingen av dem, stoppar `db-init`. Se [Webbwidgetar](#widgets).
-13. Ersätt API-nycklar som integrationer eller moduler fortfarande använder men som har statusen Utgången, eller som policyn för oanvända nycklar kommer att låta gå ut: de slutar fungera vid den första nattliga körningen. Se [API-nycklar som borde ha gått ut](#api-keys-expire).
+13. Ersätt API-nycklar som integrationer eller moduler fortfarande använder men som har statusen Utgången, eller som policyn för oanvända nycklar kommer att låta gå ut: de slutar fungera vid den första nattliga körningen. Se [API-nycklar som borde ha gått ut](#api-keys-expire). Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna; punkten gäller när de har slagits på.
 
 **Gå tillbaka till 2.3:** läs tillbaka säkerhetskopian från `pg_dump` som togs före `db-init`, tillsammans med en matchande ögonblicksbild av objektlagringen. En nedgradering av schemat stannar vid migreringen `202610291900` ("Cannot discard approved Skill reference history") så snart en godkänd Skill-version hänvisar till en annan Skill. En nedgradering tar aldrig tillbaka tömda eller borttagna loggar, tömda namn eller omskrivna granskningsposter.
 
@@ -135,7 +135,7 @@ flowchart TB
 | [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
-| [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar |
+| [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar. Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna; det gäller när de har slagits på |
 
 ### Gallring, loggar och lagring [#retention-logs-storage]
 
@@ -342,6 +342,8 @@ En migrering tömmer ikoner som pekar över organisationsgränser. Att ta bort e
 **Återställning:** tömningen går inte att ångra.
 
 ### API-nycklar som borde ha gått ut slutar fungera [#api-keys-expire]
+
+Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna, så de avslutar inte åtkomsten för någon nyckel som inloggningen fortfarande godtar. Avsnittet gäller när stegen har slagits på.
 
 När policyn för oanvända nycklar (`auto_expire_unused_days`) lät en nyckel gå ut registrerade nattens underhåll den som utgången men behöll dess senare slutdatum, och inloggningen läser bara datumen. En sådan nyckel, eller en utan slutdatum, fortsatte att fungera. Från den första körningen efter uppgraderingen (kl. 01:00 UTC) avslutar jobbet åtkomsten för:
 
