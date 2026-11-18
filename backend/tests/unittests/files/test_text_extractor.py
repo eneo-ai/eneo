@@ -10,12 +10,15 @@ Tests cover:
 - Error handling
 """
 
+import logging
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pdfminer.pdfdocument import PDFPasswordIncorrect
+from pdfminer.pdfparser import PDFSyntaxError
 
+from eneo.files import text as text_module
 from eneo.files.extraction_limits import FileExtractionLimits
 from eneo.files.text import (
     PDF_TEXT_LIKELY_REVERSED_WARNING,
@@ -685,7 +688,25 @@ class TestTextExtractorErrorHandling:
                 TextExtractor.extract_from_pdf(Path("protected.pdf"))
 
         assert exc_info.value.code == "ENCRYPTED"
-        assert "protected.pdf" in exc_info.value.message
+        assert "protected.pdf" not in exc_info.value.message
+
+    def test_a_parser_error_quoting_the_file_stays_out_of_the_extraction_error(
+        self,
+    ):
+        """A parser's message can quote the file; the error, its message and
+        the traceback a log prints from it carry neither that text nor the
+        file's name."""
+        with patch(
+            "eneo.files.text.pdfplumber.open",
+            side_effect=PDFSyntaxError("Utredning om Anna Svensson"),
+        ):
+            with pytest.raises(CorruptFileError) as exc_info:
+                TextExtractor.extract_from_pdf(Path("Utredning.pdf"))
+
+        error = exc_info.value
+        assert "Anna Svensson" not in error.message
+        assert "Utredning" not in error.message
+        assert error.__suppress_context__
 
     def test_extract_from_docx_raises_corrupt_error_on_bad_zip(self, tmp_path):
         """Should raise CorruptFileError for invalid DOCX (bad ZIP)."""
@@ -760,6 +781,48 @@ class TestTextExtractorErrorHandling:
 
             assert "Permission denied" in exc_info.value.message
 
+    @pytest.mark.parametrize(
+        "decode_failures",
+        [0, 1, 2],
+        ids=["utf-8 read", "cp1252 read", "replacing read"],
+    )
+    @pytest.mark.parametrize(
+        "error",
+        [
+            PermissionError(13, "Permission denied", "/tmp/Utredning.txt"),
+            OSError(5, "Input/output error", "/tmp/Utredning.txt"),
+        ],
+        ids=["permission", "io"],
+    )
+    def test_a_read_error_is_logged_by_type_and_errno_without_the_path(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+        error: OSError,
+        decode_failures: int,
+    ):
+        """Whichever read fails, the error the caller gets says what failed;
+        the log keeps the type and errno to diagnose it, never the path."""
+        monkeypatch.setattr(text_module, "logger", logging.getLogger("eneo.test.text"))
+        caplog.set_level(logging.DEBUG, logger="eneo.test.text")
+        test_file = tmp_path / "Utredning.txt"
+        test_file.write_text("content")
+        not_text = UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")
+
+        with patch(
+            "pathlib.Path.read_text",
+            side_effect=[not_text] * decode_failures + [error],
+        ):
+            with pytest.raises(ExtractionError) as exc_info:
+                TextExtractor.extract_from_plain_text(test_file)
+
+        assert "Utredning" not in str(exc_info.value)
+        assert exc_info.value.__suppress_context__
+        message = caplog.records[-1].getMessage()
+        assert f"({type(error).__name__}, errno {error.errno})" in message
+        assert "Utredning" not in caplog.text
+
     def test_extract_from_plain_text_handles_binary_with_replacement(self, tmp_path):
         """Should handle undecodable bytes using replacement characters."""
         # Create a file with bytes that are invalid in UTF-8
@@ -794,28 +857,25 @@ class TestTextExtractorExceptionClasses:
 
     def test_encrypted_file_error_attributes(self):
         """EncryptedFileError should set correct attributes."""
-        error = EncryptedFileError("secret.pdf")
-        assert "secret.pdf" in error.message
+        error = EncryptedFileError()
         assert "encrypted" in error.message.lower()
         assert error.code == "ENCRYPTED"
 
     def test_corrupt_file_error_with_details(self):
         """CorruptFileError should include details when provided."""
-        error = CorruptFileError("broken.docx", "Missing required element")
-        assert "broken.docx" in error.message
+        error = CorruptFileError("Missing required element")
         assert "Missing required element" in error.message
         assert error.code == "CORRUPT"
 
     def test_corrupt_file_error_without_details(self):
         """CorruptFileError should work without details."""
-        error = CorruptFileError("broken.docx")
-        assert "broken.docx" in error.message
+        error = CorruptFileError()
+        assert "corrupted" in error.message
         assert error.code == "CORRUPT"
 
     def test_unsupported_format_error_attributes(self):
         """UnsupportedFormatError should suggest conversion."""
-        error = UnsupportedFormatError("old.doc", ".doc (Legacy Word)")
-        assert "old.doc" in error.message
+        error = UnsupportedFormatError(".doc (Legacy Word)")
         assert ".doc" in error.message
         assert "not supported" in error.message.lower()
         assert error.code == "UNSUPPORTED_FORMAT"

@@ -5,7 +5,10 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.questions.question import QuestionAdd
-from tests.integration.flows.statement_capture_support import capture_queries
+from tests.integration.flows.statement_capture_support import (
+    capture_queries,
+    without_copy_source_probe,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -14,6 +17,10 @@ pytestmark = pytest.mark.integration
 async def owner_token(db_container, patch_auth_service_jwt, admin_user) -> str:
     async with db_container() as container:
         return container.auth_service().create_access_token_for_user(admin_user)
+
+
+def _reads_turns(sql: str) -> bool:
+    return "FROM questions" in without_copy_source_probe(sql)
 
 
 def _auth(token: str) -> dict[str, str]:
@@ -85,7 +92,7 @@ async def test_history_list_reads_no_turns_and_keeps_its_cursors(
     assert page["total_count"] == 3
     assert page["limit"] == 2
     assert page["next_cursor"] is not None
-    assert not [q.sql for q in queries if "FROM questions" in q.sql]
+    assert not [q.sql for q in queries if _reads_turns(q.sql)]
 
     second = await client.get(
         base + f"&limit=2&cursor={page['next_cursor']}", headers=_auth(owner_token)
@@ -108,4 +115,4 @@ async def test_history_list_reads_no_turns_and_keeps_its_cursors(
         )
     assert by_route.status_code == 200, by_route.text
     assert by_route.json()["items"] == page["items"]
-    assert not [q.sql for q in queries if "FROM questions" in q.sql]
+    assert not [q.sql for q in queries if _reads_turns(q.sql)]

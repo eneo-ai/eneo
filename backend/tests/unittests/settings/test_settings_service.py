@@ -1510,41 +1510,90 @@ def _flow_limits_service(tenant_repo: "MockTenantRepo") -> SettingService:
     )
 
 
-async def test_the_longest_recording_is_an_admin_setting_under_the_flow_ceiling():
+async def test_the_longest_recording_is_an_admin_setting_under_what_the_decoder_holds():
     settings = get_app_settings()
     service = _flow_limits_service(MockTenantRepo())
 
     limits = await service.get_flow_input_limits()
-    assert limits.audio_max_duration_seconds == min(
-        settings.flow_audio_max_duration_seconds,
-        settings.flow_audio_max_duration_ceiling_seconds,
+    assert limits.audio_max_duration_seconds == settings.flow_audio_max_duration_seconds
+    # The default 2 GiB of decoded audio holds 18 h 38 min 28 s.
+    ceiling = 67_108
+    assert limits.audio_max_duration_ceiling_seconds == ceiling
+
+    ten_hours = 10 * 60 * 60
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=ten_hours)
     )
-    assert (
-        limits.audio_max_duration_ceiling_seconds
-        == settings.flow_audio_max_duration_ceiling_seconds
+    assert updated.audio_max_duration_seconds == ten_hours
+    assert (await service.get_flow_input_limits()).audio_max_duration_seconds == (
+        ten_hours
     )
 
-    longer = settings.flow_audio_max_duration_ceiling_seconds
-    updated = await service.update_flow_input_limits(
-        FlowInputLimitsUpdate(audio_max_duration_seconds=longer)
+    at_ceiling = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=ceiling)
     )
-    assert updated.audio_max_duration_seconds == longer
+    assert at_ceiling.audio_max_duration_seconds == ceiling
 
     with pytest.raises(BadRequestException) as exc_info:
         await service.update_flow_input_limits(
-            FlowInputLimitsUpdate(audio_max_duration_seconds=longer + 1)
+            FlowInputLimitsUpdate(audio_max_duration_seconds=ceiling + 1)
         )
     assert exc_info.value.code == "flow_settings_invalid_payload"
     assert exc_info.value.context == {
         "field": "audio_max_duration_seconds",
-        "requested_seconds": longer + 1,
-        "maximum_seconds": longer,
+        "requested_seconds": ceiling + 1,
+        "maximum_seconds": ceiling,
     }
 
     reset = await service.update_flow_input_limits(
         FlowInputLimitsUpdate(audio_max_duration_seconds=None)
     )
     assert reset.audio_max_duration_seconds == limits.audio_max_duration_seconds
+
+
+@pytest.mark.parametrize(
+    ("decoded_bytes", "ceiling"), [(3 * 1024**3, 100_663), (8 * 1024**3, 134_217)]
+)
+async def test_a_larger_decoded_byte_bound_lets_an_admin_set_more_than_a_day(
+    monkeypatch, decoded_bytes, ceiling
+):
+    settings = get_app_settings().model_copy(
+        update={"flow_audio_max_decoded_bytes": decoded_bytes}
+    )
+    monkeypatch.setattr("eneo.flows.flow_input_limits.get_settings", lambda: settings)
+    service = _flow_limits_service(MockTenantRepo())
+
+    twenty_six_hours = 26 * 60 * 60
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=twenty_six_hours)
+    )
+
+    assert updated.audio_max_duration_seconds == twenty_six_hours
+    assert updated.audio_max_duration_ceiling_seconds == ceiling
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_input_limits(
+            FlowInputLimitsUpdate(audio_max_duration_seconds=ceiling + 1)
+        )
+    assert exc_info.value.context["maximum_seconds"] == ceiling
+
+
+async def test_a_lowered_decoded_byte_bound_clamps_the_saved_recording_on_read(
+    monkeypatch,
+):
+    service = _flow_limits_service(MockTenantRepo())
+    await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=10 * 60 * 60)
+    )
+    # The operator lowers the bound to what holds two hours.
+    lowered = get_app_settings().model_copy(
+        update={"flow_audio_max_decoded_bytes": 7_200 * 32_000}
+    )
+    monkeypatch.setattr("eneo.flows.flow_input_limits.get_settings", lambda: lowered)
+
+    limits = await service.get_flow_input_limits()
+
+    assert limits.audio_max_duration_seconds == 7_200
+    assert limits.audio_max_duration_ceiling_seconds == 7_200
 
 
 async def test_a_default_below_a_minute_still_reads_back(monkeypatch):

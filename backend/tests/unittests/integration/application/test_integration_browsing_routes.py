@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from cryptography.fernet import Fernet
 from dependency_injector import providers
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -18,6 +19,7 @@ from eneo.integration.infrastructure.preview_service.sharepoint_tree_service imp
 )
 from eneo.main.container.container import Container
 from eneo.roles.permissions import Permission
+from eneo.settings.encryption_service import EncryptionService
 from eneo.spaces.api.space_models import SpaceMember, SpaceRoleValue
 from eneo.spaces.space_service import SpaceService
 
@@ -85,7 +87,12 @@ def browsing_api(integration_access, monkeypatch, authenticated_integration_app)
 
     # Supply the already authenticated actor at the request dependency boundary.
     # Keep production DI for all services under test so missing wiring also fails.
+    # Credential encryption comes from the fixture, not from the process's
+    # ENCRYPTION_KEY: a rotated service-account token is only stored encrypted.
     container = Container(
+        encryption_service=providers.Object(
+            EncryptionService(Fernet.generate_key().decode())
+        ),
         user=providers.Object(case.user),
         user_integration_repo=providers.Object(case.integration_repo),
         tenant_integration_repo=providers.Object(AsyncMock()),

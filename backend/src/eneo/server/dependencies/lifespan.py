@@ -7,8 +7,10 @@ from fastapi import FastAPI
 from eneo.database.database import sessionmanager
 from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
+from eneo.main import process_scratch
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
+from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import FINALIZATION_BUDGET_SECONDS
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     drain_connection_hosts,
@@ -27,6 +29,8 @@ from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.sessions.session_service import drain_background_saves
 from eneo.settings.encryption_service import EncryptionService
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -88,9 +92,14 @@ async def start_persistence() -> Callable[[], Awaitable[None]]:
             # like any other transient storage dependency failure and retry
             # through readiness and reconciliation after startup.
             pass
-        except (ObjectContentConfigurationError, ObjectStoreConnectionError):
+        except (
+            ObjectContentConfigurationError,
+            ObjectStoreConnectionError,
+        ) as error:
             # Before the next clause: a configuration error is also an
-            # ObjectContentUnavailableError, and it is not transient.
+            # ObjectContentUnavailableError, and it is not transient. The API
+            # server only reports that its worker failed to boot.
+            logger.error("Startup refused: %s", error)
             raise
         except ObjectContentUnavailableError:
             # A transient database/store outage is a readiness failure. The
@@ -126,6 +135,8 @@ async def startup():
     # escapes (cancellation included) stops what this call started, last
     # started first. Once everything is up, stopping it is shutdown's.
     async with AsyncExitStack() as started:
+        process_scratch.start()
+        started.callback(process_scratch.stop)
         started.push_async_callback(await start_persistence())
         redis_clients.start()
         started.push_async_callback(redis_clients.stop)
@@ -158,8 +169,9 @@ async def shutdown():
 
     # Every step runs even when an earlier one fails. Callbacks run last pushed
     # first: the websocket listeners leave their subscriptions before the Redis
-    # clients behind them close.
+    # clients behind them close, and this process's scratch directory goes last.
     async with AsyncExitStack() as steps:
+        steps.callback(process_scratch.stop)
         steps.push_async_callback(redis_clients.stop)
         steps.push_async_callback(websocket_manager.shutdown)
         steps.push_async_callback(job_manager.close)

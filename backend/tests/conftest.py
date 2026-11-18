@@ -354,3 +354,19 @@ async def process_redis_clients():
         yield
     finally:
         await redis_clients.stop()
+
+
+@pytest.fixture(autouse=True)
+def process_scratch_per_test(request: pytest.FixtureRequest) -> Iterator[None]:
+    """Remove the process scratch directory a unit test made.
+
+    Code that writes temporary files makes the process's scratch directory on
+    first use (eneo.main.process_scratch). Left in place, the next test in the
+    worker would get it, made under another test's settings. Integration apps
+    own it through their lifespan, so they keep it.
+    """
+    yield
+    if request.node.get_closest_marker("integration") is None:
+        from eneo.main import process_scratch
+
+        process_scratch.stop()

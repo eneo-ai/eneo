@@ -137,6 +137,7 @@ class TestBasicLogging:
     async def test_required_log_bypasses_tenant_audit_configuration(
         self, mock_repository, mock_config_service, mock_feature_flag_service
     ):
+        """Mutant: a disabled audit setting suppresses a required event."""
         mock_feature_flag_service.check_is_feature_enabled.return_value = False
         mock_config_service.is_action_enabled.return_value = False
         mock_repository.create.return_value = MagicMock(spec=AuditLog)
@@ -149,10 +150,10 @@ class TestBasicLogging:
         result = await service.log(
             tenant_id=uuid4(),
             actor_id=uuid4(),
-            action=ActionType.FLOW_PACKAGE_IMPORT_FAILED,
-            entity_type=EntityType.SPACE,
+            action=ActionType.RETENTION_POLICY_APPLIED,
+            entity_type=EntityType.TENANT_SETTINGS,
             entity_id=uuid4(),
-            description="Flow package import failed",
+            description="Retention policy applied",
             metadata={},
             required=True,
         )

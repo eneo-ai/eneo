@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from hashlib import sha256
@@ -11,12 +10,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
-from eneo.data_retention.infrastructure import (
-    data_retention_worker,
-)
+from eneo.data_retention.domain.retention import RetentionJobOutcome
+from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import (
     FlowLiveTranscripts,
     FlowOutboxDeliveryStatus,
@@ -40,6 +40,8 @@ from eneo.database.tables.object_content_table import (
     InlineContentPayloads,
     ObjectContents,
 )
+from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 from eneo.database.tables.tenant_table import Tenants
 from eneo.files.file_models import FileContentVariant, FileType
@@ -76,8 +78,10 @@ from eneo.flows.infrastructure.flow_run_history_purge_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
-from eneo.main.container.container import Container
+from eneo.main.config import get_settings
+from eneo.main.retention_tasks import retention_task_registrations
 from eneo.object_content.content import ContentAccessClass, ContentState, StorageKind
+from tests.integration.data_retention.retention_support import run_registered_retention
 
 
 @dataclass(frozen=True)
@@ -1085,6 +1089,14 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
     db_session,
     completion_model_factory,
 ) -> None:
+    """Every registered retention task runs and leaves Flow data in place.
+
+    The organization's conversation time and the unused-upload grace both
+    make old content due, and a chat and an unreferenced file are removed, so
+    the run did work. The Flow data is older than any retention time, and an
+    authoring chat has not been asked anything yet. Mutants: a registered task
+    that removes old Flow runs; one that removes live transcripts; the
+    empty-session sweep without its authoring-chat guard."""
     now = datetime.now(timezone.utc)
     async with db_container() as setup_container:
         session = setup_container.session()
@@ -1136,7 +1148,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             user=user,
             space=space,
             assistant=assistant,
-            days_old=10,
+            days_old=400,
             flow_retention_days=1,
         )
         outbox_id = await _add_flow_audit_outbox_row(
@@ -1151,7 +1163,7 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
             tenant=tenant,
             user=user,
             space=space,
-            uploaded_at=now - timedelta(days=10),
+            uploaded_at=now - timedelta(days=400),
             size=321,
         )
         template = await _create_flow_template_asset_fixture(
@@ -1174,14 +1186,141 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         abandoned_file_id = abandoned.file.id
         template_asset_id = template.template_asset.id
         template_file_id = template.template_file.id
+        live_transcript = FlowLiveTranscripts(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            flow_id=flow_id,
+            flow_version=1,
+            step_id=runtime.step_id,
+            model_id=uuid4(),
+            recording_id="recording-1",
+            text="Hej.",
+            segments=None,
+            received_audio_seconds=1.0,
+            expires_at=now + timedelta(days=30),
+            bound_file_id=runtime_input_file_id,
+            bound_file_ids=[runtime_input_file_id],
+        )
+        session.add(live_transcript)
+        # Expired when the run happens but still bound: its file keeps it, so
+        # no task may remove it for its expiry alone.
+        expired_live_transcript = FlowLiveTranscripts(
+            tenant_id=tenant.id,
+            user_id=user.id,
+            flow_id=flow_id,
+            flow_version=1,
+            step_id=runtime.step_id,
+            model_id=uuid4(),
+            recording_id="recording-2",
+            text="Hej.",
+            segments=None,
+            received_audio_seconds=1.0,
+            expires_at=now + timedelta(days=1),
+            bound_file_id=runtime_input_file_id,
+            bound_file_ids=[runtime_input_file_id],
+        )
+        session.add(expired_live_transcript)
+        authoring_assistant = Assistants(
+            name="Flow chat",
+            user_id=user.id,
+            space_id=space.id,
+            logging_enabled=False,
+            is_default=False,
+            published=False,
+            hidden=True,
+        )
+        session.add(authoring_assistant)
+        await session.flush()
+        long_ago = now - timedelta(days=400)
+        authoring_session = Sessions(
+            name="Flow chat",
+            user_id=user.id,
+            assistant_id=authoring_assistant.id,
+            created_at=long_ago,
+            updated_at=long_ago,
+        )
+        session.add(authoring_session)
+        await session.flush()
+        session.add(
+            FlowAuthoringChats(
+                session_id=authoring_session.id,
+                assistant_id=authoring_assistant.id,
+                tenant_id=tenant.id,
+                space_id=space.id,
+                user_id=user.id,
+                flow_id=flow_id,
+            )
+        )
+        await session.flush()
+        live_transcript_id = live_transcript.id
+        expired_live_transcript_id = expired_live_transcript.id
+        authoring_session_id = authoring_session.id
 
-    cleanup_old_data = inspect.unwrap(data_retention_worker.cleanup_old_data)
-    result = await cleanup_old_data(container=Container())
+        # Content outside Flows that the same run must remove.
+        session.add(
+            AuditRetentionPolicy(
+                tenant_id=tenant.id,
+                retention_days=365,
+                conversation_retention_enabled=True,
+                conversation_retention_days=1,
+            )
+        )
+        old = now - timedelta(days=10)
+        chat = Sessions(
+            name="Old chat",
+            user_id=user.id,
+            assistant_id=assistant.id,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(chat)
+        await session.flush()
+        question = Questions(
+            question="An old question",
+            answer="An old answer",
+            num_tokens_question=1,
+            num_tokens_answer=1,
+            tenant_id=tenant.id,
+            assistant_id=assistant.id,
+            session_id=chat.id,
+            created_at=old,
+            updated_at=old,
+        )
+        session.add(question)
+        unreferenced = await _create_durable_file(
+            session,
+            tenant_id=tenant.id,
+            user_id=user.id,
+            name=f"unreferenced-{uuid4()}.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+            payload=b"unused",
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            created_at=now,
+        )
+        await session.flush()
+        question_id = question.id
+        unreferenced_file_id = unreferenced.id
 
-    assert result["success"] is True
-    assert not any(key.startswith("flow_") for key in result["deleted"])
+    # Past the unused-upload grace, so every upload nothing refers to is due.
+    later = now + timedelta(days=2)
+    settings = get_settings()
+    async with sessionmanager.session() as session:
+        reports = [
+            await run_registered_retention(
+                session, task_name=registration.name, settings=settings, now=later
+            )
+            for registration in retention_task_registrations(settings, now=later)
+        ]
+
+    for report in reports:
+        assert report.job_run_id is not None, report
+        assert report.outcome is RetentionJobOutcome.SUCCEEDED, report
+        assert not [key for key in report.counts if "flow" in key], report
 
     async with db_session() as session:
+        assert await session.get(Questions, question_id) is None
+        assert await session.get(Files, unreferenced_file_id) is None
         assert await session.get(FlowRuns, run_id) is not None
         step_result = await session.get(FlowStepResults, step_result_id)
         assert step_result is not None
@@ -1221,6 +1360,51 @@ async def test_scheduled_cleanup_preserves_all_flow_owned_data(
         assert await session.get(FlowTemplateAssets, template_asset_id) is not None
         assert await session.get(Files, template_file_id) is not None
         assert await session.get(FlowRunAuditOutbox, outbox_id) is not None
+        for file_id in (generated_file_id, runtime_input_file_id, abandoned_file_id):
+            assert await session.scalar(
+                select(func.count())
+                .select_from(FileContentReferences)
+                .where(FileContentReferences.file_id == file_id)
+            ), file_id
+        assert await session.scalar(
+            select(func.count())
+            .select_from(FlowRunStepInputFiles)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+        )
+        assert await session.get(FlowLiveTranscripts, live_transcript_id) is not None
+        assert (
+            await session.get(FlowLiveTranscripts, expired_live_transcript_id)
+            is not None
+        )
+        assert await session.get(Sessions, authoring_session_id) is not None
+        assert await session.get(FlowAuthoringChats, authoring_session_id) is not None
+        # Readable, not only referenced: the reader refuses content that is no
+        # longer AVAILABLE although its reference remains.
+        for file_id, payload in (
+            (generated_file_id, b"g" * 1024),
+            (runtime_input_file_id, b"r" * 128),
+            (abandoned_file_id, b"u" * 321),
+            (template_file_id, b"t" * 1024),
+        ):
+            contents = (
+                await session.execute(
+                    select(ObjectContents.state, InlineContentPayloads.payload)
+                    .join(
+                        FileContentReferences,
+                        FileContentReferences.content_id == ObjectContents.id,
+                    )
+                    .join(
+                        InlineContentPayloads,
+                        InlineContentPayloads.content_id == ObjectContents.id,
+                    )
+                    .where(FileContentReferences.file_id == file_id)
+                )
+            ).all()
+            assert contents == [(ContentState.AVAILABLE.value, payload)], file_id
+        for transcript_id in (live_transcript_id, expired_live_transcript_id):
+            transcript = await session.get(FlowLiveTranscripts, transcript_id)
+            assert transcript is not None
+            assert transcript.text == "Hej."
 
 
 @pytest.mark.asyncio

@@ -154,6 +154,7 @@ class AuditService:
         request_id: Optional[UUID] = None,
         error_message: Optional[str] = None,
         record_client: bool = True,
+        audit_id: Optional[UUID] = None,
     ) -> Optional[AuditLog]:
         """
         Create an audit log entry.
@@ -166,6 +167,8 @@ class AuditService:
             entity_id: ID of affected entity
             description: Human-readable description
             metadata: Additional context (actor/target snapshots, changes)
+            required: Persist even when audit configuration disables the action;
+                persistence errors propagate to the caller's transaction.
             outcome: Success or failure
             actor_type: Type of actor (user, system, api_key)
             ip_address: Client IP address
@@ -176,6 +179,8 @@ class AuditService:
                 request. False for a system event raised inside a request
                 whose client is not the actor (an anonymous widget visitor),
                 so their address never enters the tenant's audit trail.
+            audit_id: Deterministic id chosen by the caller; a second write with
+                the same id fails instead of being dropped.
 
         Returns:
             Created audit log (or None if action is disabled)
@@ -212,7 +217,7 @@ class AuditService:
             ip_address, user_agent = filled_ip, filled_agent
 
         audit_log = AuditLog(
-            id=uuid4(),
+            id=audit_id or uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
             actor_api_key_id=actor_api_key_id,

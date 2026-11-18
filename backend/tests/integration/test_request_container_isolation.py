@@ -44,7 +44,9 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 # Providers a /users/me read reaches, JWT or API key: the copies it touched
 # and every provider they reach, override Objects included, at the measured
 # count. Lower it when wiring shrinks; raise it only with the reason.
-_ME_COPY_CEILING = 25
+# 26: the user service also resolves account bindings at sign-in, so it
+# reaches the identity binding repository.
+_ME_COPY_CEILING = 26
 
 Headers = dict[str, str]
 _user_container = get_container(with_user=True)

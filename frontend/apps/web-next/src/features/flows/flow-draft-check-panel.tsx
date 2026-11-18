@@ -156,7 +156,9 @@ function flowProblemText(problem: FlowProblem, t: Translate): string {
     case "transcription_model_missing":
       return t("flow_editor_tools_check_transcription_model_missing");
     case "speaker_service_missing":
-      return t("flow_editor_tools_check_speaker_service_missing");
+      return problem.switchable
+        ? t("flow_editor_tools_check_speaker_service_unchosen")
+        : t("flow_editor_tools_check_speaker_service_missing");
     case "live_model_unavailable":
       return t("flow_editor_tools_check_live_model_unavailable");
   }

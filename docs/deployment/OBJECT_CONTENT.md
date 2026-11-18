@@ -326,6 +326,12 @@ For larger files, configure and select object storage in the same page. Its
 capacity follows the S3 multipart protocol and configured part size. There is
 no separate 2 GiB Flow file-size ceiling.
 
+The PostgreSQL inline capacity assumes PostgreSQL's default
+`bytea_output = hex`: do not change it at server, database or role level,
+because with `escape` a COPY row takes up to five characters per byte and
+`pg_dump` fails for large files (the backup command below also sets it for its
+own session).
+
 Policy does not reserve resources. Inline uploads materialize bytes in memory;
 budget for payload copies in the API/driver and larger allocations in pg_dump.
 Verify memory, WAL and backup capacity at the selected sizes and concurrency.
@@ -693,7 +699,7 @@ backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
 docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
-docker compose exec -T db pg_dump -U postgres -Fc eneo \
+docker compose exec -T -e PGOPTIONS='-c bytea_output=hex' db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content
 
@@ -763,17 +769,13 @@ reopening traffic.
 The deployment-policy migration creates revision 1 with `postgres_inline`
 selected. It reads the four former upload-limit environment values once as
 migration seeds. A present positive integer is preserved exactly; an absent
-value uses the historical seed (10 MiB for session File, session image,
+value uses the fresh-install default (10 MiB for session File, session image,
 and knowledge File; 200 MiB for transcription audio). Blank, non-integer, zero,
 or negative values stop the migration with a named remediation error. After the
 migration, environment changes and restarts never overwrite the database
 policy. During an upgrade, keep the old release's values available until
 `db-init` succeeds, then remove them from active backend and worker
-configuration. Fresh installations do not need them. Migration `202609202000`
-then raises values still at the historical seeds to 256 MiB for session and
-knowledge files and 384 MiB for audio. Other policy values remain unchanged.
-Its downgrade preserves all policy values because values matching the new
-defaults may have been chosen by an administrator.
+configuration. Fresh installations do not need them.
 
 If a restore predates this migration, keep backend and worker stopped and run:
 

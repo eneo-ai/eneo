@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
@@ -10,8 +10,10 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
+import type { Schema } from "@/lib/api/models";
 import type { ToolCallRecord } from "./side-panel/message-tool-calls";
-import { queuePartnerUpdate } from "./partner-updates";
+import { ModelReasoningPicker } from "./model-reasoning-picker";
+import { awaitPartnerUpdates, queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -224,7 +226,8 @@ function Harness({
   onToolCallFinished,
   onAnswerFinished,
   chatPartner = partner,
-  initialMessages
+  initialMessages,
+  modelSelector
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
@@ -232,6 +235,7 @@ function Harness({
   onAnswerFinished?: () => void;
   chatPartner?: ChatPartner;
   initialMessages?: EneoUIMessage[];
+  modelSelector?: ReactNode;
 }) {
   const [activity, setActivity] = useState<ActivityState | null>(null);
   return (
@@ -244,6 +248,7 @@ function Harness({
       onTitle={onTitle}
       onToolCallFinished={onToolCallFinished}
       onAnswerFinished={onAnswerFinished}
+      modelSelector={modelSelector}
     />
   );
 }
@@ -345,6 +350,259 @@ describe("ChatView streaming an answer", () => {
       release();
       await save;
     }
+  });
+
+  it("sends a question asked right after a model was picked and the panel closed once that save lands", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    const landed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saved: unknown[] = [];
+    const models = [
+      { id: "m-1", name: "m-1", nickname: "Modell Ett" },
+      { id: "m-2", name: "m-2", nickname: "Modell Två" }
+    ] as Schema<"CompletionModelPublic">[];
+    try {
+      renderInApp(
+        <Harness
+          modelSelector={
+            <ModelReasoningPicker
+              assistantId="assistant-closed"
+              models={models}
+              selectedId="m-1"
+              storedLevel={null}
+              policyDefaultLevel={null}
+              onSave={(change) =>
+                queuePartnerUpdate(() => {
+                  saved.push(change);
+                  return landed;
+                })
+              }
+            />
+          }
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+      // Closed before the choice has rested: it is saved now, and the question waits for it.
+      fireEvent.keyDown(panel, { key: "Escape" });
+      ask("Vilken gräns gäller?");
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(saved).toEqual([{ modelId: "m-2" }]);
+      expect(spies.sent).toHaveLength(0);
+
+      await act(async () => {
+        release();
+        await landed;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+    } finally {
+      release();
+      await awaitPartnerUpdates();
+    }
+  });
+
+  it("holds a question sent while a picked model still rests until that model is saved", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    const landed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const saved: unknown[] = [];
+    const models = [
+      { id: "m-1", name: "m-1", nickname: "Modell Ett" },
+      { id: "m-2", name: "m-2", nickname: "Modell Två" }
+    ] as Schema<"CompletionModelPublic">[];
+    // In a conversation the composer stays mounted when a question is sent, so only the
+    // choice's own place in the save queue can hold the question.
+    const earlier: EneoUIMessage[] = [
+      { id: "q0", role: "user", parts: [{ type: "text", text: "Hej" }] },
+      { id: "a0", role: "assistant", parts: [{ type: "text", text: "Hej!", state: "done" }] }
+    ];
+    try {
+      renderInApp(
+        <Harness
+          initialMessages={earlier}
+          modelSelector={
+            <ModelReasoningPicker
+              assistantId="assistant-resting"
+              models={models}
+              selectedId="m-1"
+              storedLevel={null}
+              policyDefaultLevel={null}
+              onSave={(change) =>
+                queuePartnerUpdate(() => {
+                  saved.push(change);
+                  return landed;
+                })
+              }
+            />
+          }
+        />
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Ett" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+      // Sent with the panel still open: the browser closes it only after the click.
+      ask("Vilken gräns gäller?");
+
+      // Past the rest: the choice is saved, and the question still waits for that save.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+      });
+      expect(saved).toEqual([{ modelId: "m-2" }]);
+      expect(spies.sent).toHaveLength(0);
+
+      await act(async () => {
+        release();
+        await landed;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+    } finally {
+      release();
+      await awaitPartnerUpdates();
+    }
+  });
+
+  describe("a model chosen in the start state while its save is held across the first question", () => {
+    /** Two models with levels of their own, both offering "medium". */
+    const LEVEL_MODELS = [
+      {
+        id: "m-1",
+        name: "m-1",
+        nickname: "Modell Ett",
+        reasoning: true,
+        supported_model_kwargs: {
+          reasoning_effort: { supported: true, control: "select", options: ["low", "medium"] }
+        }
+      },
+      {
+        id: "m-2",
+        name: "m-2",
+        nickname: "Modell Två",
+        reasoning: true,
+        supported_model_kwargs: {
+          reasoning_effort: { supported: true, control: "select", options: ["medium", "high"] }
+        }
+      }
+    ] as Schema<"CompletionModelPublic">[];
+
+    /**
+     * The chat as the personal chat runs it: the saves queued, and the stored
+     * model read again once a save lands. The first question remounts the composer.
+     */
+    function SavedChat({ saves }: { saves: { change: unknown; done: Promise<void> }[] }) {
+      const [stored, setStored] = useState("m-1");
+      return (
+        <Harness
+          modelSelector={
+            <ModelReasoningPicker
+              assistantId="assistant-remount"
+              models={LEVEL_MODELS}
+              selectedId={stored}
+              storedLevel={null}
+              policyDefaultLevel={null}
+              onSave={(change) =>
+                queuePartnerUpdate(async () => {
+                  const save = saves.shift()!;
+                  save.change = change;
+                  await save.done;
+                  if (change.modelId) setStored(change.modelId);
+                })
+              }
+            />
+          }
+        />
+      );
+    }
+
+    function held() {
+      let land!: () => void;
+      let refuse!: () => void;
+      const done = new Promise<void>((resolve, reject) => {
+        land = resolve;
+        refuse = () => reject(new Error("refused"));
+      });
+      return { change: undefined as unknown, done, land, refuse };
+    }
+
+    const pill = () => screen.getByRole("button", { name: /^Chattmodell: / });
+    /** The question went once the saves were done, and its answer is in: nothing runs on after the test. */
+    const answered = () => waitFor(() => expect(spies.titled).toHaveLength(1));
+
+    async function chooseModelThenAsk() {
+      fireEvent.click(pill());
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Modell Två/ }));
+      fireEvent.keyDown(panel, { key: "Escape" });
+      ask("Vilken gräns gäller?");
+      // The question waits for the save, in the conversation the composer moved to.
+      await screen.findByRole("log", { name: "Konversation" });
+    }
+
+    it("shows the chosen model, still saving, after the composer remounts, and never the old one", async () => {
+      spies.mode = "answer";
+      const first = held();
+      try {
+        renderInApp(<SavedChat saves={[first]} />);
+        await chooseModelThenAsk();
+        expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Modell Två");
+        expect(pill().getAttribute("aria-busy")).toBe("true");
+
+        await act(async () => {
+          first.land();
+          await awaitPartnerUpdates();
+        });
+        await waitFor(() => expect(pill().getAttribute("aria-busy")).toBeNull());
+        expect(pill().getAttribute("aria-label")).toBe("Chattmodell: Modell Två");
+        await answered();
+      } finally {
+        first.land();
+        await awaitPartnerUpdates();
+        await answered().catch(() => {});
+      }
+    });
+
+    it.each(["lands", "is refused"])(
+      "sends a level chosen after the remount with the model whose save is held, when that save %s",
+      async (outcome) => {
+        spies.mode = "answer";
+        const first = held();
+        const second = held();
+        const queued = [first, second];
+        try {
+          renderInApp(<SavedChat saves={queued} />);
+          await chooseModelThenAsk();
+          fireEvent.click(pill());
+          const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+          fireEvent.click(within(panel).getByRole("radio", { name: "Medel" }));
+          fireEvent.keyDown(panel, { key: "Escape" });
+
+          await act(async () => {
+            if (outcome === "lands") first.land();
+            else first.refuse();
+            await first.done.catch(() => {});
+          });
+          await waitFor(() => expect(second.change).toBeDefined());
+          expect([first.change, second.change]).toEqual([
+            { modelId: "m-2" },
+            { modelId: "m-2", level: "medium" }
+          ]);
+          await act(async () => second.land());
+          await answered();
+        } finally {
+          first.land();
+          second.land();
+          await awaitPartnerUpdates();
+          await answered().catch(() => {});
+        }
+      }
+    );
   });
 
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {

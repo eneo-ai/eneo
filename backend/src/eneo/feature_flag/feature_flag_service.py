@@ -24,21 +24,15 @@ class FeatureFlagService:
         self,
         feature_id: UUID,
         tenant_id: UUID,
-    ) -> FeatureFlag:
-        feature_flag = await self.feature_flag_repo.one(id=feature_id)
-        feature_flag.enable_tenant(tenant_id=tenant_id)
-        updated_feature_flag = await self.feature_flag_repo.update(feature_flag)
-        return updated_feature_flag
+    ) -> None:
+        await self.feature_flag_repo.set_tenant(feature_id, tenant_id, enabled=True)
 
     async def disable_tenant(
         self,
         feature_id: UUID,
         tenant_id: UUID,
-    ) -> FeatureFlag:
-        feature_flag = await self.feature_flag_repo.one(id=feature_id)
-        feature_flag.disable_tenant(tenant_id=tenant_id)
-        updated_feature_flag = await self.feature_flag_repo.update(feature_flag)
-        return updated_feature_flag
+    ) -> None:
+        await self.feature_flag_repo.set_tenant(feature_id, tenant_id, enabled=False)
 
     async def check_is_feature_enabled(
         self,

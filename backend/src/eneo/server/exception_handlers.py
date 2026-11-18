@@ -12,10 +12,16 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from eneo.authentication.browser_session import SessionGenerationMismatchError
+from eneo.authentication.oidc.errors import (
+    OidcLoginUnavailableError,
+    OidcResponseNotVerifiedError,
+    OidcTransactionInvalidError,
+)
 from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.infrastructure.context_builder import (
     ContextWindowExceededError,
 )
+from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -77,6 +83,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
     ObjectStoreProbeIntegrityFailed,
+    ObjectStoreProbeKeepsVersions,
     ObjectStoreProbeTlsFailed,
     ObjectStoreProbeUnavailable,
 )
@@ -96,6 +103,7 @@ from eneo.skills.domain.skill import (
     SkillSlugConflictError,
 )
 from eneo.transcription_services.models import SERVICE_ENDPOINT_MESSAGES
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -376,6 +384,15 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         None,
         ErrorCodes.SESSION_GENERATION_MISMATCH,
     ),
+    # --- OIDC sign-in ---
+    OidcLoginUnavailableError: (503, None, ErrorCodes.OIDC_LOGIN_UNAVAILABLE),
+    OidcTransactionInvalidError: (400, None, ErrorCodes.OIDC_TRANSACTION_INVALID),
+    OidcResponseNotVerifiedError: (
+        401,
+        None,
+        ErrorCodes.OIDC_RESPONSE_NOT_VERIFIED,
+    ),
+    IdentityConflictError: (403, None, ErrorCodes.IDENTITY_CONFLICT),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),
@@ -457,6 +474,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectStoreProbeTlsFailed: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeBindingMismatch: (409, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeIntegrityFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeKeepsVersions: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeCleanupFailed: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectStoreProbeConnectionFailed: (
         503,
@@ -533,7 +551,14 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "archive the widget before the Assistant can move to another Space.",
         ErrorCodes.ASSISTANT_PUBLISHED_AS_WIDGET,
     ),
+    # --- Copies of removed content ---
+    DerivedSourceRemovedError: (410, None, ErrorCodes.DERIVED_SOURCE_REMOVED),
 }
+
+
+def _is_documented_error(detail: object) -> TypeGuard[dict[str, Any]]:
+    """A raised detail that names its own error: a dict with `code` and `message`."""
+    return isinstance(detail, dict) and "code" in detail and "message" in detail
 
 
 def _http_exception_body(
@@ -548,12 +573,12 @@ def _http_exception_body(
     """
     detail: object = exc.detail
     structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
-    if structured is not None and "code" in structured and "message" in structured:
+    if _is_documented_error(detail):
         # Every raiser of this shape means it as the documented error, and its
         # extra keys (`retry_after_seconds`, `existing_status`) are part of the
         # route's contract, so the dict becomes the body. Most raisers left the
         # numeric category out; fill it here so a direct raise cannot bypass it.
-        body = dict(structured)
+        body = dict(detail)
         body.setdefault(
             "eneo_error_code", default_error_code_for_status(exc.status_code).value
         )
@@ -605,8 +630,10 @@ def add_exception_handlers(app: FastAPI):
             response = await unhandled_exception_handler(request, http_exc)
             response.headers.update(http_exc.headers or {})
             return response
-        if http_exc.status_code == 422:
-            # The raiser's headers win; otherwise carry the request's correlation id.
+        if http_exc.status_code == 422 and not _is_documented_error(http_exc.detail):
+            # A 422 that names its own error keeps it; any other answers as a
+            # request validation error. The raiser's headers win; otherwise
+            # carry the request's correlation id.
             headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
             return JSONResponse(
                 status_code=422,

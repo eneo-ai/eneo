@@ -113,13 +113,9 @@
       activeTenantSlug !== null
   );
 
-  const hasExternalLogin = $derived(
-    Boolean(data.mobilityguardLink || data.hasSingleTenantOidc || oidcErrorCode)
-  );
+  const hasExternalLogin = $derived(Boolean(data.hasSingleTenantOidc || oidcErrorCode));
   const showCredentialsForm = $derived(
-    Boolean(showUsernameAndPassword) ||
-      federationError !== null ||
-      (!data.mobilityguardLink && !data.hasSingleTenantOidc)
+    Boolean(showUsernameAndPassword) || federationError !== null || !data.hasSingleTenantOidc
   );
 
   // Determine which loading message to display
@@ -252,7 +248,7 @@
       }
     }
 
-    if (!data.zitadelLink && !data.mobilityguardLink) {
+    if (!data.zitadelLink) {
       await loadTenantsAndMaybeShow();
     }
 
@@ -311,6 +307,9 @@
         body: form
       });
       const result = deserialize(await response.text());
+      if (result.type === "failure" && result.data?.unavailable === true) {
+        federationError = m.oidc_error_login_unavailable();
+      }
       if (result.type !== "redirect") throw new Error("OIDC initiation failed");
 
       // Allow natural browser history navigation - back button returns to tenant selector
@@ -318,7 +317,7 @@
       return true;
     } catch (err) {
       console.error("Failed to initiate OIDC authentication:", err);
-      federationError = m.failed_to_start_authentication();
+      federationError ??= m.failed_to_start_authentication();
       isAwaitingLoginResponse = false;
       isInitializing = false;
       showTenantSelector = preloadedTenants.length > 0;
@@ -395,6 +394,12 @@
     }
     if (oidcErrorDetailCode === "unauthorized") {
       return m.oidc_error_unauthorized();
+    }
+    if (oidcErrorDetailCode === "login_unavailable") {
+      return m.oidc_error_login_unavailable();
+    }
+    if (oidcErrorDetailCode === "identity_conflict") {
+      return m.oidc_error_identity_conflict();
     }
     return m.oidc_error_generic();
   }
@@ -486,6 +491,12 @@
         </div>
       {:else}
         <LoginStatusAlert {message} />
+
+        {#if data.organisationSignInUnavailable}
+          <AuthAlert tone="warning">
+            <p>{m.login_organisation_sign_in_unavailable()}</p>
+          </AuthAlert>
+        {/if}
 
         {#if federationError}
           <AuthAlert tone="error" title={m.failed_to_login()}>
@@ -595,8 +606,6 @@
             <Button type="button" size="lg" class="w-full" onclick={() => beginOidcLogin()}
               >{m.login()}</Button
             >
-          {:else if data.mobilityguardLink}
-            <Button size="lg" class="w-full" href={data.mobilityguardLink}>{m.login()}</Button>
           {/if}
         </form>
       {/if}

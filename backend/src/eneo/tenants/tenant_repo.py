@@ -309,6 +309,19 @@ class TenantRepository:
             raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
         return model
 
+    async def lock(self, tenant_id: UUID) -> None:
+        """Row-lock the tenant until the transaction ends, reading nothing.
+
+        A change kept outside the tenant row (a tenant feature flag) takes this
+        lock before it reads its old value, so two changes for one tenant
+        serialize and the later one reads what the earlier one committed.
+        """
+        locked = await self.session.scalar(
+            sa.select(Tenants.id).where(Tenants.id == tenant_id).with_for_update()
+        )
+        if locked is None:
+            raise exceptions.NotFoundException(f"Tenant {tenant_id} not found.")
+
     async def lock_widget_policy(self, tenant_id: UUID) -> dict[str, Any]:
         """The stored widget policy, row-locked until the transaction ends.
 
@@ -773,6 +786,7 @@ class TenantRepository:
             - masked_secret: str (last 4 chars)
             - issuer: str
             - allowed_domains: list[str]
+            - signing_algorithms, email_verified_claims: list[str] | None
             - encrypted_at: str (ISO timestamp)
             - encryption_status: "encrypted" | "plaintext"
 
@@ -812,6 +826,11 @@ class TenantRepository:
         def _str_or_none(v: object) -> str | None:
             return v if isinstance(v, str) else None
 
+        def _strs_or_none(v: object) -> list[str] | None:
+            if not isinstance(v, list):
+                return None
+            return [s for s in cast(list[object], v) if isinstance(s, str)]
+
         domains_raw = config_typed.get("allowed_domains", [])
         domains: list[str] = (
             [d for d in cast(list[object], domains_raw) if isinstance(d, str)]
@@ -832,6 +851,10 @@ class TenantRepository:
             "issuer": _str_or_none(config_typed.get("issuer")),
             "allowed_domains": domains,
             "additional_redirect_uris": redirect_uris,
+            "signing_algorithms": _strs_or_none(config_typed.get("signing_algorithms")),
+            "email_verified_claims": _strs_or_none(
+                config_typed.get("email_verified_claims")
+            ),
             "encrypted_at": _str_or_none(config_typed.get("encrypted_at")),
             "encryption_status": encryption_status,
         }

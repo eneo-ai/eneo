@@ -5,6 +5,7 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 import re
 import uuid
 from collections.abc import Callable
@@ -138,6 +139,7 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
+from eneo.observability.error_log import log_error
 from eneo.tokens.token_utils import (
     count_tokens,
     measure_provider_input_reserve,
@@ -945,13 +947,17 @@ class TenantModelAdapter(CompletionModelAdapter):
             span.record_exception(exc)
             span.set_status(Status(StatusCode.ERROR, failure.message))
 
-        logger.exception(
-            f"[TenantModelAdapter] Provider unavailable for {self.litellm_model} during {phase}",
+        log_error(
+            logger,
+            logging.ERROR,
+            "[TenantModelAdapter] Provider unavailable for %s during %s",
+            self.litellm_model,
+            phase,
+            error=exc,
             extra={
                 "provider_type": self.provider_type,
                 "model": self.litellm_model,
                 "operation": phase,
-                "error_type": exc.__class__.__name__,
                 "error_code": failure.code,
             },
         )
@@ -2043,10 +2049,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             if response.choices:
                 choice = response.choices[0]
                 msg = choice.message
-                logger.debug(f"[DEBUG] Message: {msg}")
-                reasoning = getattr(msg, "reasoning_content", None)
-                if reasoning:
-                    logger.debug(f"[DEBUG] reasoning_content: {reasoning}")
 
                 tool_round = 0
                 max_rounds = get_settings().max_tool_rounds
@@ -2404,8 +2406,18 @@ class TenantModelAdapter(CompletionModelAdapter):
         ):
             raise
         except Exception as exc:
-            logger.exception(
-                f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
+            # A provider's error can echo the prompt: log its kinds, not its text.
+            log_error(
+                logger,
+                logging.ERROR,
+                "[TenantModelAdapter] Unexpected error for %s",
+                self.litellm_model,
+                error=exc,
+                extra={
+                    "provider_type": self.provider_type,
+                    "model": self.litellm_model,
+                    "operation": "completion",
+                },
             )
             if isinstance(
                 exc,
@@ -2668,8 +2680,17 @@ class TenantModelAdapter(CompletionModelAdapter):
         except TypedIOValidationException:
             raise
         except Exception as exc:
-            logger.exception(
-                f"[TenantModelAdapter] Unexpected error creating stream for {self.litellm_model}"
+            log_error(
+                logger,
+                logging.ERROR,
+                "[TenantModelAdapter] Unexpected error creating stream for %s",
+                self.litellm_model,
+                error=exc,
+                extra={
+                    "provider_type": self.provider_type,
+                    "model": self.litellm_model,
+                    "operation": "stream_preparation",
+                },
             )
             if isinstance(
                 exc,
@@ -3789,9 +3810,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                         phase="stream_iteration", exc=exc, failure=failure
                     )
                 else:
-                    logger.error(
-                        f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
-                        exc_info=True,
+                    log_error(
+                        logger,
+                        logging.ERROR,
+                        "[TenantModelAdapter] %s: Error during stream iteration",
+                        self.litellm_model,
+                        error=exc,
+                        extra={
+                            "provider_type": self.provider_type,
+                            "model": self.litellm_model,
+                            "operation": "stream_iteration",
+                            "error_code": (
+                                failure.code if failure is not None else None
+                            ),
+                        },
                     )
                 error = (
                     failure.message

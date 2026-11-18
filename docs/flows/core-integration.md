@@ -3,11 +3,82 @@
 Status record for the integration branch `feat/flows-core-integration`. It
 keeps the reference flow core with its history, brings develop in, and
 replaces the dedicated AI Builder interaction with ordinary assistant chat over
-a loopback MCP server and a web-next administration. Flows are on for every
-tenant: the `flows_core` feature flag is seeded off by 202610211900 and turned
-on by 202610220930, which also gives existing predefined Owner roles the four
-flow permissions (and AI Configurator roles `flows_trace`), as new tenants get
-them. A tenant row with `enabled = false` turns flows off for that tenant.
+a loopback MCP server and a web-next administration. While the global
+`flows_core` row is off, Flows are off until an organisation chooses them:
+202610211900 seeds the `flows_core` feature flag off, no upgrade turns it on or
+gives a role a flow permission, and the predefined roles of a new organisation
+carry none.
+
+## What changed from earlier builds of this branch
+
+Earlier builds of this branch switched Flows on for every organisation on
+upgrade, gave the Owner role the four flow permissions and the AI Configurator
+role `flows_trace`, gave every role with `admin` `retention_manage` and
+`retention_holds`, and raised the upload limits. An upgrade now does none of
+that. An installation that upgrades from 2.3 or installs fresh with this
+version therefore needs these steps before Flows and retention can be used:
+
+1. An administrator switches Flows on for their organisation in
+   **Admin > Settings** (below).
+2. An administrator grants the flow permissions and the retention permissions
+   to the roles that need them in **Admin > Roles**. Until then nobody can
+   change retention rules or legal holds; the retention endpoints answer 403
+   `retention_permission_required`.
+3. An administrator who wants larger uploads raises the limits in
+   **Admin > File storage**.
+
+A database that already ran the earlier revisions keeps what they did: Flows
+stay on through the global flag and existing roles keep their permissions.
+From this version on, a new organisation and a role reset to its template carry
+no flow or retention permission, so an administrator grants them there; and
+persistent assistant attachments default to 25 MiB unless
+`ATTACHMENT_MAX_SIZE_BYTES` is set.
+
+## Turning Flows on
+
+An administrator (the `admin` permission) switches Flows on and off for their
+own organisation under **Admin > Settings** in web-next, the Flows row among
+the feature switches (`PATCH /api/v1/settings/flows`). The switch writes the
+organisation's own `flows_core` row and no other: the global row is unchanged and
+other organisations are unaffected. The change is committed before the answer
+is sent, and with audit logging, the `admin_actions` category and the
+`tenant_settings_updated` action on it leaves an audit entry with the old and
+the new value. The Svelte frontend has no switch.
+
+Flows run on two services, `task-execution-worker` (runs) and
+`task-maintenance-worker` (dispatch of queued runs, recovery and outbox
+work). The Flows row shows whether they run, from each worker's latest health
+signal (`GET /api/v1/settings/task-workers`, `admin` only, no organisation
+data): running, not running with the worker named, or "could not be checked"
+when Redis cannot be read. The signal lives for about a minute, so a worker
+that just stopped can still read as running. It warns and never blocks the
+switch. With Flows on and the execution worker down, a new run waits as
+`queued` without a warning in the run view; it starts once the worker runs
+again.
+
+The switch changes no role permissions. Roles that already hold the flow
+permissions get access at once; an administrator grants them in
+**Admin > Roles**. `flows_view` reads flows, `flows_run` runs them,
+`flows_manage` builds and publishes them, and `flows_trace` reads run traces.
+Resetting a role to its template removes flow permissions granted by hand.
+
+Switching Flows off asks for confirmation first. Every flow route then
+answers `404`, but runs are not stopped: a queued run can still start, a
+running run carries on, and neither can be followed or cancelled until Flows
+are switched on again.
+
+### Retention permissions
+
+No role receives `retention_manage` or `retention_holds` automatically: not on
+upgrade (`202610041000` creates the hold table and grants nothing), not from a
+role template, and not the Owner role. An administrator grants them in role
+editing (Svelte and web-next). Startup never rewrites an existing role; a reset
+to the template removes them. The downgrade of `202610041000` removes both from
+every role, and upgrading again does not give them back. The web-next page
+`/admin/flow-data-retention` stays in the admin menu for `admin` when Flows
+are on, because its upload and debug windows are admin settings; the retention
+rules on it follow the two permissions, and the backend checks every request
+(`flow_retention_authz.py`).
 
 ## Starting points
 

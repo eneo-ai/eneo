@@ -131,11 +131,7 @@ async def _content_bytes(content) -> bytes:
 async def test_document_preparation_preserves_all_bytes_after_prior_read(
     tmp_path, monkeypatch, rolled_to_disk, position
 ):
-    monkeypatch.setattr(
-        file_size_module,
-        "get_settings",
-        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
-    )
+    monkeypatch.setattr(file_size_module.process_scratch, "directory", lambda: tmp_path)
     payload = b"PK\x03\x04" + b"document bytes" * 100
     stream = SpooledTemporaryFile(max_size=1 if rolled_to_disk else len(payload) * 2)
     stream.write(payload)

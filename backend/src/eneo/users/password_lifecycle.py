@@ -144,7 +144,8 @@ def password_status_for(
         policy=PasswordLifecyclePolicy.from_tenant(user.tenant.password_policy),
         now=now,
     )
-    if user.session_auth_method != PASSWORD_AUTH_METHOD:
+    credential = user.credential
+    if credential is None or credential.auth_method != PASSWORD_AUTH_METHOD:
         return status.model_copy(update={"change_required": False, "reason": None})
     return status
 

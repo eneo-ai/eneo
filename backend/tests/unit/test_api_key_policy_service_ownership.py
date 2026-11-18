@@ -234,3 +234,85 @@ async def test_service_key_space_scoped_read_accepted_without_guardrails():
 
     service.ensure_creator_authorized = AsyncMock(return_value=None)
     await service.validate_create_request(request=request)
+
+
+def _space(*, personal: bool):
+    return SimpleNamespace(is_personal=lambda: personal)
+
+
+class _SpaceServiceStub:
+    """ensure_creator_authorized reads the space and asks its actor."""
+
+    def __init__(self, space, *, can_manage_api_keys: bool):
+        self._space = space
+        actor = SimpleNamespace(can_manage_api_keys=lambda: can_manage_api_keys)
+        self.actor_manager = SimpleNamespace(
+            get_space_actor_from_space=lambda space: actor
+        )
+
+    async def get_space(self, space_id):
+        return self._space
+
+
+@pytest.mark.asyncio
+async def test_space_scope_is_decided_by_api_key_management_of_the_space():
+    """A personal space can never be edited, so can_edit_space would refuse
+    its owner; the creator check asks who manages the space's keys instead."""
+    service = _service_with_user([], permissions=[])
+    space = _space(personal=True)
+
+    service.space_service = _SpaceServiceStub(space, can_manage_api_keys=True)
+    assert (
+        await service.ensure_creator_authorized(
+            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
+        )
+        is space
+    )
+
+    service.space_service = _SpaceServiceStub(space, can_manage_api_keys=False)
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.ensure_creator_authorized(
+            scope_type=ApiKeyScopeType.SPACE, scope_id=uuid4()
+        )
+    assert exc.value.status_code == 403
+    assert exc.value.code == "insufficient_permission"
+
+
+@pytest.mark.asyncio
+async def test_service_key_rejected_for_a_personal_space():
+    """A personal space answers to its owner only, so an ownerless key scoped
+    to one would authenticate and reach nothing."""
+    service = _service_with_user([], permissions=[Permission.ADMIN])
+    request = ApiKeyCreateRequest(
+        name="Service key personal space",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.READ,
+        scope_type=ApiKeyScopeType.SPACE,
+        scope_id=uuid4(),
+        ownership=ApiKeyOwnership.SERVICE,
+    )
+
+    service.ensure_creator_authorized = AsyncMock(return_value=_space(personal=True))
+    with pytest.raises(ApiKeyValidationError) as exc:
+        await service.validate_create_request(request=request)
+    assert exc.value.status_code == 400
+    assert "personal space" in exc.value.message
+
+    service.ensure_creator_authorized = AsyncMock(return_value=_space(personal=False))
+    await service.validate_create_request(request=request)
+
+
+@pytest.mark.asyncio
+async def test_user_key_accepted_for_a_personal_space():
+    service = _service_with_user([], permissions=[])
+    request = ApiKeyCreateRequest(
+        name="My personal space key",
+        key_type=ApiKeyType.SK,
+        permission=ApiKeyPermission.WRITE,
+        scope_type=ApiKeyScopeType.SPACE,
+        scope_id=uuid4(),
+        ownership=ApiKeyOwnership.USER,
+    )
+    space = _space(personal=True)
+    service.ensure_creator_authorized = AsyncMock(return_value=space)
+    assert await service.validate_create_request(request=request) is space

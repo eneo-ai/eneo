@@ -1,6 +1,9 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
 
 export const BACKEND_URL = process.env.E2E_BACKEND_URL ?? "http://127.0.0.1:8124";
+// The seeded test account the suite signs in with.
+export const EMAIL = process.env.E2E_USER ?? "e2e@example.com";
+export const PASSWORD = process.env.E2E_PASSWORD ?? "E2ePassword123!";
 export const MOCK_REPLY = "E2E mock completion: pong";
 
 let counter = 0;

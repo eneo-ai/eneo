@@ -58,6 +58,11 @@ export function QuestionDetails({
         </dl>
         <QueryStateBoundary query={query} rows={3}>
           {(record) => {
+            if (record === null) {
+              return (
+                <p className="text-ax-text-secondary text-sm">{t("insights_question_no_log")}</p>
+              );
+            }
             const json = JSON.stringify(record, null, 2);
             return (
               <>

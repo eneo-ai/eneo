@@ -2,9 +2,12 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import en from "@/lib/i18n/messages/en.json";
+import sv from "@/lib/i18n/messages/sv.json";
 import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
+import { testTranslator } from "@/test/i18n";
 import { renderInApp, testAppContext } from "@/test/render";
-import { setViewport } from "@/test/setup-dom";
+import { reportResize, setViewport } from "@/test/setup-dom";
 import { ChatSkills } from "./chat-skills";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 
@@ -357,6 +360,28 @@ describe("ChatSkills", () => {
     expect(within(popover).getByRole("link", { name: "Hantera skills" })).toBeTruthy();
   });
 
+  it("keeps the panel's height while it is open, so a search that shortens the list never moves it", async () => {
+    renderSkills();
+    const trigger = await screen.findByRole("button", {
+      name: "Skills: 2 aktiva i din personliga chatt"
+    });
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      DOMRect.fromRect({ x: 300, y: 400, width: 96, height: 32 })
+    );
+    const popover = await openSkills();
+    const panel = within(popover)
+      .getByText("Gäller alla dina personliga chattar")
+      .closest("[style*='max-height']") as HTMLElement;
+    act(() => reportResize(panel, { height: 300 }));
+    expect(panel.style.minHeight).toBe("300px");
+    // Fewer rows: the panel stays as tall as it was.
+    act(() => reportResize(panel, { height: 120 }));
+    expect(panel.style.minHeight).toBe("300px");
+    // Never taller than the room above the pill.
+    act(() => reportResize(panel, { height: 500 }));
+    expect(panel.style.minHeight).toBe("356px");
+  });
+
   it("explains a paused layer and counts only the organisation's skills", async () => {
     configuration = {
       ...configuration,
@@ -496,6 +521,141 @@ describe("ChatSkills", () => {
 
     expect(answersMode.getAttribute("aria-disabled")).toBe("true");
     expect(within(rowOf(answersMode)).getByText("Spärrad av administratör")).toBeTruthy();
+  });
+
+  it("shares one control with the tools: each with its count, as on its tab, and a tab for each", async () => {
+    const onDisabled = vi.fn();
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [
+            { id: "lou", name: "LOU-register", description: null, icon_url: null },
+            { id: "diarium", name: "Diarium", description: null, icon_url: null }
+          ],
+          disabledServerIds: new Set(["diarium"]),
+          autoAcceptTools: false,
+          onDisabledServerIdsChange: onDisabled,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    // The pill reads as its tabs do: each word with its own count.
+    const name = "Verktyg 1 · Skills 2 (3 aktiva)";
+    const trigger = await screen.findByRole("button", { name });
+    expectNameToHoldVisibleText(trigger, name);
+    expect(screen.queryByRole("button", { name: /^Skills/ })).toBeNull();
+
+    fireEvent.click(trigger);
+    // The panel and its tabs are named for both; a tab's count is the pill's to say.
+    const popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    expect(within(popover).getByRole("tablist", { name: "Verktyg och Skills" })).toBeTruthy();
+    expect(
+      within(popover).getByRole("tab", { name: "Verktyg" }).getAttribute("aria-selected")
+    ).toBe("true");
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    expect(onDisabled).toHaveBeenLastCalledWith(new Set());
+    expect(within(popover).queryByRole("radiogroup")).toBeNull();
+
+    fireEvent.click(within(popover).getByRole("tab", { name: "Skills" }));
+    const skillsPanel = within(popover).getByRole("tabpanel", { name: "Skills" });
+    await waitFor(() => expect(skillsPanel.querySelector('[aria-busy="true"]')).toBeNull());
+    expect(
+      within(skillsPanel).getByRole("radiogroup", { name: "Läge för Mötesanteckningar" })
+    ).toBeTruthy();
+    expect(within(popover).queryByRole("switch", { name: "Diarium" })).toBeNull();
+    await expectNoAxeViolations(popover);
+  });
+
+  it.each([
+    [
+      "sv",
+      sv,
+      [
+        "Verktyg 1 · Skills 0 (1 aktiv)",
+        "Verktyg 3 · Skills 2 (5 aktiva)",
+        "Verktyg 3 · Skills (3 aktiva)"
+      ]
+    ],
+    [
+      "en",
+      en,
+      [
+        "Tools 1 · Skills 0 (1 active)",
+        "Tools 3 · Skills 2 (5 active)",
+        "Tools 3 · Skills (3 active)"
+      ]
+    ]
+  ])("names the shared pill as it reads, in the right number, in %s", (locale, messages, names) => {
+    const t = testTranslator(locale, messages);
+    expect([
+      t("chat_tools_and_skills_named", { count: 1, tools: 1, skills: "0" }),
+      t("chat_tools_and_skills_named", { count: 5, tools: 3, skills: "2" }),
+      // Before the chat's Skills are known, the Skills tab has no count either.
+      t("chat_tools_and_skills_named", { count: 3, tools: 3, skills: "none" })
+    ]).toEqual(names);
+  });
+
+  it.each([
+    [
+      "beside the pill, both tabs laid out, so the panel is as tall as the taller one",
+      "desktop",
+      2
+    ],
+    ["in a phone's sheet, only the chosen tab", "phone", 1]
+  ] as const)("holds %s", async (_name, viewport, laidOut) => {
+    setViewport(viewport);
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [{ id: "lou", name: "LOU-register", description: null, icon_url: null }],
+          autoAcceptTools: false,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /^Verktyg \d/ }));
+    const panel = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    // The Skills tab's choices: laid out unseen beside the pill, not there in the sheet.
+    await waitFor(() =>
+      expect(within(panel).queryAllByRole("radiogroup", { hidden: true }).length > 0).toBe(
+        laidOut === 2
+      )
+    );
+    // The other tab's controls are there to measure, never to reach.
+    expect(within(panel).getByRole("switch", { name: "LOU-register" })).toBeTruthy();
+    expect(within(panel).queryAllByRole("radiogroup")).toHaveLength(0);
+    expect(within(panel).getAllByRole("tabpanel", { hidden: true })).toHaveLength(2);
+    setViewport("desktop");
+  });
+
+  it("puts focus on the chosen tab when the panel opens again", async () => {
+    renderInApp(
+      <ChatSkills
+        tools={{
+          servers: [{ id: "lou", name: "LOU-register", description: null, icon_url: null }],
+          autoAcceptTools: false,
+          onAutoAcceptToolsChange: vi.fn()
+        }}
+      />,
+      { appContext: testAppContext({ permissions: [...OWN_AND_CHAT] as never }) }
+    );
+    const trigger = await screen.findByRole("button", { name: /^Verktyg \d/ });
+    fireEvent.click(trigger);
+    let popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    fireEvent.click(within(popover).getByRole("tab", { name: "Skills" }));
+    fireEvent.keyDown(popover, { key: "Escape" });
+    await waitFor(() => expect(trigger.getAttribute("aria-expanded")).toBe("false"));
+
+    fireEvent.click(trigger);
+    popover = await screen.findByRole("dialog", { name: "Verktyg och Skills" });
+    const chosen = within(popover).getByRole("tab", { name: "Skills" });
+    expect(chosen.getAttribute("aria-selected")).toBe("true");
+    await waitFor(() => expect(document.activeElement).toBe(chosen));
+    // And it stays there once the opening has settled.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(chosen);
   });
 
   it("opens the same choices in a bottom sheet on a phone, with search only beyond seven skills", async () => {

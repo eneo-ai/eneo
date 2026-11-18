@@ -2584,9 +2584,7 @@ async def test_extraction_limit_records_file_failure_and_continues_crawl(
             SimpleNamespace(
                 extract_bounded=AsyncMock(
                     side_effect=[
-                        ExtractionLimitError(
-                            first_path.name, "document resource limit"
-                        ),
+                        ExtractionLimitError("document resource limit"),
                         "Useful document content",
                     ]
                 )

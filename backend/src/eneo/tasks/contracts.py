@@ -36,5 +36,9 @@ class TaskEnqueuer(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class TaskWorkerReadiness:
+    """Each worker's latest health signal; ``probe_ok`` is false when the
+    signals could not be read, which says nothing about the workers."""
+
     execution_ready: bool
     maintenance_ready: bool
+    probe_ok: bool

@@ -11,9 +11,11 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import pytest
+from pdfminer.pdfparser import PDFSyntaxError
 
 from eneo.files import text
 from eneo.files.text import (
+    CorruptFileError,
     ExtractionError,
     PdfExtractionLimitExceeded,
     PdfExtractionLimits,
@@ -92,6 +94,15 @@ class _RefusingExtractor(TextExtractor):
     @classmethod
     def _extract_pdf_page(cls, page):
         raise PdfExtractionLimitExceeded("extracted_bytes", 11, 10)
+
+
+class _QuotingExtractor(TextExtractor):
+    """A parser whose errors quote the file, as real parsers' messages can."""
+
+    @classmethod
+    def _extract_pdf_text(cls, filepath, *args, **kwargs):
+        error = PDFSyntaxError if filepath.stem.endswith("corrupt") else ValueError
+        raise error(f"cannot parse {filepath.name}: Anna Svensson")
 
 
 class _ControlledExtractor(TextExtractor):
@@ -489,3 +500,25 @@ async def test_pdf_fixture_preserves_golden_text(bounded):
         "Personaltatheten ska i genomsnitt vara hogst 5,0 barn per anstalld.\n"
         "Arkiveringsstampel:\nB\nE\nS\nL\nU\nT\nA\nD"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stem", "code"),
+    [("Utredning", "EXTRACTION_FAILED"), ("Utredning corrupt", "CORRUPT")],
+)
+async def test_a_parser_error_quoting_the_file_stays_out_of_the_bounded_extraction_error(
+    tmp_path, stem, code
+):
+    """The bounded path follows the same rule as the inline one: the error
+    names what went wrong, never the file or the parser's text about it."""
+    path = _write_pdf(tmp_path / f"{stem}.pdf", 1)
+
+    with pytest.raises(ExtractionError) as caught:
+        await _QuotingExtractor.extract_from_pdf_async(path, limits=_LIMITS)
+
+    error = caught.value
+    assert error.code == code
+    assert isinstance(error, CorruptFileError) is (code == "CORRUPT")
+    assert "Anna Svensson" not in error.message
+    assert "Utredning" not in error.message

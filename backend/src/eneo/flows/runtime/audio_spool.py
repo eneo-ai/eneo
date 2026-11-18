@@ -21,6 +21,7 @@ from uuid import UUID
 
 from eneo.files import audio
 from eneo.files.file_service import FileDownload
+from eneo.main import process_scratch
 
 OpenAudioDownload: TypeAlias = Callable[[UUID], Awaitable[FileDownload]]
 _Part = TypeVar("_Part")
@@ -113,7 +114,9 @@ async def spool_audio(
             with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=Path(filename).suffix or ".audio",
-                dir=verified_path.parent if verified_path is not None else None,
+                dir=verified_path.parent
+                if verified_path is not None
+                else process_scratch.directory(),
             ) as target:
                 path = Path(target.name)
                 byte_size = download.content_length
@@ -163,7 +166,9 @@ async def spool_recording(
     taken once its header has its final lengths) and each part's length."""
     spooled: list[SpooledAudio] = []
     durations: list[float] = []
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as target:
+    with tempfile.NamedTemporaryFile(
+        delete=False, suffix=".wav", dir=process_scratch.directory()
+    ) as target:
         path = Path(target.name)
     try:
         with (

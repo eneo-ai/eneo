@@ -12,6 +12,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import NotFoundException
 from eneo.scim.services.token_service import ScimTokenService
 from eneo.sysadmin.sysadmin_router import (
@@ -79,6 +82,55 @@ class TestGetAccessToken:
 
         assert "No such user exists" in str(exc_info.value)
         user_service.get_user.assert_called_once_with(nonexistent_id)
+
+    async def test_the_token_is_audited_before_it_is_issued(
+        self, mock_container, mock_user
+    ):
+        """A token lets the operator act as the person: who got one for whom
+        is stored, whatever the tenant's audit settings, before it is issued."""
+        steps: list[str] = []
+        audit_service = mock_container.audit_service.return_value
+        audit_service.log.side_effect = lambda **_: steps.append("audit")
+        auth_service = mock_container.auth_service.return_value
+        auth_service.create_access_token_for_user.side_effect = lambda _: (
+            steps.append("token") or "jwt_token_123"
+        )
+        mock_container.user_service.return_value.get_user.return_value = mock_user
+
+        result = await get_access_token(user_id=mock_user.id, container=mock_container)
+
+        assert result == "jwt_token_123"
+        assert steps == ["audit", "token"]
+        audit = audit_service.log.call_args.kwargs
+        assert audit["required"] is True
+        assert audit["action"] == ActionType.USER_ACCESS_TOKEN_ISSUED
+        assert audit["actor_type"] == ActorType.SYSTEM
+        assert (audit["tenant_id"], audit["entity_type"], audit["entity_id"]) == (
+            mock_user.tenant_id,
+            EntityType.USER,
+            mock_user.id,
+        )
+        assert audit["metadata"] == {
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "id": str(mock_user.id),
+                "email": mock_user.email,
+                "username": mock_user.username,
+            },
+        }
+
+    async def test_no_token_is_issued_when_the_audit_row_fails(
+        self, mock_container, mock_user
+    ):
+        mock_container.user_service.return_value.get_user.return_value = mock_user
+        audit_service = mock_container.audit_service.return_value
+        audit_service.log.side_effect = RuntimeError("database unavailable")
+        auth_service = mock_container.auth_service.return_value
+
+        with pytest.raises(RuntimeError):
+            await get_access_token(user_id=mock_user.id, container=mock_container)
+
+        auth_service.create_access_token_for_user.assert_not_called()
 
 
 class TestGetUser:

@@ -40,7 +40,8 @@ class Task(str, Enum):
 
 
 KNOWLEDGE_TASKS = (Task.UPLOAD_FILE, Task.TRANSCRIPTION)
-# Their failure text is shown to the person who started the sync.
+# A failure records only its code. A record from before keeps its text, shown
+# to the person who started the sync once cleaned of URLs and SQL.
 INTEGRATION_SYNC_TASKS = (
     Task.PULL_CONFLUENCE_CONTENT,
     Task.PULL_SHAREPOINT_CONTENT,

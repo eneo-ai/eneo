@@ -11,10 +11,20 @@ export const LoginErrorCode = {
   SERVER_ERROR: "Authentication service is temporarily unavailable. Please try again later.",
   FORBIDDEN: "Access denied for this organization.",
   UNAUTHORIZED: "Authentication could not be verified.",
+  LOGIN_UNAVAILABLE: "Sign-in is temporarily unavailable. Please try again in a moment.",
+  ATTEMPT_EXPIRED: "The sign-in attempt has expired. Please start the sign-in again.",
+  IDENTITY_CONFLICT:
+    "This account is already linked to another sign-in. Please contact your administrator.",
   CALLBACK_FAILED: "Authentication callback failed. Please try again."
 } as const;
 
-export const providers = ["zitadel", "mobilityguard", "oidc"] as const;
+export const providers = ["zitadel", "oidc"] as const;
+
+/** The typed refusal code in a backend error body (`{ message, code }`). */
+export function backendErrorCode(body: unknown): string | undefined {
+  if (typeof body !== "object" || body === null || !("code" in body)) return undefined;
+  return typeof body.code === "string" ? body.code : undefined;
+}
 
 export class LoginError extends Error {
   code: keyof typeof LoginErrorCode;

@@ -27,6 +27,7 @@ from eneo.object_content.content import (
     StorageKind,
 )
 from eneo.object_content.content_repository import ObjectContentRepository
+from eneo.object_content.reconciliation import RemovalReadback
 from eneo.object_content.reconciliation_repository import (
     ObjectContentReconciliationRepository,
 )
@@ -915,3 +916,45 @@ async def test_opposite_order_parent_cascades_both_complete(
     await _assert_cross_references_fully_detached(
         object_content_database, first, second
     )
+
+
+@pytest.mark.asyncio
+async def test_removal_readback_tells_held_retrying_and_waiting_apart(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    """Every content whose bytes are to be removed and are not yet, by why:
+    kept on purpose, failed and retried, or not reached yet. Content still
+    referenced is not to be removed."""
+    held = await _available_content(
+        object_content_database,
+        minimum_retain_until=datetime.now(timezone.utc) + timedelta(days=7),
+    )
+    retrying = await _available_content(object_content_database)
+    waiting = await _available_content(object_content_database)
+    await _available_content(object_content_database)
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id.in_(
+                    [held.file_id, retrying.file_id, waiting.file_id]
+                )
+            )
+        )
+    async with object_content_database.session() as session, session.begin():
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        row = await session.get(ObjectContents, retrying.content_id)
+        assert row is not None
+        row.state = ContentState.DELETE_PENDING.value
+        # Removing the last reference already recorded the delete intent.
+        row.delete_requested_at = row.delete_requested_at or now
+        row.failure_code = ContentFailureCode.DELETE_RETRYABLE.value
+        row.next_attempt_at = now + timedelta(hours=1)
+
+    async with object_content_database.session() as session, session.begin():
+        readback = await ObjectContentReconciliationRepository(
+            session
+        ).removal_readback()
+
+    assert readback == RemovalReadback(held=1, retrying=1, waiting=1)
+    assert readback.pending == 3

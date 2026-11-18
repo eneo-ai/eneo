@@ -13,6 +13,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS, FILE_TARGET_NAME
 from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -111,7 +112,7 @@ async def upload_file(
                 action=ActionType.FILE_UPLOADED,
                 entity_type=EntityType.FILE,
                 entity_id=file.id,
-                description=f"Uploaded file '{file.name}' ({file.size} bytes)",
+                description=FILE_DESCRIPTIONS[ActionType.FILE_UPLOADED],
                 metadata=AuditMetadata.standard(
                     actor=current_user,
                     target=file,
@@ -249,7 +250,7 @@ async def delete_file(
         action=ActionType.FILE_DELETED,
         entity_type=EntityType.FILE,
         entity_id=id,
-        description=f"Deleted file '{file.name}'",
+        description=FILE_DESCRIPTIONS[ActionType.FILE_DELETED],
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=file,
@@ -370,7 +371,7 @@ async def generate_original_signed_url(
         action=ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED,
         entity_type=EntityType.FILE,
         entity_id=id,
-        description=f"Created an original download link for '{file.name}'",
+        description=FILE_DESCRIPTIONS[ActionType.FILE_ORIGINAL_DOWNLOAD_LINK_CREATED],
         metadata=AuditMetadata.standard(
             actor=current_user,
             target=file,
@@ -625,12 +626,10 @@ async def _audit_original_download_redeemed(
                 action=ActionType.FILE_ORIGINAL_DOWNLOADED,
                 entity_type=EntityType.FILE,
                 entity_id=download.file_id,
-                description=(
-                    f"Original file '{download.filename}' accessed with a signed link"
-                ),
+                description=FILE_DESCRIPTIONS[ActionType.FILE_ORIGINAL_DOWNLOADED],
                 metadata=AuditMetadata.system_action(
                     description="Signed original download link redeemed",
-                    target=SimpleNamespace(id=download.file_id, name=download.filename),
+                    target=SimpleNamespace(id=download.file_id, name=FILE_TARGET_NAME),
                     extra={
                         "content_disposition": content_disposition.value,
                         "ranged": ranged,

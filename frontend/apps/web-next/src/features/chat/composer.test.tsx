@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { createRef, useState, type Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Schema } from "@/lib/api/models";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { Composer, type ComposerHandle } from "./composer";
+import { ChatTools } from "./mcp-controls";
+import { ModelReasoningPicker } from "./model-reasoning-picker";
 import { useAttachments } from "./use-attachments";
 
 afterEach(cleanup);
@@ -355,4 +358,78 @@ it.each([
   renderInApp(<Harness knowledgeMode={mode} />);
   fireEvent.click(screen.getByRole("button", { name: /Kunskap: Upphandling/ }));
   expect(await screen.findByText(hint)).toBeTruthy();
+});
+
+describe("Composer panels", () => {
+  const models = [
+    { id: "m-1", name: "m-1", nickname: "Modell Ett" },
+    { id: "m-2", name: "m-2", nickname: "Modell Två" }
+  ] as Schema<"CompletionModelPublic">[];
+
+  function PanelHarness() {
+    const [value, setValue] = useState("");
+    const attachments = useAttachments(partner);
+    return (
+      <Composer
+        value={value}
+        onChange={setValue}
+        onSubmit={vi.fn()}
+        busy={false}
+        onStop={vi.fn()}
+        label="Fråga Upphandlingsassistenten"
+        placeholder="Fråga Upphandlingsassistenten"
+        attachments={attachments}
+        onOpenFileDialog={vi.fn()}
+        tools={
+          <ChatTools
+            servers={[{ id: "lou", name: "LOU-register", description: null, icon_url: null }]}
+            autoAcceptTools={false}
+            onDisabledServerIdsChange={vi.fn()}
+            onAutoAcceptToolsChange={vi.fn()}
+          />
+        }
+        modelSelector={
+          <ModelReasoningPicker
+            assistantId="assistant-composer"
+            models={models}
+            selectedId="m-2"
+            storedLevel={null}
+            policyDefaultLevel={null}
+            onSave={() => Promise.resolve()}
+          />
+        }
+      />
+    );
+  }
+
+  /** What a browser does for a key or a click on a control: focus it, then click it. */
+  function press(control: HTMLElement, key?: string) {
+    if (key) fireEvent.keyDown(control, { key });
+    control.focus();
+    fireEvent.click(control);
+  }
+
+  it("keeps focus on a control chosen in a panel, by arrow key or click, not in the field", async () => {
+    renderInApp(<PanelHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Chattmodell: Modell Två" }));
+    const models = await screen.findByRole("dialog", { name: "Chattmodell" });
+    // The popover's own first focus lands on the chosen model, not on the first row.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(models).getByRole("radio", { name: /Modell Två/, checked: true })
+      )
+    );
+    // An arrow on a radio moves the choice with a click on the next one.
+    const next = within(models).getByRole("radio", { name: /Modell Ett/ });
+    press(next, "ArrowUp");
+    expect(document.activeElement).toBe(next);
+    fireEvent.keyDown(models, { key: "Escape" });
+
+    fireEvent.click(screen.getByRole("button", { name: /^Verktyg/ }));
+    const tools = await screen.findByRole("dialog", { name: "Verktyg" });
+    await waitFor(() => expect(tools.contains(document.activeElement)).toBe(true));
+    const lou = within(tools).getByRole("switch", { name: "LOU-register" });
+    press(lou);
+    expect(document.activeElement).toBe(lou);
+  });
 });

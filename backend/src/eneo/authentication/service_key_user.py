@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from eneo.authentication.auth_models import ApiKeyV2InDB
+from eneo.authentication.auth_models import ApiKeyV2InDB, CredentialFacts
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.tenants.tenant import TenantInDB
@@ -35,6 +35,7 @@ def build_service_key_user(
         tenant_id=key.tenant_id,
         tenant=tenant,
         active_api_key=key,
+        credential=CredentialFacts(kind="api_key"),
         roles=[] if synthetic_role is None else [synthetic_role],
         used_tokens=0,
         email_verified=True,

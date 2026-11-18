@@ -30,6 +30,7 @@ import soundfile as sf
 from soundfile import SoundFile
 
 from eneo.files.text import MimeTypesBase
+from eneo.main import process_scratch
 from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.main.logging import get_logger
@@ -43,6 +44,9 @@ _DECODE_CHANNELS = 1
 _DECODE_SAMPLE_WIDTH = 2
 _DECODE_BYTES_PER_SECOND = _DECODE_SAMPLE_RATE * _DECODE_CHANNELS * _DECODE_SAMPLE_WIDTH
 _DECODE_BLOCK_BYTES = 64 * 1024
+# The decoded audio is one WAV file, whose RIFF size field counts the 36 header
+# bytes after it and the data in 32 bits.
+_WAV_MAX_DATA_BYTES = 2**32 - 1 - 36
 
 # Concrete numpy array type used throughout this module.
 # soundfile.blocks() yields float64 arrays; we use this alias for clarity.
@@ -65,6 +69,12 @@ class AudioMimeTypes(MimeTypesBase):
     MP4A = "audio/mp4"
 
 
+def longest_decodable_seconds(max_decoded_bytes: int) -> int:
+    """Whole seconds of audio a decode can hold: what the decoded-byte bound
+    allows, and at most what one WAV file holds (37 h 16 min)."""
+    return min(max_decoded_bytes, _WAV_MAX_DATA_BYTES) // _DECODE_BYTES_PER_SECOND
+
+
 @dataclass(frozen=True, slots=True)
 class AudioDecodeLimits:
     max_duration_seconds: float
@@ -84,7 +94,7 @@ class AudioDecodeLimits:
         return int(
             min(
                 self.max_duration_seconds,
-                self.max_decoded_bytes / _DECODE_BYTES_PER_SECOND,
+                longest_decodable_seconds(self.max_decoded_bytes),
             )
         )
 
@@ -305,7 +315,9 @@ async def bounded_measurement(work: Callable[[], Awaitable[_T]]) -> _T:
 async def to_wav(
     filepath: str, *, limits: AudioDecodeLimits | None = None
 ) -> AsyncGenerator["AudioFile", None]:
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".wav")
+    tmp_file = tempfile.NamedTemporaryFile(
+        suffix=".wav", dir=process_scratch.directory()
+    )
     try:
         with joined_wav(
             tmp_file, limits=limits or AudioDecodeLimits.from_settings()
@@ -346,7 +358,9 @@ class AudioFile:
         with closing(blocks):
             pending = next(blocks, None)
             while pending is not None and not stop.is_set():
-                with tempfile.NamedTemporaryFile(suffix=".mp3") as temp_file:
+                with tempfile.NamedTemporaryFile(
+                    suffix=".mp3", dir=process_scratch.directory()
+                ) as temp_file:
                     writer = cast(
                         AbstractContextManager[SoundFile],
                         SoundFile(

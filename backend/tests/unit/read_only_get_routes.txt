@@ -19,6 +19,7 @@ GET /api/v1/admin/crawler/websites/{id}/matches/
 GET /api/v1/admin/crawler/websites/{id}/runs/
 GET /api/v1/admin/credentials/
 GET /api/v1/admin/federation
+GET /api/v1/admin/identity-migration-windows
 GET /api/v1/admin/model-providers/
 GET /api/v1/admin/model-providers/capabilities/
 GET /api/v1/admin/model-providers/favorites/
@@ -49,6 +50,7 @@ GET /api/v1/admin/transcription-services/{connection_id}/
 GET /api/v1/admin/users/
 GET /api/v1/admin/users/deleted
 GET /api/v1/admin/users/inactive
+GET /api/v1/admin/users/{user_id}/identity
 GET /api/v1/admin/users/{username}/
 GET /api/v1/admin/widget-policy/
 GET /api/v1/admin/widget-templates/{id}/
@@ -190,6 +192,7 @@ GET /api/v1/settings/flow-runtime-policy
 GET /api/v1/settings/formats/
 GET /api/v1/settings/models/
 GET /api/v1/settings/skills/{skill_id}/execution-block
+GET /api/v1/settings/task-workers
 GET /api/v1/skills/catalogue/
 GET /api/v1/skills/catalogue/{skill_id}/
 GET /api/v1/skills/organization/

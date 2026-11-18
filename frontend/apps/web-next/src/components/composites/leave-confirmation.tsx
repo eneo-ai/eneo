@@ -10,6 +10,7 @@ export function LeaveConfirmation({
   active,
   ref,
   onLeave,
+  onStay,
   title,
   description,
   confirmLabel,
@@ -18,6 +19,8 @@ export function LeaveConfirmation({
   active: boolean;
   ref?: Ref<LeaveConfirmationHandle>;
   onLeave?: () => void;
+  /** The user chose to stay: an editor whose control behind the dialog is gone can place focus. */
+  onStay?: () => void;
   title?: string;
   description?: string;
   confirmLabel?: string;
@@ -39,6 +42,7 @@ export function LeaveConfirmation({
         if (!open) {
           setPendingAction(null);
           stay();
+          onStay?.();
         }
       }}
       title={title ?? t("unsaved_navigation_title")}

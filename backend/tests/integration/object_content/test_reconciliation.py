@@ -44,10 +44,13 @@ from eneo.object_content.content_service import ObjectContentService
 from eneo.object_content.object_store_provider import ObjectStoreProvider
 from eneo.object_content.reconciliation import ObjectContentReconciler
 from eneo.object_content.reconciliation_repository import (
+    InventoryListing,
+    InventoryListingFollower,
     ObjectContentReconciliationRepository,
     PublicationReservation,
 )
 from eneo.object_content.s3_object_store import (
+    MultipartUpload,
     ObjectStoreIntegrityError,
     ObjectStoreNotFoundError,
     ObjectStoreUnavailableError,
@@ -69,6 +72,10 @@ if TYPE_CHECKING:
         ListMultipartUploadsRequestTypeDef,
         ListObjectsV2OutputTypeDef,
         ListObjectsV2RequestTypeDef,
+        ListObjectVersionsOutputTypeDef,
+        ListObjectVersionsRequestTypeDef,
+        ListPartsOutputTypeDef,
+        ListPartsRequestTypeDef,
     )
 
 
@@ -116,6 +123,14 @@ class _DelayedDeleteClient:
             **cast("ListMultipartUploadsRequestTypeDef", request)
         )
 
+    def list_object_versions(
+        self,
+        **request: object,
+    ) -> "ListObjectVersionsOutputTypeDef":
+        return self._delegate.list_object_versions(
+            **cast("ListObjectVersionsRequestTypeDef", request)
+        )
+
 
 class _DelayedMultipartAbortClient:
     def __init__(self, delegate: "S3Client") -> None:
@@ -147,6 +162,9 @@ class _DelayedMultipartAbortClient:
         return self._delegate.list_multipart_uploads(
             **cast("ListMultipartUploadsRequestTypeDef", request)
         )
+
+    def list_parts(self, **request: object) -> "ListPartsOutputTypeDef":
+        return self._delegate.list_parts(**cast("ListPartsRequestTypeDef", request))
 
 
 class _TruncatedObjectInventoryClient:
@@ -603,6 +621,324 @@ async def test_reconciler_reclaims_a_stale_delete_after_worker_crash(
         assert row.payload_deleted_at is not None
     with pytest.raises(ObjectStoreNotFoundError):
         await real_object_store.store.head(pending.object_key)
+
+
+@pytest.mark.asyncio
+async def test_a_delete_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The readback after a restore must not call storage confirmed when the
+    store failed under it; the pass reports what it only left for a retry."""
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        await session.execute(
+            delete(FileContentReferences).where(
+                FileContentReferences.file_id == pending.file_id
+            )
+        )
+        now = await session.scalar(select(func.now()))
+        assert now is not None
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        row.state = ContentState.DELETE_PENDING.value
+        row.delete_requested_at = now
+        row.next_attempt_at = now
+    monkeypatch.setattr(
+        real_object_store.store,
+        "delete_and_confirm",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("delete unconfirmed")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+    async with object_content_database.session() as session, session.begin():
+        readback = await ObjectContentReconciliationRepository(
+            session
+        ).removal_readback()
+    assert readback.retrying == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inventory_outage_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The pass keeps what earlier phases committed and still says the store
+    failed, instead of returning as if the inventory had run."""
+    monkeypatch.setattr(
+        real_object_store.store,
+        "list_multipart_page",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("inventory unavailable")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("verification", ["digest differs", "store refuses"])
+async def test_an_upload_that_fails_verification_is_reported_as_a_store_failure(
+    verification: str,
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The store holds bytes other than those Eneo wrote: the readback after a
+    restore must say the store failed, not only that a removal is pending."""
+    pending = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    monkeypatch.setattr(
+        real_object_store.store,
+        "recompute_sha256",
+        AsyncMock(return_value=bytes(32))
+        if verification == "digest differs"
+        else AsyncMock(side_effect=ObjectStoreIntegrityError("checksum differs")),
+    )
+
+    result = await _reconciler(
+        real_object_store.settings,
+        real_object_store.store,
+        object_content_database,
+    ).run_once()
+
+    assert result.store_failures == 1
+    async with object_content_database.session() as session, session.begin():
+        row = await session.get(ObjectContents, pending.content_id)
+        assert row is not None
+        assert row.failure_code == ContentFailureCode.VERIFICATION_MISMATCH.value
+
+
+@pytest.mark.asyncio
+async def test_an_orphan_delete_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """An orphan's bytes that the store would not delete stay in it; the pass
+    says so instead of reporting nothing deleted and nothing failed."""
+    settings = real_object_store.settings
+    orphan_key = new_object_key(settings)
+    payload = b"orphan-bytes"
+    async with capture_content(
+        _source(payload),
+        declared_media_type="application/octet-stream",
+        verified_media_type="application/octet-stream",
+        maximum_size_bytes=len(payload),
+        spool_memory_bytes=settings.spool_memory_bytes,
+        multipart_part_bytes=settings.multipart_part_bytes,
+    ) as captured:
+        await real_object_store.store.upload(orphan_key, captured)
+    reconciler = _reconciler(
+        settings,
+        real_object_store.store,
+        object_content_database,
+    )
+    assert (await reconciler.run_once()).orphan_objects_deleted == 0
+    await asyncio.sleep(settings.orphan_grace_seconds + 0.1)
+    monkeypatch.setattr(
+        real_object_store.store,
+        "delete_and_confirm",
+        AsyncMock(side_effect=ObjectStoreUnavailableError("delete unconfirmed")),
+    )
+
+    result = await reconciler.run_once()
+
+    assert result.orphan_objects_deleted == 0
+    assert result.store_failures == 1
+    await real_object_store.store.head(orphan_key)
+
+
+@pytest.mark.asyncio
+async def test_a_multipart_abort_left_for_retry_is_reported_as_a_store_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """The parts of an abandoned upload that the store would not abort stay in
+    it; the pass says so instead of reporting nothing aborted and nothing
+    failed."""
+    settings = real_object_store.settings
+    key = new_object_key(settings)
+    client = _raw_client(real_object_store)
+    upload_id = client.create_multipart_upload(
+        Bucket=settings.bucket,
+        Key=key,
+        ContentType="application/octet-stream",
+        ChecksumAlgorithm="SHA256",
+        ChecksumType="COMPOSITE",
+    )["UploadId"]
+    try:
+        reconciler = _reconciler(
+            settings,
+            real_object_store.store,
+            object_content_database,
+        )
+        assert (await reconciler.run_once()).multipart_aborted == 0
+        await asyncio.sleep(settings.orphan_grace_seconds + 0.1)
+        monkeypatch.setattr(
+            real_object_store.store,
+            "abort_multipart",
+            AsyncMock(side_effect=ObjectStoreUnavailableError("abort unconfirmed")),
+        )
+
+        result = await reconciler.run_once()
+
+        assert result.multipart_aborted == 0
+        assert result.store_failures == 1
+    finally:
+        client.abort_multipart_upload(
+            Bucket=settings.bucket, Key=key, UploadId=upload_id
+        )
+
+
+@pytest.mark.asyncio
+async def test_storage_readback_waits_for_former_copies_and_not_for_live_objects(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """A move to PostgreSQL leaves the former remote copy as an orphan to delete,
+    so removal is not confirmed while those bytes are in the store. A key that
+    a live content still names is not an orphan."""
+    live = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=True,
+    )
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        before = await repository.removal_readback()
+        for key in (new_object_key(real_object_store.settings), live.object_key):
+            await repository.register_known_orphan(
+                object_key=key,
+                size_bytes=7,
+                orphan_grace_seconds=1,
+            )
+
+    async with object_content_database.session() as session, session.begin():
+        after = await ObjectContentReconciliationRepository(session).removal_readback()
+
+    assert after.waiting == before.waiting + 1
+    assert (after.held, after.retrying) == (before.held, before.retrying)
+
+
+@pytest.mark.asyncio
+async def test_storage_readback_waits_for_abandoned_multipart_uploads(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """An upload's parts stay in the store until it is aborted, so removal is
+    not confirmed while an abandoned multipart upload is listed. An upload that
+    a live content is still writing is not waiting."""
+    live = await _create_pending(
+        object_content_database,
+        real_object_store,
+        upload_remote=False,
+    )
+    async with object_content_database.session() as session, session.begin():
+        content = await session.get(ObjectContents, live.content_id)
+        descriptor = await session.get(ObjectStoreObjects, live.content_id)
+        assert content is not None and descriptor is not None
+        content.lease_owner = "writer"
+        content.lease_until = datetime.now(UTC) + timedelta(hours=1)
+        descriptor.multipart_upload_id = "live-upload"
+        descriptor.multipart_initiated_at = datetime.now(UTC)
+
+    async with object_content_database.session() as session, session.begin():
+        repository = ObjectContentReconciliationRepository(session)
+        before = await repository.removal_readback()
+        recorded = await repository.record_multipart_page(
+            cursor=await repository.multipart_inventory_cursor(),
+            uploads=[
+                MultipartUpload(
+                    key=new_object_key(real_object_store.settings),
+                    upload_id="abandoned-upload",
+                    initiated_at=None,
+                ),
+                MultipartUpload(
+                    key=live.object_key, upload_id="live-upload", initiated_at=None
+                ),
+            ],
+            next_key_marker=None,
+            next_upload_id_marker=None,
+            orphan_grace_seconds=1,
+        )
+    assert recorded
+
+    async with object_content_database.session() as session, session.begin():
+        after = await ObjectContentReconciliationRepository(session).removal_readback()
+
+    assert after.waiting == before.waiting + 1
+    assert (after.held, after.retrying) == (before.held, before.retrying)
+
+
+@pytest.mark.asyncio
+async def test_a_listing_counts_once_a_cycle_begun_after_the_readback_completes(
+    object_content_database: DatabaseSessionManager,
+) -> None:
+    """The readback continues the listings under way. Their completion does
+    not count, since they began before it: a multipart cycle that completes
+    begins the next at that moment, so only the next one's completion
+    counts."""
+
+    async def page(*, objects_done: bool, multipart_done: bool) -> InventoryListing:
+        async with object_content_database.session() as session, session.begin():
+            repository = ObjectContentReconciliationRepository(session)
+            await repository.record_object_page(
+                cursor=await repository.object_inventory_cursor(),
+                objects=(),
+                next_token=None if objects_done else "next",
+                orphan_grace_seconds=1,
+            )
+            multipart = await repository.multipart_inventory_cursor()
+            await repository.record_multipart_page(
+                cursor=multipart,
+                uploads=(),
+                next_key_marker=None if multipart_done else f"{multipart.key_marker}+",
+                next_upload_id_marker=None,
+                orphan_grace_seconds=1,
+            )
+        async with object_content_database.session() as session, session.begin():
+            return await ObjectContentReconciliationRepository(
+                session
+            ).inventory_listing()
+
+    await page(objects_done=False, multipart_done=False)
+    async with object_content_database.session() as session, session.begin():
+        follower = InventoryListingFollower(
+            since=(
+                await ObjectContentReconciliationRepository(session).inventory_listing()
+            ).observed_at
+        )
+
+    # Objects: the cycle under way completes, then one begun after. Multipart:
+    # the cycle under way, begun before, completes only on the second page.
+    assert not follower.listed_in_full(
+        await page(objects_done=True, multipart_done=False)
+    )
+    assert not follower.listed_in_full(
+        await page(objects_done=True, multipart_done=True)
+    )
+    assert follower.listed_in_full(await page(objects_done=False, multipart_done=True))
 
 
 @pytest.mark.asyncio

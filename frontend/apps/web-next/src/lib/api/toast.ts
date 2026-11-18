@@ -17,6 +17,8 @@ export type ApiErrorToastCopy = {
  * them to support and operators can grep the backend logs. A feature with
  * words of its own passes them (`copy`); the references always follow. An
  * `action` offers the way out the error names (a refused delete's "Migrera").
+ * A `fileName` names the file an upload error is about: the server's message
+ * never does.
  */
 export function toastApiError(
   error: unknown,
@@ -24,11 +26,13 @@ export function toastApiError(
   {
     title,
     message = getErrorMessage(error, t),
-    action
-  }: ApiErrorToastCopy & { action?: ToastAction } = {}
+    action,
+    fileName
+  }: ApiErrorToastCopy & { action?: ToastAction; fileName?: string } = {}
 ): void {
-  const details = [...(title ? [message] : []), ...errorReferenceLines(error, t)];
-  toast.error(title ?? message, {
+  const headline = fileName ? `${fileName}: ${message}` : message;
+  const details = [...(title ? [headline] : []), ...errorReferenceLines(error, t)];
+  toast.error(title ?? headline, {
     description: details.length > 0 ? details.join(" · ") : undefined,
     action
   });

@@ -367,6 +367,37 @@ async def test_a_session_takes_the_longest_recording_the_tenant_admin_set(
     assert session["max_seconds"] == 3600
 
 
+async def test_a_session_takes_a_recording_longer_than_eight_hours(
+    live_stack: LiveStack, db_container
+):
+    # Ten hours: the decoded-byte bound (2 GiB by default) holds about 18 h 38 min.
+    patched = await live_stack.client.patch(
+        "/api/v1/settings/flow-input-limits",
+        json={"audio_max_duration_seconds": 36_000},
+        headers=live_stack.headers,
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["audio_max_duration_seconds"] == 36_000
+    assert patched.json()["audio_max_duration_ceiling_seconds"] == 67_108
+
+    # The run contract a client records against follows the stored value.
+    contract = await live_stack.client.get(
+        f"/api/v1/flows/{live_stack.flow.flow_id}/run-contract/",
+        headers=live_stack.headers,
+    )
+    assert contract.status_code == 200, contract.text
+    [audio] = contract.json()["steps_requiring_input"]
+    assert audio["max_duration_seconds"] == 36_000
+    assert audio["max_recording_seconds"] == 36_000
+    # Ten parts of an hour: the recording spread over the input's ten file slots.
+    assert audio["max_files"] == 10
+    assert audio["recording_part_seconds"] == 3_600
+
+    session = await live_stack.open_session()
+
+    assert session["max_seconds"] == 36_000
+
+
 async def test_an_admitted_session_streams_live_text_through_the_flows_model(
     live_stack: LiveStack, db_container
 ):

@@ -17,6 +17,7 @@
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Landmark from "@lucide/svelte/icons/landmark";
   import LayoutTemplate from "@lucide/svelte/icons/layout-template";
+  import LogIn from "@lucide/svelte/icons/log-in";
   import Lightbulb from "@lucide/svelte/icons/lightbulb";
   import MessageSquareText from "@lucide/svelte/icons/message-square-text";
   import Plug from "@lucide/svelte/icons/plug";
@@ -100,7 +101,8 @@
         navItem("/admin/users", UserRound, m.users()),
         navItem("/admin/legacy/user-groups", UsersRound, m.user_groups()),
         navItem("/admin/roles", FingerprintPattern, m.roles()),
-        navItem("/admin/api-keys", KeyRound, m.api_keys())
+        navItem("/admin/api-keys", KeyRound, m.api_keys()),
+        navItem("/admin/federation", LogIn, m.federation_admin_nav())
       ]
     }
   ]);

@@ -120,6 +120,21 @@ class TestSettingToggleAuditLogging:
         # old value comes from check_is_feature_enabled mock (returns False)
         assert call_kwargs["metadata"]["changes"]["using_templates"]["old"] is False
 
+    @pytest.mark.asyncio
+    async def test_a_toggle_without_its_global_flag_row_writes_nothing(self):
+        """A missing global row is a broken installation: the toggle fails
+        with a clear error instead of creating the row as it goes."""
+        service, audit_mock = _make_service()
+        flags = service.feature_flag_service
+        flags.feature_flag_repo.one_or_none = AsyncMock(return_value=None)
+
+        with pytest.raises(ValueError, match="using_templates feature flag not found"):
+            await service.update_template_setting(enabled=True)
+
+        flags.create_feature_flag.assert_not_called()
+        flags.enable_tenant.assert_not_called()
+        audit_mock.log_async.assert_not_called()
+
 
 class TestSkillExecutionBlockAudit:
     @staticmethod

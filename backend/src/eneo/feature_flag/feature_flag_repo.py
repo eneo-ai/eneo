@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import and_, delete, insert
+from sqlalchemy import and_, insert, literal
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -20,14 +20,6 @@ class FeatureFlagRepository:
         super().__init__()
         self.db_session = db_session
 
-    async def _delete_tenant(self, feature_id: UUID, tenant_id: UUID) -> None:
-        """Delete a tenant's feature flag preference."""
-        stmt = delete(TenantFeatureFlag).where(
-            TenantFeatureFlag.feature_id == feature_id,
-            TenantFeatureFlag.tenant_id == tenant_id,
-        )
-        await self.db_session.execute(stmt)
-
     async def add(self, obj: FeatureFlag) -> FeatureFlag:
         stmt = (
             insert(GlobalFeatureFlag)
@@ -37,60 +29,34 @@ class FeatureFlagRepository:
         feature = await self.db_session.execute(stmt)
         return feature.scalar_one()  # type: ignore[return-value]
 
-    async def update(self, obj: FeatureFlag) -> FeatureFlag:
-        """Update tenant preferences for a feature flag.
+    async def set_tenant(
+        self, feature_id: UUID, tenant_id: UUID, enabled: bool
+    ) -> None:
+        """Set one tenant's preference for a feature flag.
 
-        Uses upsert pattern to handle enabled/disabled tenant preferences.
-        Removes tenants that no longer have any preference.
+        One upsert of that tenant's own row, so other tenants' rows are neither
+        read nor written: tenants switching the same flag at once cannot
+        overwrite, remove or wait on each other's choice.
         """
-        # Get current state to know what to clean up
-        current = await self.one(id=obj.feature_id)
-
-        # Upsert all enabled tenant preferences
-        for tenant_id in obj.tenant_ids:
-            stmt = (
-                pg_insert(TenantFeatureFlag)
-                .values(
-                    feature_id=obj.feature_id,
-                    tenant_id=tenant_id,
-                    enabled=True,
-                    name=obj.name,
-                )
-                .on_conflict_do_update(
-                    index_elements=["feature_id", "tenant_id"],
-                    set_={"enabled": True, "updated_at": datetime.now(timezone.utc)},
-                )
+        stmt = (
+            pg_insert(TenantFeatureFlag)
+            .from_select(
+                ["feature_id", "tenant_id", "enabled", "name"],
+                select(
+                    GlobalFeatureFlag.id,
+                    literal(tenant_id),
+                    literal(enabled),
+                    GlobalFeatureFlag.name,
+                ).where(GlobalFeatureFlag.id == feature_id),
             )
-            await self.db_session.execute(stmt)
-
-        # Upsert all disabled tenant preferences
-        for tenant_id in obj.disabled_tenant_ids:
-            stmt = (
-                pg_insert(TenantFeatureFlag)
-                .values(
-                    feature_id=obj.feature_id,
-                    tenant_id=tenant_id,
-                    enabled=False,
-                    name=obj.name,
-                )
-                .on_conflict_do_update(
-                    index_elements=["feature_id", "tenant_id"],
-                    set_={"enabled": False, "updated_at": datetime.now(timezone.utc)},
-                )
+            .on_conflict_do_update(
+                index_elements=["feature_id", "tenant_id"],
+                set_={"enabled": enabled, "updated_at": datetime.now(timezone.utc)},
             )
-            await self.db_session.execute(stmt)
-
-        # Delete tenants that no longer have any preference
-        all_current = current.tenant_ids | current.disabled_tenant_ids
-        all_new = obj.tenant_ids | obj.disabled_tenant_ids
-        removed_tenants = all_current - all_new
-
-        if obj.feature_id is None:
-            raise ValueError("Cannot update a FeatureFlag without a feature_id")
-        for tenant_id in removed_tenants:
-            await self._delete_tenant(obj.feature_id, tenant_id)
-
-        return obj
+            .returning(TenantFeatureFlag.tenant_id)
+        )
+        if (await self.db_session.execute(stmt)).scalar_one_or_none() is None:
+            raise NotFoundException("FeatureFlag not found")
 
     async def delete(self, id: UUID) -> None:
         pass
@@ -127,7 +93,7 @@ class FeatureFlagRepository:
 
         One statement reads the global row and that tenant's preference, so a
         check costs the same however many tenants have preferences. It returns
-        the effective value, not a partial aggregate that could reach ``update``.
+        the effective value, not a partial aggregate.
         """
         query = (
             select(GlobalFeatureFlag, TenantFeatureFlag)

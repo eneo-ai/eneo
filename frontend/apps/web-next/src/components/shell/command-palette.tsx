@@ -241,7 +241,7 @@ export default function ShellCommandPalette({
   const phone = useMediaQuery("(width < 40rem)");
   const pathname = usePathname();
   const queryClient = useQueryClient();
-  const { can, settings, featureFlags } = useAppContext();
+  const { can, settings } = useAppContext();
   const entriesById = useRef(new Map<string, PaletteEntry>());
   const currentSpaceRouteId = spaceRouteIdFromPath(pathname);
 
@@ -267,8 +267,7 @@ export default function ShellCommandPalette({
       adminGroups: adminNavGroups({
         usingTemplates,
         canManageModules,
-        flowsEnabled,
-        federationEnabled: featureFlags.federation
+        flowsEnabled
       })
     };
     const toItems = (entries: PaletteEntry[]): PaletteItem[] => {
@@ -293,8 +292,7 @@ export default function ShellCommandPalette({
     isAdmin,
     canManageModules,
     usingTemplates,
-    flowsEnabled,
-    featureFlags.federation
+    flowsEnabled
   ]);
 
   function run(id: string) {

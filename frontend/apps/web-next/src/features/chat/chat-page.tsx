@@ -85,7 +85,7 @@ export function ChatPage({
   sessionId: urlSessionId = null,
   buildSessionUrl,
   modelSelector,
-  skills,
+  withSkills,
   switcherItems,
   editHref
 }: {
@@ -100,8 +100,8 @@ export function ChatPage({
   buildSessionUrl?: (sessionId: string | null) => string;
   /** Interactive model picker rendered in the composer (default-assistant). */
   modelSelector?: ReactNode;
-  /** The personal chat's Skills control, beside Verktyg in the composer. */
-  skills?: ReactNode;
+  /** The personal chat: its Skills share the composer's Verktyg control. */
+  withSkills?: boolean;
   /** The space's assistants and group chats for the assistant selector. */
   switcherItems?: ChatPartnerSwitcherItem[];
   /** Editor link for partners the user may edit. */
@@ -439,7 +439,7 @@ export function ChatPage({
                 initialMessages={active.messages}
                 focusComposerIfLost={active.focusComposer}
                 modelSelector={modelSelector}
-                skills={skills}
+                withSkills={withSkills}
                 partnerToken={partnerToken}
                 onNewConversation={newConversation}
                 onStartedChange={(value) =>

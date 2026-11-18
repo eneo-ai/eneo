@@ -102,6 +102,24 @@ async def test_update_error_when_session_does_not_exist(service: SessionService)
         await service.update_session(session_upsert)
 
 
+async def test_a_title_dropped_for_a_removed_turn_returns_the_session_as_it_is(
+    service: SessionService,
+):
+    current = SessionInDB(user_id=TEST_USER.id, name="", id=TEST_UUID)
+    service.session_repo.update.return_value = None
+    service.session_repo.get.return_value = current
+
+    assert (
+        await service.update_session(
+            SessionUpdate(name="Generated title", id=TEST_UUID), title_from_turns_at=3
+        )
+        == current
+    )
+    service.session_repo.update.assert_awaited_once_with(
+        SessionUpdate(name="Generated title", id=TEST_UUID), title_from_turns_at=3
+    )
+
+
 async def test_update_error_when_user_is_not_owner_of_session(service: SessionService):
     service.session_repo.update.return_value = SessionInDB(
         user_id=uuid4(),

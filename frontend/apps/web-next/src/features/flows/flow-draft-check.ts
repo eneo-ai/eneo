@@ -50,6 +50,7 @@ import {
   speakerStepLacksTranscript,
   transcriptionModelMissing,
   transcriptionSettingsOf,
+  usableSpeakerServices,
   type TranscriptionResources
 } from "./flow-transcription";
 
@@ -85,7 +86,11 @@ export type StepProblem =
 export type FlowProblem =
   | { code: "no_steps" }
   | { code: "transcription_model_missing" }
-  | { code: "speaker_service_missing" }
+  /**
+   * No service labels the speakers the flow asks for: a step names them, or
+   * (`switchable`) the flow's own setting asks for them and can be switched off.
+   */
+  | { code: "speaker_service_missing"; switchable?: true }
   | { code: "live_model_unavailable" };
 
 export type DraftCheck = {
@@ -426,12 +431,23 @@ export function checkDraft(
   }
   const required = speakersRequired(ordered);
   const takesAudio = flowTakesAudio(ordered);
-  if (
-    required &&
-    takesAudio &&
-    speakerServiceState(transcription, facts.transcription.services, required).picked === null
-  ) {
+  // The core asks for a speaker service whenever the flow transcribes, with or
+  // without an audio step (`require_chosen_speaker_service`); the setting is
+  // reachable in both.
+  const transcribes = takesAudio || transcription.enabled;
+  const speakers = speakerServiceState(transcription, facts.transcription.services, required);
+  if (required && transcribes && speakers.picked === null) {
     problems.push({ code: "speaker_service_missing" });
+  } else if (
+    // The core's other branch: the setting asks for speakers and the space has
+    // a service to choose, but none is. A chosen service the space can no
+    // longer use is refused as unavailable.
+    transcription.enabled &&
+    speakers.labelled &&
+    transcription.speakerService.kind !== "service" &&
+    usableSpeakerServices(facts.transcription.services).length > 0
+  ) {
+    problems.push({ code: "speaker_service_missing", switchable: true });
   }
   // The core refuses to publish a live model the space cannot stream through.
   if (takesAudio && liveModelState(transcription, facts.transcription.models).kind === "lost") {

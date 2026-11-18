@@ -1,7 +1,9 @@
 from typing_extensions import TypedDict
 
 from eneo.main.logging import get_logger
+from eneo.object_content.content import ObjectContentConfigurationError
 from eneo.object_content.file_icon_backfill import FileIconBackfillState
+from eneo.object_content.reconciliation import ReconciliationResult
 from eneo.object_content.runtime import ObjectContentRuntime, object_content_runtime
 
 logger = get_logger(__name__)
@@ -40,7 +42,13 @@ class FileIconBackfillSummary(TypedDict):
 async def reconcile_object_content_task(
     runtime: ObjectContentRuntime = object_content_runtime,
 ) -> ObjectContentReconciliationSummary:
-    result = await runtime.reconcile_once()
+    try:
+        result = await runtime.reconcile_once()
+    except ObjectContentConfigurationError as error:
+        # Readiness already reports the refusal, and it repeats every run until
+        # the operator acts: one line names the reason and bucket, no traceback.
+        logger.warning("Object content reconciliation refused: %s", error)
+        result = ReconciliationResult.empty()
     return {
         "lifecycle_advanced": result.lifecycle_advanced,
         "inline_deleted": result.inline_deleted,

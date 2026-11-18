@@ -6,6 +6,7 @@ from pydantic import ValidationError
 
 from eneo.main.config import Settings
 from eneo.main.removed_env import (
+    OIDC_MIGRATION_GUIDE_URL,
     REMOVED_VARIABLES,
     UPGRADE_GUIDE_URL,
     check_removed_variables,
@@ -274,3 +275,85 @@ def test_legacy_inline_limit_does_not_block_admin_policy_rollout(caplog):
     assert "stored policy takes precedence" in caplog.text
     assert "removed in Eneo 2.3" in caplog.text
     assert UPGRADE_GUIDE_URL not in caplog.text
+
+
+MOBILITYGUARD_RENAMES = [
+    ("MOBILITYGUARD_DISCOVERY_ENDPOINT", "OIDC_DISCOVERY_ENDPOINT"),
+    ("MOBILITYGUARD_CLIENT_ID", "OIDC_CLIENT_ID"),
+    ("MOBILITYGUARD_CLIENT_SECRET", "OIDC_CLIENT_SECRET"),
+    ("MOBILITYGUARD_TENANT_ID", "OIDC_TENANT_ID"),
+]
+
+
+@pytest.mark.parametrize("name, replacement", MOBILITYGUARD_RENAMES)
+def test_mobilityguard_variable_without_its_oidc_name_stops_startup(
+    name: str, replacement: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    with pytest.raises(SystemExit):
+        check_removed_variables({name: "old"}, {})
+
+    assert f"Rename it to {replacement}" in caplog.text
+    assert OIDC_MIGRATION_GUIDE_URL in caplog.text
+    assert "Eneo 2.2" not in caplog.text
+
+
+@pytest.mark.parametrize("name, replacement", MOBILITYGUARD_RENAMES)
+def test_mobilityguard_variable_next_to_its_oidc_name_only_warns(
+    name: str, replacement: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+
+    check_removed_variables({name: "old"}, {replacement.lower(): "new"})
+
+    assert f"{name} is ignored because {replacement} is set" in caplog.text
+
+
+def test_settings_refuses_a_mobilityguard_variable_from_an_env_file(
+    tmp_path,
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("MOBILITYGUARD_CLIENT_ID=old\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit):
+        Settings(_env_file=env_file)
+
+
+@pytest.mark.parametrize("value", ["28800", "86400"])
+def test_the_retired_flow_recording_ceiling_starts_and_says_what_governs_it(
+    value: str, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        f"FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS={value}\n", encoding="utf-8"
+    )
+
+    # Required settings may be missing here; they are validated after the
+    # removed-variable check, which must not exit.
+    with contextlib.suppress(ValidationError):
+        Settings(_env_file=env_file)
+
+    assert (
+        "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS is no longer read. The longest "
+        "recording an admin can set (Admin > Flows, Longest recording) is what "
+        "FLOW_AUDIO_MAX_DECODED_BYTES holds. Remove the variable."
+    ) in caplog.text
+
+
+@pytest.mark.parametrize("value", ["3600", "90000"])
+def test_the_retired_flow_recording_ceiling_no_longer_moves_the_ceiling(
+    value: str,
+) -> None:
+    from eneo.flows.flow_input_limits import audio_duration_ceiling_seconds
+    from eneo.main.config import get_settings
+
+    settings = Settings.model_validate(
+        {
+            **get_settings().model_dump(),
+            "flow_audio_max_decoded_bytes": 2 * 1024**3,
+            "flow_audio_max_duration_ceiling_seconds": value,
+        }
+    )
+
+    # What the default 2 GiB decoded-audio bound holds: 18 h 38 min.
+    assert audio_duration_ceiling_seconds(settings) == 67_108

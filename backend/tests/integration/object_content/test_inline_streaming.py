@@ -6,6 +6,7 @@ from sqlalchemy import event, select, text
 
 from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.object_content_table import ObjectContentReconciliationState
+from eneo.main import process_scratch
 from eneo.object_content.configuration import ObjectContentCoreSettings
 from eneo.object_content.content import ContentAccessClass, ContentReadGrant
 from eneo.object_content.content_service import ObjectContentService
@@ -371,7 +372,7 @@ async def test_inline_corruption_reports_complete_observation_after_snapshot_clo
     assert (stored < raw) == compressed
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     original = ObjectContentRepository.mark_backend_failure
     observations = []
     paths = []
@@ -523,6 +524,7 @@ async def test_inline_path_is_adopted_by_audio_without_consuming_chunks(
 ):
     from eneo.files.file_service import FileDownload
     from eneo.flows.runtime.audio_spool import spool_audio
+    from eneo.main import process_scratch
     from eneo.object_content.content_service import detach_content_read
 
     database = object_content_database
@@ -532,7 +534,9 @@ async def test_inline_path_is_adopted_by_audio_without_consuming_chunks(
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    # The verified file and the audio spool both live in the process's own
+    # temporary directory; point it here to see what is left behind.
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     source_paths = []
 
     async def forbidden_chunks():
@@ -668,7 +672,7 @@ async def test_cancellation_during_postgres_operation_releases_snapshot(
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     entered = asyncio.Event()
     engine = database._engine.sync_engine
 
@@ -717,7 +721,7 @@ async def test_cancellation_during_spool_io_settles_and_unlinks(
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     entered = asyncio.Event()
     release = Event()
     loop = asyncio.get_running_loop()
@@ -778,7 +782,7 @@ async def test_local_spool_failure_preserves_inline_availability(
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
     original = verified_spool.NamedTemporaryFile
 
     def create(*args, **kwargs):
@@ -846,7 +850,7 @@ async def test_short_slice_refuses_exposure_without_an_incomplete_failure_observ
     await ObjectContentReconciler(settings, database).run_once()
     tenant_id, _ = await _owner_ids(database)
     grant = ContentReadGrant(content_id, tenant_id, ContentAccessClass.PRIVATE_RESOURCE)
-    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))
+    monkeypatch.setattr(process_scratch, "directory", lambda: tmp_path)
 
     def short_slice(connection, cursor, statement, parameters, context, executemany):
         if "substr(" in statement:

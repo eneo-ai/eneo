@@ -7,7 +7,7 @@ const meta: MetaRecord = {
   "oidc-federation": "Authentication & OIDC",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
-  "data-retention": "Data Retention & Deletion",
+  "data-retention": "Data Retention",
   skills: "Skills",
   "ai-providers": "AI Provider Configuration",
   transcription: "Transcription & Speaker Identification",
@@ -20,6 +20,7 @@ const meta: MetaRecord = {
   "document-processing": "Document Processing",
   "sharepoint-integration": "SharePoint Integration",
   "embed-widget": "Embed an Assistant (Web Widget)",
+  "upgrade-notes": "Upgrade Notes",
   "upgrade-2-2-0": "Upgrading to 2.2.0",
   "upgrade-1-7-0": "Upgrading to 1.7.0",
 };

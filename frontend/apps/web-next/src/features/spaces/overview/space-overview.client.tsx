@@ -83,7 +83,7 @@ function CountTiles() {
   const own = (item: { space_id: string }) => item.space_id === space.id;
   // As the Flöden tab (useSpaceSections): where the tenant has flows, counted
   // from the same list the tab shows, since the space itself does not carry them.
-  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
+  const showsFlows = featureFlags.flows && !space.organization;
   const flows = useQuery({
     ...flowsListQueryOptions(browserApi, space.id),
     enabled: showsFlows

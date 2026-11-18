@@ -93,7 +93,7 @@
       label={m.apps()}
     />
   {/if}
-  {#if !isOrgSpace && newAppFlowsHref && space.hasPermission("read", "app") && user.hasPermission("flows_view")}
+  {#if !isOrgSpace && newAppFlowsHref && user.hasPermission("flows_view")}
     <Navigation.Link
       href={newAppFlowsHref}
       isActive={false}

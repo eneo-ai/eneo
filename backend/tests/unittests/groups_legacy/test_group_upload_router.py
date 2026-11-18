@@ -1,3 +1,5 @@
+import json
+from io import BytesIO
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -163,3 +165,41 @@ def test_upload_reports_unavailable_storage_before_staging_or_job_creation(
         StorageKind.OBJECT_STORE,
         object_store_revision=7,
     )
+
+
+async def test_collection_upload_is_audited_without_the_file_name() -> None:
+    name = "Utredning Anna Svensson.pdf"
+    audit_service = AsyncMock()
+    group_service = SimpleNamespace(
+        get_group=AsyncMock(
+            return_value=SimpleNamespace(name="Policies", space_id=None)
+        ),
+        add_file_to_group=AsyncMock(return_value=SimpleNamespace(id=uuid4())),
+    )
+
+    class Container:
+        @staticmethod
+        def group_service():
+            return group_service
+
+        @staticmethod
+        def user():
+            return TEST_USER
+
+        @staticmethod
+        def audit_service():
+            return audit_service
+
+    await group_router.upload_file(
+        id=uuid4(),
+        file=SimpleNamespace(
+            file=BytesIO(b"payload"), filename=name, content_type="application/pdf"
+        ),
+        container=Container(),
+        _user_for_creation=None,
+    )
+
+    audit = audit_service.log_async.await_args.kwargs
+    assert name not in audit["description"]
+    assert name not in json.dumps(audit["metadata"], default=str)
+    assert audit["metadata"]["target"]["content_type"] == "application/pdf"

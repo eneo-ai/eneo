@@ -1,16 +1,5 @@
-import { readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { describe, expect, it } from "vitest";
-
-const srcDir = path.resolve(import.meta.dirname, "..");
-
-function sources(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const file = path.join(directory, entry.name);
-    if (entry.isDirectory()) return sources(file);
-    return /\.tsx$/.test(entry.name) && !/\.test\.tsx$/.test(entry.name) ? [file] : [];
-  });
-}
+import { appSources } from "./app-sources";
 
 /**
  * A raw <select> is not one of the design system's fields, so it carries its own
@@ -21,8 +10,8 @@ function sources(directory: string): string[] {
 describe("raw <select> elements", () => {
   it("are 16 px on a phone and 44 px on a touch pointer", () => {
     const faults: string[] = [];
-    for (const file of sources(srcDir)) {
-      const text = readFileSync(file, "utf8");
+    for (const { file, text } of appSources) {
+      if (!file.endsWith(".tsx")) continue;
       for (const match of text.matchAll(/<select\b/g)) {
         // The opening tag's attributes run up to the first <option> or the close tag.
         const tag = text.slice(match.index, text.indexOf("<option", match.index));
@@ -31,8 +20,7 @@ describe("raw <select> elements", () => {
         const hasTouchHeight = classes
           .split(/\s+/)
           .some((token) => token === "min-h-11" || token === "pointer-coarse:min-h-11");
-        if (!/\btext-base\b/.test(classes) || !hasTouchHeight)
-          faults.push(`${path.relative(srcDir, file)}:${line}`);
+        if (!/\btext-base\b/.test(classes) || !hasTouchHeight) faults.push(`${file}:${line}`);
       }
     }
     expect(faults).toEqual([]);

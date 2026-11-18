@@ -2,6 +2,7 @@ import asyncio
 import os
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import threading
@@ -26,6 +27,7 @@ def recording(tmp_path, monkeypatch):
     temp_dir = tmp_path / "temp"
     temp_dir.mkdir()
     monkeypatch.setattr(audio.tempfile, "tempdir", str(temp_dir))
+    monkeypatch.setattr(audio.process_scratch, "directory", lambda: temp_dir)
     return source, samples, temp_dir
 
 
@@ -441,3 +443,19 @@ async def test_decoder_failure_removes_partial_wav(
             pytest.fail("An unsuccessful decode must not reach the consumer")
     assert processes[0].returncode is not None
     assert list(temp_dir.iterdir()) == []
+
+
+def test_the_longest_decodable_audio_fits_one_wav_file():
+    # The RIFF header counts 36 bytes and the data in one 32-bit field, so a
+    # decoded-byte bound above 4 GiB still yields what one WAV file holds.
+    seconds = audio.longest_decodable_seconds(8 * 1024**3)
+
+    assert seconds == 134_217
+    struct.pack("<L", 36 + seconds * 32_000)
+    with pytest.raises(struct.error):
+        struct.pack("<L", 36 + (seconds + 1) * 32_000)
+    assert audio.AudioDecodeLimits(200_000, 8 * 1024**3).longest_audio_seconds == (
+        seconds
+    )
+    # Below it the decoded-byte bound decides.
+    assert audio.longest_decodable_seconds(2 * 1024**3) == 67_108

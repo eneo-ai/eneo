@@ -130,6 +130,25 @@ def test_http_exception_422_uses_validation_general_error_and_preserves_headers(
     assert "submitted-secret" not in response.text
 
 
+def test_http_exception_422_with_its_own_code_keeps_it_and_preserves_headers():
+    """A route that refuses with a documented code is not a request
+    validation error: the code and message reach the caller."""
+    client = _build_client_for_exception(
+        {"code": "x", "message": "y"},
+        status_code=422,
+        headers={"X-Correlation-ID": "exception-correlation-id"},
+    )
+    response = client.get("/_test-http-exc", headers={"X-Request-ID": "req-422"})
+
+    assert response.status_code == 422
+    assert response.headers["x-correlation-id"] == "exception-correlation-id"
+    payload = response.json()
+    assert payload["code"] == "x"
+    assert payload["message"] == "y"
+    assert payload["eneo_error_code"] == ErrorCodes.BAD_REQUEST == 9007
+    assert payload["request_id"] == "req-422"
+
+
 @pytest.mark.parametrize(
     ("status_code", "expected"),
     [

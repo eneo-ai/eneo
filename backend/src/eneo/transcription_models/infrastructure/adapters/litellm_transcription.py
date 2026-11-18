@@ -44,6 +44,7 @@ from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
 )
+from eneo.observability.error_log import error_facts
 
 if TYPE_CHECKING:
     from eneo.model_providers.infrastructure.outbound_headers_runtime import (
@@ -301,7 +302,19 @@ class LiteLLMTranscriptionAdapter:
                 await observer.outcome_unknown(call_id, "request_cancelled")
             raise
         except Exception as e:
-            logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
+            # A provider's error can echo what was said in the recording.
+            facts = error_facts(e)
+            logger.error(
+                "[LiteLLM] %s: transcription request failed: %s (status %s)",
+                self.litellm_model,
+                facts["error_type"],
+                facts["error_status"],
+                extra={
+                    "provider": self.provider_type,
+                    "operation": "transcription",
+                    **facts,
+                },
+            )
             try:
                 litellm_transport.raise_public_litellm_error(
                     e,

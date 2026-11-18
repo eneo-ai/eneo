@@ -19,8 +19,11 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
-from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
+from eneo.main.removed_env import (
+    OIDC_STORED_MODE_GUIDE_URL,
+    UPGRADE_GUIDE_URL,
+    check_removed_variables,
+)
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -313,10 +316,6 @@ _DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
 _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
 
 
-# A flow's longest recording, as stored and as a deployment ceiling: whole seconds within a day.
-FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
-
-
 class Settings(BaseSettings):
     # Never echo settings values in validation errors: the environment holds
     # secrets, and a failed startup must not print them.
@@ -549,12 +548,14 @@ class Settings(BaseSettings):
     # its thread, so this bounds how much name resolution a burst of unreachable
     # flow destinations can occupy; a lookup past it fails at once and is retried.
     flow_http_dns_workers: int = Field(default=16, gt=0)
+    # The default longest recording for flows (an admin changes it in Flow
+    # settings), and the longest audio other transcription takes.
     flow_audio_max_duration_seconds: int = 5 * 60 * 60
+    # Audio is decoded to a 16 kHz mono 16-bit WAV file on disk before it is
+    # transcribed; this bounds that file. What it holds, and at most what one WAV
+    # file holds (37 h 16 min), is the longest recording an admin can set for
+    # flows: the default holds 18 h 38 min.
     flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
-    # The longest recording a tenant admin may let flows take (the flow-settings
-    # page; its default is flow_audio_max_duration_seconds). Flow-only: other
-    # transcription keeps flow_audio_max_duration_seconds.
-    flow_audio_max_duration_ceiling_seconds: int = 8 * 60 * 60
     # How long an audio upload may wait for and take its measuring decode (a few
     # run at a time); past it the upload is refused as busy, to retry.
     flow_audio_measurement_timeout_seconds: int = Field(default=600, gt=0)
@@ -592,6 +593,46 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
+    # Scheduled retention shares one bounded runner across domain adopters.
+    retention_cron_hour: int = Field(default=3, ge=0, le=23)
+    retention_cron_minute: int = Field(default=30, ge=0, le=59)
+    retention_conversations_history_enabled: bool = True
+    retention_empty_sessions_enabled: bool = True
+    retention_unused_files_enabled: bool = True
+    retention_job_history_enabled: bool = True
+    retention_derived_copies_enabled: bool = True
+    retention_overdue_window_days: int = Field(default=1, ge=1, le=365)
+    retention_overdue_max_rows: int = Field(default=1000, gt=0)
+    retention_max_rows_per_run: int = Field(default=50_000, gt=0)
+    retention_conversations_max_rows_per_run: int = Field(default=250_000, gt=0)
+    # A question with a session and its help-assistant helper charges four unit
+    # rows (root DELETE, the session's lock and proof, the session, the helper);
+    # a smaller cap would block every such question as unit_exceeds_budget.
+    retention_conversations_max_unit_rows: int = Field(default=5000, ge=4)
+    retention_max_files_per_run: int = Field(default=10_000, gt=0)
+    retention_max_seconds_per_run: int = Field(default=1800, gt=0)
+    # Steps reserve a share of a chunk per unit (empty sessions a quarter, job
+    # history a half); with chunks below four rows they would defer every night.
+    # At four, a chunk holds one conversation root per transaction.
+    retention_chunk_rows: int = Field(default=500, ge=4, le=2000)
+    # A chunk stops admitting conversation roots and File families after this
+    # long, so the row locks it holds do not keep users waiting.
+    retention_chunk_gather_seconds: float = Field(default=1.0, gt=0)
+    # A singleton needs one lock, one fresh proof and one deleted row.
+    retention_max_family_rows: int = Field(default=5000, ge=3, le=100_000)
+    retention_unused_file_grace_hours: int = Field(default=24, gt=0)
+    # A session without a question is kept this long after it was created, so
+    # a chat that was just opened is not deleted before its first question.
+    retention_empty_session_grace_hours: int = Field(default=24, gt=0)
+    retention_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
+    retention_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
+    # A running execution whose heartbeat is older than this has lost its lease:
+    # the next run takes the task over and health reads it as abandoned.
+    retention_lease_stale_seconds: int = Field(default=3600, gt=0)
+    retention_health_timeout_seconds: float = Field(default=1.0, gt=0)
+    # /api/healthz is public: one database read per window, however many probes.
+    retention_health_cache_seconds: float = Field(default=30, gt=0)
+
     # Federation feature flag. Supports both single-tenant and multi-tenant setups.
     federation_enabled: bool = False
     federation_per_tenant_enabled: Optional[bool] = Field(
@@ -613,7 +654,7 @@ class Settings(BaseSettings):
     oidc_accepted_audience: Optional[str] = None
     oidc_jwks_cache_ttl_seconds: int = 3600
 
-    # Generic OIDC config (renamed from MOBILITYGUARD_*)
+    # Global OIDC sign-in (FEDERATION_ENABLED=false)
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
@@ -720,12 +761,6 @@ class Settings(BaseSettings):
             )
         return self
 
-    # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
-    mobilityguard_discovery_endpoint: Optional[str] = None
-    mobilityguard_client_id: Optional[str] = None
-    mobilityguard_client_secret: Optional[str] = None
-    mobilityguard_tenant_id: Optional[str] = None
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)
@@ -739,7 +774,7 @@ class Settings(BaseSettings):
     # silently truncated. The file count is only an abuse guardrail and the byte
     # cap only bounds storage.
     attachment_max_files: int = 100
-    attachment_max_size_bytes: int = DEFAULT_FILE_UPLOAD_LIMIT_BYTES
+    attachment_max_size_bytes: int = 26214400  # 25 MiB
     # Tokens kept free in the input window for the live question (and a little
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
@@ -1081,6 +1116,30 @@ class Settings(BaseSettings):
         return v
 
     @model_validator(mode="after")
+    def validate_retention_unit_budgets(self):
+        from eneo.data_retention.constants import validate_conversation_unit_budget
+
+        if self.retention_max_family_rows + 1 > self.retention_max_rows_per_run:
+            raise ValueError(
+                "RETENTION_MAX_FAMILY_ROWS plus discovery must fit "
+                "RETENTION_MAX_ROWS_PER_RUN."
+            )
+        # Each File member charges at least three rows (lock, fresh proof,
+        # delete). A family cap above three rows per budgeted file would admit a
+        # family with more members than the file budget: refused as
+        # insufficient_budget every pass, never as family_exceeds_budget.
+        if self.retention_max_family_rows > 3 * self.retention_max_files_per_run:
+            raise ValueError(
+                "RETENTION_MAX_FAMILY_ROWS must not exceed three times "
+                "RETENTION_MAX_FILES_PER_RUN."
+            )
+        validate_conversation_unit_budget(
+            unit_rows=self.retention_conversations_max_unit_rows,
+            execution_rows=self.retention_conversations_max_rows_per_run,
+        )
+        return self
+
+    @model_validator(mode="after")
     def resolve_deprecated_federation_flag(self):
         """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
         explicit_fields = self.model_fields_set
@@ -1107,6 +1166,34 @@ class Settings(BaseSettings):
             return self
 
         self.federation_enabled = bool(self.federation_per_tenant_enabled)
+        return self
+
+    @model_validator(mode="after")
+    def warn_about_ignored_sign_in_variables(self):
+        """Name the OIDC_* sign-in variables that FEDERATION_ENABLED ignores.
+
+        Browser sign-in then reads only the provider stored in Eneo, and these
+        values are never a fallback. Runs after the flag alias is resolved and
+        logs names only, never values.
+        """
+        if not self.federation_enabled:
+            return self
+        ignored = {
+            "OIDC_DISCOVERY_ENDPOINT": self.oidc_discovery_endpoint,
+            "OIDC_CLIENT_ID": self.oidc_client_id,
+            "OIDC_CLIENT_SECRET": self.oidc_client_secret,
+            # Access tokens read the stored provider's domains too.
+            "OIDC_ALLOWED_DOMAINS": self.oidc_allowed_domains,
+        }
+        names = [name for name, value in ignored.items() if value]
+        if names:
+            logging.warning(
+                "FEDERATION_ENABLED is true. Browser sign-in uses the identity "
+                "provider stored in Eneo and ignores %s; they are no fallback. "
+                "Remove them once the settings are stored in Eneo. See %s",
+                ", ".join(names),
+                OIDC_STORED_MODE_GUIDE_URL,
+            )
         return self
 
     @model_validator(mode="after")
@@ -1155,32 +1242,6 @@ class Settings(BaseSettings):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
-        """Auto-migrate legacy env vars with deprecation warnings.
-
-        MOBILITYGUARD_* → OIDC_*
-        """
-        migrations = [
-            ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
-            ("oidc_client_id", "mobilityguard_client_id"),
-            ("oidc_client_secret", "mobilityguard_client_secret"),
-            ("oidc_tenant_id", "mobilityguard_tenant_id"),
-        ]
-
-        for new_name, old_name in migrations:
-            # If new value not set but old value exists
-            if not values.get(new_name) and values.get(old_name):
-                values[new_name] = values[old_name]
-                logging.warning(
-                    f"DEPRECATION: Using {old_name.upper()}. "
-                    f"Please update to {new_name.upper()} in your .env file. "
-                    f"Legacy variables will be removed in v3.0"
-                )
-
-        return values
-
-    @model_validator(mode="before")
-    @classmethod
     def reject_removed_variables(cls, values: dict[str, object]) -> dict[str, object]:
         check_removed_variables(os.environ, values)
         return values
@@ -1204,36 +1265,18 @@ class Settings(BaseSettings):
             )
             sys.exit(1)
 
-        # The admin's shortest setting is a minute: the ceiling, as the decoded-byte
-        # bound (16 kHz mono 16-bit, 32 000 bytes a second) holds it, must reach one.
-        if (
-            min(
-                self.flow_audio_max_duration_ceiling_seconds,
-                self.flow_audio_max_decoded_bytes // 32_000,
-            )
-            < 60
-        ):
+        # The admin's shortest setting is a minute: the decoded-byte bound
+        # (16 kHz mono 16-bit, 32 000 bytes a second) must hold one.
+        if self.flow_audio_max_decoded_bytes // 32_000 < 60:
             logging.error(
-                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS and FLOW_AUDIO_MAX_DECODED_BYTES must "
-                "allow at least a minute of audio. Current values: %s s, %s bytes",
-                self.flow_audio_max_duration_ceiling_seconds,
+                "FLOW_AUDIO_MAX_DECODED_BYTES must allow at least a minute of audio "
+                "(1920000 bytes). Current value: %s",
                 self.flow_audio_max_decoded_bytes,
-            )
-            sys.exit(1)
-        if (
-            self.flow_audio_max_duration_ceiling_seconds
-            > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
-        ):
-            logging.error(
-                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS must be at most %s. Current value: %s",
-                FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
-                self.flow_audio_max_duration_ceiling_seconds,
             )
             sys.exit(1)
         for name in (
             "flow_audio_max_duration_seconds",
             "flow_audio_max_decoded_bytes",
-            "flow_audio_max_duration_ceiling_seconds",
         ):
             if getattr(self, name) <= 0:
                 logging.error(
@@ -1634,6 +1677,20 @@ class Settings(BaseSettings):
             )
 
         return self
+
+
+def has_env_oidc_client(settings: Settings) -> bool:
+    """Whether the OIDC_* settings name a whole client.
+
+    Sign-in needs the discovery URL, the client ID and the secret. With any of
+    them missing, env sign-in is neither offered nor resolved, and there is
+    nothing to move into Eneo.
+    """
+    return bool(
+        settings.oidc_discovery_endpoint
+        and settings.oidc_client_id
+        and settings.oidc_client_secret
+    )
 
 
 _settings: Optional[Settings] = None

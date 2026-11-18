@@ -72,9 +72,8 @@ async def job_events(
     # A browser session can stop authenticating while the stream is open
     # (sign-out, a password change, expiry); other tokens keep it until the
     # client leaves.
-    admitted = None
-    if user.browser_session is not None:
-        admitted = SessionWatch(user.browser_session, request)
+    session = user.credential.session if user.credential is not None else None
+    admitted = SessionWatch(session, request) if session is not None else None
     return EventSourceResponse(
         stream_job_events(user.id, request, admitted=admitted),
         ping=15,

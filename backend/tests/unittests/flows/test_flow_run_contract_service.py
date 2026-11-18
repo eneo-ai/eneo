@@ -421,6 +421,8 @@ async def test_a_run_chooses_speaker_labels_only_when_the_flows_own_service_labe
         (None, 7200, 2 * 2**30, 7200),
         # The admin's longest recording, not the deployment default.
         (21_600, 18000, 2 * 2**30, 21_600),
+        # Ten hours: the default 2 GiB decoded-byte bound holds 18 h 38 min.
+        (36_000, 18000, 2 * 2**30, 36_000),
         # 16 kHz mono 16-bit decodes to 32 000 bytes a second: this size
         # ceiling binds at one hour although the duration setting says five.
         (None, 18000, 115_200_000, 3600),

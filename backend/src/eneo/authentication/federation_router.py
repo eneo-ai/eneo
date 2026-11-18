@@ -1,38 +1,62 @@
 """Public OIDC authentication endpoints for tenant-based federation."""
 
-import base64
-import contextlib
-import json
+import asyncio
 import secrets
-import time
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional, Protocol, cast
+from typing import Annotated, Any, NamedTuple, Optional, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from jwt import PyJWKClient as _PyJWKClient
-from pydantic import BaseModel
-from typing_extensions import NotRequired, TypedDict
+from pydantic import BaseModel, Field
+from redis.asyncio import Redis
+from typing_extensions import TypedDict
 
-from eneo.authentication.auth_models import FederatedIdentity
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
-from eneo.main.aiohttp_client import aiohttp_client
-from eneo.main.config import get_settings, validate_redirect_uri
+from eneo.authentication.oidc.authorization import build_authorization_request
+from eneo.authentication.oidc.errors import OidcSignInError
+from eneo.authentication.oidc.profile import (
+    OidcProfile,
+    OidcProviderError,
+    load_profile,
+)
+from eneo.authentication.oidc.sign_in_source import (
+    redirect_uris,
+    selected_config,
+    sign_in_available,
+    sign_in_config,
+)
+from eneo.authentication.oidc.transaction import (
+    STORE_TIMEOUT_SECONDS,
+    OidcChannel,
+    OidcTransaction,
+    save_transaction,
+    take_transaction,
+)
+from eneo.authentication.oidc.verification import CallbackResponse, verify_response
+from eneo.main.config import (
+    Settings,
+    get_settings,
+    has_env_oidc_client,
+    validate_redirect_uri,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.settings.credential_resolver import CredentialResolver
-from eneo.tenants.tenant import TenantState
+from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -42,49 +66,14 @@ router = APIRouter(
 )
 
 
-class OIDCClaimsMapping(TypedDict):
-    email: str
-
-
-class FederationConfig(TypedDict):
-    client_id: str
-    client_secret: str
-    provider: NotRequired[str]
-    discovery_endpoint: NotRequired[str]
-    authorization_endpoint: NotRequired[str]
-    token_endpoint: NotRequired[str]
-    jwks_uri: NotRequired[str]
-    token_endpoint_auth_method: NotRequired[str]
-    token_endpoint_auth_methods_supported: NotRequired[list[str]]
-    scopes: NotRequired[list[str]]
-    claims_mapping: NotRequired[OIDCClaimsMapping]
-    allowed_domains: NotRequired[list[str]]
-
-
-class OIDCDiscoveryDocument(TypedDict):
-    authorization_endpoint: NotRequired[str]
-    token_endpoint: NotRequired[str]
-    jwks_uri: NotRequired[str]
-    token_endpoint_auth_methods_supported: NotRequired[list[str]]
-
-
 class OIDCStatePayload(TypedDict):
     tenant_id: str
     tenant_slug: str
     frontend_state: str
-    nonce: str
-    redirect_uri: str
+    # Names the server-side transaction that holds the nonce and PKCE verifier.
+    transaction_id: str
     correlation_id: str
     exp: int
-    iat: int
-    config_version: str | None
-
-
-class OIDCStateCache(TypedDict):
-    tenant_id: str
-    tenant_slug: str
-    redirect_uri: str
-    config_version: str | None
     iat: int
 
 
@@ -93,38 +82,11 @@ class AccessTokenResponse(TypedDict):
     frontend_state: str
 
 
-class _FederationConfigResolver(Protocol):
-    def get_federation_config(self) -> FederationConfig: ...
+class FederatedSignIn(NamedTuple):
+    """A verified callback's admitted user, and the state its page sent."""
 
-
-JWKClient = _PyJWKClient
-PyJWKClient = JWKClient  # Backwards compatibility alias for tests/monkeypatching
-
-
-@contextlib.asynccontextmanager
-async def _cleanup_state_cache(
-    redis_client: Any,
-    state_key: str,
-    *,
-    tenant_id: UUID | None,
-    correlation_id: str,
-):
-    try:
-        yield
-    finally:
-        if redis_client:
-            try:
-                await redis_client.delete(state_key)
-            except Exception as exc:  # pragma: no cover - best effort cleanup
-                logger.debug(
-                    "Failed to delete cached OIDC state",
-                    extra={
-                        "tenant_id": str(tenant_id) if tenant_id else None,
-                        "state_key": state_key,
-                        "error": str(exc),
-                        "correlation_id": correlation_id,
-                    },
-                )
+    user: UserInDB
+    frontend_state: str
 
 
 async def _log_oidc_debug(
@@ -137,7 +99,14 @@ async def _log_oidc_debug(
     if not correlation_id:
         correlation_id = "unknown"
 
-    if not await is_debug_enabled(redis_client):
+    try:
+        async with asyncio.timeout(STORE_TIMEOUT_SECONDS):
+            enabled = await is_debug_enabled(redis_client)
+    except TimeoutError:
+        # Diagnostics are optional: a store that stops answering skips them
+        # rather than holding up the sign-in.
+        return
+    if not enabled:
         return
 
     sanitized = sanitize_payload(payload)
@@ -153,36 +122,174 @@ async def _log_oidc_debug(
     )
 
 
-async def fetch_discovery(discovery_url: str) -> OIDCDiscoveryDocument:
+def _transaction_store(container: Container) -> Redis | None:
+    """The sign-in transaction store; None when it cannot be built, which
+    refuses the sign-in rather than continuing without it."""
+    try:
+        return container.redis_client()
+    except Exception as exc:
+        logger.error(
+            "oidc_transaction_store_failed",
+            extra={"operation": "connect", "error_type": type(exc).__name__},
+        )
+        return None
+
+
+UNUSABLE_PROVIDER_DETAIL = (
+    "Sign-in is not available for this organisation. Contact your administrator."
+)
+
+
+async def _load_profile(
+    federation_config: Mapping[str, object], settings: Settings, correlation_id: str
+) -> OidcProfile:
+    try:
+        # Discovery is cached as long as the provider's keys.
+        return await load_profile(
+            federation_config,
+            discovery_ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
+        )
+    except OidcProviderError as exc:
+        # The reason names hosts and settings: for the log and the operator,
+        # never for a visitor who is not signed in.
+        logger.error(
+            "OIDC provider configuration is unusable",
+            extra={"reason": str(exc), "correlation_id": correlation_id},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=UNUSABLE_PROVIDER_DETAIL,
+            headers={"X-Correlation-ID": correlation_id},
+        ) from exc
+
+
+def _changed_during_sign_in(
+    transaction: OidcTransaction, tenant: TenantInDB, settings: Settings
+) -> bool:
+    """The tenant's config changed after this sign-in started, recently enough
+    that a redirect URI it no longer lists is still accepted."""
+    grace_period = min(
+        settings.oidc_redirect_grace_period_seconds, settings.oidc_state_ttl_seconds
+    )
+    current_version = tenant.updated_at.isoformat() if tenant.updated_at else None
+    started_version = transaction.config_version
+    if (
+        grace_period <= 0
+        or not current_version
+        or not started_version
+        or current_version == started_version
+    ):
+        return False
+    now = datetime.now(timezone.utc)
+    updated_at = tenant.updated_at or tenant.created_at
+    if updated_at is None:
+        return False
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    try:
+        started_at = datetime.fromisoformat(started_version)
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        changed_after_start = updated_at > started_at
+    except ValueError:
+        changed_after_start = True
+    return (
+        max(0, now.timestamp() - transaction.issued_at) <= grace_period
+        and (now - updated_at).total_seconds() <= grace_period
+        and changed_after_start
+    )
+
+
+def _require_registered_redirect_uri(
+    transaction: OidcTransaction,
+    tenant: TenantInDB,
+    federation_config: Mapping[str, object],
+    settings: Settings,
+    correlation_id: str,
+) -> None:
+    """Refuse the callback unless the tenant still registers the sign-in's
+    redirect URI.
+
+    Defence in depth against a forged state (if the JWT secret leaks), a
+    public origin changed during the sign-in, and cross-tenant confusion.
     """
-    Fetch OIDC discovery document.
+    log_context = {
+        "tenant_id": transaction.tenant_id,
+        "tenant_slug": transaction.tenant_slug,
+        "correlation_id": correlation_id,
+    }
+    try:
+        expected_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
+    except ValueError as e:
+        logger.error(
+            "Failed to resolve expected redirect_uri for validation",
+            extra={**log_context, "error": str(e)},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to validate redirect_uri configuration",
+            headers={"X-Correlation-ID": correlation_id},
+        )
+    try:
+        redirect_uri = validate_redirect_uri(transaction.redirect_uri) or ""
+    except ValueError:
+        logger.error(
+            "State redirect_uri failed validation",
+            extra={**log_context, "state_redirect_uri": transaction.redirect_uri},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Redirect URI mismatch - authentication flow invalid. "
+                "Please try logging in again."
+            ),
+            headers={"X-Correlation-ID": correlation_id},
+        )
 
-    Simple fetch without caching - discovery endpoints are rarely called
-    and IdPs handle rate limiting themselves.
-
-    Args:
-        discovery_url: URL to OIDC discovery document
-
-    Returns:
-        dict: Discovery document JSON
-
-    Raises:
-        HTTPException 500: Failed to fetch discovery document
-    """
-    async with aiohttp_client().get(discovery_url) as resp:
-        if resp.status != 200:
-            logger.error(
-                f"Failed to fetch OIDC discovery document: HTTP {resp.status}",
+    if redirect_uri in valid_redirect_uris:
+        if redirect_uri != expected_redirect_uri:
+            logger.info(
+                "Accepted non-canonical configured redirect_uri during callback",
                 extra={
-                    "discovery_url": discovery_url,
-                    "http_status": resp.status,
+                    **log_context,
+                    "state_redirect_uri": redirect_uri,
+                    "expected_redirect_uri": expected_redirect_uri,
                 },
             )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Failed to fetch discovery document: HTTP {resp.status}",
-            )
-        return await resp.json()
+        return
+    if not settings.strict_oidc_redirect_validation:
+        return
+    if _changed_during_sign_in(transaction, tenant, settings):
+        logger.warning(
+            "Accepting redirect_uri from state due to recent config change",
+            extra={
+                **log_context,
+                "state_redirect_uri": redirect_uri,
+                "expected_redirect_uri": expected_redirect_uri,
+            },
+        )
+        return
+    logger.error(
+        "Redirect URI mismatch between state and tenant configuration",
+        extra={
+            **log_context,
+            "state_redirect_uri": redirect_uri,
+            "expected_redirect_uri": expected_redirect_uri,
+            "allowed_redirect_uri_count": len(valid_redirect_uris),
+            "config_version_state": transaction.config_version,
+        },
+    )
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            "Redirect URI mismatch - authentication flow invalid. "
+            "This may occur if tenant configuration changed during login. "
+            "Please try logging in again. If this persists, contact your administrator."
+        ),
+        headers={"X-Correlation-ID": correlation_id},
+    )
 
 
 class TenantInfo(BaseModel):
@@ -249,7 +356,21 @@ class CallbackRequest(BaseModel):
 
     code: str
     state: str
-    code_verifier: Optional[str] = None  # For PKCE (future use)
+    # Ignored: the PKCE verifier never leaves the server.
+    code_verifier: Optional[str] = None
+    # The authorization response's RFC 9207 issuer, when the provider sends it.
+    iss: Optional[str] = None
+    binding_verifier: Optional[str] = Field(
+        default=None,
+        min_length=43,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._~-]+$",
+        description=(
+            "The secret whose S256 hash was sent as binding_challenge at "
+            "initiate. Required for a bound sign-in and refused for an unbound "
+            "one."
+        ),
+    )
 
     model_config = {
         "json_schema_extra": {
@@ -279,10 +400,6 @@ class FederationStatusResponse(BaseModel):
             }
         }
     }
-
-
-def _has_federation_config(config: dict[str, Any]) -> bool:
-    return bool(config.get("client_id") and config.get("discovery_endpoint"))
 
 
 @router.get(
@@ -317,7 +434,7 @@ async def get_federation_status(
         FederationStatusResponse with:
         - has_single_tenant_federation: True if exactly 1 active tenant with API federation config
         - has_multi_tenant_federation: True if federation_enabled with >1 tenants
-        - has_global_oidc_config: True if OIDC_* env vars are configured
+        - has_global_oidc_config: True if federation_enabled=false and OIDC_* env vars are configured
         - tenant_count: Number of active tenants
     """
     settings = get_settings()
@@ -327,10 +444,9 @@ async def get_federation_status(
     tenants = await tenant_repo.get_all_active()
     tenant_count = len(tenants)
 
-    # Check if global OIDC env vars are configured (used when federation_enabled=false)
-    has_global_oidc = bool(
-        settings.oidc_discovery_endpoint and settings.oidc_client_secret
-    )
+    # The OIDC_* settings sign people in only in env mode; with
+    # FEDERATION_ENABLED they are ignored and never a fallback.
+    has_global_oidc = not settings.federation_enabled and has_env_oidc_client(settings)
 
     # Multi-tenant mode: federation per tenant is enabled with multiple tenants
     if settings.federation_enabled and tenant_count > 1:
@@ -343,20 +459,21 @@ async def get_federation_status(
 
     # Single-tenant federation detection (API-configured federation in database):
     # - Exactly 1 active tenant
-    # - Has API-configured federation (non-empty federation_config JSONB)
-    # - Federation config has required fields
+    # - Its stored config names a discovery URL, a client ID and a secret
     # - Only applies when federation_enabled=true
     has_single_federation = False
     if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
-        if _has_federation_config(tenant.federation_config):
+        if sign_in_available(settings, tenant):
             has_single_federation = True
             logger.info(
                 "Single-tenant API federation detected",
                 extra={
                     "tenant_id": str(tenant.id),
                     "tenant_name": tenant.name,
-                    "provider": tenant.federation_config.get("provider", "unknown"),
+                    "provider": selected_config(settings, tenant).get(
+                        "provider", "unknown"
+                    ),
                 },
             )
 
@@ -393,13 +510,13 @@ async def list_tenants(
     Returns only tenants that have:
     - Active status (not deleted)
     - Slug configured (required for federation routing)
-    - Client ID and discovery endpoint when federation is enabled
+    - A discovery URL, client ID and client secret when federation is enabled
 
     Returns:
         TenantListResponse with slug, name, display_name for each tenant
     """
     tenant_repo = container.tenant_repo()
-    federation_enabled = get_settings().federation_enabled
+    settings = get_settings()
 
     # Get all active tenants
     tenants = await tenant_repo.get_all_active()
@@ -413,7 +530,7 @@ async def list_tenants(
         )
         for tenant in tenants
         if tenant.slug
-        and (not federation_enabled or _has_federation_config(tenant.federation_config))
+        and (not settings.federation_enabled or sign_in_available(settings, tenant))
     ]
 
     logger.info(f"Listed {len(tenant_list)} tenants for selector")
@@ -435,6 +552,7 @@ async def list_tenants(
         403: {"description": "Tenant is not active"},
         404: {"description": "Tenant not found or not configured"},
         500: {"description": "Federation or redirect configuration missing"},
+        503: {"description": "Sign-in store unavailable (oidc_login_unavailable)"},
     },
 )
 @endpoint_access(
@@ -464,11 +582,45 @@ async def initiate_auth(
             ),
         ),
     ] = None,
+    binding_challenge: Annotated[
+        Optional[str],
+        Query(
+            pattern=r"^[A-Za-z0-9_-]{43}$",
+            description=(
+                "Optional base64url S256 hash of a secret the client keeps "
+                "(RFC 7636 4.2). The callback then needs that secret as "
+                "binding_verifier. Create the secret from at least 32 random "
+                "bytes."
+            ),
+        ),
+    ] = None,
+) -> InitiateAuthResponse:
+    """Get the authorization URL for the tenant's identity provider."""
+    return await initiate_federated_sign_in(
+        response,
+        container,
+        tenant=tenant,
+        state=state,
+        redirect_uri_param=redirect_uri_param,
+        channel="api",
+        binding_challenge=binding_challenge,
+    )
+
+
+async def initiate_federated_sign_in(
+    response: Response,
+    container: Container,
+    *,
+    tenant: str | None,
+    state: str | None,
+    redirect_uri_param: str | None,
+    channel: OidcChannel,
+    binding_challenge: str | None,
 ) -> InitiateAuthResponse:
     """
-    Get authorization URL for tenant's identity provider.
+    Start a sign-in at the tenant's identity provider: the shared initiation core.
 
-    This endpoint:
+    This function:
     1. Looks up tenant by slug (or uses first active tenant in single-tenant mode)
     2. Resolves tenant's federation config (tenant-specific or global)
     3. Computes redirect_uri server-side from canonical_public_origin
@@ -488,6 +640,7 @@ async def initiate_auth(
         HTTPException 400: Tenant parameter required in multi-tenant mode
         HTTPException 404: Tenant not found or no slug configured
         HTTPException 500: No IdP configured for tenant or no public origin
+        OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     tenant_repo = container.tenant_repo()
     settings = get_settings()
@@ -572,20 +725,10 @@ async def initiate_auth(
 
     set_request_context(tenant_slug=tenant_obj.slug or tenant_obj.name)
 
-    # Resolve federation config (tenant-specific or global)
-    # Create CredentialResolver with tenant, settings, and encryption_service
-    encryption_service = container.encryption_service()
-    credential_resolver = CredentialResolver(
-        tenant=tenant_obj,
-        settings=settings,
-        encryption_service=encryption_service,
-    )
-
     try:
-        federation_config = cast(
-            _FederationConfigResolver, credential_resolver
-        ).get_federation_config()
-        discovery_endpoint = federation_config.get("discovery_endpoint")
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
+        )
     except ValueError as e:
         logger.error(
             "No federation config for tenant",
@@ -607,7 +750,9 @@ async def initiate_auth(
 
     # Resolve redirect_uri server-side
     try:
-        canonical_redirect_uri = credential_resolver.get_redirect_uri()
+        canonical_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
     except ValueError as e:
         logger.error(
             "Failed to resolve redirect_uri for tenant",
@@ -623,8 +768,6 @@ async def initiate_auth(
             f"No public origin configured for tenant '{tenant}'. "
             "Contact administrator to configure canonical_public_origin.",
         )
-
-    valid_redirect_uris = credential_resolver.get_valid_redirect_uris()
 
     if redirect_uri_param is not None:
         try:
@@ -657,136 +800,48 @@ async def initiate_auth(
     else:
         redirect_uri = canonical_redirect_uri
 
-    # Generate server-signed state (includes tenant context for callback validation)
-    # State format: JWT with expiry (10 minutes)
     effective_updated_at = tenant_obj.updated_at or tenant_obj.created_at
     tenant_config_version = (
         effective_updated_at.isoformat() if effective_updated_at else None
     )
-
+    profile = await _load_profile(federation_config, settings, correlation_id)
+    transaction = OidcTransaction.start(
+        "login",
+        channel=channel,
+        binding_challenge=binding_challenge,
+        redirect_uri=redirect_uri,
+        tenant_id=str(tenant_obj.id),
+        tenant_slug=tenant_obj.slug or tenant_obj.name,
+        config_version=tenant_config_version,
+        issuer=profile.issuer,
+        iss_parameter_supported=profile.iss_parameter_supported,
+    )
     state_payload: OIDCStatePayload = {
-        "tenant_id": str(tenant_obj.id),
-        "tenant_slug": tenant_obj.slug or tenant_obj.name,
+        "tenant_id": transaction.tenant_id,
+        "tenant_slug": transaction.tenant_slug,
         "frontend_state": state or "",
-        "nonce": secrets.token_hex(16),
-        "redirect_uri": redirect_uri,
+        "transaction_id": transaction.id,
         "correlation_id": correlation_id,
-        "exp": int(time.time()) + settings.oidc_state_ttl_seconds,
-        "iat": int(time.time()),
-        "config_version": tenant_config_version,
+        "exp": transaction.issued_at + settings.oidc_state_ttl_seconds,
+        "iat": transaction.issued_at,
     }
     signed_state = pyjwt.encode(
         cast(dict[str, Any], state_payload), settings.jwt_secret, algorithm="HS256"
     )
-
-    state_cache_payload: OIDCStateCache = {
-        "tenant_id": str(tenant_obj.id),
-        "tenant_slug": tenant_obj.slug or tenant_obj.name,
-        "redirect_uri": redirect_uri,
-        "config_version": tenant_config_version,
-        "iat": state_payload["iat"],
-    }
-    state_cache_key = f"oidc:state:{state_payload['nonce']}"
-
-    redis_client: Any = None
-    try:
-        redis_client = container.redis_client()
-    except Exception:  # pragma: no cover - dependency injector safety net
-        redis_client = None
-
-    if redis_client:
-        try:
-            await redis_client.setex(
-                state_cache_key,
-                settings.oidc_state_ttl_seconds,
-                json.dumps(state_cache_payload, separators=(",", ":")),
-            )
-            await _log_oidc_debug(
-                redis_client=redis_client,
-                correlation_id=correlation_id,
-                event="initiate.state_cached",
-                tenant_slug=tenant_obj.slug or tenant_obj.name,
-                ttl=settings.oidc_state_ttl_seconds,
-            )
-        except Exception as exc:  # pragma: no cover - best effort cache
-            logger.warning(
-                "Failed to persist OIDC state in Redis",
-                extra={
-                    "tenant_id": str(tenant_obj.id),
-                    "tenant_slug": tenant,
-                    "error": str(exc),
-                },
-            )
-            await _log_oidc_debug(
-                redis_client=redis_client,
-                correlation_id=correlation_id,
-                event="initiate.state_cache_failed",
-                tenant_slug=tenant_obj.slug or tenant_obj.name,
-                error=str(exc),
-            )
-    else:
-        await _log_oidc_debug(
-            redis_client=redis_client,
-            correlation_id=correlation_id,
-            event="initiate.state_cache_skipped",
-            tenant_slug=tenant_obj.slug or tenant_obj.name,
-        )
-
-    # Resolve authorization endpoint
-    authorization_endpoint = federation_config.get("authorization_endpoint")
-    if not authorization_endpoint and discovery_endpoint:
-        try:
-            discovery = await fetch_discovery(discovery_endpoint)
-            authorization_endpoint = discovery.get("authorization_endpoint")
-        except HTTPException:
-            raise  # Re-raise HTTP exceptions
-        except Exception as e:
-            logger.error(
-                "Failed to fetch discovery endpoint",
-                extra={
-                    "tenant_id": str(tenant_obj.id),
-                    "discovery_endpoint": discovery_endpoint,
-                    "error": str(e),
-                },
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to fetch IdP configuration",
-            )
-
-    if not authorization_endpoint:
-        logger.error(
-            "Failed to resolve authorization endpoint",
-            extra={
-                "tenant_id": str(tenant_obj.id),
-                "federation_config": federation_config,
-            },
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to resolve authorization endpoint",
-        )
-
-    # Build authorization URL
-    from urllib.parse import urlencode
-
-    params = {
-        "client_id": federation_config["client_id"],
-        "response_type": "code",
-        "redirect_uri": redirect_uri,
-        "scope": " ".join(
-            federation_config.get("scopes", ["openid", "email", "profile"])
-        ),
-        "state": signed_state,
-    }
-    authorization_url = f"{authorization_endpoint}?{urlencode(params)}"
+    redis_client = _transaction_store(container)
+    await save_transaction(
+        redis_client, transaction, ttl_seconds=settings.oidc_state_ttl_seconds
+    )
+    authorization_url = build_authorization_request(
+        profile, transaction, state=signed_state
+    )
 
     await _log_oidc_debug(
         redis_client=redis_client,
         correlation_id=correlation_id,
         event="initiate.authorization_ready",
-        tenant_slug=tenant_obj.slug or tenant_obj.name,
-        authorization_endpoint=authorization_endpoint,
+        tenant_slug=transaction.tenant_slug,
+        authorization_endpoint=profile.authorization_endpoint,
         redirect_uri=redirect_uri,
     )
 
@@ -794,8 +849,7 @@ async def initiate_auth(
         f"Authentication initiated for tenant {tenant_obj.name}",
         extra={
             "tenant_id": str(tenant_obj.id),
-            "tenant_slug": tenant_obj.slug
-            or tenant_obj.name,  # Use actual tenant slug or name
+            "tenant_slug": transaction.tenant_slug,
             "provider": federation_config.get("provider"),
             "redirect_uri": redirect_uri,  # Log server-computed value
             "correlation_id": correlation_id,
@@ -818,10 +872,27 @@ async def initiate_auth(
         "Returns JWT token for authenticated user."
     ),
     responses={
-        400: {"description": "Invalid or expired state"},
-        401: {"description": "Token validation failed"},
-        403: {"description": "Domain not allowed, inactive tenant, or user missing"},
-        404: {"description": "Tenant or user not found"},
+        400: {
+            "description": (
+                "Invalid or expired state, or a binding_verifier that does not "
+                "match the sign-in (oidc_transaction_invalid)"
+            ),
+            "model": GeneralError,
+        },
+        401: {"description": "Token validation failed", "model": GeneralError},
+        403: {
+            "description": (
+                "Domain not allowed, inactive tenant or user missing; or "
+                "`identity_conflict` (9082): the account is bound to another "
+                "sign-in identity"
+            ),
+            "model": GeneralError,
+        },
+        404: {"description": "Tenant or user not found", "model": GeneralError},
+        503: {
+            "description": "Sign-in store unavailable (oidc_login_unavailable)",
+            "model": GeneralError,
+        },
     },
 )
 @endpoint_access(
@@ -831,41 +902,54 @@ async def initiate_auth(
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Annotated[Container, Depends(get_container())],
+    # The session (and an account the sign-in created) commits before the
+    # token leaves, so its first request is admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessTokenResponse:
+    """Handle the OIDC callback after the user authenticated with the IdP."""
+    signed_in = await federated_sign_in(callback, container, channel="api")
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessTokenResponse(
+        access_token=await container.browser_session_service().start(
+            signed_in.user, auth_method=None
+        ),
+        frontend_state=signed_in.frontend_state,
+    )
+
+
+async def federated_sign_in(
+    callback: CallbackRequest, container: Container, *, channel: OidcChannel
+) -> FederatedSignIn:
     """
-    Handle OIDC callback after user authenticates with IdP.
+    Verify a provider's callback and admit its user: the shared sign-in core.
 
-    This endpoint:
+    Starts no session and mints no token. Each route starts the user's
+    session (``BrowserSessionService.start``) and hands its token out.
+
+    This function:
     1. Validates signed state (JWT with tenant context)
-    2. Extracts tenant context from state
-    3. Exchanges authorization code for tokens
-    4. Validates ID token (signature, audience, expiry, at_hash)
-    5. Validates email domain against tenant's allowed_domains
-    6. Resolves an active tenant member or provisions under the shared JIT policy
-    7. Issues Eneo JWT token
-
-    Args:
-        callback: CallbackRequest with code, state, code_verifier
-        container: Dependency injection container
-
-    Returns:
-        AccessToken with Eneo JWT
+    2. Takes the single-use sign-in transaction the state names, if this
+       channel and binding verifier are the ones that started it
+    3. Exchanges the code with the PKCE verifier and verifies the ID token
+       (signature, issuer, audience, freshness, nonce)
+    4. Validates email domain against tenant's allowed_domains
+    5. Resolves an active tenant member or provisions under the shared JIT policy
+    6. Returns the admitted user and the page's frontend state
 
     Raises:
         HTTPException 400: Invalid state or code
-        HTTPException 401: Token validation failed
+        OidcTransactionInvalidError (400): No live transaction for the state
+        HTTPException 401: The verified token carries no usable email
+        OidcResponseNotVerifiedError (401): The provider's response failed a check
         HTTPException 403: Email domain not allowed for tenant or user not found
+        IdentityConflictError (403): The identity cannot be bound to the account
+            its email names
+        OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     settings = get_settings()
-    redis_client: Any = None
-    cached_state: OIDCStateCache | None = None
-    state_cache_key: str | None = None
-
-    try:
-        redis_client = container.redis_client()
-    except Exception:  # pragma: no cover - dependency injector safety net
-        redis_client = None
 
     # Validate and decode state
     # Note: pyjwt.decode() automatically validates 'exp' claim and raises ExpiredSignatureError
@@ -895,25 +979,24 @@ async def auth_callback(
             detail="Invalid state parameter",
         )
 
-    state_nonce = state_payload["nonce"]
-    if not state_nonce:
+    # A state issued before sign-in transactions existed names none.
+    transaction_id = state_payload.get("transaction_id")
+    if not transaction_id:
         logger.error(
-            "State token missing nonce claim",
-            extra={"correlation_id": state_payload["correlation_id"]},
+            "State token names no sign-in transaction",
+            extra={"correlation_id": state_payload.get("correlation_id")},
         )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid state parameter",
         )
 
-    state_cache_key = f"oidc:state:{state_nonce}"
-
     tenant_id = UUID(state_payload["tenant_id"])
     tenant_slug = state_payload["tenant_slug"]
-    redirect_uri = state_payload["redirect_uri"]
     # Extract correlation ID from state (flows from initiate endpoint)
     correlation_id = state_payload["correlation_id"] or secrets.token_hex(8)
     set_request_context(correlation_id=correlation_id, tenant_slug=tenant_slug)
+    redis_client = _transaction_store(container)
 
     await _log_oidc_debug(
         redis_client=redis_client,
@@ -922,716 +1005,182 @@ async def auth_callback(
         tenant_slug=tenant_slug,
     )
 
-    if redis_client and state_cache_key:
-        try:
-            # The state is single-use: GETDEL admits exactly one callback.
-            cached_raw = await redis_client.getdel(state_cache_key)
-            if cached_raw:
-                cached_state = cast(OIDCStateCache, json.loads(cached_raw))
-            await _log_oidc_debug(
-                redis_client=redis_client,
-                correlation_id=correlation_id,
-                event="callback.state_cache_hit"
-                if cached_state
-                else "callback.state_cache_miss",
-                tenant_slug=tenant_slug,
-            )
-        except Exception as exc:  # pragma: no cover - best effort cache fetch
-            logger.warning(
-                "Failed to retrieve cached OIDC state",
+    # Global exception handler to ensure correlation_id is always included in responses
+    try:
+        # Single use, and only for the client that started the sign-in.
+        transaction = await take_transaction(
+            redis_client,
+            transaction_id,
+            channel=channel,
+            binding_verifier=callback.binding_verifier,
+        )
+        if transaction.tenant_id != str(tenant_id) or (
+            transaction.tenant_slug.lower() != (tenant_slug or "").lower()
+        ):
+            logger.error(
+                "OIDC state tenant mismatch detected",
                 extra={
-                    "tenant_id": str(tenant_id),
-                    "tenant_slug": tenant_slug,
-                    "error": str(exc),
+                    "expected_tenant_id": transaction.tenant_id,
+                    "supplied_tenant_id": str(tenant_id),
+                    "expected_tenant_slug": transaction.tenant_slug,
+                    "supplied_tenant_slug": tenant_slug,
                     "correlation_id": correlation_id,
                 },
             )
-            await _log_oidc_debug(
-                redis_client=redis_client,
-                correlation_id=correlation_id,
-                event="callback.state_cache_error",
-                tenant_slug=tenant_slug,
-                error=str(exc),
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Authorization state mismatch detected. "
+                    "Please restart the sign-in flow."
+                ),
+                headers={"X-Correlation-ID": correlation_id},
             )
-    else:
+
+        # Get tenant and federation config
+        tenant_repo = container.tenant_repo()
+        tenant_obj = await tenant_repo.get(tenant_id)
+        if not tenant_obj:
+            logger.error(
+                "Tenant not found",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "correlation_id": correlation_id,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Tenant not found",
+                headers={"X-Correlation-ID": correlation_id},
+            )
+
+        set_request_context(tenant_slug=tenant_obj.slug or tenant_slug)
+
+        if tenant_obj.state != TenantState.ACTIVE:
+            logger.error(
+                "Inactive tenant attempted callback",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "tenant_slug": tenant_slug,
+                    "state": tenant_obj.state,
+                    "correlation_id": correlation_id,
+                },
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Tenant is not active. Contact your administrator.",
+                headers={"X-Correlation-ID": correlation_id},
+            )
+
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
+        )
+        _require_registered_redirect_uri(
+            transaction, tenant_obj, federation_config, settings, correlation_id
+        )
+        profile = await _load_profile(federation_config, settings, correlation_id)
+        verified = await verify_response(
+            profile,
+            transaction,
+            CallbackResponse(code=callback.code, iss=callback.iss),
+            jwks_ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
+            correlation_id=correlation_id,
+        )
+
+        try:
+            identity = verified.identity()
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"X-Correlation-ID": correlation_id},
+            ) from exc
+
+        email = identity.email
+        # Not the address itself: the sign-in may still be refused, and a
+        # refused one logs no email. callback.success carries it.
         await _log_oidc_debug(
             redis_client=redis_client,
             correlation_id=correlation_id,
-            event="callback.state_cache_unavailable",
-            tenant_slug=tenant_slug,
+            event="callback.email_extracted",
+            email_claim=profile.email_claim,
         )
-
-    # Global exception handler to ensure correlation_id is always included in responses
-    try:
-        async with _cleanup_state_cache(
-            redis_client,
-            state_cache_key or "",
-            tenant_id=tenant_id,
-            correlation_id=correlation_id,
-        ):
-            if redis_client and state_cache_key:
-                if not cached_state:
-                    logger.error(
-                        "OIDC state not found in cache during callback",
-                        extra={
-                            "tenant_slug": tenant_slug,
-                            "state_key": state_cache_key,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.state_cache_missing",
-                        tenant_slug=tenant_slug,
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            "Authorization session is invalid or has expired. "
-                            "Please restart the sign-in flow."
-                        ),
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-
-                expected_tenant_id = cached_state["tenant_id"]
-                if expected_tenant_id and expected_tenant_id != str(tenant_id):
-                    logger.error(
-                        "OIDC state tenant mismatch detected",
-                        extra={
-                            "expected_tenant_id": expected_tenant_id,
-                            "supplied_tenant_id": str(tenant_id),
-                            "tenant_slug": tenant_slug,
-                            "state_key": state_cache_key,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.state_tampered",
-                        reason="tenant_id_mismatch",
-                        expected_tenant_id=expected_tenant_id,
-                        supplied_tenant_id=str(tenant_id),
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            "Authorization state mismatch detected. "
-                            "Please restart the sign-in flow."
-                        ),
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-
-                expected_tenant_slug = cached_state["tenant_slug"].lower()
-                if (
-                    expected_tenant_slug
-                    and expected_tenant_slug != (tenant_slug or "").lower()
-                ):
-                    logger.error(
-                        "OIDC state tenant slug mismatch detected",
-                        extra={
-                            "expected_tenant_slug": expected_tenant_slug,
-                            "supplied_tenant_slug": tenant_slug,
-                            "state_key": state_cache_key,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    await _log_oidc_debug(
-                        redis_client=redis_client,
-                        correlation_id=correlation_id,
-                        event="callback.state_tampered",
-                        reason="tenant_slug_mismatch",
-                        expected_tenant_slug=expected_tenant_slug,
-                        supplied_tenant_slug=tenant_slug,
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            "Authorization state mismatch detected. "
-                            "Please restart the sign-in flow."
-                        ),
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-
-            # Get tenant and federation config
-            tenant_repo = container.tenant_repo()
-            tenant_obj = await tenant_repo.get(tenant_id)
-            if not tenant_obj:
-                logger.error(
-                    "Tenant not found",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Tenant not found",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            set_request_context(tenant_slug=tenant_obj.slug or tenant_slug)
+        try:
+            user, created = await container.user_service().resolve_federated_user(
+                identity=identity,
+                tenant_id=tenant_id,
+                allowed_domains=cast(
+                    list[str], federation_config.get("allowed_domains") or []
+                ),
+                correlation_id=correlation_id,
+            )
+        except IdentityConflictError as exc:
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.tenant_loaded",
-                tenant_id=str(tenant_id),
-                tenant_slug=tenant_obj.slug or tenant_slug,
+                event="callback.identity_conflict",
+                tenant_slug=tenant_slug,
+                reason=exc.reason,
             )
-
-            if tenant_obj.state != TenantState.ACTIVE:
-                await _log_oidc_debug(
-                    redis_client=redis_client,
-                    correlation_id=correlation_id,
-                    event="callback.tenant_inactive",
-                    tenant_slug=tenant_slug,
-                    state=str(tenant_obj.state),
-                )
-                logger.error(
-                    "Inactive tenant attempted callback",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "state": tenant_obj.state,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Tenant is not active. Contact your administrator.",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            encryption_service = container.encryption_service()
-            credential_resolver = CredentialResolver(
-                tenant=tenant_obj,
-                settings=settings,
-                encryption_service=encryption_service,
-            )
-            federation_config = cast(
-                _FederationConfigResolver, credential_resolver
-            ).get_federation_config()
-            discovery_endpoint = federation_config.get("discovery_endpoint")
-
-            # SECURITY: Validate redirect_uri from state matches tenant's expected redirect_uri
-            # This provides defense-in-depth against:
-            # 1. State JWT forgery (if JWT_SECRET is compromised)
-            # 2. Configuration drift (if canonical_public_origin changed during auth flow)
-            # 3. Cross-tenant redirect_uri confusion
-            try:
-                expected_redirect_uri = credential_resolver.get_redirect_uri()
-            except ValueError as e:
-                logger.error(
-                    "Failed to resolve expected redirect_uri for validation",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "correlation_id": correlation_id,
-                        "error": str(e),
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to validate redirect_uri configuration",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            valid_redirect_uris = set(credential_resolver.get_valid_redirect_uris())
-            try:
-                redirect_uri = validate_redirect_uri(redirect_uri)
-            except ValueError:
-                logger.error(
-                    "State redirect_uri failed validation",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "state_redirect_uri": redirect_uri,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "Redirect URI mismatch - authentication flow invalid. "
-                        "Please try logging in again."
-                    ),
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            redirect_mismatch = redirect_uri not in valid_redirect_uris
-            allow_redirect_mismatch = False
-            current_config_version = (
-                tenant_obj.updated_at.isoformat() if tenant_obj.updated_at else None
-            )
-            state_config_version = (
-                cached_state["config_version"] if cached_state else None
-            ) or state_payload["config_version"]
-            grace_period = min(
-                settings.oidc_redirect_grace_period_seconds,
-                settings.oidc_state_ttl_seconds,
-            )
-
-            if redirect_mismatch:
-                if not settings.strict_oidc_redirect_validation:
-                    allow_redirect_mismatch = True
-                else:
-                    now = datetime.now(timezone.utc)
-                    config_changed = (
-                        current_config_version
-                        and state_config_version
-                        and current_config_version != state_config_version
-                    )
-
-                    if (
-                        config_changed
-                        and grace_period > 0
-                        and cached_state
-                        and cached_state.get("redirect_uri") == redirect_uri
-                    ):
-                        try:
-                            state_issue_ts = int(state_payload.get("iat", 0))
-                        except (TypeError, ValueError):
-                            state_issue_ts = 0
-
-                        seconds_since_issue = max(0, now.timestamp() - state_issue_ts)
-
-                        tenant_updated_at = (
-                            tenant_obj.updated_at or tenant_obj.created_at
-                        )
-                        if tenant_updated_at and tenant_updated_at.tzinfo is None:
-                            tenant_updated_at = tenant_updated_at.replace(
-                                tzinfo=timezone.utc
-                            )
-
-                        seconds_since_update = (
-                            (now - tenant_updated_at).total_seconds()
-                            if tenant_updated_at
-                            else None
-                        )
-
-                        config_changed_after_state = False
-                        if tenant_updated_at and state_config_version:
-                            try:
-                                state_config_dt = datetime.fromisoformat(
-                                    state_config_version
-                                )
-                                if state_config_dt.tzinfo is None:
-                                    state_config_dt = state_config_dt.replace(
-                                        tzinfo=timezone.utc
-                                    )
-                                config_changed_after_state = (
-                                    tenant_updated_at > state_config_dt
-                                )
-                            except ValueError:
-                                config_changed_after_state = True
-                        else:
-                            config_changed_after_state = tenant_updated_at is not None
-
-                        if (
-                            seconds_since_issue <= grace_period
-                            and (
-                                seconds_since_update is None
-                                or seconds_since_update <= grace_period
-                            )
-                            and config_changed_after_state
-                        ):
-                            allow_redirect_mismatch = True
-                            logger.warning(
-                                "Accepting redirect_uri from state due to recent config change",
-                                extra={
-                                    "tenant_id": str(tenant_id),
-                                    "tenant_slug": tenant_slug,
-                                    "state_redirect_uri": redirect_uri,
-                                    "expected_redirect_uri": expected_redirect_uri,
-                                    "correlation_id": correlation_id,
-                                    "seconds_since_issue": seconds_since_issue,
-                                    "seconds_since_update": seconds_since_update,
-                                    "config_changed_after_state": config_changed_after_state,
-                                },
-                            )
-
-                if not allow_redirect_mismatch:
-                    logger.error(
-                        "Redirect URI mismatch between state and tenant configuration",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "tenant_slug": tenant_slug,
-                            "state_redirect_uri": redirect_uri,
-                            "expected_redirect_uri": expected_redirect_uri,
-                            "allowed_redirect_uri_count": len(valid_redirect_uris),
-                            "correlation_id": correlation_id,
-                            "config_version_state": state_config_version,
-                            "config_version_current": current_config_version,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail=(
-                            "Redirect URI mismatch - authentication flow invalid. "
-                            "This may occur if tenant configuration changed during login. "
-                            "Please try logging in again. If this persists, contact your administrator."
-                        ),
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-            elif redirect_uri != expected_redirect_uri:
-                logger.info(
-                    "Accepted non-canonical configured redirect_uri during callback",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "tenant_slug": tenant_slug,
-                        "state_redirect_uri": redirect_uri,
-                        "expected_redirect_uri": expected_redirect_uri,
-                        "correlation_id": correlation_id,
-                    },
-                )
-
-            logger.debug(
-                "Redirect URI validated successfully",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "redirect_uri": redirect_uri,
-                    "correlation_id": correlation_id,
-                },
-            )
-
-            # Resolve token endpoint
-            token_endpoint = federation_config.get("token_endpoint")
-            if not token_endpoint and discovery_endpoint:
-                try:
-                    discovery = await fetch_discovery(discovery_endpoint)
-                    token_endpoint = discovery.get("token_endpoint")
-                except HTTPException as e:
-                    raise HTTPException(
-                        status_code=e.status_code,
-                        detail=e.detail,
-                        headers={"X-Correlation-ID": correlation_id},
-                    ) from e
-
-            if not token_endpoint:
-                logger.error(
-                    "Failed to resolve token endpoint",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to resolve token endpoint",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            # Determine token endpoint auth method
-            def _select_auth_method(methods: list[str] | None) -> str | None:
-                if not methods:
-                    return None
-                normalized = [str(m).lower() for m in methods if m]
-                if "client_secret_post" in normalized:
-                    return "client_secret_post"
-                if "client_secret_basic" in normalized:
-                    return "client_secret_basic"
-                return normalized[0]
-
-            token_auth_method = federation_config.get("token_endpoint_auth_method")
-            supported_methods = federation_config.get(
-                "token_endpoint_auth_methods_supported"
-            )
-
-            if not token_auth_method:
-                token_auth_method = _select_auth_method(supported_methods)
-
-            if not token_auth_method and discovery_endpoint:
-                try:
-                    discovery = await fetch_discovery(discovery_endpoint)
-                    supported_methods = (
-                        discovery.get("token_endpoint_auth_methods_supported") or []
-                    )
-                    token_auth_method = _select_auth_method(supported_methods)
-                except HTTPException:
-                    # Discovery failure handled earlier when resolving endpoints; fall back
-                    token_auth_method = None
-                except Exception as exc:  # pragma: no cover - defensive logging
-                    logger.warning(
-                        "Failed to determine token endpoint auth method from discovery",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "token_endpoint": token_endpoint,
-                            "error": str(exc),
-                            "correlation_id": correlation_id,
-                        },
-                    )
-
-            if not token_auth_method:
-                token_auth_method = "client_secret_post"
-
-            token_data = cast(
-                dict[str, str],
-                {
-                    "grant_type": "authorization_code",
-                    "code": callback.code,
-                    "redirect_uri": redirect_uri,
-                    "client_id": federation_config["client_id"],
-                    "client_secret": federation_config["client_secret"],
-                },
-            )
-            headers: dict[str, str] = {}
-
-            if token_auth_method == "client_secret_basic":
-                credentials = f"{federation_config['client_id']}:{federation_config['client_secret']}"
-                basic_token = base64.b64encode(credentials.encode()).decode()
-                headers["Authorization"] = f"Basic {basic_token}"
-                token_data.pop("client_secret", None)
-                token_data.pop("client_id", None)
-            elif token_auth_method != "client_secret_post":
-                logger.warning(
-                    "Unsupported token endpoint auth method; defaulting to client_secret_post",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "requested_method": token_auth_method,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                token_auth_method = "client_secret_post"
-
-            logger.debug(
-                "Exchanging authorization code for tokens",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "token_endpoint": token_endpoint,
-                    "auth_method": token_auth_method,
-                    "correlation_id": correlation_id,
-                },
-            )
-
-            async with aiohttp_client().post(
-                token_endpoint, data=token_data, headers=headers or None
-            ) as resp:
-                if resp.status != 200:
-                    # Capture IdP error response for debugging
-                    try:
-                        error_body = await resp.json()
-                    except Exception:
-                        error_body = await resp.text()
-
-                    logger.error(
-                        f"Token exchange failed: HTTP {resp.status}",
-                        extra={
-                            "tenant_id": str(tenant_id),
-                            "http_status": resp.status,
-                            "token_endpoint": token_endpoint,
-                            "error_response": error_body,  # IdP's actual error message
-                            "auth_method": token_auth_method,
-                            "correlation_id": correlation_id,
-                        },
-                    )
-                    raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
-                        detail="Failed to exchange authorization code for tokens",
-                        headers={"X-Correlation-ID": correlation_id},
-                    )
-                token_response = await resp.json()
-
-            id_token = cast(str | None, token_response.get("id_token"))
-            access_token = cast(str | None, token_response.get("access_token"))
-
-            if id_token is None or access_token is None:
-                logger.error(
-                    "Missing id_token or access_token in response",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                        "has_id_token": bool(id_token),
-                        "has_access_token": bool(access_token),
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Missing id_token or access_token in response",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-            assert id_token is not None and access_token is not None
-
-            # Resolve JWKS URI
-            jwks_uri = federation_config.get("jwks_uri")
-            if not jwks_uri and discovery_endpoint:
-                try:
-                    discovery = await fetch_discovery(discovery_endpoint)
-                    jwks_uri = discovery.get("jwks_uri")
-                except HTTPException as e:
-                    raise HTTPException(
-                        status_code=e.status_code,
-                        detail=e.detail,
-                        headers={"X-Correlation-ID": correlation_id},
-                    ) from e
-
-            if not jwks_uri:
-                logger.error(
-                    "Failed to resolve JWKS URI",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to resolve JWKS URI",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            auth_service = container.auth_service()
-
-            # Get signing key from JWKS
-            logger.debug(
-                "Fetching JWKS for ID token validation",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "jwks_uri": jwks_uri,
-                    "correlation_id": correlation_id,
-                },
-            )
-
-            try:
-                jwk_client = JWKClient(jwks_uri)
-                signing_key = jwk_client.get_signing_key_from_jwt(
-                    id_token
-                ).key  # Extract raw key from PyJWK wrapper
-                logger.debug(
-                    "JWKS fetched successfully",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "correlation_id": correlation_id,
-                    },
-                )
-            except Exception as e:
-                logger.error(
-                    "Failed to fetch JWKS or extract signing key",
-                    extra={
-                        "tenant_id": str(tenant_id),
-                        "jwks_uri": jwks_uri,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
-                        "correlation_id": correlation_id,
-                    },
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Failed to validate ID token signature",
-                    headers={"X-Correlation-ID": correlation_id},
-                )
-
-            # Validate and decode ID token (conditional at_hash validation from Task 2)
-            payload = auth_service.get_payload_from_openid_jwt(
-                id_token=id_token,
-                access_token=access_token,
-                key=signing_key,
-                signing_algos=["RS256"],
-                client_id=federation_config["client_id"],
-                correlation_id=correlation_id,
-            )
-
-            # Extract email from claims
-            claims_mapping: OIDCClaimsMapping = federation_config.get(
-                "claims_mapping"
-            ) or {"email": "email"}
-            email_claim = claims_mapping.get("email", "email")
-
-            logger.debug(
-                "Extracting email from ID token claims",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "email_claim": email_claim,
-                    "available_claims": list(payload.keys()),
-                    "correlation_id": correlation_id,
-                },
-            )
-
-            try:
-                identity = FederatedIdentity.from_claims(
-                    payload, email_claim=email_claim
-                )
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=str(exc),
-                    headers={"X-Correlation-ID": correlation_id},
-                ) from exc
-
-            email = identity.email
-            set_request_context(user_email=email)
+            # Typed: 403 with its code, for the login pages to explain.
+            raise
+        except FederatedLoginDenied as exc:
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.email_extracted",
-                email=email,
-                email_claim=email_claim,
+                event="callback.user_denied",
+                tenant_slug=tenant_slug,
+                reason=str(exc),
             )
-            try:
-                user, created = await container.user_service().resolve_federated_user(
-                    identity=identity,
-                    tenant_id=tenant_id,
-                    allowed_domains=federation_config.get("allowed_domains") or [],
-                    correlation_id=correlation_id,
-                )
-            except FederatedLoginDenied as exc:
-                await _log_oidc_debug(
-                    redis_client=redis_client,
-                    correlation_id=correlation_id,
-                    event="callback.user_denied",
-                    tenant_slug=tenant_slug,
-                    reason=str(exc),
-                )
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail=str(exc),
-                    headers={"X-Correlation-ID": correlation_id},
-                ) from exc
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+                headers={"X-Correlation-ID": correlation_id},
+            ) from exc
 
-            if created:
-                await _log_oidc_debug(
-                    redis_client=redis_client,
-                    correlation_id=correlation_id,
-                    event="callback.jit_provisioning",
-                    tenant_slug=tenant_slug,
-                    email=email,
-                )
+        # Only an admitted sign-in puts its email in the request's log context,
+        # so a refused one (an identity conflict, a denied account) logs none,
+        # like the provider-response refusals before it.
+        set_request_context(user_email=email)
 
-            # Create JWT token for existing user
-            access_token_response = auth_service.create_access_token_for_user(user)
-
-            logger.info(
-                f"Federated login successful for {email} on tenant {tenant_slug}",
-                extra={
-                    "tenant_id": str(tenant_id),
-                    "tenant_slug": tenant_slug,
-                    "user_id": str(user.id),
-                    "email": email,
-                    "correlation_id": correlation_id,
-                },
-            )
-
+        if created:
             await _log_oidc_debug(
                 redis_client=redis_client,
                 correlation_id=correlation_id,
-                event="callback.success",
+                event="callback.jit_provisioning",
                 tenant_slug=tenant_slug,
                 email=email,
-                user_id=str(user.id),
             )
 
-            return AccessTokenResponse(
-                access_token=access_token_response,
-                frontend_state=state_payload["frontend_state"],
-            )
-    except HTTPException:
-        # Re-raise HTTPException with correlation_id already set
+        logger.info(
+            f"Federated login successful for {email} on tenant {tenant_slug}",
+            extra={
+                "tenant_id": str(tenant_id),
+                "tenant_slug": tenant_slug,
+                "user_id": str(user.id),
+                "email": email,
+                "correlation_id": correlation_id,
+            },
+        )
+
+        await _log_oidc_debug(
+            redis_client=redis_client,
+            correlation_id=correlation_id,
+            event="callback.success",
+            tenant_slug=tenant_slug,
+            email=email,
+            user_id=str(user.id),
+        )
+
+        return FederatedSignIn(user, state_payload["frontend_state"])
+    except (HTTPException, OidcSignInError, IdentityConflictError):
+        # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise
     except Exception as e:
         # Catch-all for unexpected errors - ensures correlation_id is always included
         logger.error(
             "Unexpected error during OIDC callback",
             extra={
-                "tenant_id": str(tenant_id) if "tenant_id" in locals() else None,
+                "tenant_id": str(tenant_id),
                 "error": str(e),
                 "error_type": type(e).__name__,
                 "correlation_id": correlation_id,

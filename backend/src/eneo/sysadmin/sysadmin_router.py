@@ -412,14 +412,35 @@ async def update_user(
 )
 async def get_access_token(
     user_id: UUID,
-    container: Annotated[Container, Depends(get_container())],
+    # The audit row commits before the response carries the token.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ):
-    user_service = container.user_service()
-    auth_service = container.auth_service()
+    user = await container.user_service().get_user(user_id)
 
-    user = await user_service.get_user(user_id)
+    # Stored before the token exists, whatever the tenant's audit settings:
+    # a token lets the operator act as this person.
+    await container.audit_service().log(
+        tenant_id=user.tenant_id,
+        actor_id=None,
+        actor_type=ActorType.SYSTEM,
+        action=ActionType.USER_ACCESS_TOKEN_ISSUED,
+        entity_type=EntityType.USER,
+        entity_id=user.id,
+        description=f"Sysadmin issued an access token for user {user.email}",
+        metadata={
+            "actor": {"type": "sysadmin", "via": "eneo_super_api_key"},
+            "target": {
+                "id": str(user.id),
+                "email": user.email,
+                "username": user.username,
+            },
+        },
+        required=True,
+    )
 
-    return auth_service.create_access_token_for_user(user)
+    return container.auth_service().create_access_token_for_user(user)
 
 
 @router.get(

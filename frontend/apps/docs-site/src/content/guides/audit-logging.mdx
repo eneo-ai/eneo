@@ -53,9 +53,7 @@ Configurable audit logging can be turned on or off globally in the admin UI.
 - Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
 - The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
-When disabled, configurable events are not created. Required Flow safety events
-described above still record the protected action or deny it if the record cannot
-be persisted.
+When disabled, no new audit logs are created, except the actions that are always logged, such as the [sign-in identity actions](#sign-in-identity-actions), the records each [data retention](/guides/data-retention) run writes, and the required Flow safety events described above, which still record the protected action or deny it if the record cannot be persisted.
 
 ## Configure what gets logged
 
@@ -65,6 +63,21 @@ You can fine-tune logging in two levels:
 2. **Action toggles** — enable/disable specific actions within a category (e.g., `user_created`).
 
 Changes apply immediately for new events. Historical logs remain unchanged.
+
+## Sign-in identity actions
+
+Four security events record which account a provider identity reaches (see [Account Binding](/guides/oidc-federation#account-binding)). They are always logged: neither the audit logging toggle nor a category or action toggle switches them off.
+
+| Action | Written when | Metadata |
+|--------|--------------|----------|
+| `identity_bound` (Sign-in Identity Linked) | A sign-in binds an identity to an account | `issuer`, `audience`, `subject_claim`, `subject`, `method` (`email_match`, `jit`, `same_subject`, `migration_window` or `admin_allowance`), `window_id` for a window, `replaced_subject_claim` and `replaced_subject` when a subject was replaced, `correlation_id` |
+| `identity_conflict` (Sign-in Identity Refused) | A sign-in is refused because its identity cannot be bound; outcome failure | `reason`, `issuer`, `audience`, `subject_claim`, `subject`, `account_ids`, `correlation_id` |
+| `identity_rebinding_updated` (Sign-in Re-linking Changed) | An administrator opens or withdraws an account's re-binding allowance | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the account's `id`), `changes.rebinding_allowed_until` with `old` and `new` |
+| `identity_migration_window_updated` (Sign-in Migration Window Changed) | An administrator opens or closes a migration window | `actor` (the administrator: `type`, `id`, `name`, `email`), `target` (the window's `id`), and in `extra`: `change` (`opened` or `closed`), `window_id`, `from_issuer`, `from_audience`, `to_issuer`, `to_audience`, `closes_at` |
+
+`user_access_token_issued` (Access Token Issued by Operator) is always logged too. It is written when the operator takes a token to act as a user with the super API key (`POST /api/v1/sysadmin/users/{user_id}/access-token/`), in the same transaction and before the token is issued: if the row cannot be stored, no token is issued. Its metadata names the `actor` (`type` `sysadmin`, `via` `eneo_super_api_key`) and the `target` user (`id`, `email`, `username`).
+
+`identity_bound` is written in the sign-in's own transaction, so it exists only for a sign-in that completed. `identity_conflict` is queued and written by the worker, so it survives the refused sign-in; if the queue cannot be reached, the backend log warning `identity_conflict` remains. Neither of the two carries the email or a token.
 
 ## Viewing audit logs
 
@@ -85,7 +98,7 @@ You can filter logs by:
 - **Date range**
 - **User** (the actor, found by searching on email)
 
-The search box has two scopes: **User** searches for an actor by email, and **Entity** is a free-text search (at least three characters) that matches the log description. If you want a name or identifier to be searchable, include it in the log description or metadata.
+The search box has two scopes: **User** searches for an actor by email, and **Entity** is a free-text search (at least three characters) that matches the log description. If you want a name or identifier to be searchable, include it in the log description or metadata. Eneo does not copy the names of files or conversations into logs, because retention removes them, so searching for a file name finds nothing. The justification and search text you enter are your own input and are kept with the log of your access, under the audit log's retention.
 
 ### Log details and JSON
 

@@ -8,11 +8,8 @@ from uuid import UUID, uuid4
 import jwt
 import pytest
 import sqlalchemy as sa
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
 from httpx import AsyncClient
 
-from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.exceptions import ErrorCodes
@@ -140,26 +137,20 @@ async def _callback(client: AsyncClient, *, code: str, state: str):
     )
 
 
-def _generate_rs256_keypair() -> tuple[str, str]:
-    """Generate an RSA keypair for RS256 signing within tests."""
-
-    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    private_pem = private_key.private_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PrivateFormat.PKCS8,
-        encryption_algorithm=serialization.NoEncryption(),
-    ).decode()
-
-    public_pem = (
-        private_key.public_key()
-        .public_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PublicFormat.SubjectPublicKeyInfo,
-        )
-        .decode()
+def _idp(fake_idp, slug: str):
+    """The organisation's provider, at the addresses its federation config names."""
+    return fake_idp(
+        issuer=f"https://idp.{slug}.local",
+        client_id=f"client-{slug}",
+        client_secret="super-secret",
     )
 
-    return private_pem, public_pem
+
+async def _sign_in(client: AsyncClient, provider, slug: str, **claims):
+    """Start a sign-in, let the provider authenticate the person, call back."""
+    started = await _initiate(client, slug)
+    answer = provider.authorize(started["authorization_url"], **claims)
+    return await _callback(client, code=answer.code, state=started["state"])
 
 
 @pytest.mark.integration
@@ -532,8 +523,7 @@ async def test_federation_callback_enforces_allowed_domains(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
 ):
@@ -545,28 +535,7 @@ async def test_federation_callback_enforces_allowed_domains(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    # Set up mock BEFORE configuring federation
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-allowed"): {
-                "id_token": "id-token-allowed",
-                "access_token": "access-token-allowed",
-            },
-            (token_endpoint, "code-blocked"): {
-                "id_token": "id-token-blocked",
-                "access_token": "access-token-blocked",
-            },
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     await _configure_federation(
         client,
@@ -591,32 +560,12 @@ async def test_federation_callback_enforces_allowed_domains(
         password="ValidPassw0rd123!",
     )
 
-    token_email_map = {
-        "id-token-allowed": allowed_email,
-        "id-token-blocked": f"intruder@other-{slug}.com",
-    }
-
-    def _fake_payload(
-        self,
-        *,
-        id_token,
-        access_token,
-        key,
-        signing_algos,
-        client_id,
-        correlation_id,
-        options=None,
-    ):
-        return {"email": token_email_map[id_token]}
-
-    monkeypatch.setattr(AuthService, "get_payload_from_openid_jwt", _fake_payload)
-
-    state_payload = await _initiate(client, tenant["slug"])
-    success = await _callback(client, code="code-allowed", state=state_payload["state"])
+    success = await _sign_in(client, provider, tenant["slug"], email=allowed_email)
     assert success.status_code == 200, success.text
 
-    second_state = await _initiate(client, tenant["slug"])
-    failure = await _callback(client, code="code-blocked", state=second_state["state"])
+    failure = await _sign_in(
+        client, provider, tenant["slug"], email=f"intruder@other-{slug}.com"
+    )
     assert failure.status_code == 403
     assert "not allowed" in failure.json()["detail"].lower()
 
@@ -627,8 +576,7 @@ async def test_federation_callback_rejects_tampered_state(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -641,24 +589,7 @@ async def test_federation_callback_rejects_tampered_state(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    # Set up mock BEFORE configuring federation
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-legit"): {
-                "id_token": "id-token-legit",
-                "access_token": "access-token-legit",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     await _configure_federation(
         client,
@@ -682,12 +613,6 @@ async def test_federation_callback_rejects_tampered_state(
         password="ValidPassw0rd123!",
     )
 
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": f"user@{slug}.gov"},
-    )
-
     state_payload = await _initiate(client, tenant["slug"])
     state_token = state_payload["state"]
 
@@ -700,7 +625,10 @@ async def test_federation_callback_rejects_tampered_state(
     decoded["tenant_id"] = str(uuid4())
     tampered_state = jwt.encode(decoded, test_settings.jwt_secret, algorithm="HS256")
 
-    tampered = await _callback(client, code="code-legit", state=tampered_state)
+    answer = provider.authorize(
+        state_payload["authorization_url"], email=f"user@{slug}.gov"
+    )
+    tampered = await _callback(client, code=answer.code, state=tampered_state)
     assert tampered.status_code in {400, 404}
 
 
@@ -710,8 +638,7 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     mock_transcription_models,
 ):
     slug = f"federation-iat-leeway-ok-{uuid4().hex[:6]}"
@@ -721,45 +648,15 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
     authorization_endpoint = f"https://idp.{slug}.local/authorize"
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
-    issuer = f"https://idp.{slug}.local"
     client_id = f"client-{slug}"
 
-    private_key, public_key = _generate_rs256_keypair()
-    jwks_mock(default_key=public_key)
-
     allowed_email = f"owner@{slug}.gov"
-
     now = datetime.now(timezone.utc)
-
-    def _build_future_token(skew_seconds: int) -> str:
-        payload = {
-            "iss": issuer,
-            "aud": client_id,
-            "sub": f"user-{slug}",
-            "email": allowed_email,
-            "iat": int((now + timedelta(seconds=skew_seconds)).timestamp()),
-            "exp": int((now + timedelta(hours=1)).timestamp()),
-        }
-        return jwt.encode(payload, private_key, algorithm="RS256")
-
-    within_leeway_token = _build_future_token(skew_seconds=90)
-
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": issuer,
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-leeway-ok"): {
-                "id_token": within_leeway_token,
-                "access_token": "access-token-leeway-ok",
-            }
-        },
-    )
+    provider = _idp(fake_idp, slug)
+    provider.token_claims = {
+        "iat": int((now + timedelta(seconds=90)).timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+    }
 
     await _configure_federation(
         client,
@@ -783,12 +680,7 @@ async def test_federation_callback_accepts_future_iat_within_leeway(
         password="ValidPassw0rd123!",
     )
 
-    state_payload = await _initiate(client, tenant["slug"])
-    response = await _callback(
-        client,
-        code="code-leeway-ok",
-        state=state_payload["state"],
-    )
+    response = await _sign_in(client, provider, tenant["slug"], email=allowed_email)
 
     assert response.status_code == 200, response.text
 
@@ -799,8 +691,7 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     mock_transcription_models,
 ):
     slug = f"federation-iat-leeway-fail-{uuid4().hex[:6]}"
@@ -810,45 +701,15 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
     authorization_endpoint = f"https://idp.{slug}.local/authorize"
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
-    issuer = f"https://idp.{slug}.local"
     client_id = f"client-{slug}"
 
-    private_key, public_key = _generate_rs256_keypair()
-    jwks_mock(default_key=public_key)
-
     allowed_email = f"owner@{slug}.gov"
-
     now = datetime.now(timezone.utc)
-
-    def _build_future_token(skew_seconds: int) -> str:
-        payload = {
-            "iss": issuer,
-            "aud": client_id,
-            "sub": f"user-{slug}",
-            "email": allowed_email,
-            "iat": int((now + timedelta(seconds=skew_seconds)).timestamp()),
-            "exp": int((now + timedelta(hours=1)).timestamp()),
-        }
-        return jwt.encode(payload, private_key, algorithm="RS256")
-
-    beyond_leeway_token = _build_future_token(skew_seconds=300)
-
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": issuer,
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-leeway-fail"): {
-                "id_token": beyond_leeway_token,
-                "access_token": "access-token-leeway-fail",
-            }
-        },
-    )
+    provider = _idp(fake_idp, slug)
+    provider.token_claims = {
+        "iat": int((now + timedelta(seconds=300)).timestamp()),
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+    }
 
     await _configure_federation(
         client,
@@ -872,17 +733,10 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
         password="ValidPassw0rd123!",
     )
 
-    state_payload = await _initiate(client, tenant["slug"])
-    response = await _callback(
-        client,
-        code="code-leeway-fail",
-        state=state_payload["state"],
-    )
+    response = await _sign_in(client, provider, tenant["slug"], email=allowed_email)
 
-    assert response.status_code == 500, response.text
-    error = response.json()
-    assert error["code"] == "internal_error"
-    assert "unexpected" in error["message"].lower()
+    assert response.status_code == 401, response.text
+    assert response.json()["code"] == "oidc_response_not_verified"
 
 
 @pytest.mark.integration
@@ -891,8 +745,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     async_session,
@@ -906,23 +759,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-old-config"): {
-                "id_token": "id-token-redirect-test",
-                "access_token": "access-token-redirect-test",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"admin@{slug}.gov"
     await _create_user(
@@ -931,12 +768,6 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     runtime_settings = override_runtime_settings(
@@ -1010,7 +841,9 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
 
         response = await _callback(
             client,
-            code="code-old-config",
+            code=provider.authorize(
+                state_payload["authorization_url"], email=allowed_email
+            ).code,
             state=state_payload["state"],
         )
 
@@ -1026,8 +859,7 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
     client: AsyncClient,
     super_admin_token: str,
     patch_auth_service_jwt,
-    oidc_mock,
-    jwks_mock,
+    fake_idp,
     monkeypatch,
     mock_transcription_models,
     test_settings,
@@ -1041,23 +873,7 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
     token_endpoint = f"https://idp.{slug}.local/token"
     jwks_uri = f"https://idp.{slug}.local/jwks"
 
-    oidc_mock(
-        discovery={
-            discovery_endpoint: {
-                "issuer": f"https://idp.{slug}.local",
-                "authorization_endpoint": authorization_endpoint,
-                "token_endpoint": token_endpoint,
-                "jwks_uri": jwks_uri,
-            }
-        },
-        tokens={
-            (token_endpoint, "code-grace"): {
-                "id_token": "id-token-grace",
-                "access_token": "access-token-grace",
-            }
-        },
-    )
-    jwks_mock()
+    provider = _idp(fake_idp, slug)
 
     allowed_email = f"owner@{slug}.gov"
     await _create_user(
@@ -1066,12 +882,6 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
         tenant["id"],
         allowed_email,
         password="ValidPassw0rd123!",
-    )
-
-    monkeypatch.setattr(
-        AuthService,
-        "get_payload_from_openid_jwt",
-        lambda *_, **__: {"email": allowed_email},
     )
 
     # Configure federation first to ensure all required fields are present
@@ -1111,7 +921,9 @@ async def test_federation_callback_allows_recent_config_change_within_grace(
 
     response = await _callback(
         client,
-        code="code-grace",
+        code=provider.authorize(
+            state_payload["authorization_url"], email=allowed_email
+        ).code,
         state=state_payload["state"],
     )
 

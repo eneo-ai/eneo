@@ -30,7 +30,6 @@ from eneo.flows.flow_input_limits import (
     FLOW_INPUT_MIN_LIMIT_BYTES,
 )
 from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
-from eneo.main.config import FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
 from eneo.main.models import InDB
 from eneo.object_content.content import MAXIMUM_UPLOAD_POLICY_BYTES
 from eneo.skills.domain.skill import (
@@ -98,10 +97,11 @@ class SettingsPublic(SettingsBase):
     flows_enabled: bool = Field(
         default=False,
         description=(
-            "Read-only: whether flows are switched on for the tenant (the "
-            "`flows_core` feature). When false every flow endpoint answers "
-            "`404`. It says nothing about the caller's own access: showing "
-            "or running flows still needs the `flows_view` and `flows_run` "
+            "Whether flows are switched on for the tenant (the `flows_core` "
+            "feature); an administrator switches it with `PATCH "
+            "/settings/flows`. When false every flow endpoint answers `404`. "
+            "It says nothing about the caller's own access: showing or "
+            "running flows still needs the `flows_view` and `flows_run` "
             "permissions."
         ),
         examples=[True],
@@ -117,13 +117,35 @@ class ToggleSettingUpdate(BaseModel):
     enabled: bool
 
 
+class TaskWorkersStatusPublic(BaseModel):
+    """Whether the two platform task workers that run flows are up, from each
+    worker's latest health signal. Deployment state only: nothing about any
+    tenant."""
+
+    probe_ok: bool = Field(
+        description=(
+            "False when the health signals could not be read; both workers "
+            "then read as not ready, which says nothing about whether they run."
+        )
+    )
+    execution_worker_ready: bool = Field(
+        description="Whether `task-execution-worker`, which runs flow runs, is up."
+    )
+    maintenance_worker_ready: bool = Field(
+        description=(
+            "Whether `task-maintenance-worker`, which dispatches queued runs "
+            "and recovers stalled ones, is up."
+        )
+    )
+
+
 FLOW_INPUT_LIMITS_PUBLIC_EXAMPLE: JsonDict = {
     "file_max_size_bytes": 52428800,
     "audio_max_size_bytes": 104857600,
     "max_files_per_run": 20,
     "audio_max_files_per_run": 5,
     "audio_max_duration_seconds": 18000,
-    "audio_max_duration_ceiling_seconds": 28800,
+    "audio_max_duration_ceiling_seconds": 67108,
 }
 
 FLOW_INPUT_LIMITS_UPDATE_EXAMPLE: JsonDict = {
@@ -242,7 +264,6 @@ class FlowInputLimitsPublic(BaseModel):
     # an admin can write (FlowInputLimitsUpdate).
     audio_max_duration_seconds: int = Field(
         ge=1,
-        le=FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
         description=(
             "The longest recording a flow takes, in seconds: one audio file, and "
             "the parts of one recording together. Resetting the stored override "
@@ -252,8 +273,11 @@ class FlowInputLimitsPublic(BaseModel):
     audio_max_duration_ceiling_seconds: int = Field(
         ge=1,
         description=(
-            "The deployment's ceiling for audio_max_duration_seconds. Tenant "
-            "values above it are rejected on write and clamped on read."
+            "The longest audio_max_duration_seconds an admin can set: what the "
+            "deployment's decoded-audio bound (FLOW_AUDIO_MAX_DECODED_BYTES, "
+            "16 kHz mono 16-bit, 32 000 bytes a second) holds, and at most "
+            "134 217 seconds, what one WAV file holds. Tenant values above it "
+            "are rejected on write and clamped on read."
         ),
     )
 
@@ -279,9 +303,9 @@ class FlowInputLimitsUpdate(BaseModel):
     audio_max_duration_seconds: int | None = Field(
         default=None,
         ge=FLOW_AUDIO_MIN_DURATION_SECONDS,
-        le=FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
         description=(
-            "Set the longest recording in seconds (up to the deployment ceiling), "
+            "Set the longest recording in seconds (up to "
+            "audio_max_duration_ceiling_seconds), "
             "or send null to use the deployment default."
         ),
     )

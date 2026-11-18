@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -14,6 +15,7 @@ from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.task_models import TaskParams, validate_dispatch_envelope
 from eneo.main.logging import get_logger
 from eneo.main.models import Status
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -81,19 +83,21 @@ async def redispatch_stale_jobs(
             if envelope.params.user_id != job.user_id:
                 raise ValueError("user does not match the persisted job")
         except (ValidationError, ValueError) as exc:
-            reason = f"Invalid dispatch envelope: {exc}"
             job.status = Status.FAILED.value
             job.finished_at = attempted_at
             job.result_location = None
             job.failure_code = JobFailureCode.INVALID_JOB_PAYLOAD.value
             failed.append(job.id)
-            logger.warning(
+            # The refusal quotes the invalid input, which can name a file.
+            log_error(
+                logger,
+                logging.WARNING,
                 "Durable job dispatch envelope is invalid",
+                error=exc,
                 extra={
                     "job_id": str(job.id),
                     "task": job.task,
                     "failure_code": JobFailureCode.INVALID_JOB_PAYLOAD.value,
-                    "reason": reason,
                 },
             )
             continue

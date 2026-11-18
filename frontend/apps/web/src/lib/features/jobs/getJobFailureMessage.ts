@@ -36,11 +36,26 @@ const JOB_FAILURE_MESSAGES: Record<JobFailureCode, (task: JobTask) => string> = 
   content_skipped: () => crawlFailureMessage("content_skipped")
 };
 
+// Syncs and app runs fail with the same codes; their guidance names no file.
+const TASK_FAILURE_MESSAGES: Partial<Record<string, () => string>> = {
+  cancelled: () => m.job_failure_task_stopped(),
+  processing_interrupted: () => m.job_failure_task_stopped(),
+  worker_interrupted: () => m.job_failure_task_stopped(),
+  quota_exceeded: () => m.job_failure_task_quota_exceeded(),
+  tenant_quota_exceeded: () => m.job_failure_tenant_quota_exceeded(),
+  user_quota_exceeded: () => m.job_failure_user_quota_exceeded(),
+  storage_unavailable: () => m.job_failure_storage_unavailable()
+};
+
 export function getJobFailureMessage(
   code: JobFailureCode | string | null | undefined,
   task: JobTask
 ): string {
   if (task === "crawl") return crawlFailureMessage(code);
+  if (task !== "upload_info_blob" && task !== "transcription") {
+    const message = code ? TASK_FAILURE_MESSAGES[code] : undefined;
+    return message ? message() : m.job_failure_task_failed();
+  }
 
   const message = code
     ? (JOB_FAILURE_MESSAGES as Partial<Record<string, (task: JobTask) => string>>)[code]

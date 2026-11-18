@@ -31,6 +31,8 @@ class SubscribedChannels:
 
 logger = get_logger(__name__)
 
+_POLL_SECONDS = 1.0
+
 
 class WebSocketManager:
     def __init__(
@@ -72,8 +74,10 @@ class WebSocketManager:
             while True:
                 raw_message = cast(
                     dict[str, Any] | None,
+                    # A finite poll: a blocking read would end at the pool's
+                    # read timeout and drop the subscription on a quiet channel.
                     await pubsub.get_message(
-                        ignore_subscribe_messages=True, timeout=None
+                        ignore_subscribe_messages=True, timeout=_POLL_SECONDS
                     ),
                 )
                 if raw_message is not None:

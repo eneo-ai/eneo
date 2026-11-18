@@ -106,10 +106,20 @@ class ErrorCodes(int, Enum):
     ICON_IN_USE = 9075
     # A resource can only show an icon the caller uploaded in their tenant.
     ICON_NOT_ATTACHABLE = 9076
+    # OIDC sign-in refusals; the string ``code`` names the case for clients.
+    OIDC_LOGIN_UNAVAILABLE = 9077
+    OIDC_TRANSACTION_INVALID = 9078
+    OIDC_RESPONSE_NOT_VERIFIED = 9079
     # A personal chat save whose own Skills would not run as configured. The
     # details carry the layer reason so clients can explain it in their language.
     PERSONAL_SKILLS_REJECTED = 9080
     SKILL_REFERENCED_BY_REVISION = 9081
+    # A federated sign-in whose identity cannot be bound to the account its
+    # email names (users.identity_binding_repo.IdentityConflictError).
+    IDENTITY_CONFLICT = 9082
+    # A conversation that holds content copied from a conversation that was
+    # removed: the copy is no longer readable and is removed in turn.
+    DERIVED_SOURCE_REMOVED = 9085
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090
