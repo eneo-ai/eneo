@@ -158,6 +158,36 @@ test("navigation reuses the ref's order and excludes the translation folder", ()
   });
 });
 
+test("navigation keeps a metadata link in the selected language", () => {
+  const map: PageMapItem[] = [
+    {
+      data: {
+        security: { title: "Security", type: "page", href: "/docs/security" },
+        source: {
+          title: "Source",
+          type: "page",
+          href: "https://github.com/eneo-ai/eneo",
+        },
+      },
+    },
+  ];
+  assert.deepEqual(languagePageMap(map, "sv")[0], {
+    data: {
+      security: {
+        title: "Säkerhet",
+        type: "page",
+        href: "/sv/docs/security",
+      },
+      source: {
+        title: "Source",
+        type: "page",
+        href: "https://github.com/eneo-ai/eneo",
+      },
+    },
+  });
+  assert.deepEqual(languagePageMap(map, "en"), map);
+});
+
 test("Pagefind separates languages and excludes English fallback even with a nested indexed main", async () => {
   const { index, errors } = await createIndex();
   assert.deepEqual(errors, []);
