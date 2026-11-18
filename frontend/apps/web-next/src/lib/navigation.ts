@@ -12,7 +12,7 @@ import {
   type AnyRouter,
   type ParsedLocation
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useMemo, useRef, useSyncExternalStore } from "react";
+import { use, useEffect, useEffectEvent, useMemo, useRef, useSyncExternalStore } from "react";
 export type LeaveConfirmationState = {
   blocked: boolean;
   leave(): void;
@@ -47,6 +47,11 @@ export type UrlState = {
   settingsSectionFromIndex?: boolean;
   /** Steps opened since the Flows list entry, for its “All steps” control. */
   flowStepDepth?: number;
+  /**
+   * An insights finding was opened from the overview at this address, the
+   * entry immediately behind it, for its way back to the overview.
+   */
+  insightFindingFrom?: string;
 };
 
 export type UrlOptions = {
@@ -56,11 +61,13 @@ export type UrlOptions = {
 };
 
 import { stringifySearch } from "./router/search";
+import { ViewSearchParams } from "./view-search-params";
 
 declare module "@tanstack/react-router" {
   interface HistoryState {
     settingsSectionFromIndex?: UrlState["settingsSectionFromIndex"];
     flowStepDepth?: UrlState["flowStepDepth"];
+    insightFindingFrom?: UrlState["insightFindingFrom"];
   }
 }
 
@@ -176,10 +183,13 @@ export const replaceUrl: (href: string | URL, options?: UrlOptions) => void = (h
 export const pushUrl: (href: string | URL, options?: UrlOptions) => void = (href, options) =>
   navigateUrl(href, false, options);
 
-/** Traverses existing entries through the current router. */
-export function goHistory(delta: number): void {
+/**
+ * Traverses existing entries through the current router. `ignoreBlocker`: a
+ * view change within the page, which no leave guard should ask about.
+ */
+export function goHistory(delta: number, options?: Pick<UrlOptions, "ignoreBlocker">): void {
   if (!boundRouter) throw new Error("History needs the app’s router: createAppRouter binds it.");
-  boundRouter.history.go(delta);
+  boundRouter.history.go(delta, { ignoreBlocker: options?.ignoreBlocker });
 }
 
 export const readUrlState: () => UrlState = () => {
@@ -187,12 +197,28 @@ export const readUrlState: () => UrlState = () => {
   return renderedLocation(boundRouter).get().state;
 };
 
+/**
+ * The identity of the history entry on screen: a new one for every push and
+ * replace, the same again when Back or Forward returns to that entry.
+ */
+export const readHistoryEntryKey: () => string | undefined = () => {
+  if (!boundRouter) throw new Error("URL state needs the app's router: createAppRouter binds it.");
+  return renderedLocation(boundRouter).get().state.__TSR_key;
+};
+
+/** `search` without the given parameters. */
+function omit(search: Record<string, unknown>, keys: readonly string[]): Record<string, unknown> {
+  if (keys.length === 0) return search;
+  return Object.fromEntries(Object.entries(search).filter(([key]) => !keys.includes(key)));
+}
+
 /** The router keeps the pending transition, including its history action and fragment. */
 export const useLeaveConfirmation: (
   active: boolean,
   onLeave?: () => void
 ) => LeaveConfirmationState = (active, onLeave) => {
   const router = useTanStackRouter();
+  const viewParams = use(ViewSearchParams);
   const departureAccepted = useRef(false);
   useEffect(
     () =>
@@ -203,9 +229,12 @@ export const useLeaveConfirmation: (
   );
   const blocker = useBlocker({
     shouldBlockFn: ({ current, next }) => {
+      // A change of the page's view parameters alone (a tab, an item opened
+      // in place) leaves nothing behind: the page stays mounted.
       const leaving =
         current.pathname !== next.pathname ||
-        stringifySearch(current.search) !== stringifySearch(next.search);
+        stringifySearch(omit(current.search, viewParams)) !==
+          stringifySearch(omit(next.search, viewParams));
       if (leaving) departureAccepted.current = false;
       return active && leaving;
     },

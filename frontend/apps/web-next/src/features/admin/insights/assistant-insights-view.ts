@@ -1,10 +1,6 @@
 import { calendarDate, type IsoDate } from "@/lib/calendar-date";
-import {
-  parseInsightSource,
-  parseOpenableFinding,
-  type InsightFilters,
-  type OpenableFindingKind
-} from "@/features/insights/insight-figures";
+import { parseInsightSource, type InsightFilters } from "@/features/insights/insight-figures";
+import { readInsightFindingSearch } from "@/features/insights/insight-finding-url";
 import {
   DEFAULT_INSIGHT_DAYS,
   insightRangeOfDays,
@@ -48,19 +44,6 @@ export function insightViewSearch(filters: InsightFilters, current = ""): string
   else params.delete("source");
   if (filters.compare) params.set("compare", "1");
   else params.delete("compare");
-  return `?${params.toString()}`;
-}
-
-/** The finding open in place of the overview (`finding`); anything unknown is none. */
-export function readInsightFindingSearch(params: SearchReader): OpenableFindingKind | null {
-  return parseOpenableFinding(params.get("finding"));
-}
-
-/** The address's query with the finding in it (none: left out); other parameters stay. */
-export function insightFindingSearch(finding: OpenableFindingKind | null, current = ""): string {
-  const params = new URLSearchParams(current);
-  if (finding) params.set("finding", finding);
-  else params.delete("finding");
   return `?${params.toString()}`;
 }
 

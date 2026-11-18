@@ -1,8 +1,14 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import { replaceUrl, useSearchParams, type UrlOptions } from "@/lib/navigation";
+import {
+  pushUrl,
+  readHistoryEntryKey,
+  replaceUrl,
+  useSearchParams,
+  type UrlOptions
+} from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useCallback, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { browserApi } from "@/lib/api/browser";
@@ -21,6 +27,10 @@ import { CHAT_PANEL_IDS, readChatTab, type ChatTab } from "./chat-url";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { ViewSearchParams } from "@/lib/view-search-params";
+
+/** The address's parameters that only choose a view: a tab, and Insikter's opened finding. */
+const CHAT_VIEW_PARAMS = ["tab", "finding"] as const;
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -135,22 +145,44 @@ export function ChatPage({
     setActivity(null);
   }
 
-  // Follow the URL (SideNav "Senaste", "Ny konversation", back/forward) on the
-  // same route. The page writes its own URL with replaceState too; those
-  // changes already match what it shows, so they are no-ops here.
+  // The history entries of this visit: the ones the page wrote or came back
+  // to while its conversation stayed. Back and Forward between them change
+  // the view (each tab is an entry of its own), never the conversation.
+  const entryKey = readHistoryEntryKey();
+  const [visitEntries, setVisitEntries] = useState<readonly string[]>(() =>
+    entryKey === undefined ? [] : [entryKey]
+  );
+  // Counts the returns to an entry of this visit that names another conversation.
+  const [staleAddress, setStaleAddress] = useState(0);
+  let entries = visitEntries;
+
+  // Follow the URL (SideNav "Senaste", "Ny konversation", a link, back/forward
+  // to another visit's entry) on the same route. The page writes its own URL
+  // too; those changes already match what it shows, so they are no-ops here.
   if (urlSessionId !== followedUrlSession) {
     setFollowedUrlSession(urlSessionId);
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (urlSessionId !== showing) {
-      if (urlSessionId) {
-        openSession(urlSessionId);
+      if (entryKey !== undefined && visitEntries.includes(entryKey)) {
+        // Back or Forward to a view written before another conversation was
+        // picked here: that conversation stays (its draft, a running answer),
+        // and the address is put right after this render.
+        setStaleAddress((count) => count + 1);
       } else {
-        setPendingSessionId(null);
-        setActive(newConversationState());
-        setActivity(null);
+        // Another conversation from outside the visit: a new visit starts here.
+        entries = [];
+        if (urlSessionId) {
+          openSession(urlSessionId);
+        } else {
+          setPendingSessionId(null);
+          setActive(newConversationState());
+          setActivity(null);
+        }
       }
     }
   }
+  if (entryKey !== undefined && !entries.includes(entryKey)) entries = [...entries, entryKey];
+  if (entries !== visitEntries) setVisitEntries(entries);
   const searchParams = useSearchParams();
   const tab = readChatTab(searchParams);
 
@@ -180,7 +212,12 @@ export function ChatPage({
     setActive(savedConversationState(detail.data));
   }
 
-  /** The conversation's URL; the view stays unless `nextTab` changes it (a late session id keeps it). */
+  /**
+   * The conversation's URL; the view stays unless `nextTab` changes it (a
+   * late session id keeps it), and so does Insikter's opened finding. Another
+   * view is a history entry of its own; the same view's address is updated in
+   * place, so a streaming answer never adds entries.
+   */
   function updateUrl(sessionId: string | null, options?: UrlOptions, nextTab: ChatTab = viewTab) {
     // The navigation seam commits same-route updates without waiting for
     // background session refreshes, so streaming stays responsive.
@@ -188,18 +225,37 @@ export function ChatPage({
       const url = new URL(buildSessionUrl(sessionId), window.location.href);
       if (nextTab === "chat") url.searchParams.delete("tab");
       else url.searchParams.set("tab", nextTab);
-      replaceUrl(url, options);
+      const finding = nextTab === "insights" ? searchParams.get("finding") : null;
+      if (finding) url.searchParams.set("finding", finding);
+      if (nextTab === viewTab) replaceUrl(url, options);
+      else pushUrl(url, options);
     }
   }
 
-  const selectTab = useCallback((next: ChatTab) => {
+  // Back or Forward returned to an entry naming another conversation than
+  // the one open: the address is put right, in place.
+  const correctAddress = useEffectEvent(() =>
+    updateUrl(pendingSessionId ?? active?.sessionId ?? null, { ignoreBlocker: true })
+  );
+  useEffect(() => {
+    if (staleAddress > 0) correctAddress();
+  }, [staleAddress]);
+
+  /**
+   * Shows another view as a history entry of its own, so Back returns to
+   * the one before. Leaving Insikter leaves its opened finding in the entry
+   * behind. Not a departure: the conversation stays mounted with its draft,
+   * so the leave guard stays out.
+   */
+  function selectTab(next: ChatTab) {
+    if (next === viewTab) return;
     setActivity(null);
     const url = new URL(window.location.href);
     if (next === "chat") url.searchParams.delete("tab");
     else url.searchParams.set("tab", next);
-    // Not a departure: the conversation stays mounted with its draft, so the leave guard stays out.
-    replaceUrl(url, { ignoreBlocker: true });
-  }, []);
+    if (next !== "insights") url.searchParams.delete("finding");
+    pushUrl(url, { ignoreBlocker: true });
+  }
 
   const closeHistory = useCallback(() => {
     setHistoryOpen(false);
@@ -354,7 +410,7 @@ export function ChatPage({
       <PartnerSwitcher partner={partner} items={switcherItems} subtitle={null} variant="token" />
     ) : undefined;
 
-  return (
+  const page = (
     <div className="bg-ax-surface relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
         partner={partner}
@@ -521,4 +577,7 @@ export function ChatPage({
       />
     </div>
   );
+  // A change of view keeps everything mounted: the leave guards of the
+  // conversation and of Insikter's analysis do not ask about it.
+  return <ViewSearchParams value={CHAT_VIEW_PARAMS}>{page}</ViewSearchParams>;
 }

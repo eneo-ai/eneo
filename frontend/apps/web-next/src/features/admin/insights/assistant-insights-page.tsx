@@ -7,15 +7,12 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { ViewSearchParams } from "@/lib/view-search-params";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import { groupChatQueryOptions } from "@/features/group-chats/use-group-chat";
 import { AssistantInsights, type InsightsPartner } from "@/features/insights/assistant-insights";
-import {
-  insightFindingSearch,
-  insightViewSearch,
-  readInsightFindingSearch,
-  readInsightViewSearch
-} from "./assistant-insights-view";
+import { useInsightFindingUrl } from "@/features/insights/insight-finding-url";
+import { insightViewSearch, readInsightViewSearch } from "./assistant-insights-view";
 
 /**
  * The height from the top of `frame` to the end of the page panel (main),
@@ -48,6 +45,9 @@ function useHeightToPanelEnd(frame: RefObject<HTMLElement | null>): number | nul
   return height;
 }
 
+/** The address's parameter that only chooses a view: the finding open in place of the overview. */
+const FINDING_VIEW_PARAMS = ["finding"] as const;
+
 /** The rest of the page, for the insights view to fill. */
 function FilledFrame({ children }: { children: ReactNode }) {
   const frame = useRef<HTMLDivElement>(null);
@@ -68,7 +68,8 @@ function FilledFrame({ children }: { children: ReactNode }) {
  * with the way back to the organisation's insights, over the same insights
  * view as the chat page's Insikter tab. The filters and the finding open in
  * place of the overview live in the address
- * (`?from=&to=&source=&compare=&finding=`), so a link or a reload keeps them.
+ * (`?from=&to=&source=&compare=&finding=`), so a link or a reload keeps them;
+ * an opened finding is a history entry of its own (`useInsightFindingUrl`).
  * The editor's links are there for a caller who may edit the target. A
  * target with insights switched off, or whose insights the caller may not
  * see, says so instead of asking for them.
@@ -87,7 +88,7 @@ function TargetInsightsPage({
   const t = useTranslations();
   const searchParams = useSearchParams();
   const filters = readInsightViewSearch(searchParams);
-  const finding = readInsightFindingSearch(searchParams);
+  const [finding, onFindingChange] = useInsightFindingUrl();
 
   const header = (
     <PageHeader
@@ -122,18 +123,21 @@ function TargetInsightsPage({
   }
 
   return (
-    <FilledFrame>
-      <AssistantInsights
-        partner={partner}
-        filters={filters}
-        onFiltersChange={(next) => replaceUrl(insightViewSearch(next, searchParams.toString()))}
-        finding={finding}
-        onFindingChange={(next) => replaceUrl(insightFindingSearch(next, searchParams.toString()))}
-        editorHref={editorHref}
-        header={header}
-        framed
-      />
-    </FilledFrame>
+    // An opened finding keeps the analysis mounted: its leave guard does not ask about it.
+    <ViewSearchParams value={FINDING_VIEW_PARAMS}>
+      <FilledFrame>
+        <AssistantInsights
+          partner={partner}
+          filters={filters}
+          onFiltersChange={(next) => replaceUrl(insightViewSearch(next, searchParams.toString()))}
+          finding={finding}
+          onFindingChange={onFindingChange}
+          editorHref={editorHref}
+          header={header}
+          framed
+        />
+      </FilledFrame>
+    </ViewSearchParams>
   );
 }
 

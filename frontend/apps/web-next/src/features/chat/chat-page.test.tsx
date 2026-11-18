@@ -5,7 +5,7 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { composerValue } from "@/test/composer";
 import { renderInApp, testAppContext } from "@/test/render";
-import { replaceUrl, setRoute } from "@/test/navigation";
+import { pushUrl, setRoute } from "@/test/navigation";
 import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 import { CHAT_PANEL_IDS } from "./chat-url";
@@ -482,10 +482,12 @@ describe("ChatPage Historik tab, as in Svelte", () => {
   it("switches views past the leave guard: the conversation and its draft stay", () => {
     renderPage(null);
     fireEvent.change(composer(), { target: { value: "Unsent question" } });
+    // Each view is a history entry of its own.
     openHistory();
-    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(pushUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
     fireEvent.click(tab("Chatt"));
-    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(pushUrl).toHaveBeenCalledTimes(2);
+    expect(pushUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
     expect(composer().value).toBe("Unsent question");
     // The draft is kept for the tab (sessionStorage); the next test starts without it.
     fireEvent.change(composer(), { target: { value: "" } });

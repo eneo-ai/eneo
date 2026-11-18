@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-  insightFindingSearch,
   insightViewSearch,
-  readInsightFindingSearch,
   readInsightRangeSearch,
   readInsightViewSearch,
   validateInsightViewSearch
 } from "./assistant-insights-view";
+import {
+  insightFindingSearch,
+  readInsightFindingSearch
+} from "@/features/insights/insight-finding-url";
 import type { InsightRange } from "@/features/insights/insights-range";
 const fallback = { start: "2026-10-01", end: "2026-10-31" } as InsightRange;
 

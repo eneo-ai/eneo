@@ -107,6 +107,18 @@ const FINDINGS = [
   }
 ];
 
+/** A group of questions with the same wording, as the commonest questions list it. */
+const questionGroup = (question: string, occurrences: number) => ({
+  question,
+  occurrences,
+  share: 0.4,
+  conversations: 10,
+  unanswered: 3,
+  ratings: { positive: 2, negative: 1 },
+  knowledge: { searched: 0, missed: 0 },
+  sample_session_id: "s-1"
+});
+
 /** The period's ratings, newest first. */
 const RATINGS = [
   {
@@ -152,6 +164,8 @@ const spies = vi.hoisted(() => ({
   cases: [] as unknown[],
   knowledge: { sources: [] as unknown[], unused: [] as unknown[] },
   tools: [] as unknown[],
+  /** The commonest questions, when not the one group every test starts with. */
+  topQuestions: null as unknown[] | null,
   /** The period has no conversations. */
   empty: false,
   /** The models that may answer an analysis, and every time they were asked for. */
@@ -256,18 +270,7 @@ vi.mock("@/lib/api/browser", () => ({
             ...period,
             include_followups: true,
             total_questions: 30,
-            groups: [
-              {
-                question: "Var parkerar jag?",
-                occurrences: 12,
-                share: 0.4,
-                conversations: 10,
-                unanswered: 3,
-                ratings: { positive: 2, negative: 1 },
-                knowledge: { searched: 0, missed: 0 },
-                sample_session_id: "s-1"
-              }
-            ]
+            groups: spies.topQuestions ?? [questionGroup("Var parkerar jag?", 12)]
           },
           response: new Response()
         };
@@ -451,6 +454,7 @@ afterEach(() => {
   spies.cases = [];
   spies.knowledge = { sources: [], unused: [] };
   spies.tools = [];
+  spies.topQuestions = null;
   spies.empty = false;
   spies.models = { items: [], default_model_id: null };
   spies.modelRequests = 0;
@@ -496,6 +500,8 @@ function renderPanel({
   /** Under StrictMode, as the app runs in development: effects run twice on mount. */
   strict?: boolean;
 } = {}) {
+  // The address bar where the navigation's route starts: Back returns to it.
+  window.history.replaceState(null, "", "/");
   const tab = (
     <div className="flex h-[700px] flex-col">
       <InsightsPanel partner={partner} editHref={editHref} />
@@ -1257,9 +1263,13 @@ describe("InsightsPanel", () => {
     await waitFor(() => expect(spies.previewed).toEqual(["s-1"]));
 
     const knowledge = screen.getByRole("region", { name: "Kunskapen som används" });
-    expect(within(knowledge).getAllByRole("listitem")[1]!.textContent).toMatch(
-      /^sundsvall\.seWebbplatsinte längre kopplad7 svar$/
-    );
+    // Its kind, state and count on one line beside the name, parted by commas for a screen reader.
+    const [, detached] = within(knowledge).getAllByRole("listitem");
+    expect(detached!.textContent).toBe("sundsvall.seWebbplats · , inte längre kopplad · , 7 svar");
+    expect([...detached!.querySelectorAll(".sr-only")].map((part) => part.textContent)).toEqual([
+      ", ",
+      ", "
+    ]);
     expect(
       within(knowledge).getByRole("list", { name: "Citeras aldrig under perioden" }).textContent
     ).toBe("Taxa 2023Samling");
@@ -1267,6 +1277,33 @@ describe("InsightsPanel", () => {
     expect(within(tools).getByRole("listitem").textContent).toBe(
       "Hitta ärendeÄrendesystemet · 2 misslyckades · 1 nekades9 anrop"
     );
+  });
+
+  it("lists the five commonest questions and shows the rest of those fetched on request", async () => {
+    spies.topQuestions = Array.from({ length: 7 }, (_, index) =>
+      questionGroup(`Fråga ${index + 1}?`, 10 - index)
+    );
+    renderPanel();
+    const table = await screen.findByRole("table", { name: "Vanligaste frågorna" });
+    const card = table.closest("section")!;
+    const listed = () =>
+      within(within(card).getByRole("table"))
+        .getAllByRole("row")
+        .slice(1)
+        .map((row) => within(row).getAllByRole("cell")[0]!.textContent);
+    await waitFor(() =>
+      expect(listed()).toEqual(["Fråga 1?", "Fråga 2?", "Fråga 3?", "Fråga 4?", "Fråga 5?"])
+    );
+
+    // The button stays where it is, with the focus, and says what it does next.
+    const toggle = within(card).getByRole("button", { name: "Visa fler" });
+    act(() => toggle.focus());
+    fireEvent.click(toggle);
+    expect(listed()).toHaveLength(7);
+    expect(document.activeElement).toBe(within(card).getByRole("button", { name: "Visa färre" }));
+    fireEvent.click(document.activeElement!);
+    expect(listed()).toHaveLength(5);
+    expect(document.activeElement).toBe(within(card).getByRole("button", { name: "Visa fler" }));
   });
 
   it("leaves out the knowledge and tools of a target without any", async () => {
