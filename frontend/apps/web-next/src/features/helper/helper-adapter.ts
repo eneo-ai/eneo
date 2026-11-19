@@ -138,6 +138,14 @@ export type HelperAdapter = {
    */
   sendHold?: string | null;
   /**
+   * Where the person can settle the standing reason when it is not on screen
+   * beside the chat (a narrow window shows one side at a time); null when it
+   * is in view. Shown as a button with the notice while the reason stands,
+   * never with a sentence from `beforeSend`. Pressing it sends, saves and
+   * clears nothing: the held message stays in the composer.
+   */
+  sendHoldAction?: { label: string; onAction: () => void } | null;
+  /**
    * Runs before each message goes, once its files are uploaded: null lets it
    * go; a sentence holds it, back in the composer, and the panel shows the
    * sentence. A page that saves as the person types saves what is pending

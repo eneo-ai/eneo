@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
@@ -454,6 +454,38 @@ describe("HelperPanel while a message is on its way", () => {
     fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
     await waitFor(() => expect(conversation.sent).toEqual([false, true]));
     expect(beforeSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the page's way to its standing reason with the notice, and none with what beforeSend says", async () => {
+    openChat(false);
+    const onAction = vi.fn();
+    const panel = (sendHold: string | null) => (
+      <HelperPanel
+        adapter={adapter({
+          sendHold,
+          sendHoldAction: { label: "Visa ändringarna", onAction },
+          beforeSend: async () => "Inställningarna kunde inte sparas."
+        })}
+      />
+    );
+    const { rerender } = renderInApp(panel("Spara ändringarna först."));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false]));
+    const notice = (await screen.findByText("Spara ändringarna först.")).closest(".astryx-banner");
+    fireEvent.click(
+      within(notice as HTMLElement).getByRole("button", { name: "Visa ändringarna" })
+    );
+    expect(onAction).toHaveBeenCalledTimes(1);
+    // Nothing goes, and the notice stays while its reason stands.
+    expect(conversation.sent).toEqual([false]);
+    expect(screen.getByText("Spara ändringarna först.")).toBeTruthy();
+
+    rerender(panel(null));
+    fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false, false]));
+    expect(await screen.findByText("Inställningarna kunde inte sparas.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Visa ändringarna" })).toBeNull();
   });
 
   it("reads the standing reason when a message goes, once its files are uploaded", async () => {

@@ -319,6 +319,12 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     setSettingsRequest((last) => ({ nonce: (last?.nonce ?? 0) + 1, focus }));
   }
 
+  /** Below lg, shows the open step's editor from the chat, with focus on its region. */
+  function showEditor() {
+    flushSync(() => setView("definition"));
+    editorRef.current?.focus();
+  }
+
   /** A refusal above both columns; a stale draft is reloaded first. */
   const refused = useCallback(
     (error: unknown, title: string, against: readonly FlowStep[], cause?: Notice["cause"]) => {
@@ -631,7 +637,17 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     onAskChat: askChat,
     onRefused: (error, title) => refused(error, title, steps),
     onFlowMayHaveChanged: () => void refreshFromChat(),
-    unsaved: stepUnsaved || settingsDirty
+    unsaved: stepUnsaved || settingsDirty,
+    // Below lg the chat hides the definition: a held message's notice leads
+    // to the edits it waits for. Bringing the settings up answers an open
+    // form by focusing it, its changes kept.
+    unsavedAction: beside
+      ? null
+      : stepUnsaved
+        ? { label: t("flows_chat_send_held_show_step"), onAction: showEditor }
+        : settingsDirty
+          ? { label: t("flows_chat_send_held_show_settings"), onAction: () => openSettings() }
+          : null
   });
 
   /**

@@ -41,7 +41,8 @@ export function OptimizeFlowButton({ onAskChat }: { onAskChat: (text: string) =>
  * pills are the flow's steps and values, a run it starts shows as a run
  * card and a change it makes as the steps it touched; its title row offers
  * "Optimera flödet" once the flow has a step. The chat reads the saved flow:
- * a message waits while edits on the page are not saved.
+ * a message waits while edits on the page are not saved, and where the chat
+ * hides them its notice leads to them.
  */
 export function useFlowHelper({
   flow,
@@ -49,7 +50,8 @@ export function useFlowHelper({
   onAskChat,
   onRefused,
   onFlowMayHaveChanged,
-  unsaved = false
+  unsaved = false,
+  unsavedAction = null
 }: {
   flow: FlowPublic;
   /** The flow's references (`useFlowChatReferences`), which the page also inserts through. */
@@ -69,6 +71,11 @@ export function useFlowHelper({
    * the settings form): a message is held until they are saved or dropped.
    */
   unsaved?: boolean;
+  /**
+   * Shows the unsaved edits where the chat hides them (a narrow window shows
+   * one side at a time): offered with the notice of a held message.
+   */
+  unsavedAction?: HelperAdapter["sendHoldAction"];
 }): HelperAdapter {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -121,6 +128,7 @@ export function useFlowHelper({
       if (isFlowsToolCall(call)) onFlowMayHaveChanged();
     },
     onAnswerFinished: onFlowMayHaveChanged,
-    sendHold: unsaved ? t("flows_chat_send_held_unsaved") : null
+    sendHold: unsaved ? t("flows_chat_send_held_unsaved") : null,
+    sendHoldAction: unsaved ? unsavedAction : null
   };
 }

@@ -11,6 +11,7 @@ import { SpaceProvider } from "@/features/spaces/use-space";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { renderWithRouter } from "@/test/router";
 import { testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import messages from "@/lib/i18n/messages/sv.json";
 import { makeAssistant, makeKindOption, makeKindPlace } from "./editor/testing/fixtures";
 import { makeFlow, makeStep } from "./flow-fixtures";
@@ -46,6 +47,8 @@ vi.mock("@/features/chat/chat-view", () => ({
 }));
 
 const BASE = "/spaces/space-1/flows/flow-1";
+/** A desktop window dragged narrow: the workspace shows the chat or the definition. */
+const NARROW_WINDOW = { width: 900, height: 800, pointer: "fine" } as const;
 let flow: FlowPublic;
 let history: RouterHistory;
 
@@ -330,6 +333,10 @@ it("holds a chat message while the open step has unsaved edits, and lets it go o
   await waitFor(() => expect(chat.sent).toEqual([false]));
   const reason = await screen.findByText(messages.flows_chat_send_held_unsaved);
   expect(reason.closest('[role="alert"]')?.textContent).toContain(messages.helper_send_held);
+  // The step is on screen beside the chat: the notice leads nowhere.
+  expect(
+    screen.queryByRole("button", { name: messages.flows_chat_send_held_show_step })
+  ).toBeNull();
   // Nothing is saved for the person: the draft stays as typed, with the editor open.
   expect(((await nameField()) as HTMLInputElement).value).toBe("Eget utkast");
 
@@ -355,6 +362,51 @@ it("lets a chat message go while the settings form is merely open, and holds it 
   await click("Skicka meddelandet");
   await waitFor(() => expect(chat.sent).toEqual([true, false]));
   expect(await screen.findByText(messages.flows_chat_send_held_unsaved)).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: messages.flows_chat_send_held_show_settings })
+  ).toBeNull();
+});
+
+it("leads from a held message's notice to the open step on a narrow window, nothing saved or dropped", async () => {
+  routeChat();
+  setViewport(NARROW_WINDOW);
+  await renderPage();
+  await openFirst();
+  await changeName();
+  const definition = screen.getByRole("region", { name: messages.flows_view_definition });
+  fireEvent.click(screen.getByRole("tab", { name: messages.flows_view_chat }));
+  expect(definition.className).toContain("max-lg:hidden");
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([false]));
+
+  await click(messages.flows_chat_send_held_show_step);
+  expect(definition.className).not.toContain("max-lg:hidden");
+  expect(document.activeElement).toBe(
+    screen.getByRole("region", { name: "Inställningar för Steg 1: Sammanfatta" })
+  );
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Eget utkast");
+  expect(api.stub.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+  // The reason stands, and the notice with it.
+  expect(screen.getByText(messages.flows_chat_send_held_unsaved)).toBeTruthy();
+});
+
+it("leads from a held message's notice to the settings form on a narrow window, its changes kept", async () => {
+  routeChat();
+  setViewport(NARROW_WINDOW);
+  await renderPage();
+  await click(messages.flows_settings_edit);
+  const name = await screen.findByRole("textbox", { name: /^Namn/ });
+  fireEvent.change(name, { target: { value: "Nytt namn" } });
+  await screen.findByText(messages.flow_page_settings_unsaved);
+  const definition = screen.getByRole("region", { name: messages.flows_view_definition });
+  fireEvent.click(screen.getByRole("tab", { name: messages.flows_view_chat }));
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([false]));
+
+  await click(messages.flows_chat_send_held_show_settings);
+  expect(definition.className).not.toContain("max-lg:hidden");
+  await waitFor(() => expect(document.activeElement).toBe(name));
+  expect((name as HTMLInputElement).value).toBe("Nytt namn");
 });
 
 it("releases a pending navigation after the current draft is saved", async () => {
