@@ -4,7 +4,6 @@ target answers the chat's other questions."""
 
 from __future__ import annotations
 
-from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -27,7 +26,6 @@ from eneo.helper_chats.personas.organisation_guidance import (
 )
 from eneo.helper_chats.targets import HelperChatTargetType, target_for
 from eneo.internal_mcp.foundation import request_for_bound_space
-from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -249,24 +247,12 @@ def test_the_target_answers_the_chats_other_questions():
     assistant = _assistant()
 
     assert target_for(HelperChatTargetType.ASSISTANT) is ASSISTANT_TARGET
-    assert ASSISTANT_TARGET.has_modes is False
-    assert ASSISTANT_TARGET.starts_in_edit_mode(assistant) is False
+    assert ASSISTANT_TARGET.modes is None
     assert ASSISTANT_TARGET.space_id(assistant) == assistant.space_id
     assert ASSISTANT_TARGET.name(assistant) == assistant.name
     assert ASSISTANT_TARGET.changeable(assistant) is True
     assert ASSISTANT_TARGET.require_changeable(assistant) is None
-    assert ASSISTANT_TARGET.idle_after() == timedelta(
-        minutes=get_settings().flow_authoring_chat_idle_minutes
-    )
     assert ASSISTANT_TARGET.audit.entity_type is EntityType.ASSISTANT
-
-
-async def test_a_mode_change_is_not_fenced():
-    container = MagicMock()
-
-    await ASSISTANT_TARGET.fence_mode_change(container, uuid4(), None)
-
-    assert container.mock_calls == []
 
 
 def test_the_organisation_default_is_the_one_helper_chats_share():
@@ -380,11 +366,3 @@ async def test_every_turn_gets_the_same_assistant_settings_tools(editing: bool):
         "propose_changes",
         "publish_assistant",
     }
-
-
-def test_a_mode_change_is_refused_with_its_own_code():
-    refused = ASSISTANT_TARGET.refusals.no_modes()
-
-    assert isinstance(refused, BadRequestException)
-    assert refused.code == AssistantHelperChatErrorCode.NO_MODES
-    assert refused.code == "helper_chat_no_modes"

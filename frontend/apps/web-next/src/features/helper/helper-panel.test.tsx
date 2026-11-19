@@ -47,7 +47,6 @@ vi.mock("@/features/chat/chat-view", async () => {
     partner,
     onToolCallFinished,
     onAnswerFinished,
-    onSendingChange,
     beforeSend,
     references
   }: {
@@ -57,7 +56,6 @@ vi.mock("@/features/chat/chat-view", async () => {
     partner?: { name?: string; description?: string; personalSpace?: boolean };
     onToolCallFinished?: (call: { serverName: string; isInternal: boolean }) => void;
     onAnswerFinished?: () => void;
-    onSendingChange?: (sending: boolean) => void;
     beforeSend?: () => Promise<boolean>;
     references?: { onComposer?: (input: unknown) => void };
   }) {
@@ -96,12 +94,6 @@ vi.mock("@/features/chat/chat-view", async () => {
           onClick={() => void conversation.waiting?.().then((go) => conversation.sent.push(go))}
         >
           Filerna uppladdade
-        </button>
-        <button type="button" onClick={() => onSendingChange?.(true)}>
-          Tur börjar
-        </button>
-        <button type="button" onClick={() => onSendingChange?.(false)}>
-          Tur slut
         </button>
         <p>{beforeSend ? "asks before sending" : "sends at once"}</p>
         <textarea aria-label="Meddelande" />
@@ -375,18 +367,15 @@ describe("HelperPanel on a target without modes", () => {
     expect(screen.queryByText(MODES.edit.partnerDescription)).toBeNull();
   });
 
-  it("never tells the page the chat may write, nor announces a mode", async () => {
+  it("never announces a mode, whatever a read of the chat says of it", async () => {
     openChat(true);
-    const onWritingChange = vi.fn();
-    renderPanel(oneMode({ onWritingChange }));
+    renderPanel(oneMode());
 
-    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
+    await screen.findByRole("button", { name: "Svar klart" });
     api.POST.mockResolvedValue(ok({ ...CHAT, editing: false }));
     fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
-    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
 
-    expect(onWritingChange).not.toHaveBeenCalledWith(true);
     expect(announce).not.toHaveBeenCalled();
     expect(api.PATCH).not.toHaveBeenCalled();
   });
@@ -448,41 +437,6 @@ describe("HelperPanel's conversation", () => {
 });
 
 describe("HelperPanel while a message is on its way", () => {
-  it("tells the page the chat may change the target while a message sent in Redigera runs", async () => {
-    openChat(true);
-    const onWritingChange = vi.fn();
-    renderPanel(adapter({ onWritingChange }));
-
-    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
-    expect(onWritingChange.mock.calls).toEqual([[true]]);
-    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
-    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
-  });
-
-  it("never for a message sent in Fråga, until Redigera is picked while it runs", async () => {
-    openChat(false);
-    const onWritingChange = vi.fn();
-    renderPanel(adapter({ onWritingChange }));
-
-    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
-    expect(onWritingChange).not.toHaveBeenCalled();
-
-    await pickEdit();
-    await waitFor(() => expect(onWritingChange.mock.calls).toEqual([[true]]));
-    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
-    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
-  });
-
-  it("says it has ended once the panel is gone", async () => {
-    openChat(true);
-    const onWritingChange = vi.fn();
-    const { unmount } = renderPanel(adapter({ onWritingChange }));
-    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
-
-    unmount();
-    expect(onWritingChange.mock.calls).toEqual([[true], [false]]);
-  });
-
   it("holds a message the page holds back, and says why at the top of the panel until one goes", async () => {
     openChat(false);
     const reasons: (string | null)[] = ["Inställningarna kunde inte sparas.", null];

@@ -40,18 +40,17 @@ const REFUSAL_KEYS: Record<string, string> = {
 
 /**
  * The helper panel's adapter for an assistant in its settings editor. The
- * chat is open to the person as the availability read says (it is asked
- * for only then); an assistant has no lock and no revision. The chat has
- * one mode: every change it wants shows as a proposal card that the person
+ * chat is open to the person as the availability read says (it is asked for
+ * only then); an assistant has no lock and no revision. The chat has one
+ * mode: every change it wants shows as a proposal card that the person
  * applies, and a publish or unpublish waits for the person's approval. A
- * change card with an undo is still drawn for a direct change an earlier
- * conversation holds. When one of the chat's tools finishes, and when an
- * answer ends, the assistant and its space are read again, so the form
- * shows what changed (a publish also the API keys' expiry notices, as the
- * publishing section's own publish does), and a publish (or a direct
- * change) is handed to `onChanged`. The page hands it what the chat can
- * refer to (the assistant's settings), the composer's "@" button and what
- * runs before a message goes.
+ * conversation's history can hold a direct change by the helper, whose card
+ * has an undo. When one of the chat's tools finishes, and when an answer
+ * ends, the assistant and its space are read again, so the form shows what
+ * changed (a publish also the API keys' expiry notices, as the publishing
+ * section's own publish does), and a publish is handed to `onChanged`. The
+ * page hands it what the chat can refer to (the assistant's settings), the
+ * composer's "@" button and what runs before a message goes.
  */
 export function useAssistantHelper({
   assistant,
@@ -66,7 +65,7 @@ export function useAssistantHelper({
   availability: AssistantHelperAvailability | undefined;
   references?: ChatReferences;
   footerActions?: ReactNode;
-  /** The settings an `update_assistant` or `publish_assistant` call of this visit actually changed. */
+  /** The settings a `publish_assistant` call of this visit actually changed. */
   onChanged?: (fields: string[]) => void;
   beforeSend?: HelperAdapter["beforeSend"];
 }): HelperAdapter {

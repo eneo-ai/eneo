@@ -418,14 +418,11 @@ describe("Before a message goes to the helper", () => {
 });
 
 describe("The helper's one mode", () => {
-  it("leaves the form open: the helper proposes and never writes it by itself", () => {
+  it("has no mode to pick: the helper proposes and never writes the form by itself", () => {
     renderEditor();
     openHelperBeside();
 
     expect(state.adapter!.modes).toBeNull();
-    expect(state.adapter!.onWritingChange).toBeUndefined();
-    expect(document.querySelector("[data-editor-lock]")).toBeNull();
-    expect(document.getElementById("general")!.hasAttribute("inert")).toBe(false);
   });
 });
 

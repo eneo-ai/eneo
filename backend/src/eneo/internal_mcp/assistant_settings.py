@@ -13,15 +13,12 @@ versions of its instructions) and one proposes a change without saving it:
 the person applies a proposal as their own save. One more publishes or
 unpublishes the assistant through the same publishing a person's own does
 (``apply_assistant_publish``), audited with the person as actor, once the
-person has approved the call in the chat. A last one, ``update_assistant``,
-changes the assistant through the same update a person's own save makes
-(``apply_assistant_update``); only a chat in edit mode may call it, and the
-chat on an assistant has none, so no turn offers it. A setting the person's
-role does not let them change in the editor is refused by the tools that
-propose and change it, and named as such when the assistant is read. So is
-what the editor's own rules hold back while the assistant is set up as it
-is: knowledge beside MCP servers, and tools and functions for a chat model
-that cannot use tools.
+person has approved the call in the chat; no other tool changes the
+assistant. A setting the person's role does not let them change in the
+editor is refused by the tool that proposes it, and named as such when the
+assistant is read. So is what the editor's own rules hold back while the
+assistant is set up as it is: knowledge beside MCP servers, and tools and
+functions for a chat model that cannot use tools.
 """
 
 from __future__ import annotations
@@ -88,13 +85,11 @@ mcp = FastMCP(
     instructions=_SERVER_DESCRIPTION,
 )
 
-# Reading tools change nothing, and neither does a proposal. A change is not
-# destructive: the person sees it with its before and after and can undo it.
-# Publishing acts beyond the editor (who can use the assistant changes) and
-# has no undo on its card, so it declares destructiveHint and the chat asks
-# the person before each call.
+# Reading tools change nothing, and neither does a proposal. Publishing acts
+# beyond the editor (who can use the assistant changes) and has no undo on
+# its card, so it declares destructiveHint and the chat asks the person
+# before each call.
 _READS = ToolAnnotations(readOnlyHint=True)
-_CHANGES = ToolAnnotations(readOnlyHint=False, destructiveHint=False)
 _ACTS = ToolAnnotations(readOnlyHint=False, destructiveHint=True)
 
 AssistantSection = Literal[
@@ -133,18 +128,16 @@ async def _call(
     ctx: Context,
     operation: Callable[[Any, Any], Awaitable[CallToolResult]],
     *,
-    editing: bool = False,
     approved: bool = False,
 ) -> CallToolResult:
     """Run ``operation`` on the chat the token was minted for, as the person,
-    in one transaction. ``editing`` makes the call a change the chat makes by
-    itself, and ``approved`` one the person approves in the chat before it
-    runs. Either way the assistant and the chat are locked, the person must
-    still be allowed to edit the assistant, and the audit entries the change
-    logs are saved in its transaction (``_audit_in_transaction``); a change
-    by the chat itself also needs edit mode, which the chat on an assistant
-    never is (``helper_chat_service.require_approved_change``). A refusal
-    rolls the transaction back and comes back as text the model reads."""
+    in one transaction. ``approved`` makes the call a change the person
+    approves in the chat before it runs: the assistant and the chat are
+    locked, the person must still be allowed to edit the assistant
+    (``helper_chat_service.require_approved_change``), and the audit entries
+    the change logs are saved in its transaction (``_audit_in_transaction``).
+    A refusal rolls the transaction back and comes back as text the model
+    reads."""
     from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
     from eneo.helper_chats.application import helper_chat_service
 
@@ -152,7 +145,7 @@ async def _call(
         async with internal_tool_context(ctx) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Helper chat not found.")
-            if not (editing or approved):
+            if not approved:
                 chat = await helper_chat_service.load_chat(
                     scope.container,
                     ASSISTANT_TARGET,
@@ -167,14 +160,9 @@ async def _call(
                 assistant_id=scope.assistant_id,
                 lock=True,
             )
-            if editing:
-                await helper_chat_service.require_edit_mode(
-                    scope.container, ASSISTANT_TARGET, chat, change=True
-                )
-            else:
-                await helper_chat_service.require_approved_change(
-                    scope.container, ASSISTANT_TARGET, chat
-                )
+            await helper_chat_service.require_approved_change(
+                scope.container, ASSISTANT_TARGET, chat
+            )
             async with _audit_in_transaction(scope.container):
                 return await operation(scope.container, chat)
     except (
@@ -1295,9 +1283,6 @@ _UNCHANGEABLE: dict[str, str] = {
 # neutral line when it gives none.
 _VERSION_DESCRIPTION_CHARS = 200
 _CHANGED_WITH_HELPER = "Changed with the helper assistant."
-_RESTORED_WITH_UNDO = (
-    "Restored the instructions from before a change made with the helper assistant."
-)
 
 _CHANGES_TAKE = (
     "changes holds only these fields of the assistant; a field left out keeps "
@@ -1666,60 +1651,16 @@ def setting_changes(
     ]
 
 
-def undo_update(
-    changes: Sequence[dict[str, Any]], kwargs_before: ModelKwargs
-) -> dict[str, Any]:
-    """The update request that gives the changed settings their values from
-    before. A chat model cannot be taken away by an update, so an assistant
-    that had none keeps the one it was given. A list setting gets its whole
-    list from before."""
-    undo: dict[str, Any] = {}
-    for change in changes:
-        key, before = change["field"], change["before"]
-        if key == "prompt":
-            undo["prompt"] = {"text": before, "description": _RESTORED_WITH_UNDO}
-        elif key == "completion_model":
-            if before is not None:
-                undo["completion_model"] = {"id": before["id"]}
-        elif key.startswith("completion_model_kwargs."):
-            undo["completion_model_kwargs"] = kwargs_before.model_dump(
-                mode="json", exclude_none=True
-            )
-        elif key in (*_KNOWLEDGE_LISTS, "mcp_servers"):
-            undo[key] = [{"id": item["id"]} for item in before]
-        elif key == "mcp_tools":
-            undo[key] = [
-                {"tool_id": item["id"], "is_enabled": item["is_enabled"]}
-                for item in before
-            ]
-        elif key == "enabled_capabilities":
-            undo[key] = [item["id"] for item in before]
-        elif key == "rerank_model_id":
-            undo[key] = before["id"] if before is not None else None
-        elif key == "document_template":
-            undo[key] = {"mode": before["mode"], "template_id": before["template_id"]}
-        else:
-            undo[key] = before
-    return undo
-
-
 @dataclass(frozen=True)
 class PlannedChange:
-    """A change as the chat would make it: the settings now (``settings``,
-    with the model settings whole in ``kwargs``), the update request that
-    makes it (``update``, only what differs from now) and each setting it
-    changes with its value now and after (``changes``). ``more`` and
-    ``facts`` say which settings beyond the base ones ``settings`` holds and
-    what named them, so the assistant after the change is read the same
-    way."""
+    """A change as the chat proposes it: the update request that makes it
+    (``update``, only what differs from now), each setting it changes with
+    its value now and after (``changes``) and whether the assistant is
+    published."""
 
-    settings: dict[str, Any]
-    kwargs: ModelKwargs
     update: dict[str, Any]
     changes: list[dict[str, Any]]
     published: bool
-    more: tuple[str, ...] = ()
-    facts: ChangeFacts = field(default_factory=ChangeFacts)
 
 
 def _policy_refusal(what: str) -> BadRequestException:
@@ -2390,13 +2331,9 @@ def plan_change(
         _plan_choices(assistant, parsed, facts, after, update)
 
     return PlannedChange(
-        settings=before,
-        kwargs=stored,
         update=update,
         changes=setting_changes(before, after),
         published=bool(assistant.published),
-        more=more,
-        facts=facts,
     )
 
 
@@ -2547,17 +2484,13 @@ def _choice_line(key: str, before: Any, after: Any) -> str:
     return f"{label} (from {shown(before)} to {shown(after)})"
 
 
-def _change_line(change: dict[str, Any], *, saved: bool) -> str:
-    """One change for the model: the setting as the editor calls it, with
-    its values when they are short. Never an id, and never the text of the
-    instructions or the description."""
+def _change_line(change: dict[str, Any]) -> str:
+    """One proposed change for the model: the setting as the editor calls
+    it, with its values when they are short. Never an id, and never the text
+    of the instructions or the description."""
     key, before, after = change["field"], change["before"], change["after"]
     if key == "prompt":
-        return (
-            "instructions (a new version)"
-            if saved
-            else f"instructions (new text of {len(after or ''):,} characters)"
-        )
+        return f"instructions (new text of {len(after or ''):,} characters)"
     if key == "description":
         return "description (cleared)" if not after else "description"
     if key == "name":
@@ -2594,19 +2527,9 @@ def _change_line(change: dict[str, Any], *, saved: bool) -> str:
     return f"{label} (from {shown(before)} to {shown(after)})"
 
 
-def change_text(
-    changes: Sequence[dict[str, Any]], *, saved: bool, published: bool
-) -> str:
-    """What the model is told about a change it made or proposed."""
-    lines = "; ".join(_change_line(change, saved=saved) for change in changes)
-    if saved:
-        text = f"Saved: {lines}. The person sees before and after and can undo it."
-        if published:
-            text += (
-                " The assistant is published, so the change already applies for "
-                "everyone who uses it."
-            )
-        return text
+def change_text(changes: Sequence[dict[str, Any]], *, published: bool) -> str:
+    """What the model is told about a change it proposed."""
+    lines = "; ".join(_change_line(change) for change in changes)
     text = (
         f"Proposed, nothing saved: {lines}. The person applies it with the "
         "button on the proposal."
@@ -2622,45 +2545,49 @@ def change_text(
 
 
 def _within_cap(content: dict[str, Any]) -> dict[str, Any]:
-    """``content`` within what the chat keeps of a call's structured content
-    (it drops more whole). When it would not fit, the texts of the
-    instructions and the description are left out of the before and after
-    (marked ``too_long``) and the request bodies stay whole, so the person
-    can still apply or undo the change."""
+    """A proposal's ``content`` within what the chat keeps of a call's
+    structured content (it drops more whole). When it would not fit, the
+    texts of the instructions and the description are left out of the
+    before and after (marked ``too_long``) and the request body stays whole,
+    so the person can still apply the proposal."""
 
     def size() -> int:
         return len(json.dumps(content, ensure_ascii=False, default=str).encode())
 
     if size() <= STRUCTURED_CONTENT_MAX_BYTES:
         return content
-    proposal = content.get("proposal") or {}
-    for change in content.get("changes") or proposal.get("changes") or []:
+    for change in content["proposal"]["changes"]:
         if change["field"] in ("prompt", "description"):
             change.update(before=None, after=None, too_long=True)
     return content
 
 
-def _unchanged(target_id: UUID, *, proposal: bool) -> CallToolResult:
+def _unchanged(target_id: UUID) -> CallToolResult:
     """The result of changes that give every setting the value it has: no
-    proposal, or no change and nothing to undo."""
-    already = "the assistant already has these settings."
-    if proposal:
-        return CallToolResult(
-            content=[TextContent(type="text", text=f"Nothing to propose: {already}")],
-            structuredContent={"target_id": str(target_id)},
-        )
+    proposal."""
     return CallToolResult(
-        content=[TextContent(type="text", text=f"Nothing changed: {already}")],
-        structuredContent={"target_id": str(target_id), "changes": [], "undo": None},
+        content=[
+            TextContent(
+                type="text",
+                text="Nothing to propose: the assistant already has these settings.",
+            )
+        ],
+        structuredContent={"target_id": str(target_id)},
     )
 
 
 @mcp.tool(
     annotations=_READS,
     description=(
-        "Propose a change to the assistant this chat is about, without saving "
-        "anything: the person applies it with the button on the proposal, as "
-        "their own save. " + _CHANGES_TAKE + " The proposal is checked as far "
+        "Propose a change to the assistant this chat is about. Call it whenever "
+        "the person asks for a setting to be changed, even a one-word change "
+        "such as a new name: the proposal it makes is the only thing the "
+        "person can approve, and a change described in words gives them "
+        "nothing to apply. A change that does not depend on the current value, "
+        "such as a new name, needs no read first; one that builds on it, such "
+        "as rewriting the instructions, needs read_assistant first. Nothing is "
+        "saved: the person applies the proposal with its button, as their own "
+        "save. " + _CHANGES_TAKE + " The proposal is checked as far "
         "as it can be without saving (what a policy decides, what the person's "
         "role allows, the editor's rules on knowledge beside MCP servers and on "
         "models that cannot use tools, whether the space offers a model, "
@@ -2686,14 +2613,12 @@ async def propose_changes(ctx: Context, changes: dict[str, Any]) -> CallToolResu
         )
         planned = await _planned_change(container, chat, changes)
         if not planned.update:
-            return _unchanged(chat.target_id, proposal=True)
+            return _unchanged(chat.target_id)
         return CallToolResult(
             content=[
                 TextContent(
                     type="text",
-                    text=change_text(
-                        planned.changes, saved=False, published=planned.published
-                    ),
+                    text=change_text(planned.changes, published=planned.published),
                 )
             ],
             structuredContent=_within_cap(
@@ -2708,68 +2633,6 @@ async def propose_changes(ctx: Context, changes: dict[str, Any]) -> CallToolResu
         )
 
     return await _call(ctx, operation)
-
-
-@mcp.tool(
-    annotations=_CHANGES,
-    description=(
-        'Change the assistant this chat is about; only in "Redigera". '
-        + _CHANGES_TAKE
-        + " Everything is saved or nothing; a refusal says why and saves "
-        "nothing. The result says what changed; the person sees before and "
-        "after and can undo it."
-    ),
-)
-async def update_assistant(ctx: Context, changes: dict[str, Any]) -> CallToolResult:
-    """Change the chat's assistant through ``apply_assistant_update``, as the
-    person, audited with the person as actor. The structured content carries
-    each changed setting before and after, read from the assistant, and the
-    update request that undoes the change."""
-
-    async def operation(container, chat):
-        from eneo.assistants.api.assistant_models import AssistantUpdatePublic
-        from eneo.assistants.application.assistant_update_operation import (
-            apply_assistant_update,
-        )
-
-        planned = await _planned_change(container, chat, changes)
-        if not planned.update:
-            return _unchanged(chat.target_id, proposal=False)
-        await apply_assistant_update(
-            container,
-            assistant_id=chat.target_id,
-            update=AssistantUpdatePublic.model_validate(planned.update),
-            audit_context={
-                "origin": HELPER_CHAT_ORIGIN,
-                "session_id": str(chat.session_id),
-            },
-        )
-        after, _ = await container.assistant_service().get_assistant(chat.target_id)
-        changed = setting_changes(
-            planned.settings,
-            assistant_settings_of(after, planned.facts, more=planned.more),
-        )
-        if not changed:
-            return _unchanged(chat.target_id, proposal=False)
-        return CallToolResult(
-            content=[
-                TextContent(
-                    type="text",
-                    text=change_text(
-                        changed, saved=True, published=bool(after.published)
-                    ),
-                )
-            ],
-            structuredContent=_within_cap(
-                {
-                    "target_id": str(chat.target_id),
-                    "changes": changed,
-                    "undo": undo_update(changed, planned.kwargs),
-                }
-            ),
-        )
-
-    return await _call(ctx, operation, editing=True)
 
 
 # --- read_prompt_history -----------------------------------------------------
@@ -2941,19 +2804,14 @@ async def publish_assistant(ctx: Context, published: bool) -> CallToolResult:
 
 # --- The server of one turn --------------------------------------------------
 
-EDIT_MODE_TOOLS: frozenset[str] = frozenset({"update_assistant"})
-"""The tools ``_call`` refuses outside edit mode. The chat on an assistant has
-no edit mode, so no turn offers them; it proposes a change instead."""
-
 
 async def build_assistant_settings_mcp_server(*, token: str, tenant_id: UUID):
     """The assistant settings server for one turn: the tools that read, the
-    proposal and publishing, never a tool that needs edit mode."""
+    proposal and publishing."""
     return await build_ephemeral_server(
         mcp,
         name=ASSISTANT_SERVER_NAME,
         description=_SERVER_DESCRIPTION,
         token=token,
         tenant_id=tenant_id,
-        exclude_tools=EDIT_MODE_TOOLS,
     )

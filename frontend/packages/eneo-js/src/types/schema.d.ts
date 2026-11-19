@@ -3896,7 +3896,7 @@ export interface paths {
     head?: never;
     /**
      * Update Assistant Helper Chat
-     * @description Choose the helper chat's model or reasoning effort. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response. The chat has one mode, so a request that sends `editing` is refused (`helper_chat_no_modes`).
+     * @description Choose the helper chat's model or reasoning effort. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response.
      */
     patch: operations["update_assistant_helper_chat"];
     trace?: never;
@@ -15186,11 +15186,6 @@ export interface components {
        */
       default_completion_model_id?: string | null;
       /**
-       * Editing
-       * @description Always false: the chat on an assistant has one mode. It proposes each change for the person to apply and never changes the assistant itself.
-       */
-      editing: boolean;
-      /**
        * Reasoning Effort
        * @description The reasoning effort the caller chose; null uses the model's own default. Applied only when the chat's model offers that level.
        */
@@ -15221,11 +15216,6 @@ export interface components {
        * @description The model this chat answers with: one enabled in the assistant's space, meeting its security classification, that supports tools. Null returns to the default; omit to keep the current choice.
        */
       completion_model_id?: string | null;
-      /**
-       * Editing
-       * @description Not taken: the chat on an assistant has one mode, so a request that sends this is refused (`helper_chat_no_modes`).
-       */
-      editing?: boolean | null;
       /**
        * Reasoning Effort
        * @description A reasoning effort the chat's model offers (`supported_model_kwargs.reasoning_effort`). Null uses the model's default; omit to keep the current choice.
@@ -59449,7 +59439,6 @@ export interface operations {
            * @example {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
            *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
-           *       "editing": false,
            *       "session_id": "00000000-0000-0000-0000-000000000301",
            *       "target_id": "00000000-0000-0000-0000-000000000001"
            *     }
@@ -59645,7 +59634,6 @@ export interface operations {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
            *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
            *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
-           *       "editing": false,
            *       "reasoning_effort": "high",
            *       "session_id": "00000000-0000-0000-0000-000000000301",
            *       "target_id": "00000000-0000-0000-0000-000000000001"
@@ -59654,7 +59642,7 @@ export interface operations {
           "application/json": components["schemas"]["AssistantHelperChatPublic"];
         };
       };
-      /** @description The model or reasoning effort cannot be used by this chat, or the request sends a mode. */
+      /** @description The model or reasoning effort cannot be used by this chat. */
       400: {
         headers: {
           [name: string]: unknown;
@@ -59716,7 +59704,6 @@ export interface operations {
            * @example {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
            *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
-           *       "editing": false,
            *       "session_id": "00000000-0000-0000-0000-000000000302",
            *       "target_id": "00000000-0000-0000-0000-000000000001"
            *     }

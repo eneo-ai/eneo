@@ -19,7 +19,6 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModelResponse,
 )
-from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
 from eneo.assistants.assistant import Assistant
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
@@ -175,7 +174,7 @@ _TURN_TOOLS = [
 ]
 
 
-async def test_a_chat_is_opened_once_in_view_mode_with_the_assistants_persona(
+async def test_a_chat_is_opened_once_with_the_assistants_persona_and_no_mode(
     client, setup: Setup, db_container
 ):
     available = await client.get(setup.url + "availability", headers=setup.headers)
@@ -187,7 +186,7 @@ async def test_a_chat_is_opened_once_in_view_mode_with_the_assistants_persona(
     assert chat == await _open(client, setup)
     assert chat["target_id"] == setup.assistant_id
     assert chat["assistant_id"] != setup.assistant_id
-    assert chat["editing"] is False
+    assert "editing" not in chat
     assert chat["default_completion_model_id"] is not None
     async with db_container() as container:
         hidden = await container.session().scalar(
@@ -213,10 +212,10 @@ async def test_the_person_changes_model_and_conversation_of_their_chat_but_no_mo
     chat = await _open(client, setup)
     url = setup.url + chat["session_id"] + "/"
 
+    # A request that names a mode is not one the chat takes.
     for editing in (True, False):
         mode = await client.patch(url, headers=setup.headers, json={"editing": editing})
-        assert mode.status_code == 400, mode.text
-        assert mode.json()["code"] == "helper_chat_no_modes"
+        assert mode.status_code == 422, mode.text
     async with db_container() as container:
         stored = await container.session().scalar(
             sa.select(HelperChats.editing).where(
@@ -871,12 +870,12 @@ async def test_a_chat_whose_row_holds_edit_mode_is_one_like_any_other(
         json={"question": "Byt namn på assistenten.", "stream": False},
     )
 
-    assert opened["editing"] is False
+    assert "editing" not in opened
     assert opened["session_id"] == chat["session_id"]
     assert asked.status_code == 200, asked.text
     assert turns == [(PROPOSING, _TURN_TOOLS)]
     # The pause leaves the row alone: there is no mode to leave.
-    assert ActionType.HELPER_CHAT_MODE_CHANGED not in audited
+    assert not [action for action in audited if action.value.endswith("mode_changed")]
     async with db_container() as container:
         stored = await container.session().scalar(
             sa.select(HelperChats.editing).where(
@@ -916,28 +915,10 @@ async def test_moving_the_assistant_to_another_space_leaves_its_chats_behind(
     assert str(space_id) == other_space.json()["id"]
 
 
-# --- Proposing and making changes --------------------------------------------
+# --- Proposing changes -------------------------------------------------------
 
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 _INSTRUCTIONS = "Du är ärendehjälpen.\nSvara sakligt och hänvisa till rutinerna."
-
-
-@pytest.fixture
-def with_modes(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The chat on an assistant with modes. ``update_assistant`` runs only in
-    edit mode, which only a target with modes has, so the tests of that tool
-    give the assistant's chat modes to reach its code."""
-    monkeypatch.setattr(type(ASSISTANT_TARGET), "has_modes", True)
-
-
-async def _edit_mode(client, setup: Setup, chat: dict, headers=None) -> None:
-    changed = await client.patch(
-        setup.url + chat["session_id"] + "/",
-        headers=headers or setup.headers,
-        json={"editing": True},
-    )
-    assert changed.status_code == 200, changed.text
-    assert changed.json()["editing"] is True
 
 
 async def _saved(client, setup: Setup, values: dict) -> dict:
@@ -1044,115 +1025,8 @@ def _updated(queued: list[tuple[str, UUID]], assistant_id: str) -> list:
     ]
 
 
-async def test_a_change_in_edit_mode_is_saved_and_audited_with_the_person_as_actor(
-    client, setup: Setup, db_container, admin_user, queued, with_modes
-):
-    before = _settings(
-        await _saved(
-            client,
-            setup,
-            {"description": "Hjälper handläggare.", "prompt": {"text": _INSTRUCTIONS}},
-        )
-    )
-    chat = await _open(client, setup)
-    await _edit_mode(client, setup, chat)
-    ctx = await _ctx(
-        db_container,
-        admin_user,
-        assistant_id=chat["assistant_id"],
-        session_id=chat["session_id"],
-    )
-    stored = await _stored(db_container, setup.assistant_id)
-    queued.clear()
-    mode = "inject" if before["knowledge_mode"] == "tool" else "tool"
-    new_instructions = "Du är ärendestödet.\nSvara kort, på svenska."
-
-    result = await assistant_settings.update_assistant(
-        ctx,
-        changes={
-            "name": "Ärendestödet",
-            "description": None,
-            "prompt": {
-                "text": new_instructions,
-                "description": "Kortare svar, ändrat med hjälpassistenten",
-            },
-            "knowledge_mode": mode,
-            "inline_file_text": not before["inline_file_text"],
-        },
-    )
-
-    assert not result.isError, result.content[0].text
-    content = result.structuredContent
-    assert content["target_id"] == setup.assistant_id
-    assert content["changes"] == [
-        {"field": "name", "before": "Ärendehjälpen", "after": "Ärendestödet"},
-        {"field": "description", "before": "Hjälper handläggare.", "after": None},
-        {"field": "prompt", "before": _INSTRUCTIONS, "after": new_instructions},
-        {"field": "knowledge_mode", "before": before["knowledge_mode"], "after": mode},
-        {
-            "field": "inline_file_text",
-            "before": before["inline_file_text"],
-            "after": not before["inline_file_text"],
-        },
-    ]
-    text = result.content[0].text
-    assert text.startswith('Saved: name (from "Ärendehjälpen" to "Ärendestödet")')
-    assert _UUID.search(text) is None
-    for long_text in (_INSTRUCTIONS, new_instructions, "Svara kort"):
-        assert long_text not in text
-
-    after = await _read(client, setup)
-    assert _settings(after) == {
-        "name": "Ärendestödet",
-        "description": None,
-        "prompt": new_instructions,
-        "knowledge_mode": mode,
-        "inline_file_text": not before["inline_file_text"],
-    }
-    saved = await _stored(db_container, setup.assistant_id)
-    assert saved.prompts[len(stored.prompts) :] == [
-        (new_instructions, "Kortare svar, ändrat med hjälpassistenten", True)
-    ]
-    # One entry, the one a person's own save writes, saved with the change.
-    new_entries = saved.audit[len(stored.audit) :]
-    assert [entry[:3] for entry in new_entries] == [
-        (ActionType.ASSISTANT_UPDATED.value, admin_user.id, "user")
-    ]
-    extra = new_entries[0][3]["extra"]
-    assert extra["origin"] == "helper_chat"
-    assert extra["session_id"] == chat["session_id"]
-    assert _updated(queued, setup.assistant_id) == []
-
-    undone = await _saved(client, setup, content["undo"])
-    assert _settings(undone) == before
-
-
-async def test_a_direct_change_is_refused_however_the_row_holds_the_mode(
+async def test_a_person_who_lost_their_edit_rights_is_refused_a_proposal(
     client, setup: Setup, db_container, admin_user, queued
-):
-    chat = await _open(client, setup)
-    await _left_in_edit_mode(db_container, chat, admin_user.tenant_id)
-    ctx = await _ctx(
-        db_container,
-        admin_user,
-        assistant_id=chat["assistant_id"],
-        session_id=chat["session_id"],
-    )
-    stored = await _stored(db_container, setup.assistant_id)
-    queued.clear()
-
-    result = await assistant_settings.update_assistant(
-        ctx, changes={"name": "Ärendestödet", "prompt": {"text": "Ny text."}}
-    )
-
-    assert result.isError
-    assert result.content[0].text.startswith("Turn on edit mode")
-    assert await _stored(db_container, setup.assistant_id) == stored
-    assert _updated(queued, setup.assistant_id) == []
-
-
-async def test_a_person_who_lost_their_edit_rights_is_refused_a_change(
-    client, setup: Setup, db_container, admin_user, queued, with_modes
 ):
     await client.post(
         f"/api/v1/assistants/{setup.assistant_id}/publish/",
@@ -1163,7 +1037,6 @@ async def test_a_person_who_lost_their_edit_rights_is_refused_a_change(
         db_container, admin_user.tenant_id, setup.space_id, SpaceRoleValue.EDITOR
     )
     chat = await _open(client, replace(setup, headers=colleague))
-    await _edit_mode(client, setup, chat, headers=colleague)
     async with db_container() as container:
         person = await container.session().scalar(
             sa.select(Sessions.user_id).where(Sessions.id == UUID(chat["session_id"]))
@@ -1189,7 +1062,7 @@ async def test_a_person_who_lost_their_edit_rights_is_refused_a_change(
     stored = await _stored(db_container, setup.assistant_id)
     queued.clear()
 
-    result = await assistant_settings.update_assistant(
+    result = await assistant_settings.propose_changes(
         ctx, changes={"name": "Ärendestödet"}
     )
 
@@ -1269,10 +1142,9 @@ async def test_a_proposal_writes_nothing_and_applying_it_is_the_persons_save(
 
 
 async def test_a_change_the_space_cannot_take_is_refused_without_naming_it(
-    client, setup: Setup, db_container, admin_user, with_modes
+    client, setup: Setup, db_container, admin_user
 ):
     chat = await _open(client, setup)
-    await _edit_mode(client, setup, chat)
     ctx = await _ctx(
         db_container,
         admin_user,
@@ -1282,20 +1154,18 @@ async def test_a_change_the_space_cannot_take_is_refused_without_naming_it(
     stored = await _stored(db_container, setup.assistant_id)
     stranger = str(uuid4())
 
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        result = await tool(ctx, changes={"completion_model": {"id": stranger}})
+    result = await assistant_settings.propose_changes(
+        ctx, changes={"completion_model": {"id": stranger}}
+    )
 
-        assert result.isError
-        assert "does not offer that model" in result.content[0].text
-        assert _UUID.search(result.content[0].text) is None
+    assert result.isError
+    assert "does not offer that model" in result.content[0].text
+    assert _UUID.search(result.content[0].text) is None
     assert await _stored(db_container, setup.assistant_id) == stored
 
 
-async def test_instructions_a_policy_sets_are_neither_changed_nor_proposed(
-    client, setup: Setup, db_container, admin_user, with_modes
+async def test_instructions_a_policy_sets_are_not_proposed(
+    client, setup: Setup, db_container, admin_user
 ):
     entry = await client.post(
         "/api/v1/admin/prompt-library/",
@@ -1325,7 +1195,6 @@ async def test_instructions_a_policy_sets_are_neither_changed_nor_proposed(
         url=f"/api/v1/assistants/{default_id}/helper-chat/",
     )
     chat = await _open(client, governed)
-    await _edit_mode(client, governed, chat)
     ctx = await _ctx(
         db_container,
         admin_user,
@@ -1334,16 +1203,14 @@ async def test_instructions_a_policy_sets_are_neither_changed_nor_proposed(
     )
     stored = await _stored(db_container, default_id)
 
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        result = await tool(ctx, changes={"prompt": {"text": "Egna instruktioner."}})
+    result = await assistant_settings.propose_changes(
+        ctx, changes={"prompt": {"text": "Egna instruktioner."}}
+    )
 
-        assert result.isError
-        assert result.content[0].text.startswith(
-            "An organisation policy sets the instructions for this assistant"
-        )
+    assert result.isError
+    assert result.content[0].text.startswith(
+        "An organisation policy sets the instructions for this assistant"
+    )
     assert await _stored(db_container, default_id) == stored
 
 
@@ -1612,57 +1479,8 @@ async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_
     assert _added_settings(applied) == _expected(before, offered, insight)
 
 
-async def test_the_added_settings_are_changed_audited_and_undone_in_edit_mode(
-    client, setup: Setup, db_container, admin_user, offered: Offered, queued, with_modes
-):
-    # Knowledge and MCP servers are added in one change only to an assistant
-    # that has both already.
-    archive = await _knowledge_and_a_server(
-        client, setup, db_container, admin_user, offered
-    )
-    before = _added_settings(await _read(client, setup))
-    insight = not before["insight_enabled"]
-    chat = await _open(client, setup)
-    await _edit_mode(client, setup, chat)
-    ctx = await _ctx(
-        db_container,
-        admin_user,
-        assistant_id=chat["assistant_id"],
-        session_id=chat["session_id"],
-    )
-    stored = await _stored(db_container, setup.assistant_id)
-    queued.clear()
-
-    result = await assistant_settings.update_assistant(
-        ctx, changes=_every_added_setting(offered, insight)
-    )
-
-    assert not result.isError, result.content[0].text
-    assert _added_settings(await _read(client, setup)) == _expected(
-        before, offered, insight
-    )
-    _holds_no_secret(result, offered)
-    assert _UUID.search(result.content[0].text) is None
-    # One entry, the one a person's own save writes, saved with the change.
-    saved = await _stored(db_container, setup.assistant_id)
-    new_entries = saved.audit[len(stored.audit) :]
-    assert [entry[:3] for entry in new_entries] == [
-        (ActionType.ASSISTANT_UPDATED.value, admin_user.id, "user")
-    ]
-    extra = new_entries[0][3]["extra"]
-    assert extra["origin"] == "helper_chat"
-    assert extra["session_id"] == chat["session_id"]
-    assert _updated(queued, setup.assistant_id) == []
-
-    undo = result.structuredContent["undo"]
-    assert undo["groups"] == [{"id": offered.groups[0]}]
-    assert undo["mcp_servers"] == [{"id": archive}]
-    undone = await _saved(client, setup, undo)
-    assert _added_settings(undone) == before
-
-
-async def test_what_the_space_does_not_offer_is_refused_by_both_tools(
-    client, setup: Setup, db_container, admin_user, offered: Offered, with_modes
+async def test_what_the_space_does_not_offer_is_refused_by_the_proposal(
+    client, setup: Setup, db_container, admin_user, offered: Offered
 ):
     async with db_container() as container:
         outside = await container.session().scalar(
@@ -1682,7 +1500,6 @@ async def test_what_the_space_does_not_offer_is_refused_by_both_tools(
             )
         )
     chat = await _open(client, setup)
-    await _edit_mode(client, setup, chat)
     ctx = await _ctx(
         db_container,
         admin_user,
@@ -1710,24 +1527,19 @@ async def test_what_the_space_does_not_offer_is_refused_by_both_tools(
             "no such document template",
         ),
     ):
-        for tool in (
-            assistant_settings.propose_changes,
-            assistant_settings.update_assistant,
-        ):
-            result = await tool(ctx, changes=changes)
+        result = await assistant_settings.propose_changes(ctx, changes=changes)
 
-            assert result.isError, changes
-            assert refusal in result.content[0].text
-            assert _UUID.search(result.content[0].text) is None
+        assert result.isError, changes
+        assert refusal in result.content[0].text
+        assert _UUID.search(result.content[0].text) is None
     assert await _stored(db_container, setup.assistant_id) == stored
 
 
-async def test_the_editors_rules_are_named_and_refused_by_both_tools(
-    client, setup: Setup, db_container, admin_user, offered: Offered, queued, with_modes
+async def test_the_editors_rules_are_named_and_refused_by_the_proposal(
+    client, setup: Setup, db_container, admin_user, offered: Offered, queued
 ):
     await _saved(client, setup, {"groups": [{"id": offered.groups[0]}]})
     chat = await _open(client, setup)
-    await _edit_mode(client, setup, chat)
     ctx = await _ctx(
         db_container,
         admin_user,
@@ -1737,7 +1549,7 @@ async def test_the_editors_rules_are_named_and_refused_by_both_tools(
     before = await _read(client, setup)
     stored = await _stored(db_container, setup.assistant_id)
     queued.clear()
-    tools = (assistant_settings.propose_changes, assistant_settings.update_assistant)
+    propose = assistant_settings.propose_changes
 
     read = await assistant_settings.read_assistant(ctx)
     assert not read.isError, read.content[0].text
@@ -1746,17 +1558,14 @@ async def test_the_editors_rules_are_named_and_refused_by_both_tools(
         in read.content[0].text
     )
     add_server = {"mcp_servers": {"add": [{"id": offered.server_id}]}}
-    for tool in tools:
-        result = await tool(ctx, changes=add_server)
-        assert result.isError
-        assert result.content[0].text.startswith(
-            "Knowledge and MCP servers are not combined on one assistant, and this "
-            "one has knowledge, so no MCP server can be added to it."
-        )
-    # Knowledge that goes in the same change makes way for the server.
-    swapped = await assistant_settings.propose_changes(
-        ctx, changes={**add_server, "groups": []}
+    result = await propose(ctx, changes=add_server)
+    assert result.isError
+    assert result.content[0].text.startswith(
+        "Knowledge and MCP servers are not combined on one assistant, and this "
+        "one has knowledge, so no MCP server can be added to it."
     )
+    # Knowledge that goes in the same change makes way for the server.
+    swapped = await propose(ctx, changes={**add_server, "groups": []})
     assert not swapped.isError, swapped.content[0].text
     assert swapped.structuredContent["proposal"]["update"] == {
         "groups": [],
@@ -1775,14 +1584,13 @@ async def test_the_editors_rules_are_named_and_refused_by_both_tools(
         "cannot use tools, so no MCP server or function can be turned on"
         in read.content[0].text
     )
-    for tool in tools:
-        result = await tool(
-            ctx, changes={"enabled_capabilities": {"add": ["web_search"]}}
-        )
-        assert result.isError
-        assert "cannot use tools, so web search cannot be switched on" in (
-            result.content[0].text
-        )
+    result = await propose(
+        ctx, changes={"enabled_capabilities": {"add": ["web_search"]}}
+    )
+    assert result.isError
+    assert "cannot use tools, so web search cannot be switched on" in (
+        result.content[0].text
+    )
 
     assert await _stored(db_container, setup.assistant_id) == stored
     assert _added_settings(await _read(client, setup)) == _added_settings(before)
@@ -1804,14 +1612,13 @@ async def _person_ctx(db_container, chat: dict) -> SimpleNamespace:
     )
 
 
-async def test_what_an_editors_role_withholds_is_named_and_refused_by_both_tools(
-    client, setup: Setup, db_container, admin_user, queued, with_modes
+async def test_what_an_editors_role_withholds_is_named_and_refused_by_the_proposal(
+    client, setup: Setup, db_container, admin_user, queued
 ):
     colleague = await _member_headers(
         db_container, admin_user.tenant_id, setup.space_id, SpaceRoleValue.EDITOR
     )
     chat = await _open(client, replace(setup, headers=colleague))
-    await _edit_mode(client, setup, chat, headers=colleague)
     ctx = await _person_ctx(db_container, chat)
     before = await _read(client, setup)
     stored = await _stored(db_container, setup.assistant_id)
@@ -1827,23 +1634,19 @@ async def test_what_an_editors_role_withholds_is_named_and_refused_by_both_tools
     # An editor publishes assistants in a shared space.
     assert "- publishing" not in text
 
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
+    for changes, what in (
+        ({"data_retention_days": 30}, "how long conversations are kept"),
+        (
+            {"insight_enabled": not before["insight_enabled"]},
+            "whether insights are on",
+        ),
     ):
-        for changes, what in (
-            ({"data_retention_days": 30}, "how long conversations are kept"),
-            (
-                {"insight_enabled": not before["insight_enabled"]},
-                "whether insights are on",
-            ),
-        ):
-            result = await tool(ctx, changes=changes)
+        result = await assistant_settings.propose_changes(ctx, changes=changes)
 
-            assert result.isError
-            assert result.content[0].text.startswith(
-                f"The person's role does not let them change {what}; {others}."
-            )
+        assert result.isError
+        assert result.content[0].text.startswith(
+            f"The person's role does not let them change {what}; {others}."
+        )
 
     assert await _stored(db_container, setup.assistant_id) == stored
     after = await _read(client, setup)
@@ -1855,7 +1658,7 @@ async def test_what_an_editors_role_withholds_is_named_and_refused_by_both_tools
 
 
 async def test_publishing_and_insights_are_refused_in_a_personal_space(
-    client, setup: Setup, db_container, admin_user, queued, with_modes
+    client, setup: Setup, db_container, admin_user, queued
 ):
     async with db_container() as container:
         personal = await container.space_init_service().get_personal_space()
@@ -1872,7 +1675,6 @@ async def test_publishing_and_insights_are_refused_in_a_personal_space(
         url=f"/api/v1/assistants/{created.json()['id']}/helper-chat/",
     )
     chat = await _open(client, own)
-    await _edit_mode(client, own, chat)
     ctx = await _ctx(
         db_container,
         admin_user,
@@ -1897,18 +1699,14 @@ async def test_publishing_and_insights_are_refused_in_a_personal_space(
     assert published.content[0].text == (
         "An assistant in a personal space is not published. Nothing was changed."
     )
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        result = await tool(
-            ctx, changes={"insight_enabled": not before["insight_enabled"]}
-        )
-        assert result.isError
-        assert result.content[0].text == (
-            "Insights are not used for an assistant in a personal space. "
-            "Nothing was changed."
-        )
+    result = await assistant_settings.propose_changes(
+        ctx, changes={"insight_enabled": not before["insight_enabled"]}
+    )
+    assert result.isError
+    assert result.content[0].text == (
+        "Insights are not used for an assistant in a personal space. "
+        "Nothing was changed."
+    )
 
     assert await _stored(db_container, own.assistant_id) == stored
     after = await _read(client, own)
@@ -1919,7 +1717,7 @@ async def test_publishing_and_insights_are_refused_in_a_personal_space(
     assert queued == []
 
 
-async def test_publishing_from_the_chat_needs_no_mode_and_is_audited_as_the_person(
+async def test_publishing_from_the_chat_is_audited_as_the_person(
     client, setup: Setup, db_container, admin_user, queued
 ):
     chat = await _open(client, setup)
@@ -1961,14 +1759,6 @@ async def test_publishing_from_the_chat_needs_no_mode_and_is_audited_as_the_pers
     assert again.content[0].text == (
         "The assistant is already published. Nothing was changed."
     )
-    # Publishing leaves the chat as it was.
-    async with db_container() as container:
-        mode = await container.session().scalar(
-            sa.select(HelperChats.editing).where(
-                HelperChats.session_id == UUID(chat["session_id"])
-            )
-        )
-    assert mode is False
 
 
 async def test_a_person_who_lost_their_edit_rights_is_refused_unpublishing(

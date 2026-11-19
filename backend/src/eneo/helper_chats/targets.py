@@ -35,6 +35,8 @@ class HelperChatTargetType(StrEnum):
 
 
 RecordT = TypeVar("RecordT")
+# The modes only take a target, so they may take a more general one.
+RecordInT = TypeVar("RecordInT", contravariant=True)
 
 
 @dataclass(frozen=True)
@@ -51,7 +53,6 @@ class HelperChatAudit:
 
     entity_type: EntityType
     chat_created: HelperChatAuditEvent | None
-    mode_changed: HelperChatAuditEvent | None
     conversation_started: HelperChatAuditEvent | None
     model_changed: HelperChatAuditEvent | None
 
@@ -62,12 +63,6 @@ class HelperChatRefusals(Protocol):
     def chat_not_found(self) -> Exception: ...
 
     def target_not_found(self) -> Exception: ...
-
-    def not_editing(self) -> Exception: ...
-
-    def no_modes(self) -> Exception:
-        """A request to change the mode of a chat whose target has none."""
-        ...
 
     def no_model(self) -> Exception: ...
 
@@ -82,6 +77,38 @@ class HelperChatRefusals(Protocol):
     ) -> Exception: ...
 
 
+class HelperChatModes(Protocol[RecordInT]):
+    """What a target whose chat the person switches between "Fråga" and
+    "Redigera" adds. Only such a chat is ever in edit mode, where the chat
+    itself may write to the target."""
+
+    @property
+    def mode_changed(self) -> HelperChatAuditEvent:
+        """The audit entry of a change of edit mode, the person's or the
+        pause's."""
+        ...
+
+    def not_editing(self) -> Exception:
+        """The refusal of a change the chat makes outside edit mode."""
+        ...
+
+    def starts_in_edit_mode(self, record: RecordInT) -> bool:
+        """Whether a new chat on the target starts in edit mode."""
+        ...
+
+    def idle_after(self) -> timedelta:
+        """How long a conversation goes without a question or mode change
+        before edit mode is left and turning it on starts a new one."""
+        ...
+
+    async def fence_mode_change(
+        self, container: Container, target_id: UUID, expected_revision: int | None
+    ) -> None:
+        """Refuse a change of edit mode made against a target that changed
+        since the caller last read it."""
+        ...
+
+
 class HelperChatTarget(Protocol[RecordT]):
     """One kind of target. ``RecordT`` is the target as its own package loads
     it; the audit entries name it."""
@@ -90,12 +117,10 @@ class HelperChatTarget(Protocol[RecordT]):
     def target_type(self) -> HelperChatTargetType: ...
 
     @property
-    def has_modes(self) -> bool:
-        """Whether the person switches the chat between "Fråga" and
-        "Redigera". Only a chat on a target with modes is ever in edit mode,
-        where the chat itself may write to the target. On a target without
-        them the chat proposes each change for the person to apply, and its
-        mode cannot be changed."""
+    def modes(self) -> HelperChatModes[RecordT] | None:
+        """The chat's two modes; None for a target whose chat has one. That
+        chat is never in edit mode: it proposes each change for the person
+        to apply."""
         ...
 
     def instructions(self, container: Container) -> str:
@@ -152,28 +177,12 @@ class HelperChatTarget(Protocol[RecordT]):
         it still exists."""
         ...
 
-    async def fence_mode_change(
-        self, container: Container, target_id: UUID, expected_revision: int | None
-    ) -> None:
-        """Refuse a change of edit mode made against a target that changed
-        since the caller last read it."""
-        ...
-
     def changeable(self, record: RecordT) -> bool:
         """Whether anything in the target may change right now."""
         ...
 
     def require_changeable(self, record: RecordT) -> None:
         """Refuse when nothing in the target may change right now."""
-        ...
-
-    def starts_in_edit_mode(self, record: RecordT) -> bool:
-        """Whether a new chat on the target starts in edit mode."""
-        ...
-
-    def idle_after(self) -> timedelta:
-        """How long a conversation goes without a question or mode change
-        before edit mode is left and turning it on starts a new one."""
         ...
 
     def organisation_default_model_id(self, container: Container) -> UUID | None:

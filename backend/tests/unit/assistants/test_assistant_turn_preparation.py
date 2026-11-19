@@ -37,9 +37,6 @@ from eneo.helper_chats.personas.shared import (
     WITHOUT_TOOLS,
     WITHOUT_TOOLS_NOW,
 )
-from eneo.internal_mcp.assistant_settings import (
-    EDIT_MODE_TOOLS as ASSISTANT_EDIT_MODE_TOOLS,
-)
 from eneo.internal_mcp.flows import EDIT_MODE_TOOLS as FLOW_EDIT_MODE_TOOLS
 from eneo.main.exceptions import (
     NotFoundException,
@@ -417,8 +414,8 @@ async def test_an_assistant_chat_turn_proposes_and_publishes_and_names_no_mode(
         assert note not in instructions
     offered = _offered_tools(request)
     assert {"propose_changes", "publish_assistant", "read_assistant"} <= offered
-    assert not ASSISTANT_EDIT_MODE_TOOLS & offered
-    assert "update_assistant" not in offered
+    # The tool the note tells the model to call is one the turn offers.
+    assert "propose_changes" in PROPOSING
 
 
 @pytest.mark.parametrize(

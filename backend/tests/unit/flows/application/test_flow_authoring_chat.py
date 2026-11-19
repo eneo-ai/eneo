@@ -653,7 +653,7 @@ async def test_the_flow_chat_has_modes_and_a_published_flow_cannot_change(
         AsyncMock(return_value=access),
     )
 
-    assert target.has_modes is True
+    assert target.modes is not None
     assert target.changeable(SimpleNamespace(published_version=None)) is True
     assert target.changeable(published) is False
     # The read check hands on the flow it loaded, so a turn asks no more.

@@ -34,6 +34,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.helper_chats.binding import HelperChatBinding
 from eneo.helper_chats.targets import (
     HelperChatAuditEvent,
+    HelperChatModes,
     HelperChatTarget,
     target_for,
 )
@@ -73,7 +74,15 @@ class OpenedChat:
 def in_edit_mode(target: HelperChatTarget[Any], chat: HelperChats) -> bool:
     """Whether the chat is in edit mode, where the chat itself may write to
     its target. Never on a target without modes, whatever its row holds."""
-    return target.has_modes and chat.editing
+    return target.modes is not None and chat.editing
+
+
+def _modes_of(target: HelperChatTarget[Any]) -> HelperChatModes[Any]:
+    """The modes of a target that has them. Only what a target with modes
+    offers asks, so a target without them here is a caller's mistake."""
+    if target.modes is None:
+        raise TypeError(f"A helper chat on a {target.target_type} has no modes.")
+    return target.modes
 
 
 async def load_chat(
@@ -235,11 +244,12 @@ async def require_edit_mode(
     *,
     change: bool = False,
 ) -> None:
-    """Edit mode and edit access to the chat's ``target``, and with
-    ``change`` also a target that may change right now, so a change it
-    refuses is refused before anything is read or written."""
-    if not in_edit_mode(target, chat):
-        raise target.refusals.not_editing()
+    """Edit mode and edit access to the chat's ``target``, which has modes,
+    and with ``change`` also a target that may change right now, so a change
+    it refuses is refused before anything is read or written."""
+    modes = _modes_of(target)
+    if not chat.editing:
+        raise modes.not_editing()
     await _require_edit_access(container, target, chat, change=change)
 
 
@@ -250,7 +260,7 @@ async def require_approved_change(
     publishing) needs: edit access to a target that may change right now,
     and on a target with modes edit mode too. A chat on a target without
     modes never writes by itself, so there the approval takes its place."""
-    if target.has_modes:
+    if target.modes is not None:
         await require_edit_mode(container, target, chat, change=True)
         return
     await _require_edit_access(container, target, chat, change=True)
@@ -518,7 +528,9 @@ async def _audit(
     )
 
 
-async def _idle_since_last_activity(container: Container, chat: HelperChats) -> bool:
+async def _idle_since_last_activity(
+    container: Container, chat: HelperChats, modes: HelperChatModes[Any]
+) -> bool:
     """Whether the current conversation has questions and none of them, nor a
     mode change, is newer than the target's idle threshold. An empty
     conversation is never replaced: there is nothing in it to leave behind."""
@@ -532,7 +544,7 @@ async def _idle_since_last_activity(container: Container, chat: HelperChats) -> 
     last_activity = max(
         moment for moment in (last_question, chat.mode_changed_at) if moment
     )
-    return _now() - last_activity > target_for(chat.target_type).idle_after()
+    return _now() - last_activity > modes.idle_after()
 
 
 async def _leave_edit_mode_after_pause(container: Container, chat: HelperChats) -> None:
@@ -545,9 +557,10 @@ async def _leave_edit_mode_after_pause(container: Container, chat: HelperChats) 
     own activity, so turning edit mode on after this still starts a new
     conversation. The update matches only the chat as it was read, so a mode
     change or a new conversation saved meanwhile is kept."""
-    if not in_edit_mode(target_for(chat.target_type), chat):
+    modes = target_for(chat.target_type).modes
+    if modes is None or not chat.editing:
         return
-    if not await _idle_since_last_activity(container, chat):
+    if not await _idle_since_last_activity(container, chat, modes):
         return
     left = await _session(container).scalar(
         sa.update(HelperChats)
@@ -566,21 +579,23 @@ async def _leave_edit_mode_after_pause(container: Container, chat: HelperChats) 
     # The row now says what the update wrote; the loaded chat says the same
     # without being written again.
     set_committed_value(chat, "editing", False)
-    await _audit_mode_change(container, chat, reason="idle")
+    await _audit_mode_change(container, chat, modes, reason="idle")
 
 
 async def _audit_mode_change(
-    container: Container, chat: HelperChats, *, reason: ChangeReason
+    container: Container,
+    chat: HelperChats,
+    modes: HelperChatModes[Any],
+    *,
+    reason: ChangeReason,
 ) -> None:
     """The one audit entry for a change of edit mode, the person's or the
     pause's, with the mode the chat is now in."""
     target = target_for(chat.target_type)
-    if target.audit.mode_changed is None:
-        return
     await _audit(
         container,
         target,
-        target.audit.mode_changed,
+        modes.mode_changed,
         target_id=chat.target_id,
         record=await target.load(container, chat.target_id),
         extra={
@@ -736,7 +751,10 @@ async def get_or_create_chat(
                 space_id=space_id,
                 assistant_id=assistant.id,
                 session_id=conversation.id,
-                editing=target.starts_in_edit_mode(record),
+                editing=(
+                    target.modes is not None
+                    and target.modes.starts_in_edit_mode(record)
+                ),
             )
             .returning(HelperChats)
         )
@@ -767,27 +785,26 @@ async def update_chat(
     completion_model_id: UUID | None | NotProvided = NOT_PROVIDED,
     reasoning_effort: str | None | NotProvided = NOT_PROVIDED,
 ) -> OpenedChat:
-    """Change the chat's edit mode, model or reasoning effort, then bring its
-    assistant in line. Entering edit mode after a pause starts a new
-    conversation (see ``_idle_since_last_activity``). A chat on a target
-    without modes refuses any ``editing``."""
+    """Change the chat's model or reasoning effort, and on a target with
+    modes its edit mode, then bring its assistant in line. Entering edit mode
+    after a pause starts a new conversation (see
+    ``_idle_since_last_activity``)."""
     chat = await load_chat(
         container, target, session_id=session_id, target_id=target_id, lock=True
     )
     if editing is not None:
-        if not target.has_modes:
-            raise target.refusals.no_modes()
-        await target.fence_mode_change(container, target_id, expected_revision)
+        modes = _modes_of(target)
+        await modes.fence_mode_change(container, target_id, expected_revision)
         if editing:
             await target.require_edit(
                 container, target.scoped_request(chat.space_id), target_id
             )
         if chat.editing != editing:
-            if editing and await _idle_since_last_activity(container, chat):
+            if editing and await _idle_since_last_activity(container, chat, modes):
                 await _start_conversation(container, chat, reason="idle")
             chat.editing = editing
             chat.mode_changed_at = _now()
-            await _audit_mode_change(container, chat, reason="requested")
+            await _audit_mode_change(container, chat, modes, reason="requested")
             await _session(container).flush()
 
     space = await _load_space(container, chat)
