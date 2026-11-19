@@ -358,6 +358,20 @@ def test_the_instructions_take_a_contract_from_an_example() -> None:
     assert "ask for one when the wanted result is structured" in instructions
 
 
+def test_the_instructions_help_write_a_steps_instruction_from_what_it_reads() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert (
+        "help writing or improving the instruction of a step, read that step in "
+        "full first" in instructions
+    )
+    assert "Ask only where the answer changes the instruction" in instructions
+    assert "never from invented facts" in instructions
+    assert "Keep the step's {{ ... }} reads as they are" in instructions
+    assert chr(0x2013) not in AUTHORING_INSTRUCTIONS
+    assert chr(0x2014) not in AUTHORING_INSTRUCTIONS
+
+
 def test_the_instructions_show_the_expected_result_without_doing_the_work() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
