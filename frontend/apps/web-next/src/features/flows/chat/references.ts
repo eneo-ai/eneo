@@ -1,4 +1,8 @@
-import { mentionParts as splitMentions, mentionText } from "@/features/references/mentions";
+import {
+  mentionParts as splitMentions,
+  mentionText,
+  parseBareMention
+} from "@/features/references/mentions";
 import { readMeaning, readTone, type ReadMeaning } from "../editor/request-preview";
 import { contractFields } from "../editor/step-variables";
 import type { FlowPublic, FlowStep } from "../editor/step-types";
@@ -75,6 +79,22 @@ export function parseReference(raw: string, flow: Flow): Reference | null {
   const parts = referenceParts(raw, flow);
   const part = parts[0];
   return parts.length === 1 && part && part.kind !== "text" ? part : null;
+}
+
+/**
+ * What a reference in an answer is: one `parseReference` reads, or a step
+ * mention a model wrote without the scheme. `@[Steg 1](<id>)` is that step
+ * when the flow has a step with the id, and otherwise its name alone (a text
+ * part). Null for anything else.
+ */
+export function answerReference(raw: string, flow: Flow): ReferencePart | null {
+  const reference = parseReference(raw, flow);
+  if (reference) return reference;
+  const mention = parseBareMention(raw);
+  if (!mention) return null;
+  return flow.steps.some((step) => step.id === mention.key)
+    ? stepReference(mention.key, mention.name, flow)
+    : { kind: "text", text: mention.name };
 }
 
 /** The references a text holds, each once, in order of first appearance. */

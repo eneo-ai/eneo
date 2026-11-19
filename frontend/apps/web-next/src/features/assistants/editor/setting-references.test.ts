@@ -4,6 +4,7 @@ import { testTranslator } from "@/test/i18n";
 import {
   ASSISTANT_SECTION_IDS,
   SETTING_REFERENCE_KEYS,
+  answerSettingMention,
   settingMention,
   settingParts,
   settingReferences,
@@ -290,5 +291,25 @@ describe("A setting mention", () => {
       { kind: "mention", raw, name: "AI-inställningar", key: "section:ai" },
       { kind: "text", text: "?" }
     ]);
+  });
+
+  it("in an answer names a known key with or without the scheme, and nothing else", () => {
+    expect(answerSettingMention("@[Namn](setting:name)")).toEqual({ name: "Namn", key: "name" });
+    expect(answerSettingMention("@[Namn](name)")).toEqual({ name: "Namn", key: "name" });
+    expect(answerSettingMention("@[Chattmodell](completion_model)")).toEqual({
+      name: "Chattmodell",
+      key: "completion_model"
+    });
+    expect(answerSettingMention("@[Allmänt](section:general)")).toEqual({
+      name: "Allmänt",
+      key: "section:general"
+    });
+    // A mention of no setting the editor knows keeps its name; the key is compared as written.
+    for (const raw of ["@[Namn](nonsense)", "@[Namn](setting:nonsense)", "@[Namn](Name)"]) {
+      expect(answerSettingMention(raw)).toEqual({ name: "Namn", key: null });
+    }
+    // A link, or a mention of a web address, is no mention of a setting.
+    expect(answerSettingMention("[text](name)")).toBeNull();
+    expect(answerSettingMention("@[text](https://example.com)")).toBeNull();
   });
 });

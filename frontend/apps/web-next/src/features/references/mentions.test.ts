@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { mentionParts, mentionPattern, mentionText, parseMention } from "./mentions";
+import {
+  mentionParts,
+  mentionPattern,
+  mentionText,
+  parseBareMention,
+  parseMention
+} from "./mentions";
 
 describe("mentions", () => {
   it("writes a mention and reads it back, name and key alike", () => {
@@ -40,5 +46,29 @@ describe("mentions", () => {
   it("leaves a text without mentions as one part, and an empty one as none", () => {
     expect(mentionParts("Hej", "setting")).toEqual([{ kind: "text", text: "Hej" }]);
     expect(mentionParts("", "setting")).toEqual([]);
+  });
+
+  it("reads a mention without its scheme, the whole address as the key, but not a link", () => {
+    expect(parseBareMention("@[Namn](name)")).toEqual({ name: "Namn", key: "name" });
+    expect(parseBareMention("@[Allmänt](section:general)")).toEqual({
+      name: "Allmänt",
+      key: "section:general"
+    });
+    expect(parseBareMention("@[Bedömning](3f1c-22)")).toEqual({
+      name: "Bedömning",
+      key: "3f1c-22"
+    });
+    for (const raw of [
+      "@[text](https://example.com)",
+      "@[text](mailto:kontakt@example.se)",
+      "@[text](/spaces)",
+      "@[text](./bilaga)",
+      "@[text](#avsnitt)",
+      "[text](name)",
+      "@[Namn](name) ",
+      "@[Namn](två ord)"
+    ]) {
+      expect(parseBareMention(raw)).toBeNull();
+    }
   });
 });

@@ -1,6 +1,7 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react";
 import type { MessageResponseProps } from "@/components/ai-elements/message";
 import { AnswerLink } from "@/features/chat/answer-links";
+import { parseBareMention } from "./mentions";
 
 /**
  * References in an answer. A remark plugin turns every reference a page
@@ -34,6 +35,10 @@ function textOf(node: MdNode): string {
  * A remark plugin for the references `pattern` matches (a global pattern).
  * Markdown reads a mention (`@[Name](step:<id>)`) as "@" and a link to
  * `step:<id>`: for each of `mentionSchemes` the two are put back together.
+ * So are "@" and a link to an address no link can go to (`@[Namn](name)`),
+ * a mention a model wrote without the scheme: the page's reference says what
+ * it names, and it never reaches the link sanitiser. "@" before a link to a
+ * web address, and a link without "@", stay links.
  */
 export function referenceRemarkPlugins(
   pattern: RegExp,
@@ -66,16 +71,14 @@ export function referenceRemarkPlugins(
     const next: MdNode[] = [];
     for (const child of node.children) {
       const before = next.at(-1);
-      if (
-        child.type === "link" &&
-        prefixes.some((prefix) => child.url?.startsWith(prefix)) &&
-        before?.type === "text" &&
-        before.value?.endsWith("@")
-      ) {
-        before.value = before.value.slice(0, -1);
-        if (!before.value) next.pop();
-        next.push(referenceLink(`@[${textOf(child)}](${child.url})`));
-        continue;
+      if (child.type === "link" && before?.type === "text" && before.value?.endsWith("@")) {
+        const raw = `@[${textOf(child)}](${child.url})`;
+        if (prefixes.some((prefix) => child.url?.startsWith(prefix)) || parseBareMention(raw)) {
+          before.value = before.value.slice(0, -1);
+          if (!before.value) next.pop();
+          next.push(referenceLink(raw));
+          continue;
+        }
       }
       if (child.type === "text" && child.value) {
         next.push(...split(child.value));
