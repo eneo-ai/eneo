@@ -5,7 +5,7 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 // The flow is the helper's one target so far: its endpoints stand in for any target's.
 import { flowHelperApi } from "@/features/flows/flows-api";
-import type { HelperAdapter, HelperTexts } from "./helper-adapter";
+import type { HelperAdapter, HelperModes, HelperTexts } from "./helper-adapter";
 import { HelperPanel } from "./helper-panel";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
@@ -100,22 +100,32 @@ vi.mock("@/features/chat/chat-view", () => ({
 const TEXTS: HelperTexts = {
   heading: "Hjälp med målet",
   partnerName: "Målhjälpen",
-  partnerDescription: { ask: "Jag läser målet.", edit: "Jag ändrar målet." },
-  placeholder: { ask: "Fråga om målet…", edit: "Beskriv ändringen av målet…" },
-  composerLabelEdit: "Beskriv ändringen av målet",
-  modeDescription: { ask: "Läser målet.", edit: "Ändrar målet direkt." },
-  editingOn: "Nu kan chatten ändra målet.",
-  editingOff: "Nu kan chatten bara läsa målet.",
-  askAfterPause: "Fråga igen efter en paus.",
+  partnerDescription: "Jag läser målet.",
+  placeholder: "Fråga om målet…",
   noAccess: "Du får inte ändra målet.",
   newConversationDescription: "Målet påverkas inte."
 };
 
+/** The target's two modes, in its words. */
+const MODES: HelperModes = {
+  description: { ask: "Läser målet.", edit: "Ändrar målet direkt." },
+  edit: {
+    partnerDescription: "Jag ändrar målet.",
+    placeholder: "Beskriv ändringen av målet…",
+    composerLabel: "Beskriv ändringen av målet"
+  },
+  editingOn: "Nu kan chatten ändra målet.",
+  editingOff: "Nu kan chatten bara läsa målet.",
+  askAfterPause: "Fråga igen efter en paus."
+};
+
+/** A target with modes, unless the overrides say otherwise. */
 function adapter(overrides: Partial<HelperAdapter> = {}): HelperAdapter {
   return {
     api: flowHelperApi("flow-1"),
     unavailable: null,
     texts: TEXTS,
+    modes: MODES,
     onRefused: () => {},
     ...overrides
   };
@@ -264,10 +274,10 @@ describe("HelperPanel's mode", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Läge: Fråga" }));
     const edit = await screen.findByRole("menuitemradio", { name: /Redigera/ });
     expect(edit.getAttribute("aria-disabled")).not.toBe("true");
-    expect(edit.textContent).toContain(TEXTS.modeDescription.edit);
+    expect(edit.textContent).toContain(MODES.description.edit);
     expect(screen.getByText(`partner: ${TEXTS.partnerName}`)).toBeTruthy();
-    expect(screen.getByText(TEXTS.partnerDescription.ask)).toBeTruthy();
-    expect(screen.getByText(TEXTS.placeholder.ask)).toBeTruthy();
+    expect(screen.getByText(TEXTS.partnerDescription)).toBeTruthy();
+    expect(screen.getByText(TEXTS.placeholder)).toBeTruthy();
   });
 
   it("names the composer and the welcome by Redigera once it is on", async () => {
@@ -276,10 +286,10 @@ describe("HelperPanel's mode", () => {
     await pickEdit();
 
     expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
-    await waitFor(() => expect(announce).toHaveBeenCalledWith(TEXTS.editingOn));
-    expect(screen.getByText(TEXTS.placeholder.edit)).toBeTruthy();
-    expect(screen.getByText(`composer: ${TEXTS.composerLabelEdit}`)).toBeTruthy();
-    expect(screen.getByText(TEXTS.partnerDescription.edit)).toBeTruthy();
+    await waitFor(() => expect(announce).toHaveBeenCalledWith(MODES.editingOn));
+    expect(screen.getByText(MODES.edit.placeholder)).toBeTruthy();
+    expect(screen.getByText(`composer: ${MODES.edit.composerLabel}`)).toBeTruthy();
+    expect(screen.getByText(MODES.edit.partnerDescription)).toBeTruthy();
   });
 
   it("fences a mode change on the revision the target has on screen", async () => {
@@ -307,6 +317,17 @@ describe("HelperPanel's mode", () => {
     });
   });
 
+  it("says so when a read finds the server left Redigera after a pause", async () => {
+    openChat(true);
+    renderPanel();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+
+    api.POST.mockResolvedValue(ok({ ...CHAT, editing: false }));
+    fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
+
+    await waitFor(() => expect(announce).toHaveBeenCalledWith(MODES.askAfterPause));
+  });
+
   it("hands a refused mode change to the page", async () => {
     openChat(false);
     api.PATCH.mockResolvedValue({
@@ -320,6 +341,45 @@ describe("HelperPanel's mode", () => {
     await waitFor(() => expect(onRefused).toHaveBeenCalledTimes(1));
     expect(onRefused.mock.calls[0]![1]).toBe(messages.flows_notice_mode_not_changed);
     expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+  });
+});
+
+describe("HelperPanel on a target without modes", () => {
+  const oneMode = (overrides: Partial<HelperAdapter> = {}) =>
+    adapter({ modes: null, ...overrides });
+
+  it("shows no mode picker and one set of words, whatever the chat says of its mode", async () => {
+    openChat(true);
+    renderPanel(oneMode({ footerActions: <button type="button">Målets kontroll</button> }));
+
+    expect(await screen.findByRole("button", { name: "Målets kontroll" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Läge:/ })).toBeNull();
+    expect(screen.getByText(TEXTS.partnerDescription)).toBeTruthy();
+    expect(screen.getByText(TEXTS.placeholder)).toBeTruthy();
+    expect(screen.getByText("composer: partner")).toBeTruthy();
+    expect(screen.queryByText(MODES.edit.partnerDescription)).toBeNull();
+  });
+
+  it("never tells the page the chat may write, nor announces a mode", async () => {
+    openChat(true);
+    const onWritingChange = vi.fn();
+    renderPanel(oneMode({ onWritingChange }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Tur börjar" }));
+    api.POST.mockResolvedValue(ok({ ...CHAT, editing: false }));
+    fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole("button", { name: "Tur slut" }));
+
+    expect(onWritingChange).not.toHaveBeenCalledWith(true);
+    expect(announce).not.toHaveBeenCalled();
+    expect(api.PATCH).not.toHaveBeenCalled();
+  });
+
+  it("sends at once for a page with nothing to do first", async () => {
+    openChat(false);
+    renderPanel(oneMode());
+    expect(await screen.findByText("sends at once")).toBeTruthy();
   });
 });
 
@@ -500,9 +560,45 @@ describe("HelperPanel while a message is on its way", () => {
     expect(await screen.findByText("Spara ändringarna först.")).toBeTruthy();
   });
 
-  it("sends at once for a page with nothing to do first", async () => {
+  it("holds a message sent while a mode is being saved until the save lands", async () => {
+    openChat(false);
+    let land!: (value: unknown) => void;
+    api.PATCH.mockReturnValue(new Promise((resolve) => (land = resolve)));
+    renderPanel();
+    await pickEdit();
+    expect(await screen.findByRole("button", { name: "Läge: Redigera" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(conversation.sent).toEqual([]);
+
+    land(ok({ ...CHAT, editing: true }));
+    await waitFor(() => expect(conversation.sent).toEqual([true]));
+  });
+
+  it("holds the message when the mode it waits for is refused, and shows the refusal", async () => {
+    openChat(false);
+    let land!: (value: unknown) => void;
+    api.PATCH.mockReturnValue(new Promise((resolve) => (land = resolve)));
+    const onRefused = vi.fn();
+    renderPanel(adapter({ onRefused }));
+    await pickEdit();
+    fireEvent.click(await screen.findByRole("button", { name: "Skicka" }));
+
+    land({
+      error: { message: "Stale.", code: "stale", eneo_error_code: 9007 },
+      response: new Response(null, { status: 409 })
+    });
+
+    await waitFor(() => expect(conversation.sent).toEqual([false]));
+    expect(onRefused).toHaveBeenCalledTimes(1);
+    expect(onRefused.mock.calls[0]![1]).toBe(messages.flows_notice_mode_not_changed);
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+  });
+
+  it("asks first on a target with modes, so a message can wait for a mode save", async () => {
     openChat(false);
     renderPanel();
-    expect(await screen.findByText("sends at once")).toBeTruthy();
+    expect(await screen.findByText("asks before sending")).toBeTruthy();
   });
 });

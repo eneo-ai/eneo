@@ -506,34 +506,26 @@ def test_no_tool_takes_an_assistant_from_the_model():
         assert set(inspect.signature(tool).parameters) == {"ctx", "changes"}
 
 
-async def test_view_mode_offers_proposals_and_edit_mode_also_changes():
-    asking = await assistant_settings.build_assistant_settings_mcp_server(
-        token="t", tenant_id=uuid4(), editing=False
-    )
-    editing = await assistant_settings.build_assistant_settings_mcp_server(
-        token="t", tenant_id=uuid4(), editing=True
+async def test_a_turn_reads_proposes_and_publishes_but_never_changes_directly():
+    server = await assistant_settings.build_assistant_settings_mcp_server(
+        token="t", tenant_id=uuid4()
     )
 
-    assert {tool.name for tool in asking.tools} == {
+    assert {tool.name for tool in server.tools} == {
         "read_assistant",
         "read_options",
         "read_prompt_history",
         "propose_changes",
-    }
-    assert {tool.name for tool in editing.tools} == {
-        "read_assistant",
-        "read_options",
-        "read_prompt_history",
-        "propose_changes",
-        "update_assistant",
         "publish_assistant",
     }
-    assert all(tool.annotations == {"readOnlyHint": True} for tool in asking.tools)
-    update = next(tool for tool in editing.tools if tool.name == "update_assistant")
-    assert update.annotations == {"readOnlyHint": False, "destructiveHint": False}
-    publish = next(tool for tool in editing.tools if tool.name == "publish_assistant")
-    assert publish.annotations == {"readOnlyHint": False, "destructiveHint": True}
-    assert asking.name == "assistant"
+    assert assistant_settings.EDIT_MODE_TOOLS == {"update_assistant"}
+    for tool in server.tools:
+        if tool.name == "publish_assistant":
+            # The chat asks the person before each call.
+            assert tool.annotations == {"readOnlyHint": False, "destructiveHint": True}
+        else:
+            assert tool.annotations == {"readOnlyHint": True}
+    assert server.name == "assistant"
 
 
 # --- Changes -----------------------------------------------------------------
@@ -940,6 +932,9 @@ async def test_a_change_saves_its_audit_entries_in_its_own_transaction():
             raise BadRequestException("refused")
     service.log.assert_not_awaited()
     service.log_async.assert_not_awaited()
+
+
+_REAL_REQUIRE_EDIT_MODE = helper_chat_service.require_edit_mode
 
 
 def _chat_calls(monkeypatch, *, editing: bool):
@@ -2000,19 +1995,61 @@ def _publishing(monkeypatch, *, editing: bool, published: bool, rights):
     return chat, publish
 
 
-async def test_publishing_is_refused_outside_edit_mode_before_anything_is_read(
-    monkeypatch,
-):
-    _, publish = _publishing(
+async def test_publishing_needs_no_mode_but_the_persons_edit_access(monkeypatch):
+    chat, publish = _publishing(
         monkeypatch, editing=False, published=False, rights=_ALL_RIGHTS
     )
 
     result = await assistant_settings.publish_assistant(MagicMock(), published=True)
 
+    assert not result.isError, result.content[0].text
+    publish.assert_awaited_once()
+    # The edit access is checked on the chat's assistant before the change.
+    ASSISTANT_TARGET.require_edit.assert_awaited_once()  # pyright: ignore[reportFunctionMemberAccess]
+    assert ASSISTANT_TARGET.require_edit.await_args.args[2] == chat.target_id  # pyright: ignore[reportFunctionMemberAccess]
+    assert helper_chat_service.load_chat.await_args.kwargs["lock"] is True  # pyright: ignore[reportFunctionMemberAccess]
+
+
+async def test_publishing_is_refused_without_edit_access_before_anything_is_read(
+    monkeypatch,
+):
+    _, publish = _publishing(
+        monkeypatch, editing=False, published=False, rights=_ALL_RIGHTS
+    )
+    monkeypatch.setattr(
+        ASSISTANT_TARGET,
+        "require_edit",
+        AsyncMock(side_effect=ASSISTANT_TARGET.refusals.unavailable("no_edit_rights")),
+    )
+
+    result = await assistant_settings.publish_assistant(MagicMock(), published=True)
+
     assert result.isError
-    assert result.content[0].text.startswith("Turn on edit mode")
+    assert result.content[0].text == (
+        "You do not have permission to edit this assistant."
+    )
     assistant_settings._person_rights.assert_not_awaited()  # pyright: ignore[reportPrivateUsage, reportFunctionMemberAccess]
     publish.assert_not_awaited()
+
+
+async def test_a_direct_change_is_refused_however_the_row_holds_the_mode(
+    monkeypatch,
+):
+    container, apply = _chat_calls(monkeypatch, editing=True)
+    # The gate as it is: the chat on an assistant is never in edit mode.
+    monkeypatch.setattr(
+        helper_chat_service, "require_edit_mode", _REAL_REQUIRE_EDIT_MODE
+    )
+
+    result = await assistant_settings.update_assistant(
+        MagicMock(), changes={"name": "Ärendestöd"}
+    )
+
+    assert result.isError
+    assert result.content[0].text.startswith("Turn on edit mode")
+    apply.assert_not_awaited()
+    ASSISTANT_TARGET.require_edit.assert_not_awaited()  # pyright: ignore[reportFunctionMemberAccess]
+    container.assistant_service.assert_not_called()
 
 
 async def test_publishing_is_refused_without_the_right_or_when_nothing_would_change(

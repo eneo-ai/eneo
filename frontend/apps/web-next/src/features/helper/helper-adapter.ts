@@ -17,7 +17,10 @@ export type HelperChat = {
    * after a pause) replaces it; earlier ones are never answered again.
    */
   session_id: string;
-  /** Redigera (the chat's tools may change the target) rather than Fråga. */
+  /**
+   * Redigera (the chat's tools may change the target) rather than Fråga;
+   * always false for a target without modes.
+   */
   editing: boolean;
   /** The person's model for this chat; null follows the default. */
   completion_model_id?: string | null;
@@ -29,6 +32,7 @@ export type HelperChat = {
 
 /** A change to the chat; a null model or effort returns to the default. */
 export type HelperChatUpdate = {
+  /** The mode, for a target with modes only. */
   editing?: boolean;
   completion_model_id?: string | null;
   reasoning_effort?: string | null;
@@ -58,23 +62,32 @@ export type HelperTexts = {
   heading: string;
   /** What the conversation calls its partner. */
   partnerName: string;
-  /** The partner's welcome in each mode. */
-  partnerDescription: { ask: string; edit: string };
-  /** The composer's placeholder in each mode. */
-  placeholder: { ask: string; edit: string };
-  /** The composer's name in Redigera; in Fråga it is named by its partner. */
-  composerLabelEdit: string;
+  /** The partner's welcome; in Fråga, for a target with modes. */
+  partnerDescription: string;
+  /** The composer's placeholder; in Fråga, for a target with modes. */
+  placeholder: string;
+  /** Why the server refused the chat for want of access (403), should the page's own reading be out of date. */
+  noAccess: string;
+  /** What starting a new conversation keeps and drops, in its confirmation. */
+  newConversationDescription: string;
+};
+
+/**
+ * A target's two modes, picked beside the send button: Fråga (the chat
+ * reads the target and changes nothing) and Redigera (its tools may change
+ * it). Fråga takes the panel's own texts; these are the picker's and
+ * Redigera's words.
+ */
+export type HelperModes = {
   /** What each mode does, under its name in the picker. */
-  modeDescription: { ask: string; edit: string };
+  description: { ask: string; edit: string };
+  /** Redigera's welcome, placeholder and composer name (in Fråga the composer is named by its partner). */
+  edit: { partnerDescription: string; placeholder: string; composerLabel: string };
   /** Said when the person turns Redigera on or off. */
   editingOn: string;
   editingOff: string;
   /** Said when a read of the chat finds the server left Redigera after a pause. */
   askAfterPause: string;
-  /** Why the server refused the chat for want of access (403), should the page's own reading be out of date. */
-  noAccess: string;
-  /** What starting a new conversation keeps and drops, in its confirmation. */
-  newConversationDescription: string;
 };
 
 /**
@@ -105,6 +118,13 @@ export type HelperAdapter = {
    */
   unavailable: string | null;
   texts: HelperTexts;
+  /**
+   * The target's modes; null for a target with one, whose chat proposes
+   * each change for the person to apply and never changes the target
+   * itself: the panel shows no picker, announces no mode and never reports
+   * a writing turn.
+   */
+  modes: HelperModes | null;
   /** Set while the target cannot be changed. */
   lock?: HelperLock | null;
   /**
@@ -123,7 +143,7 @@ export type HelperAdapter = {
   toolCards?: ToolCards;
   /** The target's own actions in the panel's title row, before the chat's. */
   headerActions?: ReactNode;
-  /** The target's own controls in the composer's footer, before the mode picker (an "@" button). */
+  /** The target's own controls in the composer's footer, before any mode picker (an "@" button). */
   footerActions?: ReactNode;
   /** A tool call of this visit finished; the page knows whether it can have changed the target. */
   onToolCallFinished?: (call: ToolCallRecord) => void;
@@ -155,7 +175,8 @@ export type HelperAdapter = {
   /**
    * A message sent in Redigera left the composer, so the chat may change the
    * target from now on (true), until its answer has ended (false): finished,
-   * failed or stopped, or the message came back. Never true in Fråga.
+   * failed or stopped, or the message came back. Never true in Fråga, nor
+   * for a target without modes.
    */
   onWritingChange?: (writing: boolean) => void;
 };

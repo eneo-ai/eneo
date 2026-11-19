@@ -71,7 +71,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
 from eneo.helper_chats.binding import HelperChatBinding
-from eneo.helper_chats.personas.shared import mode_now
+from eneo.helper_chats.personas.shared import turn_note
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
@@ -4118,25 +4118,18 @@ class AssistantService:
     async def _helper_chat_binding(
         self, *, session_id: UUID, assistant_id: UUID
     ) -> HelperChatBinding:
-        """The target the chat helps with and whether it is in edit mode,
-        after the binding's own access checks."""
+        """The target the chat helps with and whether the turn runs in edit
+        mode, after the binding's own access checks."""
         from dependency_injector import providers
 
-        from eneo.helper_chats.application.helper_chat_service import (
-            load_bound_chat,
-        )
+        from eneo.helper_chats.application.helper_chat_service import load_binding
         from eneo.main.container.container_overrides import override_user
         from eneo.main.container.request_container import request_container
 
         container = request_container(session=providers.Object(self.repo.session))
         override_user(container=container, user=self.user)
-        chat = await load_bound_chat(
+        return await load_binding(
             container, session_id=session_id, assistant_id=assistant_id
-        )
-        return HelperChatBinding(
-            target_type=chat.target_type,
-            target_id=chat.target_id,
-            editing=chat.editing,
         )
 
     async def _execute_turn(
@@ -4218,17 +4211,22 @@ class AssistantService:
 
         # A helper chat works on its target through the target's loopback
         # tools; a model without tool calling only talks about it. The turn's
-        # instructions end with the mode the tools are chosen by, so what the
-        # model is told and what it is offered agree; the note is appended,
-        # because the start of the prompt belongs to the Skill runtime.
+        # instructions end with a note for the mode the tools are chosen by
+        # (none for a target without modes), so what the model is told and
+        # what it is offered agree; the note is appended, because the start
+        # of the prompt belongs to the Skill runtime.
         helper_mcp_server = None
         if prepared.helper_chat is not None:
+            from eneo.helper_chats.targets import target_for
+
+            helper_target = target_for(prepared.helper_chat.target_type)
             can_call_tools = prepared.effective_completion_model.supports_tool_calling
             prompt_addendum = "\n\n".join(
                 part
                 for part in (
                     prompt_addendum,
-                    mode_now(
+                    turn_note(
+                        has_modes=helper_target.has_modes,
                         editing=prepared.helper_chat.editing,
                         can_call_tools=can_call_tools,
                     ),
@@ -4236,11 +4234,7 @@ class AssistantService:
                 if part
             )
             if can_call_tools:
-                from eneo.helper_chats.targets import target_for
-
-                helper_mcp_server = await target_for(
-                    prepared.helper_chat.target_type
-                ).build_tool_server(
+                helper_mcp_server = await helper_target.build_tool_server(
                     token=mint_scoped_token(),
                     tenant_id=self.user.tenant_id,
                     editing=prepared.helper_chat.editing,

@@ -29,6 +29,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.helper_chats.binding import HelperChatBinding
 from eneo.helper_chats.targets import (
     HelperChatAuditEvent,
     HelperChatTarget,
@@ -67,6 +68,12 @@ class OpenedChat:
     default_completion_model_id: UUID | None
 
 
+def in_edit_mode(target: HelperChatTarget[Any], chat: HelperChats) -> bool:
+    """Whether the chat is in edit mode, where the chat itself may write to
+    its target. Never on a target without modes, whatever its row holds."""
+    return target.has_modes and chat.editing
+
+
 async def load_chat(
     container: Container,
     target: HelperChatTarget[Any],
@@ -84,6 +91,27 @@ async def load_chat(
     after a pause (``_leave_edit_mode_after_pause``): the chat opened, or a
     turn started on a tab left open, after the pause offers no writing tools,
     and its tool calls are refused a change."""
+    chat, _ = await _load_chat(
+        container,
+        target,
+        session_id=session_id,
+        assistant_id=assistant_id,
+        target_id=target_id,
+        lock=lock,
+    )
+    return chat
+
+
+async def _load_chat(
+    container: Container,
+    target: HelperChatTarget[Any],
+    *,
+    session_id: UUID,
+    assistant_id: UUID | None,
+    target_id: UUID | None,
+    lock: bool,
+) -> tuple[HelperChats, Any]:
+    """``load_chat``, with the target as its read check read it."""
     user = container.user()
     await target.require_available(container)
     query = (
@@ -111,7 +139,7 @@ async def load_chat(
     chat = await _session(container).scalar(query)
     if chat is None:
         raise target.refusals.chat_not_found()
-    await target.require_read(
+    record = await target.require_read(
         container, target.scoped_request(chat.space_id), chat.target_id
     )
     if lock:
@@ -127,14 +155,27 @@ async def load_chat(
         if chat is None:
             raise target.refusals.chat_not_found()
     await _leave_edit_mode_after_pause(container, chat)
-    return chat
+    return chat, record
 
 
-async def load_bound_chat(
+def turn_in_edit_mode(
+    target: HelperChatTarget[Any], chat: HelperChats, record: object
+) -> bool:
+    """Whether a turn of the chat runs in edit mode: the chat is in it and
+    the target may change right now. A turn on a target that cannot change
+    (a published flow) runs as "Fråga" whatever the row holds, so the tools
+    it is offered and the note it is told say what the panel shows; the row
+    is left as it is."""
+    return in_edit_mode(target, chat) and target.changeable(record)
+
+
+async def load_binding(
     container: Container, *, session_id: UUID, assistant_id: UUID
-) -> HelperChats:
-    """The chat ``assistant_id`` answers in, loaded as its target loads it.
-    An assistant that is no chat's is not found."""
+) -> HelperChatBinding:
+    """The chat ``assistant_id`` answers in, loaded as its target loads it,
+    with the mode its turn runs in (``turn_in_edit_mode``), read from the
+    target its access check loaded. An assistant that is no chat's is not
+    found."""
     target_type = await _session(container).scalar(
         sa.select(HelperChats.target_type).where(
             HelperChats.tenant_id == container.user().tenant_id,
@@ -143,11 +184,19 @@ async def load_bound_chat(
     )
     if target_type is None:
         raise NotFoundException("Helper chat not found.")
-    return await load_chat(
+    target = target_for(target_type)
+    chat, record = await _load_chat(
         container,
-        target_for(target_type),
+        target,
         session_id=session_id,
         assistant_id=assistant_id,
+        target_id=None,
+        lock=False,
+    )
+    return HelperChatBinding(
+        target_type=chat.target_type,
+        target_id=chat.target_id,
+        editing=turn_in_edit_mode(target, chat, record),
     )
 
 
@@ -161,8 +210,31 @@ async def require_edit_mode(
     """Edit mode and edit access to the chat's ``target``, and with
     ``change`` also a target that may change right now, so a change it
     refuses is refused before anything is read or written."""
-    if not chat.editing:
+    if not in_edit_mode(target, chat):
         raise target.refusals.not_editing()
+    await _require_edit_access(container, target, chat, change=change)
+
+
+async def require_approved_change(
+    container: Container, target: HelperChatTarget[Any], chat: HelperChats
+) -> None:
+    """What a change the person approves in the chat before it runs (such as
+    publishing) needs: edit access to a target that may change right now,
+    and on a target with modes edit mode too. A chat on a target without
+    modes never writes by itself, so there the approval takes its place."""
+    if target.has_modes:
+        await require_edit_mode(container, target, chat, change=True)
+        return
+    await _require_edit_access(container, target, chat, change=True)
+
+
+async def _require_edit_access(
+    container: Container,
+    target: HelperChatTarget[Any],
+    chat: HelperChats,
+    *,
+    change: bool,
+) -> None:
     record = await target.require_edit(
         container, target.scoped_request(chat.space_id), chat.target_id
     )
@@ -402,12 +474,16 @@ async def _idle_since_last_activity(container: Container, chat: HelperChats) -> 
 async def _leave_edit_mode_after_pause(container: Container, chat: HelperChats) -> None:
     """Turn edit mode off when the conversation has been idle, so a person who
     comes back after the pause asks in view mode until they turn edit mode on.
+    A chat on a target without modes is never in edit mode, so nothing here
+    applies to it.
 
     ``mode_changed_at`` is left as it is: the idle measure counts the person's
     own activity, so turning edit mode on after this still starts a new
     conversation. The update matches only the chat as it was read, so a mode
     change or a new conversation saved meanwhile is kept."""
-    if not chat.editing or not await _idle_since_last_activity(container, chat):
+    if not in_edit_mode(target_for(chat.target_type), chat):
+        return
+    if not await _idle_since_last_activity(container, chat):
         return
     left = await _session(container).scalar(
         sa.update(HelperChats)
@@ -611,11 +687,14 @@ async def update_chat(
 ) -> OpenedChat:
     """Change the chat's edit mode, model or reasoning effort, then bring its
     assistant in line. Entering edit mode after a pause starts a new
-    conversation (see ``_idle_since_last_activity``)."""
+    conversation (see ``_idle_since_last_activity``). A chat on a target
+    without modes refuses any ``editing``."""
     chat = await load_chat(
         container, target, session_id=session_id, target_id=target_id, lock=True
     )
     if editing is not None:
+        if not target.has_modes:
+            raise target.refusals.no_modes()
         await target.fence_mode_change(container, target_id, expected_revision)
         if editing:
             await target.require_edit(

@@ -342,7 +342,7 @@ Det här tar hjälpassistenten inte över:
 - Guidens modellinställningar (personen väljer resonemangsnivå i chatten), dess egen kunskap, rankningen av träffar och dess MCP-servrar.
 - Guidens gallringstid. Hjälpassistentens konversationer följer ytans gallringstid, annars organisationens. De tas bort tillsammans med assistenten eller flödet de hör till.
 
-Hjälpassistentens konversationer räknas som modellanvändning, också i personens egen användning. Det gjorde inte guidens konversationer. En ändring som hjälpassistenten gör loggas i granskningsloggen som personens egen ändring.
+Hjälpassistentens konversationer räknas som modellanvändning, också i personens egen användning. Det gjorde inte guidens konversationer. Hjälpassistenten föreslår varje ändring av en assistent och sparar inget själv. Ändringen sparas när personen använder förslaget, och då är den personens egen. Publicering och avpublicering via hjälpassistenten väntar tills personen godkänner dem i chatten. Båda loggas i granskningsloggen som personens egna ändringar.
 
 **Gör:** flytta era egna regler från guidens prompt till hjälpassistentens riktlinjer. Kontrollera sedan reglaget och standardmodellen under **Admin > Hjälpassistent**.
 

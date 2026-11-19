@@ -596,7 +596,8 @@ function AssistantProposalCard({
 }
 
 /**
- * A change the helper chat made in Redigera: each setting before and after,
+ * A direct change by the helper chat, which a conversation's history can
+ * hold: each setting before and after,
  * and "Ångra", which saves the values from before as the person's own edit.
  * "Ångra" is offered only while the settings still have what the change
  * gave them, read from the assistant as the editor has it now; otherwise

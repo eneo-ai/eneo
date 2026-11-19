@@ -1,6 +1,6 @@
 """The assistant as a helper chat's target: who gets a chat on which
-assistant, what the refusals say, and how the target answers the chat's
-other questions."""
+assistant, what the refusals say, that the chat has one mode, and how the
+target answers the chat's other questions."""
 
 from __future__ import annotations
 
@@ -169,6 +169,10 @@ async def test_an_assistant_outside_the_chats_space_is_out_of_reach():
         await ASSISTANT_TARGET.require_edit(container, inside, assistant.id)
         is assistant
     )
+    assert (
+        await ASSISTANT_TARGET.require_read(container, inside, assistant.id)
+        is assistant
+    )
 
 
 async def test_a_bound_chat_whose_assistant_cannot_be_read_is_not_found():
@@ -245,9 +249,11 @@ def test_the_target_answers_the_chats_other_questions():
     assistant = _assistant()
 
     assert target_for(HelperChatTargetType.ASSISTANT) is ASSISTANT_TARGET
+    assert ASSISTANT_TARGET.has_modes is False
     assert ASSISTANT_TARGET.starts_in_edit_mode(assistant) is False
     assert ASSISTANT_TARGET.space_id(assistant) == assistant.space_id
     assert ASSISTANT_TARGET.name(assistant) == assistant.name
+    assert ASSISTANT_TARGET.changeable(assistant) is True
     assert ASSISTANT_TARGET.require_changeable(assistant) is None
     assert ASSISTANT_TARGET.idle_after() == timedelta(
         minutes=get_settings().flow_authoring_chat_idle_minutes
@@ -360,9 +366,10 @@ async def test_the_lock_takes_the_assistants_own():
     )
 
 
-async def test_a_turn_gets_the_assistant_settings_tools():
+@pytest.mark.parametrize("editing", [True, False])
+async def test_every_turn_gets_the_same_assistant_settings_tools(editing: bool):
     server = await ASSISTANT_TARGET.build_tool_server(
-        token="t", tenant_id=uuid4(), editing=False
+        token="t", tenant_id=uuid4(), editing=editing
     )
 
     assert server.name == "assistant"
@@ -371,4 +378,13 @@ async def test_a_turn_gets_the_assistant_settings_tools():
         "read_options",
         "read_prompt_history",
         "propose_changes",
+        "publish_assistant",
     }
+
+
+def test_a_mode_change_is_refused_with_its_own_code():
+    refused = ASSISTANT_TARGET.refusals.no_modes()
+
+    assert isinstance(refused, BadRequestException)
+    assert refused.code == AssistantHelperChatErrorCode.NO_MODES
+    assert refused.code == "helper_chat_no_modes"

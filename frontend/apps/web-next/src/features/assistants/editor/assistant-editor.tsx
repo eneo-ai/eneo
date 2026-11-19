@@ -51,7 +51,7 @@ import { spaceModelsQueryOptions } from "./assistant-editor-rules";
 import { AskHelperButton, AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
 import { assistantHelperAvailabilityQueryOptions } from "./assistant-helper-api";
 import { settingLabel } from "./assistant-helper-cards";
-import { useChatChangeMarks, useHelperFormLock } from "./assistant-helper-feedback";
+import { useChatChangeMarks } from "./assistant-helper-feedback";
 import { AssistantHelperFormProvider } from "./assistant-helper-form";
 import { isPromptLocked, lockedAssistantModel } from "./effective-config";
 import {
@@ -118,10 +118,6 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   // Ways into the helper from the form exist only where they can lead somewhere.
   const helperAvailable = availability?.available === true;
   const [helperOpen, setHelperOpen] = useState(false);
-  // A message sent in Redigera is running: the helper may write the form at
-  // any moment, so it is locked, also while the helper is closed.
-  const [helperWriting, setHelperWriting] = useState(false);
-  const formLock = useHelperFormLock(helperWriting);
   const savePending = useSavePendingNow();
   // A prepared message for the composer, put there once the helper shows one.
   const pendingAsk = useRef<string | null>(null);
@@ -386,8 +382,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     ) : null,
     onChanged: (fields) => showChanges(fields, "helper"),
     // The helper reads what is on screen: what the form has not saved goes first.
-    beforeSend: async () => ((await savePending()) ? null : t("helper_send_held_unsaved")),
-    onWritingChange: setHelperWriting
+    beforeSend: async () => ((await savePending()) ? null : t("helper_send_held_unsaved"))
   });
 
   // A prepared message goes in once the helper is open and its composer is on screen.
@@ -469,7 +464,6 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
               sections={markedSections}
               // A section's own bar has the helper's toggle too, as the index's has.
               phone={{ ...phone, sectionActions: helperToggle(true) }}
-              contentLock={formLock}
               sectionAction={
                 helperAvailable
                   ? (section) => (

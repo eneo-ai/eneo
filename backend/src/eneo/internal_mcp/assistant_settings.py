@@ -9,16 +9,19 @@ model is plain text built from an allow-list of settings, so a credential, an
 API key or a server's sign-in configuration never reaches it.
 
 Three tools read (the assistant, what its space offers and the saved
-versions of its instructions) and one proposes a change without saving it.
-Two more are offered only in edit mode: one changes the assistant through the
-same update a person's own save makes (``apply_assistant_update``), and one
-publishes or unpublishes it through the same publishing a person's own does
-(``apply_assistant_publish``), each audited with the person as actor. A
-setting the person's role does not let them change in the editor is refused
-by the tools that propose and change it, and named as such when the
-assistant is read. So is what the editor's own rules hold back while the
-assistant is set up as it is: knowledge beside MCP servers, and tools and
-functions for a chat model that cannot use tools.
+versions of its instructions) and one proposes a change without saving it:
+the person applies a proposal as their own save. One more publishes or
+unpublishes the assistant through the same publishing a person's own does
+(``apply_assistant_publish``), audited with the person as actor, once the
+person has approved the call in the chat. A last one, ``update_assistant``,
+changes the assistant through the same update a person's own save makes
+(``apply_assistant_update``); only a chat in edit mode may call it, and the
+chat on an assistant has none, so no turn offers it. A setting the person's
+role does not let them change in the editor is refused by the tools that
+propose and change it, and named as such when the assistant is read. So is
+what the editor's own rules hold back while the assistant is set up as it
+is: knowledge beside MCP servers, and tools and functions for a chat model
+that cannot use tools.
 """
 
 from __future__ import annotations
@@ -75,8 +78,8 @@ logger = logging.getLogger(__name__)
 
 _SERVER_DESCRIPTION = (
     "Read the assistant this chat is about, what its space offers and the "
-    "saved versions of its instructions, propose changes, and in edit mode "
-    "make them and publish or unpublish the assistant."
+    "saved versions of its instructions, propose changes for the person to "
+    "apply, and publish or unpublish the assistant once the person approves."
 )
 
 mcp = FastMCP(
@@ -131,12 +134,16 @@ async def _call(
     operation: Callable[[Any, Any], Awaitable[CallToolResult]],
     *,
     editing: bool = False,
+    approved: bool = False,
 ) -> CallToolResult:
     """Run ``operation`` on the chat the token was minted for, as the person,
-    in one transaction. ``editing`` makes the call a change: the assistant and
-    the chat are locked, the chat must be in edit mode and the person must
+    in one transaction. ``editing`` makes the call a change the chat makes by
+    itself, and ``approved`` one the person approves in the chat before it
+    runs. Either way the assistant and the chat are locked, the person must
     still be allowed to edit the assistant, and the audit entries the change
-    logs are saved in its transaction (``_audit_in_transaction``). A refusal
+    logs are saved in its transaction (``_audit_in_transaction``); a change
+    by the chat itself also needs edit mode, which the chat on an assistant
+    never is (``helper_chat_service.require_approved_change``). A refusal
     rolls the transaction back and comes back as text the model reads."""
     from eneo.assistants.application.assistant_helper_chat import ASSISTANT_TARGET
     from eneo.helper_chats.application import helper_chat_service
@@ -145,7 +152,7 @@ async def _call(
         async with internal_tool_context(ctx) as scope:
             if scope.session_id is None:
                 raise NotFoundException("Helper chat not found.")
-            if not editing:
+            if not (editing or approved):
                 chat = await helper_chat_service.load_chat(
                     scope.container,
                     ASSISTANT_TARGET,
@@ -160,9 +167,14 @@ async def _call(
                 assistant_id=scope.assistant_id,
                 lock=True,
             )
-            await helper_chat_service.require_edit_mode(
-                scope.container, ASSISTANT_TARGET, chat, change=True
-            )
+            if editing:
+                await helper_chat_service.require_edit_mode(
+                    scope.container, ASSISTANT_TARGET, chat, change=True
+                )
+            else:
+                await helper_chat_service.require_approved_change(
+                    scope.container, ASSISTANT_TARGET, chat
+                )
             async with _audit_in_transaction(scope.container):
                 return await operation(scope.container, chat)
     except (
@@ -1375,7 +1387,8 @@ def require_changeable(changes: dict[str, Any]) -> None:
         "knowledge and its result ranking, the MCP servers and their tools, the "
         "functions, the document template, conversation retention and insights."
         + (
-            " Publishing and unpublishing have a tool of their own, in edit mode."
+            " Publishing and unpublishing have a tool of their own, which asks "
+            "the person first."
             if "published" in changes
             else ""
         )
@@ -2878,11 +2891,11 @@ def publish_text(published: bool) -> str:
 @mcp.tool(annotations=_ACTS)
 async def publish_assistant(ctx: Context, published: bool) -> CallToolResult:
     """Publish the assistant (published true) or unpublish it (false), only
-    in "Redigera" and only when the person asks for it. The person approves
-    each call in the chat before it runs; a call they decline changed
-    nothing, so do not repeat it unless they ask again. Refused when the
-    person's role does not let them publish, or when the assistant already
-    is published or unpublished as asked."""
+    when the person asks for it. The person approves each call in the chat
+    before it runs; a call they decline changed nothing, so do not repeat it
+    unless they ask again. Refused when the person's role does not let them
+    publish, or when the assistant already is published or unpublished as
+    asked."""
 
     async def operation(container, chat):
         from eneo.assistants.application.assistant_publish_operation import (
@@ -2923,27 +2936,24 @@ async def publish_assistant(ctx: Context, published: bool) -> CallToolResult:
             },
         )
 
-    return await _call(ctx, operation, editing=True)
+    return await _call(ctx, operation, approved=True)
 
 
 # --- The server of one turn --------------------------------------------------
 
-EDIT_MODE_TOOLS: frozenset[str] = frozenset({"update_assistant", "publish_assistant"})
-"""The tools ``_call`` refuses outside edit mode. A turn in view mode does not
-offer them, so the model never calls what would be refused; it proposes a
-change instead."""
+EDIT_MODE_TOOLS: frozenset[str] = frozenset({"update_assistant"})
+"""The tools ``_call`` refuses outside edit mode. The chat on an assistant has
+no edit mode, so no turn offers them; it proposes a change instead."""
 
 
-async def build_assistant_settings_mcp_server(
-    *, token: str, tenant_id: UUID, editing: bool = True
-):
-    """The assistant settings server for one turn: every tool in edit mode,
-    those that change nothing while the chat only asks."""
+async def build_assistant_settings_mcp_server(*, token: str, tenant_id: UUID):
+    """The assistant settings server for one turn: the tools that read, the
+    proposal and publishing, never a tool that needs edit mode."""
     return await build_ephemeral_server(
         mcp,
         name=ASSISTANT_SERVER_NAME,
         description=_SERVER_DESCRIPTION,
         token=token,
         tenant_id=tenant_id,
-        exclude_tools=() if editing else EDIT_MODE_TOOLS,
+        exclude_tools=EDIT_MODE_TOOLS,
     )

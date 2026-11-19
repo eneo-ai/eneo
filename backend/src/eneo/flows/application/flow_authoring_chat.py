@@ -740,6 +740,10 @@ class _FlowChatRefusals:
             "Enter edit mode in the flow editor before changing this flow."
         )
 
+    def no_modes(self) -> Exception:
+        # Not given: a flow's chat has modes.
+        return BadRequestException("The flow chat's mode cannot be changed.")
+
     def no_model(self) -> Exception:
         return FlowBadRequestException(
             "Choose a default model that supports tools for this space.",
@@ -786,6 +790,7 @@ class _FlowTarget:
     edit mode while the person may edit it and the flow is not published."""
 
     target_type = HelperChatTargetType.FLOW
+    has_modes = True
     audit = HelperChatAudit(
         entity_type=EntityType.FLOW,
         chat_created=HelperChatAuditEvent(
@@ -828,10 +833,11 @@ class _FlowTarget:
 
     async def require_read(
         self, container: Container, request: Request, target_id: UUID
-    ) -> None:
-        await require_flow_current_definition_access(
+    ) -> Flow:
+        access = await require_flow_current_definition_access(
             request, container, flow_id=target_id
         )
+        return access.flow
 
     async def require_edit(
         self, container: Container, request: Request, target_id: UUID
@@ -871,9 +877,12 @@ class _FlowTarget:
             flow_id=target_id, expected_revision=expected_revision
         )
 
-    def require_changeable(self, record: Flow) -> None:
+    def changeable(self, record: Flow) -> bool:
         # The chat has no way to unpublish a flow.
-        if record.published_version is not None:
+        return record.published_version is None
+
+    def require_changeable(self, record: Flow) -> None:
+        if not self.changeable(record):
             raise BadRequestException(PUBLISHED_FLOW_MESSAGE, code="flow_published")
 
     def starts_in_edit_mode(self, record: Flow) -> bool:

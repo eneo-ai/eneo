@@ -65,6 +65,10 @@ class HelperChatRefusals(Protocol):
 
     def not_editing(self) -> Exception: ...
 
+    def no_modes(self) -> Exception:
+        """A request to change the mode of a chat whose target has none."""
+        ...
+
     def no_model(self) -> Exception: ...
 
     def model_without_tools(self, model_id: UUID) -> Exception: ...
@@ -84,6 +88,15 @@ class HelperChatTarget(Protocol[RecordT]):
 
     @property
     def target_type(self) -> HelperChatTargetType: ...
+
+    @property
+    def has_modes(self) -> bool:
+        """Whether the person switches the chat between "Fråga" and
+        "Redigera". Only a chat on a target with modes is ever in edit mode,
+        where the chat itself may write to the target. On a target without
+        them the chat proposes each change for the person to apply, and its
+        mode cannot be changed."""
+        ...
 
     def instructions(self, container: Container) -> str:
         """The persona the chat's assistant answers with, as the caller's
@@ -115,8 +128,9 @@ class HelperChatTarget(Protocol[RecordT]):
 
     async def require_read(
         self, container: Container, request: Request, target_id: UUID
-    ) -> None:
-        """Refuse when the caller may not read the target."""
+    ) -> RecordT:
+        """The target as the access check read it, or a refusal when the
+        caller may not read it."""
         ...
 
     async def require_edit(
@@ -145,6 +159,10 @@ class HelperChatTarget(Protocol[RecordT]):
         since the caller last read it."""
         ...
 
+    def changeable(self, record: RecordT) -> bool:
+        """Whether anything in the target may change right now."""
+        ...
+
     def require_changeable(self, record: RecordT) -> None:
         """Refuse when nothing in the target may change right now."""
         ...
@@ -166,7 +184,8 @@ class HelperChatTarget(Protocol[RecordT]):
         self, *, token: str, tenant_id: UUID, editing: bool
     ) -> MCPServer:
         """The tool server of one turn: every tool in edit mode, else those
-        that change nothing."""
+        the chat may call without it. ``editing`` is the mode the turn runs
+        in (``helper_chat_service.turn_in_edit_mode``)."""
         ...
 
 

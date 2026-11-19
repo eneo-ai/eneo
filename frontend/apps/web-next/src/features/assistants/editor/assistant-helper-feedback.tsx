@@ -1,7 +1,6 @@
-import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useFormatter, useTranslations } from "use-intl";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { capabilityControlId } from "./assistant-editor-rules";
 import { settingLabel } from "./assistant-helper-cards";
 import { FUNCTION_FIELD_PREFIX } from "./assistant-helper-changes";
@@ -11,8 +10,7 @@ import type { AssistantSectionId, SettingReference } from "./setting-references"
 
 /**
  * What the form shows of the helper chat's work: the settings a change from
- * the chat touched, marked for a while, and the lock while the helper may
- * write.
+ * the chat touched, marked for a while.
  */
 
 /** How long the marks stay: as long as the flow page's. */
@@ -133,27 +131,4 @@ export function useChatChangeMarks(references: References) {
     [announce, format, references, t]
   );
   return { marks, show };
-}
-
-/**
- * The form's lock while the helper may write it: said politely when it
- * starts and when it ends, and the notice to show above the form while it
- * lasts. The notice describes a state, so it has no live role.
- */
-export function useHelperFormLock(locked: boolean): ReactNode {
-  const t = useTranslations();
-  const announce = useAnnounce();
-  const announced = useRef(locked);
-  useEffect(() => {
-    if (announced.current === locked) return;
-    announced.current = locked;
-    announce(t(locked ? "helper_lock_started" : "helper_lock_ended"));
-  }, [announce, locked, t]);
-  return locked ? (
-    <Banner
-      status="info"
-      title={t("helper_lock_title")}
-      description={t("helper_lock_description")}
-    />
-  ) : null;
 }

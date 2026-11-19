@@ -32,7 +32,6 @@ const REFUSAL_KEYS: Record<string, string> = {
   helper_chat_no_edit_rights: "helper_no_access",
   helper_chat_not_supported: "helper_unavailable_not_supported",
   helper_chat_disabled: "helper_unavailable_disabled",
-  helper_chat_not_editing: "helper_refusal_not_editing",
   helper_chat_model_without_tools: "helper_refusal_model_without_tools",
   helper_chat_model_below_classification: "helper_refusal_model_below_classification",
   helper_chat_model_not_in_space: "helper_refusal_model_not_in_space",
@@ -42,16 +41,17 @@ const REFUSAL_KEYS: Record<string, string> = {
 /**
  * The helper panel's adapter for an assistant in its settings editor. The
  * chat is open to the person as the availability read says (it is asked
- * for only then); an assistant has no lock and no revision. A proposal
- * shows as a card to apply, a change made in Redigera as a card to undo.
- * When one of the chat's tools finishes, and when an answer ends, the
- * assistant and its space are read again, so the form shows what the
- * helper changed (a publish also the API keys' expiry notices, as the
- * publishing section's own publish does), and a change it made or a
- * publish is handed to `onChanged`. The page
- * hands it what the chat can refer to (the assistant's settings), the
- * composer's "@" button, what runs before a message goes and what to do
- * while the helper may write.
+ * for only then); an assistant has no lock and no revision. The chat has
+ * one mode: every change it wants shows as a proposal card that the person
+ * applies, and a publish or unpublish waits for the person's approval. A
+ * change card with an undo is still drawn for a direct change an earlier
+ * conversation holds. When one of the chat's tools finishes, and when an
+ * answer ends, the assistant and its space are read again, so the form
+ * shows what changed (a publish also the API keys' expiry notices, as the
+ * publishing section's own publish does), and a publish (or a direct
+ * change) is handed to `onChanged`. The page hands it what the chat can
+ * refer to (the assistant's settings), the composer's "@" button and what
+ * runs before a message goes.
  */
 export function useAssistantHelper({
   assistant,
@@ -59,8 +59,7 @@ export function useAssistantHelper({
   references,
   footerActions,
   onChanged,
-  beforeSend,
-  onWritingChange
+  beforeSend
 }: {
   assistant: Assistant;
   /** The availability read; undefined while it is pending or failed. */
@@ -70,7 +69,6 @@ export function useAssistantHelper({
   /** The settings an `update_assistant` or `publish_assistant` call of this visit actually changed. */
   onChanged?: (fields: string[]) => void;
   beforeSend?: HelperAdapter["beforeSend"];
-  onWritingChange?: HelperAdapter["onWritingChange"];
 }): HelperAdapter {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -92,25 +90,12 @@ export function useAssistantHelper({
     texts: {
       heading: t("helper_heading"),
       partnerName: t("helper_partner_name"),
-      partnerDescription: {
-        ask: t("helper_partner_description_ask"),
-        edit: t("helper_partner_description_edit")
-      },
-      placeholder: {
-        ask: t("helper_placeholder_ask"),
-        edit: t("helper_placeholder_edit")
-      },
-      composerLabelEdit: t("helper_composer_label_edit"),
-      modeDescription: {
-        ask: t("helper_mode_ask_description"),
-        edit: t("helper_mode_edit_description")
-      },
-      editingOn: t("helper_editing_on"),
-      editingOff: t("helper_editing_off"),
-      askAfterPause: t("helper_ask_after_pause"),
+      partnerDescription: t("helper_partner_description"),
+      placeholder: t("helper_placeholder"),
       noAccess: t("helper_no_access"),
       newConversationDescription: t("helper_new_conversation_description")
     },
+    modes: null,
     refusalText,
     onRefused: (error, title) => {
       const reason = error instanceof EneoApiError ? error.reason : undefined;
@@ -130,8 +115,7 @@ export function useAssistantHelper({
       if (fields.length > 0) onChanged?.(fields);
     },
     onAnswerFinished: refresh,
-    beforeSend,
-    onWritingChange
+    beforeSend
   };
 }
 

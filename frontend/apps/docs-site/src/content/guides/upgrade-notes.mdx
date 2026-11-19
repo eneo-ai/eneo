@@ -337,7 +337,7 @@ The helper does not take over:
 - The guide's model settings (the person chooses the reasoning effort in the chat), its own knowledge, its result ranking and its MCP servers.
 - The guide's retention period. Helper conversations follow the space's retention, then the organisation's, and are removed with the assistant or flow they belong to.
 
-Helper conversations count as model use, also in the person's own usage, which the guide's conversations did not. A change the helper makes is audited as the person's own change.
+Helper conversations count as model use, also in the person's own usage, which the guide's conversations did not. The helper proposes each change to an assistant and saves nothing itself: the change is saved when the person applies the proposal, as the person's own change. Publishing or unpublishing from the helper waits for the person's approval in the chat. Both are audited as the person's own changes.
 
 **Do:** move your own rules from the guide's prompt into the helper's guidance, then check the switch and the default model in **Admin > Helper assistant**.
 
