@@ -15,7 +15,7 @@ async def test_mark_stale_jobs_failed_targets_queued_and_in_progress():
     async def fake_execute(stmt):
         captured["stmt"] = stmt
         result = MagicMock()
-        result.all.return_value = []
+        result.scalars.return_value.all.return_value = []
         return result
 
     session = AsyncMock()
@@ -42,7 +42,7 @@ async def test_mark_stale_jobs_failed_skips_rows_a_running_job_holds():
     async def fake_execute(stmt):
         captured["stmt"] = stmt
         result = MagicMock()
-        result.all.return_value = []
+        result.scalars.return_value.all.return_value = []
         return result
 
     session = AsyncMock()
