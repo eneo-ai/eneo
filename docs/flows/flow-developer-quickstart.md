@@ -344,8 +344,9 @@ ends over one core path, not separate engines.
   space's default model must support tool calling. Its assistant reaches the
   Flow only through the loopback flow tools
   (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
-  `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
-  `move_step`, `remove_step`, `publish_flow` (unpublishing stays the editor's
+  `update_flow_settings`, `read_step_assistant`, `update_step`,
+  `read_step_kinds`, `add_step` (adds a step by the editor's step kind, with
+  the values that kind takes), `move_step`, `remove_step`, `publish_flow` (unpublishing stays the editor's
   action; the chat has no tool for it),
   `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`,
   `dismiss_flow_suggestion`, and the run tools `run_flow`, `read_run`,

@@ -22,6 +22,7 @@ from eneo.authentication.browser_session_router import (
     router as browser_session_router,
 )
 from eneo.main.config import get_settings
+from eneo.server.api_docs import install_api_docs
 from eneo.server.exception_handlers import http_exception_response
 from eneo.server.middleware.compression import SelectiveGZipMiddleware
 from eneo.server.middleware.response_headers import ResponseHeadersMiddleware
@@ -29,10 +30,9 @@ from eneo.server.runtime_config_router import log_unlinked_runtime_values
 from eneo.server.runtime_config_router import router as runtime_config_router
 from eneo.server.web_app import install_web_app
 
-# FastAPI's and SCIM's interactive documentation; the openapi.json files stay.
+# Remaining CDN-backed documentation; /docs is the local viewer now.
 _DOCUMENTATION_PAGES = frozenset(
     {
-        "/docs",
         "/docs/oauth2-redirect",
         "/redoc",
         "/scim/v2/docs",
@@ -43,7 +43,7 @@ _DOCUMENTATION_PAGES = frozenset(
 
 
 class _DocumentationOff:
-    """404 for the documentation pages.
+    """404 for the remaining CDN-backed documentation pages.
 
     They load unpinned CDN scripts without SRI. On the host that holds the
     browser session, such a script would run with the signed-in user's session.
@@ -65,6 +65,7 @@ class _DocumentationOff:
 
 def install_browser_platform(app: FastAPI) -> None:
     settings = get_settings()
+    install_api_docs(app)
     app.include_router(runtime_config_router, prefix=settings.api_prefix)
     app.include_router(browser_session_router, prefix=settings.api_prefix)
     app.include_router(callback_router)

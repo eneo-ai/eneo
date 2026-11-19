@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { Switch } from "@astryxdesign/core/Switch";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Lock, MessagesSquare, MessageSquareText } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -16,7 +15,7 @@ import { CONVERSATION_MIN_WIDTH, panelFitsBeside } from "@/features/chat/side-pa
 import { InsightsAnalysis, type AnalysisSuggestion } from "./chat/insights-analysis";
 import { InsightCitationsContext } from "./chat/insight-citations";
 import { ExploreConversationsDialog } from "./explore-conversations-dialog";
-import { FeedbackInbox, type FeedbackFilter } from "./feedback-inbox";
+import { FeedbackInbox } from "./feedback-inbox";
 import { FINDING_SUGGESTION, FindingView } from "./finding-view";
 import {
   feedbackCounts,
@@ -24,7 +23,12 @@ import {
   type InsightFilters,
   type OpenableFindingKind
 } from "./insight-figures";
-import { findingTrigger, insightEditorLinks, InsightFindings } from "./insight-findings";
+import {
+  findingTrigger,
+  insightEditorLinks,
+  InsightFindings,
+  readCommentsTrigger
+} from "./insight-findings";
 import {
   insightActivityQueryOptions,
   insightFindingsQueryOptions,
@@ -34,8 +38,9 @@ import {
   insightTopQuestionsQueryOptions,
   isInsightRefusal
 } from "./insight-stats";
+import type { InsightView } from "./insight-view-url";
 import { InsightsOverview } from "./insights-overview";
-import { InsightsRangePicker } from "./insights-range-picker";
+import { InsightsFilterRow } from "./insights-filter-row";
 import { KnowledgeUseCard } from "./knowledge-use";
 import { ToolUseCard } from "./tool-use";
 import { TopQuestionsCard } from "./top-questions";
@@ -47,9 +52,6 @@ const PANEL_WIDTH_STORAGE_KEY = "eneo:insights-analysis-width";
 const PANEL_MIN_WIDTH = 360;
 /** Astryx's ResizeHandle with a divider takes 1 px of the row. */
 const PANEL_HANDLE_WIDTH = 1;
-
-/** The analysis panel's whereabouts: not yet opened (not mounted), open, or closed (kept). */
-type PanelState = "unopened" | "open" | "closed";
 
 /** The question offered to the analysis for the finding on screen. */
 type FindingSuggestion = AnalysisSuggestion & { kind: OpenableFindingKind };
@@ -120,15 +122,21 @@ function NoConversations({
  * while the filters change and fails on its own. A period without
  * conversations shows one empty state in their place, under the filters.
  *
- * A finding with examples opens in place of the overview (`finding`, kept
- * where the mount keeps the filters), with the filters above it; its way back
- * returns focus to the finding's button. Its links to the knowledge and the
- * editor are there only where the viewer may edit the target (`editorHref`).
+ * Where the view is, is the address's (`view`, `useInsightViewUrl`): a
+ * finding with examples opens in place of the overview, with the filters
+ * above it, and its way back returns focus to the finding's button. Its links
+ * to the knowledge and the editor are there only where the viewer may edit
+ * the target (`editorHref`). "Läs kommentarerna" filters the feedback inbox
+ * to the bad ratings with a comment and moves focus to the inbox; going back
+ * from there returns the filter it had and focus to the button.
  *
  * "Fråga analysen" opens the analysis in a side panel (Insiktsanalys): beside
  * the overview where the overview keeps 480 px (decision 14, measured on the
  * view's row, with a handle to resize it as on the flow page), and over the
- * view otherwise. Asked from a finding, it offers the finding's question: in
+ * view otherwise. Over the view it is a place of its own in the address
+ * (`view.analysis`), so the browser's Back closes it; beside the overview it
+ * is the view's layout and Back is not involved. Asked from a finding, it
+ * offers the finding's question: in
  * the composer of an analysis not yet started with nothing typed, otherwise
  * as a suggestion in the panel to use. Nothing is sent without a click. The
  * analysis stays mounted when the panel closes, so opening it again shows the
@@ -142,8 +150,7 @@ export function AssistantInsights({
   partner,
   filters,
   onFiltersChange,
-  finding = null,
-  onFindingChange,
+  view,
   editorHref = null,
   header,
   framed = false,
@@ -152,9 +159,8 @@ export function AssistantInsights({
   partner: InsightsPartner;
   filters: InsightFilters;
   onFiltersChange: (filters: InsightFilters) => void;
-  /** The finding open in place of the overview; none for the overview. */
-  finding?: OpenableFindingKind | null;
-  onFindingChange: (finding: OpenableFindingKind | null) => void;
+  /** Where the view is (a finding, the inbox's filter, the analysis over it), kept in the address. */
+  view: InsightView;
   /** The target's editor, where the viewer may edit it; null otherwise. */
   editorHref?: string | null;
   /** The page's own header, above the filters (the administration's page header). */
@@ -174,10 +180,15 @@ export function AssistantInsights({
   const findingHeading = useRef<HTMLHeadingElement>(null);
   const inboxHeading = useRef<HTMLHeadingElement>(null);
   const [explore, setExplore] = useState<{ sessionId: string | null } | null>(null);
-  const [panel, setPanel] = useState<PanelState>("unopened");
-  const [feedbackFilter, setFeedbackFilter] = useState<FeedbackFilter>("all");
+  // The analysis is open beside the overview (the view's own layout) or over
+  // the view (the address's). It mounts when first opened and then stays, so
+  // closing and opening it again shows the same analysis.
+  const [openBeside, setOpenBeside] = useState(false);
+  const open = openBeside || view.analysis;
+  const [analysisMounted, setAnalysisMounted] = useState(open);
+  if (open && !analysisMounted) setAnalysisMounted(true);
   const [suggestion, setSuggestion] = useState<FindingSuggestion | null>(null);
-  const open = panel === "open";
+  const { finding } = view;
   const { range } = filters;
   // A new source or comparison keeps the figures on screen until the new ones are in.
   const summary = useQuery({
@@ -219,40 +230,55 @@ export function AssistantInsights({
   const covered = open && !beside;
 
   // Focus moves into the panel when it opens and back to what opened it
-  // ("Fråga analysen") when it closes. A panel that comes to cover the view
-  // (a narrower window) takes the focus the overview had: the overview is
-  // inert under it.
-  const wasOpen = useRef(false);
+  // ("Fråga analysen") when it closes, Back and Forward included. A panel
+  // that comes to cover the view (a narrower window, an address opening it)
+  // takes the focus the overview had: the overview is inert under it. Focus
+  // stays where it is while the view is not on screen.
+  const wasOpen = useRef(open);
   useEffect(() => {
-    if (open && !wasOpen.current) aside.current?.focus();
-    if (!open && wasOpen.current) {
-      (opener.current?.isConnected ? opener.current : trigger.current)?.focus();
-    }
+    const was = wasOpen.current;
     wasOpen.current = open;
-  }, [open]);
+    if (hidden || was === open) return;
+    if (open) aside.current?.focus();
+    else (opener.current?.isConnected ? opener.current : trigger.current)?.focus();
+  }, [open, hidden]);
   useEffect(() => {
-    if (!covered) return;
+    if (!covered || hidden) return;
     const active = document.activeElement;
     if (active === null || active === document.body || main.current?.contains(active)) {
       aside.current?.focus();
     }
-  }, [covered]);
+  }, [covered, hidden]);
 
   // A finding opened here moves focus to its title; its way back returns
-  // focus to the finding's button. One open in the address at load is left
-  // where it is.
-  const shownFinding = useRef(finding);
+  // focus to the finding's button. Back from "Läs kommentarerna" returns
+  // focus to that button, Forward to the inbox. What the address shows at
+  // load is left where it is, and so is focus while the view is not on screen.
+  const isReadingComments = view.isReadingComments;
+  const shown = useRef({ finding, isReadingComments });
   useEffect(() => {
-    const was = shownFinding.current;
-    shownFinding.current = finding;
-    if (was === finding) return;
-    if (finding) findingHeading.current?.focus();
-    else if (was) (findingTrigger(main.current, was) ?? trigger.current)?.focus();
-  }, [finding]);
+    const was = shown.current;
+    shown.current = { finding, isReadingComments };
+    if (hidden) return;
+    if (was.finding !== finding) {
+      if (finding) findingHeading.current?.focus();
+      else if (was.finding) (findingTrigger(main.current, was.finding) ?? trigger.current)?.focus();
+    } else if (was.isReadingComments !== isReadingComments) {
+      if (isReadingComments) inboxHeading.current?.focus();
+      else (readCommentsTrigger(main.current) ?? trigger.current)?.focus();
+    }
+  }, [finding, isReadingComments, hidden]);
 
+  /** Opens the analysis: beside the overview where it fits, otherwise over the view as an entry of its own. */
   function openPanel() {
     if (open) aside.current?.focus();
-    else setPanel("open");
+    else if (beside) setOpenBeside(true);
+    else view.openAnalysis();
+  }
+
+  function closePanel() {
+    setOpenBeside(false);
+    view.closeAnalysis();
   }
 
   /** "Fråga analysen": from a finding, with the finding's question offered. */
@@ -267,12 +293,12 @@ export function AssistantInsights({
 
   function showFinding(next: OpenableFindingKind | null) {
     setSuggestion(null);
-    onFindingChange(next);
+    view.onFindingChange(next);
   }
 
   /** "Läs kommentarerna": the inbox, filtered to the bad ratings with a comment. */
   function readComments() {
-    setFeedbackFilter("bad_commented");
+    view.readComments();
     inboxHeading.current?.focus();
   }
 
@@ -318,14 +344,12 @@ export function AssistantInsights({
             */}
             <section aria-label={t("insights_filters_label")} className="@container">
               <div className="flex flex-col gap-3 @min-[26rem]:flex-row @min-[26rem]:items-start">
-                <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
-                  <div className="min-w-0 flex-1 basis-56 sm:max-w-80">
-                    <InsightsRangePicker
-                      value={range}
-                      onChange={(next) => change({ range: next })}
-                      compact
-                    />
-                  </div>
+                <InsightsFilterRow
+                  range={range}
+                  onRangeChange={(next) => change({ range: next })}
+                  compare={filters.compare}
+                  onCompareChange={(compare) => change({ compare })}
+                >
                   <div className="max-w-full min-w-0">
                     <SegmentedControl
                       label={t("insights_source_label")}
@@ -338,15 +362,7 @@ export function AssistantInsights({
                       <SegmentedControlItem value="api_key" label={t("insights_source_api_key")} />
                     </SegmentedControl>
                   </div>
-                  {/* As tall as the controls beside it, with the switch on their centre line. */}
-                  <div className="flex min-h-(--size-element-md) items-center">
-                    <Switch
-                      label={t("insights_compare_previous")}
-                      value={filters.compare}
-                      onChange={(compare) => change({ compare })}
-                    />
-                  </div>
-                </div>
+                </InsightsFilterRow>
                 <div className="@min-[26rem]:shrink-0 @min-[26rem]:pt-[calc(var(--text-label-size)*var(--text-label-leading)+var(--spacing-1))]">
                   <Button
                     ref={trigger}
@@ -405,8 +421,8 @@ export function AssistantInsights({
                   <FeedbackInbox
                     partner={partner}
                     filters={filters}
-                    filter={feedbackFilter}
-                    onFilterChange={setFeedbackFilter}
+                    filter={view.feedback}
+                    onFilterChange={view.onFeedbackChange}
                     counts={summary.data ? feedbackCounts(summary.data.period) : null}
                     headingRef={inboxHeading}
                     onOpenConversation={openConversation}
@@ -448,7 +464,7 @@ export function AssistantInsights({
             resizable={resizable.props}
           />
         )}
-        {panel !== "unopened" && (
+        {analysisMounted && (
           <aside
             ref={aside}
             aria-label={t("insights_chat_partner_name")}
@@ -470,7 +486,7 @@ export function AssistantInsights({
               hidden={hidden || !open}
               // The finding's question, while that finding is on screen.
               suggestion={suggestion && suggestion.kind === finding ? suggestion : null}
-              onClose={() => setPanel("closed")}
+              onClose={closePanel}
             />
           </aside>
         )}

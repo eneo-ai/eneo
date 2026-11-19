@@ -1,6 +1,7 @@
 """The insights figures over a mix of sources: a period's summary, activity
-per local day, the ratings inbox, the tenant's target list, knowledge use,
-the commonest questions, tool use and the findings.
+per local day, the ratings inbox, the tenant's target list and the
+organisation's activity, knowledge use, the commonest questions, tool use and
+the findings.
 
 The seed is ``seed_sources``, or ``seed_quality`` for knowledge and tool calls
 (see the conftest). The period is 2026-09-06 and 2026-09-07 UTC; times below
@@ -14,6 +15,7 @@ from uuid import uuid4
 
 import sqlalchemy as sa
 
+from eneo.analysis.insight_conversation_repo import InsightConversationRepository
 from eneo.analysis.insight_findings import FINDING_THRESHOLDS, FindingThreshold
 from eneo.analysis.insight_scope import InsightScope, InsightWindow
 from eneo.analysis.insights_repo import KnowledgeUse
@@ -21,6 +23,8 @@ from eneo.database.tables.assistant_table import Assistants, AssistantsGroups
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.mcp_tool_references_table import McpToolReference
 from eneo.database.tables.questions_table import Questions
+from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.users_table import Users
 
 _PERIOD = {"start_time": "2026-09-06T00:00:00Z", "end_time": "2026-09-08T00:00:00Z"}
 
@@ -303,6 +307,62 @@ async def test_feedback_inbox_pages_answer_and_conversation_ratings(
     }
 
 
+async def _users_outside_the_figures(db_container, seed) -> None:
+    """Two signed-in users who asked on 2026-09-06 10:00 where no figure
+    counts: one only a hidden assistant, the other only in an analysis
+    conversation (a hidden session) on bygg."""
+    async with db_container() as container:
+        session = container.session()
+        tenant_id = seed["tenant_id"]
+        for person, assistant_id in (
+            ("cilla", seed["hidden_assistant"]),
+            ("dan", seed["bygg"]),
+        ):
+            user_id = await session.scalar(
+                sa.insert(Users)
+                .values(
+                    email=f"{person}-{uuid4().hex[:8]}@example.com",
+                    username=f"{person}-{uuid4().hex[:8]}",
+                    tenant_id=tenant_id,
+                    state="active",
+                )
+                .returning(Users.id)
+            )
+            session_id = uuid4()
+            await session.execute(
+                sa.insert(Sessions).values(
+                    id=session_id,
+                    name=person,
+                    user_id=user_id,
+                    assistant_id=assistant_id,
+                )
+            )
+            at = utc(2026, 9, 6, 10, 0)
+            await session.execute(
+                sa.insert(Questions).values(
+                    id=uuid4(),
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    assistant_id=assistant_id,
+                    question=f"{person} frågar",
+                    answer="svar",
+                    num_tokens_question=1,
+                    num_tokens_answer=1,
+                    created_at=at,
+                    updated_at=at,
+                )
+            )
+            if person == "dan":
+                await InsightConversationRepository(session).add(
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    actor_user_id=user_id,
+                    timezone="UTC",
+                    assistant_id=assistant_id,
+                    completion_model_id=seed["model_id"],
+                )
+
+
 async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     db_container, admin_user, client, patch_auth_service_jwt, seed_personal
 ):
@@ -310,6 +370,7 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     rows: not under a search for their name, not among the unused ones and
     not on a later page."""
     seed, headers = await _seeded(db_container, admin_user, seed_personal)
+    await _users_outside_the_figures(db_container, seed)
     personal_ids = {
         str(value) for key, value in seed.items() if key.startswith("personal:")
     }
@@ -348,6 +409,14 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
         "previous": {"conversations": _sources(2, 1, 0, 1), "questions": 2},
     }
 
+    # The listed targets the search finds: none is searched for, so all.
+    unused_total = listed["total_count"] - 3
+    assert listed["counts"] == {"all": listed["total_count"], "unused": unused_total}
+    # Signed-in users on any target, personal ones included: the admin, Anna
+    # and Bo, and Bo in the period before. Not API keys or widget visitors,
+    # not who asked only a hidden assistant or in a hidden session.
+    assert listed["users"] == {"current": 3, "previous": 1}
+
     other = items[str(seed["other"])]
     # Insights off: usage only.
     assert other["ratings"] is None
@@ -360,6 +429,9 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     without_previous = {**personal, "previous": None}
     found = await targets(q="gc-ins")
     assert found["total_count"] == 1
+    # The counts follow the search; the users do not.
+    assert found["counts"] == {"all": 1, "unused": 0}
+    assert found["users"] == {"current": 3, "previous": None}
     assert found["items"][0]["id"] == str(seed["group_chat"])
     assert found["items"][0]["previous"] is None
     assert found["personal"] == without_previous
@@ -371,14 +443,17 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     # A personal assistant's name finds nothing.
     by_personal_name = await targets(q="assistent")
     assert by_personal_name["total_count"] == 0
+    assert by_personal_name["counts"] == {"all": 0, "unused": 0}
     assert by_personal_name["personal"] == without_previous
 
     used = {str(seed[key]) for key in ("bygg", "other", "group_chat")}
     unused = await targets(activity="unused")
     assert not used & {item["id"] for item in unused["items"]}
     # "Annas utkast" is unused too, and still no row.
-    assert unused["total_count"] == listed["total_count"] - 3
+    assert unused["total_count"] == unused_total
     assert unused["personal"] == without_previous
+    # The counts do not follow the activity filter.
+    assert unused["counts"] == listed["counts"]
 
     by_name = await targets(sort="name", order="asc", limit=200)
     order = [item["id"] for item in by_name["items"] if item["id"] in used]
@@ -391,6 +466,41 @@ async def test_targets_list_usage_by_source_and_ratings_where_insights_are_on(
     assert beyond["items"] == []
     assert beyond["total_count"] == listed["total_count"]
     assert beyond["totals"] == listed["totals"]
+
+
+async def test_organisation_activity_counts_each_day_by_the_target_lists_rules(
+    db_container, admin_user, client, patch_auth_service_jwt, seed_personal
+):
+    seed, headers = await _seeded(db_container, admin_user, seed_personal)
+    await _users_outside_the_figures(db_container, seed)
+    one_day = {"start_time": "2026-09-06T00:00:00Z", "end_time": "2026-09-07T00:00:00Z"}
+
+    response = await client.get(
+        "/api/v1/analysis/targets/activity/",
+        params={**one_day, "timezone": "UTC"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert (body["source"], body["timezone"]) == (None, "UTC")
+    # s3 and widget_2 on bygg and Bo's conversation in his personal space;
+    # not the hidden assistant's or the hidden session's.
+    assert body["days"] == [
+        {
+            "date": "2026-09-06",
+            "conversations": _sources(3, 2, 0, 1),
+            "questions": _sources(4, 3, 0, 1),
+        }
+    ]
+    # One day's conversations are the target list's totals for that day.
+    targets = await client.get(
+        "/api/v1/analysis/targets/", params=one_day, headers=headers
+    )
+    assert targets.status_code == 200, targets.text
+    totals = targets.json()["totals"]
+    assert totals["conversations"] == body["days"][0]["conversations"]
+    assert totals["questions"] == body["days"][0]["questions"]["total"]
 
 
 async def _quality(db_container, admin_user, seed_quality):

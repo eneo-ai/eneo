@@ -22,9 +22,10 @@ The rule lives in one place, `eneo.sessions.hidden_sessions`:
 - `QuestionRepository.get_by_service` and `get_by_tenant` (exports);
 - the per-user token usage analyzer;
 - the insights tools' own reads and the insights figures (summary, activity,
-  ratings inbox, target list, knowledge use, common questions, tool use and
-  the findings with their cases) in `InsightsRepository`, so one analysis
-  never reads or counts another.
+  ratings inbox, target list with its user count, the organisation's
+  activity, knowledge use, common questions, tool use and the findings with
+  their cases) in `InsightsRepository`, so one analysis never reads or counts
+  another.
 
 Adding a new kind of hidden session means adding one `NOT EXISTS` to
 `hidden_session_clause` and nothing else. The owner service loads its own
@@ -39,7 +40,9 @@ for, such as a helper chat's (a flow authoring chat is one). It decides which as
 the chat partner list and the assistant counts leave hidden assistants out.
 Their conversations are not hidden sessions: they stay in the session and
 question figures, which measure model use, and a helper chat is reached
-through its own `helper_chats` row.
+through its own `helper_chats` row. The insights target list, its user count
+and the organisation's activity count the targets people see, so a hidden
+assistant's conversations are not in them.
 
 ## Sources are another rule
 

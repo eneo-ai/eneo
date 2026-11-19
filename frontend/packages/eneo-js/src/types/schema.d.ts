@@ -3277,9 +3277,29 @@ export interface paths {
     };
     /**
      * Get Insight Targets
-     * @description Every assistant people see and every group chat of the tenant outside personal spaces, with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. Targets in personal spaces are never rows: personal gives their number and usage together, without ratings, the same on every page and whatever q and activity say. totals is everything the organisation used: every listed target that matches the filters, not only the page, plus the personal usage.
+     * @description Every assistant people see and every group chat of the tenant outside personal spaces, with its usage in the period: conversations by source and questions, the previous period of equal length when compare is set, and answer ratings where insights are on (usage only where they are off). A conversation counts when it has a question in the period. Targets in personal spaces are never rows: personal gives their number and usage together, without ratings, the same on every page and whatever q and activity say. totals is everything the organisation used: every listed target that matches the filters, not only the page, plus the personal usage. counts gives the listed targets q finds, whatever activity says; users the signed-in users with a question on any target people see, whatever the filters.
      */
     get: operations["get_insight_targets_api_v1_analysis_targets__get"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/analysis/targets/activity/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get Insight Targets Activity
+     * @description Conversations and questions per local day for the whole organisation, split by source: every assistant people see and every group chat, listed and in personal spaces, counted by the rules of the target list. A conversation counts on every day it had a question, so the days of a period can add up to more conversations than the target list's totals. source is always null.
+     */
+    get: operations["get_insight_targets_activity_api_v1_analysis_targets_activity__get"];
     put?: never;
     post?: never;
     delete?: never;
@@ -6924,7 +6944,7 @@ export interface paths {
      * Get Flow Suggestions
      * @description What the draft could do cheaper or simpler. By default it is judged from the saved definition alone: where a step's model receives the same earlier result twice (`duplicate_read`), takes more of the earlier results than it needs, carries data no later step reads, or relays a result another step could read directly. The reads are the ones publish and the runtime resolve, so a suggestion states what the definition proves and nothing it does not: no prompt is judged by a model and a read of a field next to a read of the whole result is reported as `contained` rather than guessed at.
      *
-     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and the findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`, and from the forwarding facts the worker records for each model call, `model_relay` (most of a model step's output is an earlier result copied word for word, which a later step reads from it), `overlapping_inputs` (two inputs of a call share half or more of their text; added to the `duplicate_read` or `broad_all_previous_steps` about the same two reads as `params.measured_overlaps` when there is one) and `deterministic_candidate` (a model step whose output is its inputs copied word for word, which a `compose_text` step does without a model). A finding from the forwarding facts holds in half or more of the runs that measured it. From what the model catalogue knows, `oversized_reasoning`: a step asks its reasoning-capable model for high reasoning effort while, in half or more of the runs, its calls were a small extraction into a JSON result (a small share of the model's input limit, and a small output with the reasoning included); it names no price and no model. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts, call reasons and the shares the worker measured), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted, how many it left out and how many of their attempts had forwarding facts, and is refused with 503 when that entry cannot be written.
+     *     With `runs` (1 to 50) the newest finished runs in which a step ran (completed, failed or cancelled) are measured as well: what a duplicate or an unused result cost in tokens per run (`impact.basis` `runs`, with the run count and the published version measured, and whether the step changed since), and the findings only runs show: `identical_inputs`, `context_headroom` and `format_fallback`, and from the forwarding facts the worker records for each model call, `model_relay` (most of a model step's output is an earlier result copied word for word, which a later step reads from it), `overlapping_inputs` (two inputs of a call share half or more of their text; added to the `duplicate_read` or `broad_all_previous_steps` about the same two reads as `params.measured_overlaps` when there is one) and `deterministic_candidate` (a model step whose output is its inputs copied word for word, which a `compose_text` step could do without a model, worth trying when the step's own part is not needed). A finding from the forwarding facts holds in half or more of the runs that measured it. From what the model catalogue knows, `oversized_reasoning`: a step asks its reasoning-capable model for high reasoning effort while, in half or more of the runs, its calls were a small extraction into a JSON result (a small share of the model's input limit, and a small output with the reasoning included); it names no price and no model. Measured suggestions come first, most tokens first. Only numbers are read from the runs (sizes, hashes, token counts, call reasons and the shares the worker measured), never their content. Measuring needs the permission to view flow traces on top of editing the flow; runs whose evidence the caller may not see (another member's run, without the space role that shows it) are left out and counted in `runs.left_out`. A measured read writes one audit entry on the flow (`flow_evidence_viewed`) naming the runs it counted, how many it left out and how many of their attempts had forwarding facts, and is refused with 503 when that entry cannot be written.
      *
      *     Each suggestion names its steps, a `fingerprint` that is stable across unrelated edits and measurements, an `impact` and how it is acted on (`fix.kind`). Suggestions never block publishing and never change the flow: acting on one is a separate, explicit editor update. The answer judges `draft_revision`; read again after a save. It reads the prompts of the flow's assistants, so it needs the permission to edit the flow.
      *
@@ -29992,7 +30012,7 @@ export interface components {
      */
     FlowSuggestionPublic: {
       /**
-       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format. From the forwarding facts the worker records for each model call, also only with `runs`: `model_relay`, most of a model step's output was an earlier result copied word for word, which a later step reads from it (that step can read the original); `overlapping_inputs`, two inputs of a step shared half or more of the shorter one's text without being identical; `deterministic_candidate`, a model step's output was its inputs copied word for word with little of its own, which a `compose_text` step does without a model. Measured against what the model catalogue knows, also only with `runs`: `oversized_reasoning`, a step asks its reasoning-capable model for high reasoning effort while its calls were a small extraction into a JSON result.
+       * @description What the suggestion is about. `duplicate_read`: the same earlier step reaches the step's model twice, through its input and its prompt or twice in one of them. `broad_all_previous_steps`: a step takes every earlier step, where one is derived from another it also gets, or three or more of them. `whole_structured_read`: a step reads all of a JSON result with four or more fields. `unread_contract_fields`: fields of a step's contract no later step reads. `unread_result`: a step whose result no later step reads. `relay_step`: a step that only passes another result on. `per_item_prompt_read`: a step that runs once per item with a whole earlier result in its prompt. `repeated_long_material`: two steps digest the same source as long material. `unused_form_field`: a run form field no step reads and that does not name or date the run. Measured from recent runs, only with `runs`: `identical_inputs`, two inputs of a step carried the same value though they are read from different steps; `context_headroom`, a step's model came close to its input limit or the step failed the inline input limit; `format_fallback`, a step often needed a second call because its model did not accept the structured format. From the forwarding facts the worker records for each model call, also only with `runs`: `model_relay`, most of a model step's output was an earlier result copied word for word, which a later step reads from it (that step can read the original); `overlapping_inputs`, two inputs of a step shared half or more of the shorter one's text without being identical; `deterministic_candidate`, a model step's output was its inputs copied word for word with little of its own, which a `compose_text` step could do without a model: worth trying when the step's own part is not needed. Measured against what the model catalogue knows, also only with `runs`: `oversized_reasoning`, a step asks its reasoning-capable model for high reasoning effort while its calls were a small extraction into a JSON result.
        * @example duplicate_read
        * @example model_relay
        * @example overlapping_inputs
@@ -32863,8 +32883,26 @@ export interface components {
       /** Space Name */
       space_name: string;
     };
+    /**
+     * InsightTargetCounts
+     * @description The targets outside personal spaces whose name matches q, whatever
+     *     activity says.
+     */
+    InsightTargetCounts: {
+      /**
+       * All
+       * @description Every one of them.
+       */
+      all: number;
+      /**
+       * Unused
+       * @description Those without a conversation with a question in the period.
+       */
+      unused: number;
+    };
     /** InsightTargetPage */
     InsightTargetPage: {
+      counts: components["schemas"]["InsightTargetCounts"];
       /**
        * Items
        * @description The page of targets outside personal spaces.
@@ -32882,6 +32920,7 @@ export interface components {
        */
       total_count: number;
       totals: components["schemas"]["InsightTargetTotals"];
+      users: components["schemas"]["InsightTargetUsers"];
     };
     /**
      * InsightTargetTotals
@@ -32903,6 +32942,25 @@ export interface components {
       conversations: components["schemas"]["SourceCounts"];
       /** Questions */
       questions: number;
+    };
+    /**
+     * InsightTargetUsers
+     * @description Distinct signed-in users with a question in the period on any target
+     *     people see, listed or in a personal space, whatever q and activity say.
+     *     API keys and widget visitors are not users; hidden sessions and hidden
+     *     assistants' conversations are left out, as for the usage.
+     */
+    InsightTargetUsers: {
+      /**
+       * Current
+       * @description In the period.
+       */
+      current: number;
+      /**
+       * Previous
+       * @description In the previous period of equal length, when compare was asked for.
+       */
+      previous: number | null;
     };
     /**
      * InsightToolUsage
@@ -56909,6 +56967,60 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["InsightTargetPage"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_insight_targets_activity_api_v1_analysis_targets_activity__get: {
+    parameters: {
+      query?: {
+        /** @description Start of the period, inclusive. Defaults to 30 days before the end. */
+        start_time?: string | null;
+        /** @description End of the period, exclusive. Defaults to now. */
+        end_time?: string | null;
+        /** @description IANA time zone for local days; 400 invalid_timezone when unknown. */
+        timezone?: string;
+      };
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["InsightActivity"];
         };
       };
       /** @description Bad Request */

@@ -3,6 +3,7 @@ import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
 import {
   apiPath,
+  apiPost,
   apiPostJson,
   conversationLog,
   createSpace,
@@ -68,40 +69,94 @@ test("loaded denial and helper identities stop private chat queries", async ({ p
   }
 });
 
-test("insight permission and submitted Markdown follow the loaded assistant", async ({ page }) => {
-  const { assistant } = await personal(page);
-  let allowed = false;
-  let insightReads = 0;
-  await page.route(`**/api/v1/assistants/${assistant.id}/`, (route) =>
-    reply(route, {
-      ...assistant,
-      insight_enabled: true,
-      permissions: allowed ? ["read", "insight_view"] : ["read"]
-    })
-  );
-  await page.route("**/api/v1/analysis/conversation-insights/**", (route) => {
-    insightReads++;
-    return reply(
-      route,
-      route.request().method() === "POST"
-        ? { answer: "## Resultat\n\n**LOU** gäller. [Osäker](javascript:alert(1))" }
-        : { total_conversations: 12, total_questions: 30, feedback: { positive: 7, negative: 2 } }
-    );
+test("insight permission and the analysis answer's Markdown follow the loaded assistant", async ({
+  page
+}) => {
+  await page.goto("/spaces/list");
+  const space = await apiPost(page, "/spaces/", { name: uniqueName("Insiktsbehörighet") });
+  const assistantId = await apiPost(page, `/spaces/${space}/applications/assistants/`, {
+    name: uniqueName("Insiktsassistent")
   });
-  await page.goto(`/dashboard/${assistant.id}?tab=insights`);
+  await apiPost(page, `/assistants/${assistantId}/`, { insight_enabled: true });
+  const loaded = await page.request.get(apiPath(`/assistants/${assistantId}/`));
+  expect(loaded.ok()).toBe(true);
+  const assistant: Schema<"AssistantPublic"> = await loaded.json();
+  expect(assistant.permissions).toContain("insight_view");
+
+  let allowed = false;
+  const insightReads: string[] = [];
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname;
+    if (path.startsWith("/api/v1/analysis/")) insightReads.push(path);
+  });
+  await page.route(`**/api/v1/assistants/${assistantId}/`, (route) =>
+    route.request().method() === "GET"
+      ? reply(route, {
+          ...assistant,
+          permissions: (assistant.permissions ?? []).filter(
+            (permission) => allowed || permission !== "insight_view"
+          )
+        })
+      : route.fallback()
+  );
+  // The analysis' answer, as the stream contract sends it (src/lib/chat/CONTRACT.md).
+  await page.route("**/api/v1/analysis/conversation-insights/chat/", (route) =>
+    route.request().method() === "POST"
+      ? route.fulfill({
+          status: 200,
+          headers: {
+            ...sessionResponseHeaders(route),
+            "content-type": "text/event-stream",
+            "x-vercel-ai-ui-message-stream": "v1"
+          },
+          body:
+            [
+              { type: "start", messageId: "analysis-answer" },
+              {
+                type: "data-session",
+                data: {
+                  session_id: SESSION,
+                  completion_model: null,
+                  files: [],
+                  web_search_references: []
+                }
+              },
+              { type: "text-start", id: "text-0" },
+              {
+                type: "text-delta",
+                id: "text-0",
+                delta: "## Resultat\n\n**LOU** gäller. [Osäker](javascript:alert(1))"
+              },
+              { type: "text-end", id: "text-0" },
+              { type: "finish" }
+            ]
+              .map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`)
+              .join("") + "data: [DONE]\n\n"
+        })
+      : route.fallback()
+  );
+
+  // Without insight access the address's tab is not offered and nothing is read.
+  await page.goto(`/dashboard/${assistantId}?tab=insights`);
   await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
   await expect(page.getByRole("tab", { name: "Insikter", exact: true })).toHaveCount(0);
-  expect(insightReads).toBe(0);
+  expect(insightReads).toEqual([]);
+
   allowed = true;
   await page.reload();
-  await expect(page.getByText("Totala konversationer", { exact: true })).toBeVisible();
-  const input = page.getByRole("textbox", { name: /Fråga om insikter/ });
-  await input.fill("Vilka regler gäller?");
-  await page.getByRole("button", { name: "Generera insikter", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Resultat", exact: true })).toBeVisible();
-  await input.fill("Nästa fråga");
-  await expect(page.getByText("Vilka regler gäller?", { exact: true })).toBeVisible();
-  await expect(page.locator('[data-streamdown="strong"]')).toHaveText("LOU");
+  await expect(page.getByRole("tab", { name: "Insikter", exact: true })).toHaveAttribute(
+    "aria-selected",
+    "true"
+  );
+  await page.getByRole("button", { name: "Fråga analysen", exact: true }).click();
+  const analysis = page.getByRole("complementary", { name: "Insiktsanalys" });
+  await analysis
+    .getByRole("textbox", { name: "Fråga om användningen" })
+    .fill("Vilka regler gäller?");
+  await analysis.getByRole("button", { name: /skicka meddelande/i }).click();
+  await expect(analysis.getByRole("heading", { name: "Resultat", exact: true })).toBeVisible();
+  await expect(analysis.getByRole("log")).toContainText("Vilka regler gäller?");
+  await expect(analysis.locator('[data-streamdown="strong"]')).toHaveText("LOU");
   await expect(page.locator('a[href^="javascript:"]')).toHaveCount(0);
 });
 

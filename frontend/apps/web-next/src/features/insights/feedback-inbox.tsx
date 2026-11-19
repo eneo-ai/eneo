@@ -14,24 +14,23 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
 import type { ChatPartner } from "@/lib/chat/types";
-import { insightSourceQuery, type InsightFilters, type InsightRating } from "./insight-figures";
+import {
+  insightSourceQuery,
+  parseFeedbackFilter,
+  type FeedbackFilter,
+  type InsightFilters,
+  type InsightRating
+} from "./insight-figures";
 import { insightPartnerQuery, insightRangeParams } from "./insights-range";
 import { SourceTag } from "./source-tag";
 
 const PAGE_SIZE = 20;
-
-/** The inbox's filter: every rating, the bad ones someone explained, or the good ones. */
-export type FeedbackFilter = "all" | "bad_commented" | "good";
 
 const FILTER_QUERY: Record<FeedbackFilter, { value?: 1 | -1; has_comment?: boolean }> = {
   all: {},
   bad_commented: { value: -1, has_comment: true },
   good: { value: 1 }
 };
-
-function isFeedbackFilter(value: string): value is FeedbackFilter {
-  return value in FILTER_QUERY;
-}
 
 /** A rating's identity: one per rated answer, and one per rated conversation. */
 const ratingKey = (rating: InsightRating) =>
@@ -105,8 +104,8 @@ function RatingRow({
  * (`counts`: the same ratings the list returns). A row says what was rated
  * and how, the comment, the question it was about and where the
  * conversation came from; never who rated it. "Läs konversationen" opens
- * the conversation in "Utforska konversationer". The filter is the view's,
- * so a finding can show the bad ratings' comments.
+ * the conversation in "Utforska konversationer". The filter is the view's
+ * (kept in the address), so a finding can show the bad ratings' comments.
  */
 export function FeedbackInbox({
   partner,
@@ -201,9 +200,7 @@ export function FeedbackInbox({
             <SegmentedControl
               label={t("insights_feedback_filter_label")}
               value={filter}
-              onChange={(value) => {
-                if (isFeedbackFilter(value)) onFilterChange(value);
-              }}
+              onChange={(value) => onFilterChange(parseFeedbackFilter(value))}
               size="sm"
             >
               <SegmentedControlItem value="all" label={filterLabel("all", t("all"))} />

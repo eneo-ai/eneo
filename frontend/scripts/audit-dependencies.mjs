@@ -9,7 +9,9 @@ import {
 
 const cwd = fileURLToPath(new URL("..", import.meta.url));
 // Accepted advisories, each pinned to its exact advisory and version range
-// and with an expiry: a reviewed reason, not a blanket waiver.
+// and with an expiry: a reviewed reason, not a blanket waiver. A reason that
+// rests on how Eneo is configured names a `check`, a test run on every audit;
+// while it fails, the advisory is not accepted.
 const ACCEPTED = [
   {
     name: "braces",
@@ -36,15 +38,24 @@ const ACCEPTED = [
       "affects prerendered pages only; web prerenders none. Fixed only in SvelteKit 3",
   },
   {
-    name: "deepmerge",
-    url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
-    vulnerable_versions: ">=4.2.0 <=4.3.1",
-    expires: "2026-11-27",
+    name: "@sveltejs/kit",
+    url: "https://github.com/advisories/GHSA-3r8g-jcqq-3p5j",
+    vulnerable_versions: ">=2.42.0 <=3.1.0",
+    expires: "2026-12-15",
     reason:
-      "build-time only: @sveltejs/vite-plugin-svelte and adapter-node's @rollup/plugin-node-resolve merge the build's own config, never request input, and nothing ships it to the runtime. No fixed release exists (4.3.1 is the latest)",
+      "only remote functions parse the affected form data, and neither web nor ui turns on kit.experimental.remoteFunctions. Fixed only in SvelteKit 3.1.1",
+    check: "scripts/remote-functions-off.test.mjs",
+  },
+  {
+    name: "picomatch",
+    url: "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+    vulnerable_versions: "<=4.0.7",
+    expires: "2026-12-15",
+    reason:
+      "needs an attacker-chosen glob pattern; picomatch runs only in build and developer tools (Vite, Rollup plugins, Nextra's fast-glob, Knip, Vitest) on patterns from their configuration and source, and the shipped Svelte server, web-next bundle and docs export contain none of it. No fixed release exists",
   },
 ];
-export function evaluate(report, now = new Date()) {
+export function evaluate(report, now = new Date(), failedChecks = []) {
   assert.ok(
     report && typeof report === "object" && !Array.isArray(report),
     "Invalid Bun audit report.",
@@ -52,10 +63,18 @@ export function evaluate(report, now = new Date()) {
   const errors = [];
   const warnings = [];
   const accepted = [];
+  const holds = (entry) =>
+    now < new Date(`${entry.expires}T00:00:00Z`) &&
+    !failedChecks.includes(entry.check);
   for (const entry of ACCEPTED) {
     if (now >= new Date(`${entry.expires}T00:00:00Z`)) {
       errors.push(
         `Review ${entry.name} ${entry.url} and remove/renew its documented exception before ${entry.expires}.`,
+      );
+    }
+    if (failedChecks.includes(entry.check)) {
+      errors.push(
+        `${entry.name} ${entry.url} is no longer accepted: ${entry.check} failed.`,
       );
     }
   }
@@ -68,7 +87,7 @@ export function evaluate(report, now = new Date()) {
           entry.url === advisory.url &&
           entry.vulnerable_versions === advisory.vulnerable_versions,
       );
-      if (entry && now < new Date(`${entry.expires}T00:00:00Z`)) {
+      if (entry && holds(entry)) {
         accepted.push(
           `${name}: ${advisory.url} accepted, ${entry.reason}; review expires ${entry.expires}.`,
         );
@@ -94,6 +113,16 @@ export function run(argv) {
     0,
     "The installed dependency security patch must pass its behavior tests.",
   );
+  const failedChecks = [];
+  for (const { check } of ACCEPTED) {
+    if (!check) continue;
+    const result = spawnSync(
+      process.execPath,
+      ["--test", "--test-concurrency=1", check],
+      { cwd, stdio: "inherit" },
+    );
+    if (result.status !== 0) failedChecks.push(check);
+  }
   const audit = spawnSync("bun", ["audit", "--json"], {
     cwd,
     encoding: "utf8",
@@ -105,7 +134,7 @@ export function run(argv) {
   );
   const report = JSON.parse(audit.stdout);
   if (argv[0]) writeFileSync(argv[0], JSON.stringify(report, null, 2) + "\n");
-  const result = evaluate(report);
+  const result = evaluate(report, new Date(), failedChecks);
   const escape = (message) =>
     message
       .replaceAll("%", "%25")

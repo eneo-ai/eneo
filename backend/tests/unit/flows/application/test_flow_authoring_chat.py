@@ -4,6 +4,7 @@ a chat left in edit mode returns to view mode after a pause."""
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -17,6 +18,7 @@ from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.flows.application import flow_authoring_chat
 from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
+    CONFIGURATION_EXAMPLES,
     starts_in_edit_mode,
 )
 from eneo.flows.domain.flow_suggestions import (
@@ -152,6 +154,14 @@ def test_the_instructions_name_the_switch_to_redigera_in_the_uis_words() -> None
     assert "the first sentence of your answer says that nothing was changed" in (
         instructions
     )
+    # A round where one change was saved and another refused is told as it
+    # was, never as if nothing changed.
+    assert "When no change was saved, the first sentence" in instructions
+    assert (
+        "say which changes were saved, which were refused and why, and what is "
+        "uncertain" in instructions
+    )
+    assert "read the flow again before you say" in instructions
     # HTTP or a named receiver already answers where the result goes.
     assert "the person has named no HTTP, address or receiving system" in (instructions)
 
@@ -165,8 +175,58 @@ def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> N
         instructions
     )
     assert '("Ladda upp en Word-mall")' in instructions
+    # A Word field's name is read, never guessed, and each binding is one
+    # reference to a value publish lets it read.
+    assert "read_flow lists them (word_fields)" in instructions
+    assert "you never guess a field's name" in instructions
+    # "" is the person's choice, never a way to clear a blocker.
+    assert (
+        'exactly one reference, or "" only when the person asks for that field '
+        "to stay empty" in instructions
+    )
+    assert "leave it empty on purpose" not in instructions
+    # Every run form field type publish lets a Word field read is named.
+    from eneo.flows.flow_validators import _SCALAR_FORM_FIELD_TYPES
+
+    word = instructions[instructions.index("A Word step (template_fill)") :]
+    sentence = word[word.index("A field can read a run form field") :][:120]
+    for field_type in _SCALAR_FORM_FIELD_TYPES:
+        assert field_type in sentence, field_type
+    assert "It cannot read a list, a multiselect, an object" in instructions
+    # A change of bindings keeps the template; its id is never sent again.
+    assert "The step keeps its template when you change its bindings" in instructions
+    assert "leave the template out" in instructions
+    assert "A new Word step takes the flow's only template" in instructions
+    assert "a field of a json step that is required and of one type" in (instructions)
     assert 'the body {"mode": "auto"}' in instructions
-    assert 'runtime_input "required": true' in instructions
+    # An upload is chosen by its value, never by raw fields. The value has
+    # the words of the saved configuration, so one example shows both.
+    assert (
+        "A first step that takes an upload says so with upload, for example "
+        + json.dumps(CONFIGURATION_EXAMPLES["runtime_input"])
+    ) in instructions
+    assert "When the flow cannot run without the upload it is required" in (
+        instructions
+    )
+    # A new step's upload is its value; only a saved first step is changed
+    # with the raw field.
+    assert all(
+        "update_step" in sentence
+        for sentence in instructions.split(". ")
+        if "runtime_input" in sentence
+    )
+    assert (
+        "A saved first step gets the same value with update_step as "
+        "input_config.runtime_input" in instructions
+    )
+    # Long material is a new step's value too, so the upload it is added with
+    # is not replaced by a second call; the raw field is a saved step's.
+    assert (
+        'gets long_material {"mode": "digest"} in add_step (on a saved step: '
+        "input_config.long_material)" in instructions
+    )
+    assert "once the step is added" not in instructions
+    assert "in add_step, the value bindings" in " ".join(instructions.split())
 
 
 def test_a_new_chat_builds_an_empty_draft_and_only_reads_any_other_flow() -> None:
@@ -247,6 +307,11 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "lists under publish_blockers" in instructions
+    # A cut or unread list is read whole before anything is called done.
+    assert (
+        'When publish_blockers_complete is false, read_flow section "blockers"'
+        in instructions
+    )
     assert "account for every blocker that is left" in instructions
     assert "Fix in the same turn what a setting fixes" in instructions
     assert "What only the person can do, say in one plain sentence each" in (
@@ -254,14 +319,33 @@ def test_the_instructions_account_for_what_blocks_publishing() -> None:
     )
     # A blocker the person removes is never removed by rebuilding the step.
     assert (
-        "Never make a blocker go away by changing what a step is for or by "
-        "taking a step out" in instructions
+        "Never make a blocker go away by changing what a step is for, by "
+        'taking a step out or by binding a Word field to ""' in instructions
     )
     assert "a Word step that waits for its template stays a Word step" in instructions
     assert (
-        "Never call a flow ready to publish while publish_blocker_count is above zero"
-        in instructions
+        "Never call a flow ready to publish while publish_blocker_count is above "
+        "zero or unknown" in instructions
     )
+
+
+def test_the_instructions_design_reads_from_what_must_come_out() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Design the reads backwards from what must come out" in instructions
+    assert "as narrowly as the task allows" in instructions
+    # It names where the rules are, hundreds of lines further on.
+    assert 'follow the rules under "Design every step by these rules"' in (instructions)
+    assert "by the rules below" not in instructions
+    # Fields of an earlier json step for chosen facts, the whole text once
+    # where the task needs it, and a run form value straight to a Word field.
+    assert "reads those fields of an earlier json step" in instructions
+    assert "A step that needs the whole text reads the whole text" in instructions
+    assert "is bound to it directly, with no step between" in instructions
+    # The shape is read where the tools are described, not repeated here.
+    assert "the shape is in update_step" in instructions
+    assert '"source_refs"' not in instructions
+    assert "let an earlier json step declare them" not in instructions
 
 
 def test_the_instructions_take_a_contract_from_an_example() -> None:
@@ -278,13 +362,39 @@ def test_the_instructions_show_the_expected_result_without_doing_the_work() -> N
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
     assert "say in a few lines what its result will look like" in instructions
+    assert (
+        "Derive it from the steps' results and contracts as saved, and mark what "
+        "is not saved yet as a proposal." in instructions
+    )
     assert "mark what is not saved yet as a proposal" in instructions
     assert "Use placeholders for content" in instructions
-    assert "Describing the shape of the result this way is part of building" in (
-        instructions
-    )
+    assert "Describing the result's shape this way is always allowed" in instructions
     assert "filling it with content is doing the work the flow is for" in instructions
     assert "Explaining a run the person asks about" in instructions
+
+
+def test_the_instructions_describe_the_result_after_the_build_in_the_same_answer() -> (
+    None
+):
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    # The build comes first: a description in its place ends the turn with
+    # nothing built.
+    assert (
+        "After building a flow or changing what it delivers, and in the same "
+        "answer, say in a few lines what its result will look like" in instructions
+    )
+    assert "Before building a flow" not in instructions
+    # Where nothing can be saved, the result is described with the change the
+    # chat would make.
+    assert (
+        'In "Fråga" or on a published flow, say it with what you would change.'
+        in instructions
+    )
+    # A question that shapes the flow is still asked before the build, and
+    # outside edit mode the steps are still described.
+    assert "ask it before you build, not between two steps" in instructions
+    assert "When edit mode is off, describe the steps you would build" in instructions
 
 
 def test_the_instructions_carry_a_change_to_the_steps_that_read_it() -> None:
@@ -351,9 +461,11 @@ def test_the_instructions_declare_the_auth_mode_and_leave_the_credential_out() -
     )
     assert "declare its mode with the credential left out" in instructions
     assert '{"mode": "api_key", "header_name": "X-API-Key"}' in instructions
-    assert '{"mode": "basic_auth", "username": "..."}' in instructions
-    assert 'A secret header is declared as {"name": "...", "secret": true}' in (
-        instructions
+    assert json.dumps(CONFIGURATION_EXAMPLES["auth_basic"]) in instructions
+    assert (
+        "A secret header is declared as "
+        + json.dumps(CONFIGURATION_EXAMPLES["secret_header"])
+        in instructions
     )
     assert "read_flow shows it as missing until then" in instructions
     # One rule for the mode: none of the earlier contradicting forms is left.
@@ -377,11 +489,12 @@ def test_the_instructions_leave_a_stored_credentials_config_to_the_editor() -> N
 def test_the_instructions_describe_an_http_steps_whole_config() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
-    assert '"custom_headers": [{"name": "...", "value": "...", "secret": false}]' in (
-        instructions
-    )
-    assert '"response_format": "text" or "json"' in instructions
-    assert '"json_template" or "text_template", "template": "..."}' in instructions
+    examples = CONFIGURATION_EXAMPLES
+    # One whole config, with its headers, and the choices beside it.
+    assert json.dumps(examples["http_request"], ensure_ascii=False) in instructions
+    assert 'where response_format is "text" or "json"' in instructions
+    assert json.dumps(examples["body_template"], ensure_ascii=False) in instructions
+    assert "a json_template takes its JSON as such a string" in instructions
     assert '{"mode": "none"}. The step decides the method' in instructions
     assert "there is no method key" in instructions
     assert "the address, the method" not in instructions
@@ -434,9 +547,11 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
 
     assert "they reach this flow only" in instructions
     assert "follow next_offset until it is null" in instructions
-    assert 'input_config.long_material to {"mode": "digest"}' in instructions
+    assert 'long_material {"mode": "digest"} in add_step' in instructions
     assert "partial coverage fails the step unless it has a review" in instructions
-    assert "A change to input_config replaces it whole" in instructions
+    assert "A change to input_config or output_config replaces it whole" in (
+        instructions
+    )
     assert "Name a step as @[<user_description>](step:<id>)" in instructions
     assert "the person's messages use the same forms" in instructions
     assert "or a change is refused because edit mode is off" in instructions
@@ -637,3 +752,15 @@ async def test_a_chat_in_view_mode_is_not_measured(
 
     measured.assert_not_awaited()
     container.audit_service.return_value.log_async.assert_not_awaited()
+
+
+def test_the_instructions_add_steps_by_kind_and_never_teach_raw_fields() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "add_step adds a step by its kind" in instructions
+    assert "read_step_kinds says which kinds may stand at a place" in instructions
+    assert "a step put first takes the run over" in instructions
+    assert "Never invent step kinds" not in instructions
+    assert "input_source flow_input" not in instructions
+    assert "give it input_source" not in instructions
+    assert "review_policy {" not in instructions

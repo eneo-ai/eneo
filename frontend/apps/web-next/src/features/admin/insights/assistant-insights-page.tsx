@@ -11,8 +11,9 @@ import { ViewSearchParams } from "@/lib/view-search-params";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import { groupChatQueryOptions } from "@/features/group-chats/use-group-chat";
 import { AssistantInsights, type InsightsPartner } from "@/features/insights/assistant-insights";
-import { useInsightFindingUrl } from "@/features/insights/insight-finding-url";
+import { INSIGHT_VIEW_PARAMS, useInsightViewUrl } from "@/features/insights/insight-view-url";
 import { insightViewSearch, readInsightViewSearch } from "./assistant-insights-view";
+import { insightsPageHref } from "./insights-page-search";
 
 /**
  * The height from the top of `frame` to the end of the page panel (main),
@@ -45,9 +46,6 @@ function useHeightToPanelEnd(frame: RefObject<HTMLElement | null>): number | nul
   return height;
 }
 
-/** The address's parameter that only chooses a view: the finding open in place of the overview. */
-const FINDING_VIEW_PARAMS = ["finding"] as const;
-
 /** The rest of the page, for the insights view to fill. */
 function FilledFrame({ children }: { children: ReactNode }) {
   const frame = useRef<HTMLDivElement>(null);
@@ -65,11 +63,15 @@ function FilledFrame({ children }: { children: ReactNode }) {
 
 /**
  * An assistant's or group chat's insights in the administration: its name
- * with the way back to the organisation's insights, over the same insights
- * view as the chat page's Insikter tab. The filters and the finding open in
- * place of the overview live in the address
- * (`?from=&to=&source=&compare=&finding=`), so a link or a reload keeps them;
- * an opened finding is a history entry of its own (`useInsightFindingUrl`).
+ * with the way back to the organisation's insights (on the same period and
+ * comparison), over the same insights
+ * view as the chat page's Insikter tab. The filters, the finding open in
+ * place of the overview, the feedback inbox's filter and the analysis open
+ * over the view live in the address
+ * (`?from=&to=&source=&compare=&finding=&feedback=&analysis=`), so a link or
+ * a reload keeps them; an opened finding, "Läs kommentarerna" and the
+ * analysis over the view are history entries of their own
+ * (`useInsightViewUrl`).
  * The editor's links are there for a caller who may edit the target. A
  * target with insights switched off, or whose insights the caller may not
  * see, says so instead of asking for them.
@@ -88,14 +90,15 @@ function TargetInsightsPage({
   const t = useTranslations();
   const searchParams = useSearchParams();
   const filters = readInsightViewSearch(searchParams);
-  const [finding, onFindingChange] = useInsightFindingUrl();
+  const view = useInsightViewUrl();
 
   const header = (
     <PageHeader
       title={partner.name}
       actions={
         <Button
-          href="/admin/insights"
+          // The way back keeps the period and the comparison.
+          href={insightsPageHref(filters.range, filters.compare)}
           label={t("insights")}
           icon={<BarChart3 className="size-4" aria-hidden="true" />}
         />
@@ -123,15 +126,14 @@ function TargetInsightsPage({
   }
 
   return (
-    // An opened finding keeps the analysis mounted: its leave guard does not ask about it.
-    <ViewSearchParams value={FINDING_VIEW_PARAMS}>
+    // A change of where the insights view is keeps the analysis mounted: its leave guard does not ask.
+    <ViewSearchParams value={INSIGHT_VIEW_PARAMS}>
       <FilledFrame>
         <AssistantInsights
           partner={partner}
           filters={filters}
           onFiltersChange={(next) => replaceUrl(insightViewSearch(next, searchParams.toString()))}
-          finding={finding}
-          onFindingChange={onFindingChange}
+          view={view}
           editorHref={editorHref}
           header={header}
           framed

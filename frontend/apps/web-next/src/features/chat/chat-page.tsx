@@ -20,6 +20,7 @@ import { ChatHeader, PartnerSwitcher, type HeaderMenuItem } from "./chat-header"
 import { ChatView, type ActivityState, type ChatDebugHandle } from "./chat-view";
 import { setContextUsagePinned, useContextUsagePinned } from "./context-usage-bar";
 import { HistoryAside, HistoryTab } from "./history-panel";
+import { INSIGHT_VIEW_PARAMS } from "@/features/insights/insight-view-url";
 import { InsightsPanel } from "./insights-panel";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 import { DeleteSessionDialog, RenameSessionDialog, useSessionMutations } from "./session-actions";
@@ -29,8 +30,8 @@ import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { ViewSearchParams } from "@/lib/view-search-params";
 
-/** The address's parameters that only choose a view: a tab, and Insikter's opened finding. */
-const CHAT_VIEW_PARAMS = ["tab", "finding"] as const;
+/** The address's parameters that only choose a view: a tab, and where Insikter is. */
+const CHAT_VIEW_PARAMS = ["tab", ...INSIGHT_VIEW_PARAMS] as const;
 
 type ActiveConversation = {
   /** Remount key: changes when the conversation context changes. */
@@ -214,7 +215,7 @@ export function ChatPage({
 
   /**
    * The conversation's URL; the view stays unless `nextTab` changes it (a
-   * late session id keeps it), and so does Insikter's opened finding. Another
+   * late session id keeps it), and so does where Insikter is. Another
    * view is a history entry of its own; the same view's address is updated in
    * place, so a streaming answer never adds entries.
    */
@@ -225,8 +226,10 @@ export function ChatPage({
       const url = new URL(buildSessionUrl(sessionId), window.location.href);
       if (nextTab === "chat") url.searchParams.delete("tab");
       else url.searchParams.set("tab", nextTab);
-      const finding = nextTab === "insights" ? searchParams.get("finding") : null;
-      if (finding) url.searchParams.set("finding", finding);
+      for (const key of nextTab === "insights" ? INSIGHT_VIEW_PARAMS : []) {
+        const value = searchParams.get(key);
+        if (value) url.searchParams.set(key, value);
+      }
       if (nextTab === viewTab) replaceUrl(url, options);
       else pushUrl(url, options);
     }
@@ -243,9 +246,9 @@ export function ChatPage({
 
   /**
    * Shows another view as a history entry of its own, so Back returns to
-   * the one before. Leaving Insikter leaves its opened finding in the entry
-   * behind. Not a departure: the conversation stays mounted with its draft,
-   * so the leave guard stays out.
+   * the one before. Leaving Insikter leaves where it was (an opened finding,
+   * the inbox's filter) in the entry behind. Not a departure: the
+   * conversation stays mounted with its draft, so the leave guard stays out.
    */
   function selectTab(next: ChatTab) {
     if (next === viewTab) return;
@@ -253,7 +256,7 @@ export function ChatPage({
     const url = new URL(window.location.href);
     if (next === "chat") url.searchParams.delete("tab");
     else url.searchParams.set("tab", next);
-    if (next !== "insights") url.searchParams.delete("finding");
+    if (next !== "insights") for (const key of INSIGHT_VIEW_PARAMS) url.searchParams.delete(key);
     pushUrl(url, { ignoreBlocker: true });
   }
 

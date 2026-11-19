@@ -104,10 +104,13 @@ __all__ = [
     "RephrasingRow",
     "SearchHit",
     "SourceCounts",
+    "TargetCounts",
+    "TargetListing",
     "TargetRow",
     "TargetSort",
     "TargetTotals",
     "TargetUsage",
+    "TargetUsers",
     "ToolUseRow",
     "TopQuestionRow",
     "Transcript",
@@ -370,6 +373,34 @@ class TargetRow(NamedTuple):
     previous: TargetUsage
     answers_positive: int
     answers_negative: int
+
+
+class TargetCounts(NamedTuple):
+    """The listed targets whose name matches the search, whatever the
+    activity filter: all of them, and those without a conversation."""
+
+    all: int
+    unused: int
+
+
+class TargetUsers(NamedTuple):
+    """Distinct signed-in users with a question in the window (and the
+    previous window) on any target people see, listed or personal."""
+
+    current: int
+    previous: int
+
+
+class TargetListing(NamedTuple):
+    """A page of the target list and the figures that come with it."""
+
+    rows: list[TargetRow]
+    # Listed targets that match every filter.
+    total: int
+    totals: TargetTotals
+    personal: PersonalUsage | None
+    counts: TargetCounts
+    users: TargetUsers
 
 
 # Trigram thresholds. word_similarity finds a query phrase inside a longer
@@ -1901,6 +1932,106 @@ class InsightsRepository:
             len(rows) > limit,
         )
 
+    @staticmethod
+    def _tenant_targets(tenant_id: UUID) -> sa.CompoundSelect[Any]:
+        """Every assistant people see (hidden ones left out) and every group
+        chat of the tenant, with its space and whether that space is
+        someone's personal space."""
+        personal_space = Spaces.user_id.is_not(None)
+        return sa.union_all(
+            sa.select(
+                Assistants.id.label("id"),
+                sa.literal("assistant", sa.String).label("kind"),
+                Assistants.name.label("name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                personal_space.label("personal_space"),
+                Assistants.insight_enabled.label("insight_enabled"),
+            )
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(Spaces.tenant_id == tenant_id, Assistants.hidden.is_(False)),
+            sa.select(
+                GroupChatsTable.id.label("id"),
+                sa.literal("group_chat", sa.String).label("kind"),
+                GroupChatsTable.name.label("name"),
+                Spaces.id.label("space_id"),
+                Spaces.name.label("space_name"),
+                personal_space.label("personal_space"),
+                GroupChatsTable.insight_enabled.label("insight_enabled"),
+            )
+            .join(Spaces, Spaces.id == GroupChatsTable.space_id)
+            .where(Spaces.tenant_id == tenant_id),
+        )
+
+    async def count_tenant_activity(
+        self, *, tenant_id: UUID, window: InsightWindow
+    ) -> list[ActivityDay]:
+        """Conversations and questions per local day in the window's zone,
+        split by source, over every target people see, listed and personal,
+        by the rules of :meth:`list_targets`; days without questions are left
+        out. A conversation counts on every day it had a question.
+
+        The questions are grouped per conversation and day first, so the
+        hidden-session rule and the copy check run once for each of those.
+        """
+        day = sa.cast(
+            sa.func.timezone(window.timezone, Questions.created_at), sa.Date
+        ).label("day")
+        per_session_day = (
+            sa.select(
+                Questions.session_id.label("session_id"),
+                day,
+                sa.func.count().label("questions"),
+            )
+            .where(
+                Questions.tenant_id == tenant_id,
+                Questions.session_id.is_not(None),
+                Questions.question.isnot(None),
+                Questions.created_at >= window.start,
+                Questions.created_at < window.end,
+            )
+            .group_by(Questions.session_id, day)
+            .subquery("per_session_day")
+        )
+        psd = per_session_day.c
+        source = session_source()
+        visible = self._tenant_targets(tenant_id).subquery("targets")
+        stmt = (
+            sa.select(
+                psd.day,
+                *_split_by_source(
+                    "questions",
+                    lambda where: sa.func.coalesce(
+                        sa.func.sum(psd.questions).filter(where), 0
+                    ),
+                    source,
+                ),
+                *_split_by_source(
+                    "conversations", lambda where: sa.func.count().filter(where), source
+                ),
+            )
+            .select_from(per_session_day)
+            .join(Sessions, Sessions.id == psd.session_id)
+            .where(
+                sa.func.coalesce(Sessions.group_chat_id, Sessions.assistant_id).in_(
+                    sa.select(visible.c.id)
+                ),
+                hidden_session_clause(psd.session_id),
+                copy_session_valid(psd.session_id),
+            )
+            .group_by(psd.day)
+            .order_by(psd.day)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            ActivityDay(
+                day=row.day,
+                conversations=_source_counts(row, "conversations"),
+                questions=_source_counts(row, "questions"),
+            )
+            for row in rows
+        ]
+
     async def list_targets(
         self,
         *,
@@ -1913,21 +2044,24 @@ class InsightsRepository:
         descending: bool,
         offset: int,
         limit: int,
-    ) -> tuple[list[TargetRow], int, TargetTotals, PersonalUsage | None]:
+    ) -> TargetListing:
         """Every assistant people see and every group chat of the tenant
         outside personal spaces, with its usage in the window (and the
-        previous window), in one statement. Returns ``(page, total, totals,
-        personal)``.
+        previous window), in one statement.
 
         The targets in personal spaces are never listed: ``personal`` is
         their number and usage together, the same whatever the filters and
         the page, and None when the tenant has none. ``totals`` sums the
         usage of every listed target that matches, not only the page's, and
-        the personal usage.
+        the personal usage. ``counts`` counts the listed targets whose name
+        matches ``query``, whatever ``unused_only`` says. ``users`` counts
+        the signed-in users with a question on any target people see, listed
+        or personal, whatever the filters.
 
         The tenant's questions in both windows are read once and grouped per
-        conversation, then per target; only the conversation rows are checked
-        for the hidden-session rule and the copy check.
+        conversation; only the conversation rows are checked for the
+        hidden-session rule and the copy check, and both the per-target
+        figures and the users are read from them.
         """
         current = Questions.created_at >= window.start
         per_session = (
@@ -1956,66 +2090,72 @@ class InsightsRepository:
             .subquery("per_session")
         )
         ps = per_session.c
-        target_id = sa.func.coalesce(Sessions.group_chat_id, Sessions.assistant_id)
-        source = session_source()
-        per_target = (
+        # The window's conversations, each with its target, its user and its
+        # source. On the grouped conversations, so the checks run once for
+        # each conversation of the window and never for the rest of the
+        # table; read twice (per target and for the users), so materialised.
+        conversations = (
             sa.select(
-                target_id.label("target_id"),
-                *_split_by_source(
-                    "conversations",
-                    lambda where: sa.func.count().filter(ps.questions > 0, where),
-                    source,
+                ps.session_id,
+                sa.func.coalesce(Sessions.group_chat_id, Sessions.assistant_id).label(
+                    "target_id"
                 ),
-                sa.func.sum(ps.questions).label("questions"),
-                *_split_by_source(
-                    "previous_conversations",
-                    lambda where: sa.func.count().filter(
-                        ps.previous_questions > 0, where
-                    ),
-                    source,
-                ),
-                sa.func.sum(ps.previous_questions).label("previous_questions"),
-                sa.func.sum(ps.positive).label("positive"),
-                sa.func.sum(ps.negative).label("negative"),
+                Sessions.user_id.label("user_id"),
+                session_source().label("source"),
+                ps.questions,
+                ps.previous_questions,
+                ps.positive,
+                ps.negative,
             )
             .select_from(per_session)
             .join(Sessions, Sessions.id == ps.session_id)
-            # On the grouped conversations, so the checks run once for each
-            # conversation of the window and never for the rest of the table.
             .where(
                 hidden_session_clause(ps.session_id),
                 copy_session_valid(ps.session_id),
             )
-            .group_by(target_id)
+            .cte("conversations")
+        )
+        cv = conversations.c
+        per_target = (
+            sa.select(
+                cv.target_id,
+                *_split_by_source(
+                    "conversations",
+                    lambda where: sa.func.count().filter(cv.questions > 0, where),
+                    cv.source,
+                ),
+                sa.func.sum(cv.questions).label("questions"),
+                *_split_by_source(
+                    "previous_conversations",
+                    lambda where: sa.func.count().filter(
+                        cv.previous_questions > 0, where
+                    ),
+                    cv.source,
+                ),
+                sa.func.sum(cv.previous_questions).label("previous_questions"),
+                sa.func.sum(cv.positive).label("positive"),
+                sa.func.sum(cv.negative).label("negative"),
+            )
+            .group_by(cv.target_id)
             .subquery("per_target")
         )
 
-        personal_space = Spaces.user_id.is_not(None)
-        targets = sa.union_all(
-            sa.select(
-                Assistants.id.label("id"),
-                sa.literal("assistant", sa.String).label("kind"),
-                Assistants.name.label("name"),
-                Spaces.id.label("space_id"),
-                Spaces.name.label("space_name"),
-                personal_space.label("personal_space"),
-                Assistants.insight_enabled.label("insight_enabled"),
-            )
-            .join(Spaces, Spaces.id == Assistants.space_id)
-            .where(Spaces.tenant_id == tenant_id, Assistants.hidden.is_(False)),
-            sa.select(
-                GroupChatsTable.id.label("id"),
-                sa.literal("group_chat", sa.String).label("kind"),
-                GroupChatsTable.name.label("name"),
-                Spaces.id.label("space_id"),
-                Spaces.name.label("space_name"),
-                personal_space.label("personal_space"),
-                GroupChatsTable.insight_enabled.label("insight_enabled"),
-            )
-            .join(Spaces, Spaces.id == GroupChatsTable.space_id)
-            .where(Spaces.tenant_id == tenant_id),
-        ).subquery("targets")
+        targets = self._tenant_targets(tenant_id).cte("targets")
         t = targets.c
+        # Signed-in users only: an API-key or widget conversation has no
+        # user, and a hidden assistant's is no target's.
+        users = (
+            sa.select(
+                sa.func.count(sa.distinct(cv.user_id))
+                .filter(cv.questions > 0)
+                .label("users"),
+                sa.func.count(sa.distinct(cv.user_id))
+                .filter(cv.previous_questions > 0)
+                .label("previous_users"),
+            )
+            .where(cv.user_id.is_not(None), cv.target_id.in_(sa.select(t.id)))
+            .subquery("users")
+        )
         figures = [column for column in per_target.c if column.name != "target_id"]
         usage = (
             sa.select(
@@ -2032,13 +2172,14 @@ class InsightsRepository:
             .cte("usage")
         )
         u = usage.c
+        name_matches = (
+            u.name.ilike(f"%{_escape_like(query)}%", escape="\\")
+            if query
+            else sa.true()
+        )
         listing = sa.select(
             *(column for column in u if column.name != "personal_space")
-        ).where(sa.not_(u.personal_space))
-        if query:
-            listing = listing.where(
-                u.name.ilike(f"%{_escape_like(query)}%", escape="\\")
-            )
+        ).where(sa.not_(u.personal_space), name_matches)
         if unused_only:
             listing = listing.where(u.conversations == 0)
         listed = listing.cte("listing")
@@ -2085,17 +2226,35 @@ class InsightsRepository:
             .where(u.personal_space)
             .subquery("personal")
         )
+        # The listed targets the search finds, whatever the activity filter.
+        counts = (
+            sa.select(
+                sa.func.count().label("count_all"),
+                sa.func.count().filter(u.conversations == 0).label("count_unused"),
+            )
+            .where(sa.not_(u.personal_space), name_matches)
+            .subquery("counts")
+        )
         # One row even for an empty page, so the totals always come back.
         stmt = (
-            sa.select(totals, personal, page)
+            sa.select(totals, personal, counts, users, page)
             .select_from(totals)
             .join(personal, sa.true())
+            .join(counts, sa.true())
+            .join(users, sa.true())
             .outerjoin(page, sa.true())
         )
         rows = (await self.session.execute(stmt)).all()
         if not rows:
             none = TargetUsage(SourceCounts(0, 0, 0, 0), 0)
-            return [], 0, TargetTotals(none, none), None
+            return TargetListing(
+                [],
+                0,
+                TargetTotals(none, none),
+                None,
+                TargetCounts(0, 0),
+                TargetUsers(0, 0),
+            )
         first = rows[0]
         personal_usage = (
             PersonalUsage(
@@ -2116,8 +2275,8 @@ class InsightsRepository:
                 personal_usage.previous if personal_usage is not None else None,
             ),
         )
-        return (
-            [
+        return TargetListing(
+            rows=[
                 TargetRow(
                     id=row.id,
                     kind=cast(InsightTargetKind, row.kind),
@@ -2139,7 +2298,13 @@ class InsightsRepository:
                 for row in rows
                 if row.id is not None
             ],
-            int(first.total),
-            organisation,
-            personal_usage,
+            total=int(first.total),
+            totals=organisation,
+            personal=personal_usage,
+            counts=TargetCounts(
+                all=int(first.count_all), unused=int(first.count_unused)
+            ),
+            users=TargetUsers(
+                current=int(first.users), previous=int(first.previous_users)
+            ),
         )

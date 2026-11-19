@@ -275,6 +275,19 @@ class ApiKeyPolicyService:
         space = await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
         )
+        # A service key has no owner, and a personal space grants access to its
+        # owner alone: the key would authenticate and then reach nothing.
+        if (
+            request.ownership == ApiKeyOwnership.SERVICE
+            and request.scope_type == ApiKeyScopeType.SPACE
+            and space is not None
+            and space.is_personal()
+        ):
+            raise ApiKeyValidationError(
+                status_code=400,
+                code="invalid_request",
+                message="Service keys cannot be scoped to a personal space.",
+            )
         await self.refuse_flow_managed_assistant_scope(
             scope_type=request.scope_type, scope_id=request.scope_id, status_code=400
         )
@@ -338,7 +351,7 @@ class ApiKeyPolicyService:
                     message="Space-scoped keys require space admin permission.",
                 )
             actor = space_service.actor_manager.get_space_actor_from_space(space)
-            if not actor.can_edit_space():
+            if not actor.can_manage_api_keys():
                 raise ApiKeyValidationError(
                     status_code=403,
                     code="insufficient_permission",

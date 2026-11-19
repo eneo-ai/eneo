@@ -97,9 +97,18 @@ def test_high_effort_on_a_small_extraction_is_oversized_reasoning() -> None:
         "In 1 of the last 1 runs, step 2 asked its model for high reasoning "
         "effort to write a JSON result, and each call took at most 1200 input "
         "tokens (1 % of the model's limit) and wrote at most 900 output "
-        "tokens, reasoning included; an extraction this small rarely needs "
-        "that effort."
+        "tokens, reasoning included; these sizes do not show how hard the "
+        "task is, so a lower effort is worth trying and comparing."
     )
+
+
+def test_the_oversized_reasoning_message_reports_the_measured_calls() -> None:
+    (item,) = _oversized([[_attempt(inputs=3800, output=2100)], [_attempt()]])
+
+    for measured in ("In 2 of the last 2 runs", "3800 input", "3 %", "2100 output"):
+        assert measured in item.message, measured
+    assert "worth trying" in item.message
+    assert "rarely needs" not in item.message
 
 
 def test_the_top_efforts_count_as_high_and_the_others_do_not() -> None:

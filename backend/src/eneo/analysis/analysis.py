@@ -375,6 +375,28 @@ class InsightPersonalUsage(BaseModel):
     )
 
 
+class InsightTargetCounts(BaseModel):
+    """The targets outside personal spaces whose name matches q, whatever
+    activity says."""
+
+    all: int = Field(description="Every one of them.")
+    unused: int = Field(
+        description="Those without a conversation with a question in the period."
+    )
+
+
+class InsightTargetUsers(BaseModel):
+    """Distinct signed-in users with a question in the period on any target
+    people see, listed or in a personal space, whatever q and activity say.
+    API keys and widget visitors are not users; hidden sessions and hidden
+    assistants' conversations are left out, as for the usage."""
+
+    current: int = Field(description="In the period.")
+    previous: Optional[int] = Field(
+        description="In the previous period of equal length, when compare was asked for."
+    )
+
+
 class InsightTargetPage(BaseModel):
     items: list[InsightTarget] = Field(
         description="The page of targets outside personal spaces."
@@ -391,6 +413,8 @@ class InsightTargetPage(BaseModel):
             "whatever the filters; null when the tenant has none."
         )
     )
+    counts: InsightTargetCounts
+    users: InsightTargetUsers
 
 
 _PERIOD_START = "Start of the period, inclusive."

@@ -5,6 +5,7 @@ import { StrictMode } from "react";
 import { loadFixtures, sseResponse, toSseBody } from "@/lib/chat/contract-fixtures";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { pushUrl } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { observedElements, reportResize } from "@/test/setup-dom";
 import { InsightsPanel } from "./insights-panel";
@@ -937,8 +938,9 @@ describe("InsightsPanel", () => {
     expect(spies.requests).toEqual([]);
 
     const panel = openAnalysis();
-    // Beside the overview, with a handle to resize it; focus moves into it.
+    // Beside the overview, with a handle to resize it, and no history entry; focus moves into it.
     expect(screen.getByRole("separator", { name: "Ändra analysens bredd" })).toBeTruthy();
+    expect(pushUrl).not.toHaveBeenCalled();
     expect(panel.closest("[inert]")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(panel));
     expect(within(panel).getByRole("heading", { name: "Insiktsanalys", level: 2 })).toBeTruthy();
@@ -975,8 +977,9 @@ describe("InsightsPanel", () => {
     expect(panel.closest("[inert]")).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(panel));
 
+    // Over the view it is an entry of its own: closing it goes back to the one behind.
     fireEvent.click(within(panel).getByRole("button", { name: "Stäng analysen" }));
-    expect(askButton().closest("[inert]")).toBeNull();
+    await waitFor(() => expect(askButton().closest("[inert]")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(askButton()));
   });
 

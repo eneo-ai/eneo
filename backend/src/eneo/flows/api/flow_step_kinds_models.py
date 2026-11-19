@@ -12,7 +12,7 @@ from eneo.flows.application.flow_step_kinds import (
     StepKindPlace,
 )
 from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
-from eneo.flows.domain.step_kinds import FlowStepKind
+from eneo.flows.domain.step_kinds import STEP_KIND_DESCRIPTIONS, FlowStepKind
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -250,16 +250,12 @@ class FlowStepKindOptionPublic(BaseModel):
 
     kind: FlowStepKind = Field(
         description=(
-            "What the step does: `ai` (a model writes text), `structured` (a "
-            "model writes JSON), `compose` (text put together without a "
-            "model), `document` (text rendered as a Word document; `pdf` is "
-            "the other output type it takes), `template` (a Word template "
-            "filled in), `transcribe` (an uploaded recording transcribed), "
-            "`speakers` (the speakers of the transcript before it named, "
-            "confirmed by a person), `review` (a person reviews and may edit "
-            "what the step before it gave), `fetch_http` (text fetched with an "
-            "HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result "
-            "sent with an HTTP POST)."
+            "What the step does: "
+            + ", ".join(
+                f"`{kind.value}` ({text})"
+                for kind, text in STEP_KIND_DESCRIPTIONS.items()
+            )
+            + "."
         ),
         examples=["ai"],
     )

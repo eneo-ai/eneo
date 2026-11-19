@@ -1204,16 +1204,17 @@ class UserService:
     async def _owner_belongs_to_space(self, space_id: UUID, user: "UserInDB") -> bool:
         """Whether a key's owner still belongs to its space (no user context).
 
-        A member row decides, except in the organization space, which belongs to
-        the tenant's admins: there the admin permission held now decides, as in
-        SpaceActor, since a row outlives the role and a new admin may lack one.
+        A member row decides, with two exceptions that follow SpaceActor. The
+        organization space belongs to the tenant's admins: there the admin
+        permission held now decides, since a row outlives the role and a new
+        admin may lack one. A personal space has no member rows at all: it
+        belongs to the user it was created for.
         """
         from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 
         query = sa.select(
-            (Spaces.user_id.is_(None) & Spaces.tenant_space_id.is_(None)).label(
-                "organization"
-            ),
+            Spaces.user_id,
+            Spaces.tenant_space_id,
             sa.exists()
             .where(SpacesUsers.space_id == space_id, SpacesUsers.user_id == user.id)
             .label("member"),
@@ -1222,8 +1223,10 @@ class UserService:
         row = (await self._session.execute(query)).one_or_none()
         if row is None:
             return False
-        is_organization, is_member = row
-        if is_organization:
+        personal_owner_id, tenant_space_id, is_member = row
+        if personal_owner_id is not None:
+            return personal_owner_id == user.id
+        if tenant_space_id is None:
             return Permission.ADMIN in user.permissions
         return bool(is_member)
 

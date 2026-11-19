@@ -166,12 +166,10 @@ const refused = (status: number, error: unknown): ApiResult => ({
 });
 
 function answerGets(...results: ApiResult[]) {
-  const get = vi.spyOn(browserApi, "GET");
-  // A resolved value typed on every route of the API is more than the
-  // compiler will instantiate, so each answer is given as an implementation.
-  for (const result of results) {
-    get.mockImplementationOnce((() => Promise.resolve(result)) as never);
-  }
+  // Through a plain signature: the typed client's GET is too deep for a mock's resolved value.
+  const client = browserApi as unknown as { GET: (...args: unknown[]) => Promise<unknown> };
+  const get = vi.spyOn(client, "GET");
+  for (const result of results) get.mockResolvedValueOnce(result);
   return get;
 }
 
