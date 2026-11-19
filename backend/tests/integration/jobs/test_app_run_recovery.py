@@ -226,7 +226,7 @@ async def test_late_delivery_cannot_restart_a_failed_app_run(
 
 
 async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
-    app_run_fixture, db_session, redis_client
+    app_run_fixture, db_session, redis_client, client, admin_user_api_key, monkeypatch
 ):
     old = timedelta(hours=3)
     orphan, params, space_id = await app_run_fixture(age=old)
@@ -234,6 +234,14 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
     fresh, _, _ = await app_run_fixture()
     other_task, _, _ = await app_run_fixture(age=old, task=Task.TRANSCRIPTION)
     channel = Channel(type=ChannelType.APP_RUN_UPDATES, user_id=params.user_id)
+    release_publish = asyncio.Event()
+    publish = app_run_worker.publish_task_status
+
+    async def publish_and_wait(channel, message):
+        await publish(channel, message)
+        await release_publish.wait()
+
+    monkeypatch.setattr(app_run_worker, "publish_task_status", publish_and_wait)
 
     # Invoke the registered maintenance entry point with its actual session wrapper.
     cron = next(
@@ -246,17 +254,28 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
         await subscription.get_message(timeout=2)  # Acknowledge subscription.
         async with db_session() as running:
             assert await JobRepository(running).mark_job_started(active)
-            await asyncio.wait_for(cron.coroutine({}), timeout=5)
-            event = await subscription.get_message(timeout=5)
+            reaping = asyncio.create_task(cron.coroutine({}))
+            try:
+                event = await subscription.get_message(timeout=5)
+                assert event is not None
+                update = RedisMessage.model_validate_json(event["data"])
+                assert update.id == params.id
+                assert update.status == Status.FAILED
+                assert update.additional_data == {
+                    "app_id": str(params.app_id),
+                    "space": {"id": str(space_id), "personal": False},
+                }
 
-        assert event is not None
-        update = RedisMessage.model_validate_json(event["data"])
-        assert update.id == params.id
-        assert update.status == Status.FAILED
-        assert update.additional_data == {
-            "app_id": str(params.app_id),
-            "space": {"id": str(space_id), "personal": False},
-        }
+                # A subscriber can refetch as soon as Redis delivers the event.
+                result = await client.get(
+                    f"/api/v1/app-runs/{params.id}/",
+                    headers={"X-API-Key": admin_user_api_key.key},
+                )
+                assert result.status_code == 200, result.text
+                assert result.json()["status"] == Status.FAILED
+            finally:
+                release_publish.set()
+                await asyncio.wait_for(reaping, timeout=5)
 
     async with db_session() as session:
         orphaned_run = await session.get(AppRuns, params.id)
