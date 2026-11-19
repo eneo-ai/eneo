@@ -176,6 +176,8 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
     sendHoldNow.current = sendHold;
   }, [sendHold]);
   const asksFirst = beforeSend !== undefined || adapter.sendHold !== undefined;
+  // Where the standing reason can be settled, as the page offers it now.
+  const heldAction = held?.standing ? (adapter.sendHoldAction ?? null) : null;
 
   const assistant = useQuery({
     queryKey: ["assistants", chat.assistant_id],
@@ -259,6 +261,11 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
             status="error"
             title={t("helper_send_held")}
             description={held.reason}
+            endContent={
+              heldAction ? (
+                <Button label={heldAction.label} size="sm" onClick={heldAction.onAction} />
+              ) : undefined
+            }
           />
         </div>
       ) : null}

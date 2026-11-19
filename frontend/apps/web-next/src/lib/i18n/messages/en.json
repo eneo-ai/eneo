@@ -10312,6 +10312,8 @@
   "flows_chat_resize_handle": "Resize the chat",
   "flows_chat_mode_ask_after_pause": "Back to Ask after a pause. The chat can only read the flow.",
   "flows_chat_send_held_unsaved": "Save or cancel your changes before you send. The flow assistant reads only what is saved.",
+  "flows_chat_send_held_show_step": "Show the step",
+  "flows_chat_send_held_show_settings": "Show the settings",
   "flow_suggestions_runs_measure": "Include the latest runs",
   "flow_suggestions_runs_context": "The suggestions are based on how the flow is built.",
   "flow_suggestions_runs_plain": "Show without the runs",

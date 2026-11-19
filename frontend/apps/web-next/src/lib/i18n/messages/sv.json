@@ -10312,6 +10312,8 @@
   "flows_chat_resize_handle": "Ändra storlek på chatten",
   "flows_chat_mode_ask_after_pause": "Läget är Fråga igen efter en paus. Chatten kan bara läsa flödet.",
   "flows_chat_send_held_unsaved": "Spara eller avbryt dina ändringar innan du skickar. Flödesassistenten läser bara det som är sparat.",
+  "flows_chat_send_held_show_step": "Visa steget",
+  "flows_chat_send_held_show_settings": "Visa inställningarna",
   "flow_suggestions_runs_measure": "Räkna med de senaste körningarna",
   "flow_suggestions_runs_context": "Förslagen bygger på hur flödet är byggt.",
   "flow_suggestions_runs_plain": "Visa utan körningarna",
