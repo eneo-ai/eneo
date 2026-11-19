@@ -161,9 +161,21 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   const [firstSession] = useState(chat.session_id);
   const editing = chat.editing && !lock;
   const onSendingChange = useWritingTurn(chat, editing, adapter);
-  // Why the page held the last message back, until the next one goes.
-  const [held, setHeld] = useState<string | null>(null);
+  // Why the page held the last message back: what `beforeSend` said, until
+  // the next message goes, or the page's standing reason, while it stands.
+  const [held, setHeld] = useState<{ reason: string; standing: boolean } | null>(null);
   const beforeSend = adapter.beforeSend;
+  const sendHold = adapter.sendHold ?? null;
+  // Saved or dropped: the notice goes with its reason, and only a held
+  // message brings it back.
+  if (held?.standing && sendHold === null) setHeld(null);
+  // A message goes once its files are uploaded, with the callbacks of the
+  // render it was sent from: the standing reason is read from here then.
+  const sendHoldNow = useRef(sendHold);
+  useEffect(() => {
+    sendHoldNow.current = sendHold;
+  }, [sendHold]);
+  const asksFirst = beforeSend !== undefined || adapter.sendHold !== undefined;
 
   const assistant = useQuery({
     queryKey: ["assistants", chat.assistant_id],
@@ -239,9 +251,15 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   return (
     <>
       {held !== null ? (
-        // Something that just happened: read out at once, and kept until a message goes.
+        // Something that just happened: read out at once, and kept until a
+        // message goes or its standing reason has gone.
         <div className="shrink-0 px-4 pt-3">
-          <Banner role="alert" status="error" title={t("helper_send_held")} description={held} />
+          <Banner
+            role="alert"
+            status="error"
+            title={t("helper_send_held")}
+            description={held.reason}
+          />
         </div>
       ) : null}
       <ChatView
@@ -272,10 +290,15 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
         }}
         onSendingChange={onSendingChange}
         beforeSend={
-          beforeSend
+          asksFirst
             ? async () => {
-                const reason = await beforeSend();
-                setHeld(reason);
+                const standing = sendHoldNow.current;
+                if (standing !== null) {
+                  setHeld({ reason: standing, standing: true });
+                  return false;
+                }
+                const reason = beforeSend ? await beforeSend() : null;
+                setHeld(reason === null ? null : { reason, standing: false });
                 return reason === null;
               }
             : undefined

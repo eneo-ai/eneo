@@ -40,14 +40,16 @@ export function OptimizeFlowButton({ onAskChat }: { onAskChat: (text: string) =>
  * draft to change, so Redigera is off and the panel says why. The chat's
  * pills are the flow's steps and values, a run it starts shows as a run
  * card and a change it makes as the steps it touched; its title row offers
- * "Optimera flödet" once the flow has a step.
+ * "Optimera flödet" once the flow has a step. The chat reads the saved flow:
+ * a message waits while edits on the page are not saved.
  */
 export function useFlowHelper({
   flow,
   references,
   onAskChat,
   onRefused,
-  onFlowMayHaveChanged
+  onFlowMayHaveChanged,
+  unsaved = false
 }: {
   flow: FlowPublic;
   /** The flow's references (`useFlowChatReferences`), which the page also inserts through. */
@@ -62,6 +64,11 @@ export function useFlowHelper({
   onRefused: (error: unknown, title: string) => void;
   /** A tool of the chat finished, or an answer ended: the flow may have changed. */
   onFlowMayHaveChanged: () => void;
+  /**
+   * The page holds edits that are not saved (the open step's, or changes in
+   * the settings form): a message is held until they are saved or dropped.
+   */
+  unsaved?: boolean;
 }): HelperAdapter {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -113,6 +120,7 @@ export function useFlowHelper({
     onToolCallFinished: (call) => {
       if (isFlowsToolCall(call)) onFlowMayHaveChanged();
     },
-    onAnswerFinished: onFlowMayHaveChanged
+    onAnswerFinished: onFlowMayHaveChanged,
+    sendHold: unsaved ? t("flows_chat_send_held_unsaved") : null
   };
 }
