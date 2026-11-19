@@ -10,13 +10,32 @@ Eneo is open source and built together by public-sector organisations.
 Municipalities and agencies run it in production, so everyone who uses it needs
 to trust what goes into the platform and what is released.
 
-We achieve that by separating two responsibilities. **Contributing** is open:
-partner organisations and anyone else can propose and build improvements.
-**Stewardship** sits with one accountable team, which reviews every change and
-decides what is merged and released.
+Eneo keeps two responsibilities apart. **Contributing** is open: partner
+organisations and anyone else can propose and build improvements.
+**Stewardship** sits with one accountable team, which decides what is merged
+and released.
 
 This page explains the roles and the protections behind them. For the practical
-steps, see [Contributing to Eneo](/contributing).
+steps, see [Contributing to Eneo](/contributing). For how these rules fit with
+Eneo's other security controls, see [Security at Eneo](/docs/security).
+
+**In short**
+
+- Anyone with a GitHub account can contribute from a fork. Collaborators from
+  partner organisations also get Triage rights. Core Maintainers is the only
+  team with write access.
+- On `develop`, the Core Maintainers agree on their own changes as a team,
+  without a formal approval, and approve every contribution from outside the
+  team before queueing it. The required checks and the merge queue always
+  apply, and there is no bypass.
+- On `release/**` and `main`, a pull request needs an approval from someone
+  with write access other than its author, in practice another Core
+  Maintainer. A Core Maintainer can bypass that for a single pull request, and
+  GitHub records it.
+- Core Maintainers authorise every release. They create the release branches
+  and the `v*` tags; for a managed final release, the release App creates the
+  tag after they approve the preparation pull request. A `v*` tag starts the
+  release build.
 
 ## Two roles
 
@@ -28,74 +47,106 @@ ships. It:
 
 - keeps the codebase in line with the agreed technical roadmap and architecture
 - reviews and approves contributions from outside the team
-- decides what enters the merge queue and publishes releases
+- agrees as a team on its own changes before they are merged
+- decides what enters the merge queue, approves each other's release changes
+  and publishes releases
 - responds to security alerts and vulnerability reports
 
 ### Collaborators: building Eneo together
 
 Collaborators are developers from partner municipalities and government
-agencies who develop Eneo with us in the open (`@eneo-ai/collaborators`). They:
+agencies (`@eneo-ai/collaborators`). They:
 
 - build features and fixes and propose them as pull requests
 - report, discuss and organise issues
 - review each other's work and share what their organisations need
 
-Their work reaches the platform through pull requests that a Core Maintainer
-reviews.
+Collaborators work from a fork like everyone else, and a Core Maintainer
+reviews and approves their pull requests. What the role adds is a shorter path
+to a reviewable pull request:
+
+- With Triage, they label their own pull requests, so the PR label check
+  passes without waiting for a maintainer.
+- As members of the `eneo-ai` organisation, their CI and Dependency Review runs
+  start without a maintainer approving them first.
 
 ### Everyone else
 
 You do not need to be in a team to contribute. Anyone with a GitHub account can
 open issues, take part in discussions, review pull requests and submit changes
-from a fork, in exactly the same way as Collaborators.
+from a fork, the same way Collaborators do, only without Triage rights.
 
 ## How a change reaches Eneo
 
-![Six steps in three lanes. Collaborators agree on a change in an issue, build it in a fork and open a pull request. GitHub runs CI, dependency review and label checks. Core Maintainers approve the pull request, merge it through the merge queue into develop, and authorise releases from release branches. GitHub rulesets reserve release authority for Core Maintainers; the configured release App executes approved final releases.](/diagrams/contribution-governance.svg)
+![A contribution moves from an issue and a fork through the required checks, Core Maintainer review and the merge queue into develop, and from there to a release that Core Maintainers authorise.](/diagrams/contribution-governance.svg)
 
 1. **Issue.** The change is described and agreed in an issue.
 2. **Fork and pull request.** The contributor builds it in a fork and opens a
    pull request against `develop`.
-3. **Checks.** CI, Dependency Review and the PR label check run automatically.
+3. **Checks.** CI, Dependency Review, the PR label check and the User-facing
+   section check run. For contributors outside the `eneo-ai` organisation, the
+   checks other than PR labels start once a Core Maintainer approves the
+   workflow run.
 4. **Review.** A Core Maintainer reviews and approves it.
 5. **Merge.** The Core Maintainer chooses **Merge when ready**. As soon as the
    checks are green, the pull request enters the merge queue, which tests it
    against the latest `develop` and squash-merges it.
-6. **Release.** Core Maintainers cut a release branch and publish a `v*` tag.
+6. **Release.** Core Maintainers cut a release branch. Every pull request into
+   it needs one approval from someone with write access other than its author,
+   normally another Core Maintainer, and the release is
+   published from a `v*` tag that Core Maintainers authorise.
 
-Core Maintainers' own pull requests skip step 4: they choose **Merge when
-ready** themselves, and the same checks and merge queue apply. They ask a
-colleague for a review whenever a second opinion helps.
+Core Maintainers' own pull requests into `develop` skip the formal approval in
+step 4. The team works together and agrees on a change before one of them
+chooses **Merge when ready**, and the same checks and merge queue apply. They
+ask for a written review when a change is large or risky.
 
 Each step is described for contributors in
 [Contributing to Eneo](/contributing#contribute-a-change).
 
 ## How we protect the platform
 
-The rules are enforced by GitHub team roles and repository rulesets. They do not
-depend on anyone remembering them.
+GitHub team roles and repository rulesets enforce who can merge and release,
+and the required checks. Reviewing outside contributions and agreeing on
+changes within the team are our own procedures; the list says which is which.
 
-- **Least privilege.** Only Core Maintainers have write access to the
-  repository. Everyone else contributes from forks. Administrator rights are
-  limited to a small number of organisation owners.
-- **Only Core Maintainers decide what is merged.** Only they can add a pull
-  request to the merge queue. A contribution from outside the team is reviewed
-  and approved by a Core Maintainer first. If someone without write access
-  pushes new commits afterwards, GitHub cancels **Merge when ready** and the
-  change must be looked at again.
-- **Green checks, no shortcuts.** Nothing reaches `develop` without passing the
-  required checks. The ruleset has no bypass, so there is no way to skip CI or
-  the merge queue.
+- **Least privilege.** Core Maintainers is the only team with write access to
+  the repository. Everyone else contributes from forks. Administrator rights
+  are limited to a small number of organisation owners, who manage settings
+  and are not part of the day-to-day merge flow.
+- **Core Maintainers decide what is merged.** Only people with write access can
+  add a pull request to the merge queue, and the Core Maintainers do the
+  ordinary merges. Their rule is to review and approve every contribution from
+  outside the team before queueing it; GitHub enforces who can queue, not who
+  approved. If someone without write access pushes new
+  commits afterwards, GitHub cancels **Merge when ready** and the change must be
+  looked at again.
+- **Green checks, no shortcuts.** The `develop` ruleset requires the checks and
+  the merge queue for every pull request and has no bypass. Merging from a
+  security advisory's private fork would skip them, so our procedure is not to
+  use it.
+- **Release changes are approved by someone other than the author.** A pull request into a release
+  branch or `main` needs an approval from someone with write access other
+  than its author, in practice another Core Maintainer, and new commits
+  dismiss an earlier approval. When no second
+  maintainer is available, a Core Maintainer can bypass the approval for a
+  single pull request and states the reason in it. GitHub records the bypass,
+  and direct pushes stay blocked.
 - **Tested before and after merging.** Required checks run on the pull request
   and, as the full suite, in the merge queue. Publishing `develop` reuses that
   full run for the exact commit and still runs a fresh security scan and scans
   the published images.
-- **Isolated CI for contributions.** Pull requests from forks cannot read
-  secrets or publish anything.
-- **Controlled releases.** Only Core Maintainers can create release branches
-  and `v*` tags, and a tag is the only way to publish release images.
-- **Protected history.** `develop`, `main` and release branches cannot be
-  deleted or force-pushed.
+- **Isolated CI for contributions.** CI that runs code from a fork gets a
+  read-only token and no repository secrets, and no pull request workflow
+  publishes anything. The project-board workflow, which needs a token, runs the base
+  branch's code and never the pull request's.
+- **Controlled releases.** Only Core Maintainers can create release branches.
+  A `v*` tag is created by them or, for a managed final release they have
+  approved, by the release App, and only a `v*` tag produces a versioned
+  release. Builds of `develop` are published as `develop` images for testing.
+- **Protected history.** `develop` and `main` cannot be deleted or
+  force-pushed. Release branches and tags can be changed only by Core
+  Maintainers.
 - **Transparent rules.** Anyone can read the active rules at
   [github.com/eneo-ai/eneo/rules](https://github.com/eneo-ai/eneo/rules).
   Changes to access are recorded in GitHub issues.
@@ -105,29 +156,30 @@ The security policy behind these controls is in
 
 ## Roles and permissions
 
-| Role             | Team                        | Access to `eneo`                                                    | What the role can do                                                                                                                               |
-| ---------------- | --------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Everyone         | –                           | Public                                                              | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork.                          |
-| Collaborators    | `@eneo-ai/collaborators`    | Triage                                                              | Everything above, plus label, assign, close and reopen issues and pull requests.                                                                   |
-| Teknisk kommitté | `@eneo-ai/teknisk-kommitte` | Triage                                                              | Shape the technical roadmap through issues and discussions, and organise issues.                                                                   |
-| Core Maintainers | `@eneo-ai/core-maintainers` | Maintain on every repository, plus Security manager and CI/CD admin | Approve and merge pull requests, cut release branches, publish releases, triage security alerts and manage Actions secrets, variables and runners. |
-| Administrators   | Organisation owners         | Admin                                                               | Change rulesets, team access and repository settings.                                                                                              |
+| Role             | Team                        | Access to `eneo`                                                    | What the role can do                                                                                                                                            |
+| ---------------- | --------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Everyone         | –                           | Public                                                              | Open and comment on issues and discussions, review pull requests, fork the repository and open pull requests from a fork.                                       |
+| Collaborators    | `@eneo-ai/collaborators`    | Triage                                                              | Everything above, plus label, assign, close and reopen issues and pull requests.                                                                                |
+| Teknisk kommitté | –                           | Through each member's own role                                      | Shape the technical roadmap through issues and discussions.                                                                                                     |
+| Core Maintainers | `@eneo-ai/core-maintainers` | Maintain on every repository, plus Security manager and CI/CD admin | Queue pull requests, approve release changes, cut release branches, publish releases, triage security alerts and manage Actions secrets, variables and runners. |
+| Administrators   | Organisation owners         | Admin                                                               | Change rulesets, team access and repository settings.                                                                                                           |
 
 Organisation members have read access to the organisation's repositories by
-default. Any further rights come from the teams above.
+default. Any further rights come from the teams above, or from Triage granted
+directly to an individual outside collaborator.
 
 ## Protected branches and tags
 
-| Ref          | Rules                                                                                                                                                                                            |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `develop`    | Changes only through pull requests that a Core Maintainer adds to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed. |
-| `release/**` | Only Core Maintainers can create, update, merge into or delete release branches. Cannot be force-pushed. Pull requests must pass the PR label check.                                             |
-| `main`       | Cannot be deleted or force-pushed.                                                                                                                                                               |
-| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.    |
+| Ref          | Rules                                                                                                                                                                                                                                    |
+| ------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `develop`    | Changes only through pull requests, which only people with write access can add to the merge queue. Required checks and resolved conversations. No bypass. Squash merges only. Cannot be deleted or force-pushed.                        |
+| `release/**` | Only Core Maintainers can create, update or delete release branches. A pull request needs an approval from someone with write access other than its author, or a recorded bypass by a Core Maintainer, and must pass the PR label check. |
+| `main`       | A pull request needs an approval from someone with write access other than its author, or a recorded bypass by a Core Maintainer, and must pass the PR label check. Cannot be deleted or force-pushed.                                   |
+| `v*` tags    | Core Maintainers control human tag operations. When configured, the release App can create a final tag after the reviewed preparation PR and merged-commit CI; it cannot move or delete tags.                                            |
 
 ## Releases
 
-Only Core Maintainers cut `release/vX.Y` branches and publish releases. A `v*`
+Core Maintainers cut `release/vX.Y` branches and authorise releases. A `v*`
 tag starts **Build and Push Docker Images**, which builds, tests, scans and
 attests the release images that deployments consume. Restricting who can create
 those tags is how Eneo controls what is released.
@@ -145,21 +197,23 @@ flowchart LR
   D["develop"] -->|"Core Maintainers cut"| R["release/vX.Y"]
   R -->|"Core Maintainers authorise"| T["vX.Y.Z-rc.N<br/>vX.Y.Z"]
   T --> B["Build and Push<br/>Docker Images"]
-  B --> I["Release images<br/>in GHCR"]
-  I --> E["Test and production<br/>deployments"]
+  B --> I["Completed<br/>release bundle"]
+  I --> E["Deploy the recorded<br/>image digests"]
 ```
 
 To propose a fix for a released version, open a pull request against the
-affected `release/vX.Y` branch. A Core Maintainer reviews, merges and releases
-it. The full flow is described in
+affected `release/vX.Y` branch. Someone other than the author approves it before it
+is merged, and a Core Maintainer releases it. The full flow is described in
 [DEPLOYMENT_WORKFLOW.md](https://github.com/eneo-ai/eneo/blob/develop/docs/DEPLOYMENT_WORKFLOW.md),
 and the release artefacts in [Release SBOMs](/docs/release-sboms).
 
 ## Urgent fixes
 
-An urgent fix takes the normal route: open a pull request, choose **Merge when
-ready** and let the checks run. There is no bypass that skips CI or the merge
-queue.
+An urgent fix follows the rules for its target branch. On `develop`, it is an
+ordinary pull request that must pass the required checks and the merge queue;
+there is no bypass. On a release branch, it needs one approval from someone
+with write access other than its author, normally another Core Maintainer. If none is available, a Core Maintainer can
+bypass the approval for that pull request and states the reason in it.
 
 <Callout type="warning">
   If GitHub itself blocks a critical fix, for example because a required check
@@ -206,17 +260,29 @@ publish container images, and deployments consume those images. Keeping write
 access with one accountable team protects every organisation that runs Eneo.
 Working from a fork gives you the same ability to propose and test changes.
 
+### Why is my push to `eneo-ai/eneo` refused with 403?
+
+GitHub refuses a push to `eneo-ai/eneo` from everyone without write access.
+That includes Collaborators, also if you could push branches here before. You are still a member of the organisation
+and of your team.
+
+Push your branch to a fork and open the pull request from there. In a clone of
+`eneo-ai/eneo`, `gh repo fork --remote` creates the fork, makes it `origin` and
+keeps this repository as `upstream`. The steps are in
+[Fork and set up](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment).
+
 ### Can I review other people's pull requests?
 
-Yes, and it is encouraged. Anyone can review and comment. Only a Core
-Maintainer can add a pull request to the merge queue, but other reviews often
-surface problems early and speed it up.
+Yes, and it is encouraged. Anyone can review and comment. Core Maintainers add
+approved contributions to the merge queue, and other reviews often surface
+problems early and speed that up.
 
 ### Does CI run on my pull request from a fork?
 
-Yes. The same checks run, with a read-only token and without secrets. If you
-are a first-time contributor, a Core Maintainer may need to approve the first
-workflow run before it starts.
+Yes. The same checks run. Jobs that run your code get a read-only token and no
+repository secrets. For contributors outside the `eneo-ai` organisation, a
+Core Maintainer approves the CI, Dependency Review and User-facing runs before
+they start; PR labels runs straight away.
 
 ### Why is the PR label check red on my pull request?
 
@@ -232,16 +298,20 @@ Maintainers decide on each merge and are accountable for what is released.
 ### How do I get a fix into a released version?
 
 Open a pull request against the affected `release/vX.Y` branch, or ask in the
-issue for a backport. A Core Maintainer merges it, carries it over to `develop`
-and publishes a patch release.
+issue for a backport. Someone other than the author approves it, it is merged,
+and a Core Maintainer publishes a patch release. A fix that originated on the
+release branch is also carried to `develop`; a fix backported from `develop`
+is already there.
 
 ### Can Core Maintainers merge their own changes without review?
 
-Yes. They choose **Merge when ready** on their own pull request, and it enters
-the merge queue when the checks are green. A formal approval is not required,
-so the team is not slowed down waiting for each other. They can still ask a
-colleague for a review when a second opinion helps, for example on larger or
-riskier changes. The required checks and the merge queue always apply.
+On `develop`, without a formal approval, yes. The team works together and
+agrees on each change before one of them chooses **Merge when ready**, so it is
+not slowed down waiting for approvals. They ask for a written review when a
+change is large or risky, and the required checks and the merge queue always
+apply. On release branches and `main`, someone with write access other than
+the author approves the pull request, normally another Core Maintainer. When none is available, a Core Maintainer can bypass that
+approval for a single pull request, and GitHub records it.
 
 ### Can a pull request be merged with failing checks?
 
@@ -252,5 +322,6 @@ required checks and go through the merge queue.
 
 Privately, through
 [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
-or by email to `security@sundsvall.se`. Never report it in a public issue, pull
-request or discussion.
+on GitHub, which is the preferred way. If you cannot use GitHub, email
+`security@sundsvall.se`. Never report it in a public issue, pull request or
+discussion.

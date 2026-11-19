@@ -6068,6 +6068,7 @@
   "eneo_error_9079": "Inloggningen kunde inte verifieras. Försök igen.",
   "eneo_error_9082": "Kontot är redan kopplat till en annan inloggning. Kontakta din administratör för hjälp.",
   "eneo_error_9085": "Den här konversationen bygger på innehåll från en konversation som har tagits bort och kan därför inte längre öppnas.",
+  "eneo_error_9086": "Gallringstiden är längre än den gräns som gäller här.",
   "required_field": "Detta fält är obligatoriskt",
   "federation_admin_change": "{field}: {from} → {to}",
   "federation_admin_confirm_action": "Spara och använd",

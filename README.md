@@ -28,7 +28,7 @@ Originally developed by Sundsvall Municipality and Ånge Municipality, Eneo embo
 - **🔒 Data Sovereignty** - Your data never leaves your environment
 - **🤝 Model Agnostic** - Use OpenAI, Anthropic, Azure, or local models
 - **🏛️ Public Sector Focus** - Built for municipal and government needs
-- **📋 Compliance Ready** - GDPR and EU AI Act support built-in
+- **📋 Compliance Support** - Audit logging, data retention, security classifications and self-hosting to support GDPR and EU AI Act work
 - **🔓 True Open Source** - AGPL v3 licensed with no vendor lock-in
 
 ---

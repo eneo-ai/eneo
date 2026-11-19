@@ -167,9 +167,25 @@ describe("getErrorMessage", () => {
   });
 
   it.each([
-    9042, 9043, 9053, 9054, 9055, 9056, 9057, 9058, 9059, 9060, 9061, 9062, 9063, 9064, 9071, 9074
-  ])("localizes backend refusal %i in both supported languages", (code) => {
-    const error = apiErrorFromResponse(errorResponse(409), {
+    [9042, 409],
+    [9043, 409],
+    [9053, 409],
+    [9054, 409],
+    [9055, 409],
+    [9056, 409],
+    [9057, 409],
+    [9058, 409],
+    [9059, 409],
+    [9060, 409],
+    [9061, 409],
+    [9062, 409],
+    [9063, 409],
+    [9064, 409],
+    [9071, 409],
+    [9074, 409],
+    [9086, 400]
+  ])("localizes backend refusal %i in both supported languages", (code, status) => {
+    const error = apiErrorFromResponse(errorResponse(status), {
       message: "Backend English refusal",
       eneo_error_code: code
     });
@@ -177,8 +193,11 @@ describe("getErrorMessage", () => {
       ["sv", sv],
       ["en", en]
     ] as const) {
-      const t = testTranslator(locale, messages);
-      expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
+      // The catalog text itself: a key missing from the catalog makes the
+      // translator answer with its fallback on both sides of `t(key)`.
+      const text = (messages as Record<string, string>)[`eneo_error_${code}`];
+      expect(text).toBeTruthy();
+      expect(getErrorMessage(error, testTranslator(locale, messages))).toBe(text);
     }
   });
 

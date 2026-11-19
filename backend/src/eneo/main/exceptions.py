@@ -120,6 +120,11 @@ class ErrorCodes(int, Enum):
     # A conversation that holds content copied from a conversation that was
     # removed: the copy is no longer readable and is removed in turn.
     DERIVED_SOURCE_REMOVED = 9085
+    # A retention period longer than the cap where it is written
+    # (data_retention.domain.rules.RetentionExceedsSpaceError). The name stays
+    # when the organisation or a flow set the cap; the context carries the cap
+    # in days and the level that chose it.
+    RETENTION_EXCEEDS_SPACE = 9086
     # Browser-session protocol for the Vite app. Keep distinct from Skill errors
     # so a refused configuration save never triggers session recovery.
     SESSION_GENERATION_MISMATCH = 9090

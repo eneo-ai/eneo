@@ -889,7 +889,13 @@ class ApiKeyLifecycleService:
         user = self._require_user()
         key: ApiKeyV2InDB | None = None
         try:
-            key = await self._get_key_or_404(key_id=key_id, tenant_id=user.tenant_id)
+            # The strong lock makes a new row that points to the key wait from
+            # this read on, and fail once the key is gone. Under the weaker one
+            # it could commit before the delete, and a conversation the key
+            # owns would then make the delete fail: it keeps exactly one owner.
+            key = await self._get_key_or_404(
+                key_id=key_id, tenant_id=user.tenant_id, for_update=True
+            )
             if not skip_manage_authorization:
                 await self.policy_service.ensure_manage_authorized(key=key)
                 await self.policy_service.ensure_ownership_authorized(key=key)
@@ -956,12 +962,21 @@ class ApiKeyLifecycleService:
 
         await self.api_key_repo.delete(key_id=key.id, tenant_id=key.tenant_id)
 
-    async def _get_key_or_404(self, *, key_id: UUID, tenant_id: UUID) -> ApiKeyV2InDB:
+    async def _get_key_or_404(
+        self,
+        *,
+        key_id: UUID,
+        tenant_id: UUID,
+        for_update: Literal[True, "no_key"] = "no_key",
+    ) -> ApiKeyV2InDB:
         # Every change reads the key through here. The lock makes it validate
         # and write the row as it is after a concurrent change commits (the
         # nightly maintenance among them), instead of overwriting that change.
+        # A change that keeps the row takes the weaker lock, so a conversation
+        # or rating that the key's own requests create meanwhile is not held
+        # back by it, for example by a rename.
         key = await self.api_key_repo.get(
-            key_id=key_id, tenant_id=tenant_id, for_update=True
+            key_id=key_id, tenant_id=tenant_id, for_update=for_update
         )
         if key is None:
             raise ApiKeyValidationError(

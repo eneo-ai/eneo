@@ -3,7 +3,10 @@
 Retention passes "fewer days is stricter" with no bounding level, so the
 nearest chosen period wins. An access requirement passes "required is
 stricter" with every level bounding, which makes the levels an OR that an
-inner level can raise but never lower.
+inner level can raise but never lower. Retention in flows will pass "fewer
+days" over organisation, space, flow and step, with the space and the flow
+bounding: neither is ever exceeded inside it, and the organisation is a
+default that a space inherits, not a cap.
 """
 
 import pytest
@@ -13,7 +16,10 @@ from eneo.policy_levels import LevelSetting, PolicyLevel, Resolved, admits, reso
 ORG = PolicyLevel.ORGANIZATION
 SPACE = PolicyLevel.SPACE
 OWN = PolicyLevel.ASSISTANT_OR_APP
+FLOW = PolicyLevel.FLOW
+STEP = PolicyLevel.FLOW_STEP
 EVERY_LEVEL = frozenset(PolicyLevel)
+FLOW_RETENTION_CAPS = frozenset({SPACE, FLOW})
 
 
 def fewer_days(candidate: int, current: int) -> bool:
@@ -33,6 +39,7 @@ def test_level_values_are_the_released_strings():
         "space",
         "assistant_or_app",
         "flow",
+        "flow_step",
     ]
 
 
@@ -192,3 +199,128 @@ def test_a_write_may_inherit_or_tighten_but_never_loosen_a_bound():
     )
     assert admits(required_above, True, stricter=required)
     assert not admits(required_above, False, stricter=required)
+
+
+# Retention in flows. The numbers are periods in one unit for the whole chain;
+# a step chosen in hours is converted by its caller before it is compared, and
+# these tests do not exercise that conversion.
+
+
+def flow_retention(*periods: int | None) -> Resolved[int]:
+    """Organisation, space, flow and step, cut after the periods given: two
+    periods resolve the levels outside a flow, three the levels outside a
+    step."""
+    levels = (ORG, SPACE, FLOW, STEP)
+    return resolve(
+        [LevelSetting(level, period) for level, period in zip(levels, periods)],
+        stricter=fewer_days,
+        bounding=FLOW_RETENTION_CAPS,
+    )
+
+
+def test_a_step_keeps_its_own_shorter_period_under_its_flow_and_space():
+    """Space 30, flow 7, step 1: the step keeps 1 and the flow keeps 7.
+    Mutants: the flow is not a cap, so the bound a step is held to is the
+    space's 30; the shortest period in the chain names the wrong level."""
+    assert flow_retention(None, 30, 7, 1) == Resolved(1, STEP, 7, FLOW)
+    assert flow_retention(None, 30, 7) == Resolved(7, FLOW, 7, FLOW)
+
+
+@pytest.mark.parametrize(
+    "org,space,flow,step,expected",
+    [
+        pytest.param(None, 30, 7, 10, Resolved(7, FLOW, 7, FLOW), id="flow caps"),
+        pytest.param(
+            None, 30, None, 40, Resolved(30, SPACE, 30, SPACE), id="space caps"
+        ),
+        pytest.param(None, None, 7, 10, Resolved(7, FLOW, 7, FLOW), id="no space"),
+    ],
+)
+def test_a_step_never_outlives_the_flow_or_the_space_that_caps_it(
+    org: int | None,
+    space: int | None,
+    flow: int | None,
+    step: int | None,
+    expected: Resolved[int],
+):
+    """Mutants: the flow is not a cap, so a step resolves to a longer period
+    than its flow's; a step longer than its caps keeps its own period."""
+    assert flow_retention(org, space, flow, step) == expected
+
+
+@pytest.mark.parametrize(
+    "org,space,flow,step,expected",
+    [
+        pytest.param(
+            None, 30, None, None, Resolved(30, SPACE, 30, SPACE), id="from space"
+        ),
+        pytest.param(None, 30, 7, None, Resolved(7, FLOW, 7, FLOW), id="from flow"),
+        pytest.param(
+            None, None, None, 2, Resolved(2, STEP, None, None), id="step alone"
+        ),
+        pytest.param(
+            None, None, None, None, Resolved(None, None, None, None), id="nothing"
+        ),
+    ],
+)
+def test_an_empty_level_in_a_flow_inherits_the_nearest_choice_outside_it(
+    org: int | None,
+    space: int | None,
+    flow: int | None,
+    step: int | None,
+    expected: Resolved[int],
+):
+    """Mutants: an empty step or flow is read as no retention although a level
+    outside it chose one; nothing chosen anywhere still removes something; the
+    flow is not a cap, so the bound names the space."""
+    assert flow_retention(org, space, flow, step) == expected
+
+
+def test_a_flow_or_a_step_may_choose_its_cap_but_nothing_longer():
+    """A write is to be checked against the levels outside the one written;
+    this test shows what `admits` gives for those periods. The write path that
+    will use it is built later.
+    Mutants: a period equal to the cap is refused; a longer one is admitted;
+    the flow is not a cap, so a step may choose up to the space's period."""
+    outside_a_step = flow_retention(None, 30, 7)
+    assert admits(outside_a_step, 7, stricter=fewer_days)
+    assert admits(outside_a_step, 1, stricter=fewer_days)
+    assert admits(outside_a_step, None, stricter=fewer_days)
+    assert not admits(outside_a_step, 8, stricter=fewer_days)
+
+    outside_a_flow = flow_retention(None, 30)
+    assert admits(outside_a_flow, 30, stricter=fewer_days)
+    assert not admits(outside_a_flow, 31, stricter=fewer_days)
+
+
+def test_the_organization_is_a_default_a_space_inherits_not_a_cap():
+    """Organisation 30 and space 60 give 60, also for what is inside the space.
+    Mutant: the organisation caps, so a space cannot choose a longer period
+    than its organisation's default."""
+    assert flow_retention(30, 60) == Resolved(60, SPACE, 60, SPACE)
+    assert flow_retention(30, 60, None, 45) == Resolved(45, STEP, 60, SPACE)
+    assert admits(flow_retention(30), 60, stricter=fewer_days)
+
+
+def test_a_space_that_inherits_its_organizations_period_caps_from_the_organization():
+    """The cap a refused write is to report comes from the level that chose
+    it; `resolve` names the organisation as the bound's origin here. The write
+    path that will report it is built later.
+    Mutant: the bound names the space that only inherits, so a client sends the
+    administrator to a space setting that is empty."""
+    outside_a_flow = flow_retention(30, None)
+    assert (outside_a_flow.bound, outside_a_flow.bound_origin) == (30, ORG)
+    assert not admits(outside_a_flow, 31, stricter=fewer_days)
+    assert flow_retention(30, None, 90) == Resolved(30, ORG, 30, ORG)
+
+
+def test_a_lowered_cap_applies_over_a_longer_period_stored_inside_it():
+    """The space goes down to 5 after the flow stored 7 and a step 6. A save
+    is to check only the periods it writes, so the stored periods stay; this
+    test shows what `resolve` gives: the shorter cap over the longer stored
+    periods. The write path is built later.
+    Mutants: the stored period still applies; a stored step that is shorter
+    than the new cap is lifted to it."""
+    assert flow_retention(None, 5, 7) == Resolved(5, SPACE, 5, SPACE)
+    assert flow_retention(None, 5, 7, 6) == Resolved(5, SPACE, 5, SPACE)
+    assert flow_retention(None, 5, 7, 1) == Resolved(1, STEP, 5, SPACE)

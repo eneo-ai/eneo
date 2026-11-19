@@ -36,7 +36,7 @@ FLOW_MANAGED_ASSISTANT_KEY_SWEEP_LIMIT = 500
 # per step for keys past their end date, for keys recorded as expired but
 # still open, and for rotated keys; per tenant for unused keys. It is not a
 # cap for the whole run. A selection that reaches it leaves the rest to the
-# next night's run.
+# next night's run; a key it selects but leaves unchanged still takes a place.
 API_KEY_MAINTENANCE_BATCH_LIMIT = 500
 
 
@@ -51,12 +51,13 @@ def _connection_lost(exc: BaseException) -> bool:
 
 
 class _Run:
-    """What one run reports beside its counts: the failures, and the
-    selections that reached the limit."""
+    """What one run reports beside its counts: the failures, the selections
+    that reached the limit, and per selection the keys it left unchanged."""
 
     def __init__(self) -> None:
         self.errors: list[dict[str, str]] = []
         self.limit_reached: list[dict[str, str]] = []
+        self.selected_unchanged: list[dict[str, str | int]] = []
 
     def failed(self, exc: Exception, *, step: str, **where: str) -> None:
         if _connection_lost(exc):
@@ -84,7 +85,15 @@ class ApiKeyMaintenanceService:
     async def run_daily_maintenance(self) -> dict[str, object]:
         """Run every step; a failing key, selection or tenant is reported in
         ``errors`` and the rest goes on. An unreachable database or a lost
-        connection fails the run."""
+        connection fails the run.
+
+        The run never waits for a key another transaction holds: the
+        selection writing the key skips it, and counts it in
+        ``selected_unchanged`` with the keys that stopped matching after
+        selection. A later selection in the same run, or a later run, can
+        change it if it selects it, it still matches and it is free, so a key
+        held at every run can be put off indefinitely. A key selected but left
+        unchanged still takes a place in the selection's limit."""
         # Connect before the per-step error boundaries, so a database that
         # cannot be reached fails the job instead of becoming one error per step.
         await self.api_key_repo.session.connection()
@@ -121,6 +130,7 @@ class ApiKeyMaintenanceService:
             "rotation_revoked": rotation_revoked,
             "batch_limit_per_selection": API_KEY_MAINTENANCE_BATCH_LIMIT,
             "limit_reached": run.limit_reached,
+            "selected_unchanged": run.selected_unchanged,
             "errors": run.errors,
         }
 
@@ -202,7 +212,7 @@ class ApiKeyMaintenanceService:
         *,
         step: str,
         condition: sa.ColumnElement[bool],
-        change: Callable[[sa.ColumnElement[bool], ApiKeyV2InDB], Awaitable[int]],
+        change: Callable[[sa.ColumnElement[bool], ApiKeyV2InDB], Awaitable[bool]],
         tenant_id: UUID | None = None,
     ) -> int:
         """Select the oldest keys matching ``condition`` and ``change`` each.
@@ -227,15 +237,22 @@ class ApiKeyMaintenanceService:
                 extra={"step": step, "limit": limit, **where},
             )
 
-        changed = 0
+        changed = unchanged = 0
         for key in keys:
             try:
                 async with session.begin_nested():
-                    changed += await change(condition, key)
+                    if await change(condition, key):
+                        changed += 1
+                    else:
+                        unchanged += 1
             except Exception as exc:
                 run.failed(
                     exc, step=step, key_id=str(key.id), tenant_id=str(key.tenant_id)
                 )
+        if unchanged:
+            # Held by another transaction or no longer matching: an update
+            # that matches no row cannot tell which.
+            run.selected_unchanged.append({"step": step, **where, "count": unchanged})
         return changed
 
     def _get_auto_expire_days(self, tenant: "TenantInDB") -> int | None:
@@ -263,9 +280,9 @@ class ApiKeyMaintenanceService:
         now: datetime,
         reason: str,
         extra: dict[str, str] | None = None,
-    ) -> int:
-        """Expire ``key`` if it still matches ``condition``: 1 if it did,
-        0 if it changed after it was selected."""
+    ) -> bool:
+        """Expire ``key`` if it still matches ``condition``; False if another
+        transaction holds it or it changed after it was selected."""
         # Sign-in judges a key by its end date alone, so ending access means
         # moving a later (or missing) end date to now; a passed one is kept.
         expires_at = min(key.expires_at or now, now)
@@ -273,7 +290,7 @@ class ApiKeyMaintenanceService:
             condition, key=key, expires_at=expires_at
         )
         if updated_key is None:
-            return 0
+            return False
 
         # Written in the key's savepoint whatever the tenant's audit settings,
         # so the transition and its audit row commit or roll back together.
@@ -298,7 +315,7 @@ class ApiKeyMaintenanceService:
                 },
             ),
         )
-        return 1
+        return True
 
     async def _mark_revoked_for_rotation(
         self,
@@ -306,9 +323,10 @@ class ApiKeyMaintenanceService:
         key: ApiKeyV2InDB,
         *,
         now: datetime,
-    ) -> int:
-        """Revoke ``key`` if its grace period has still ended: 1 if it did,
-        0 if it was revoked or given a new grace period after selection."""
+    ) -> bool:
+        """Revoke ``key`` if its grace period has still ended; False if another
+        transaction holds it, or it was revoked or given a new grace period
+        after selection."""
         updated_key = await self.api_key_repo.revoke_matching(
             condition,
             key=key,
@@ -317,7 +335,7 @@ class ApiKeyMaintenanceService:
             revoked_reason_text="Rotation grace period ended.",
         )
         if updated_key is None:
-            return 0
+            return False
 
         await self.audit_service.log(
             required=True,
@@ -338,4 +356,4 @@ class ApiKeyMaintenanceService:
                 },
             ),
         )
-        return 1
+        return True

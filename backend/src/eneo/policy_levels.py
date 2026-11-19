@@ -26,6 +26,7 @@ class PolicyLevel(StrEnum):
     SPACE = "space"
     ASSISTANT_OR_APP = "assistant_or_app"
     FLOW = "flow"
+    FLOW_STEP = "flow_step"
 
 
 @dataclass(frozen=True, slots=True)
