@@ -10,7 +10,7 @@ from arq.worker import Function, create_worker
 from sqlalchemy.exc import IntegrityError
 
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
-from eneo.jobs.job_models import JobFailureCode
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
 from eneo.main.exceptions import TenantQuotaExceededException
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
@@ -54,6 +54,12 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.job_serializer is general.job_serializer
     assert crawler.job_deserializer is general.job_deserializer
     assert crawler.functions["crawl"].keep_result_s == 0
+
+
+def test_arq_does_not_rerun_app_jobs_after_a_worker_crash() -> None:
+    general = create_worker(WorkerSettings)
+
+    assert general.functions[Task.RUN_APP.value].max_tries == 1
 
 
 async def test_crawler_startup_removes_earlier_workspaces_before_runtime_start(
@@ -320,7 +326,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
     # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_active=True
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED
     )
 
 
@@ -400,7 +406,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     assert tx_contexts[0].committed is False
     assert tx_contexts[1].committed is True
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.CANCELLED, only_if_active=True
+        job_id, failure_code=JobFailureCode.CANCELLED
     )
     assert published_when_recovery_committed[-1] is True
 
@@ -459,9 +465,7 @@ async def test_a_commit_failure_is_recorded_as_its_code_without_text(
 
     await worker._fail_job_after_commit_error(job_id, None, error)
 
-    job_service.fail_job.assert_awaited_once_with(
-        job_id, failure_code=code, only_if_active=True
-    )
+    job_service.fail_job.assert_awaited_once_with(job_id, failure_code=code)
 
 
 async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(

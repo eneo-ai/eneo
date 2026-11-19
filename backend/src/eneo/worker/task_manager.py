@@ -106,7 +106,7 @@ class TaskManager:
 
     @asynccontextmanager
     async def set_status_on_exception(
-        self, *, status_already_set: bool = False, publish_terminal: bool = True
+        self, *, status_already_set: bool = False, transactional: bool = False
     ):
         """Context manager that handles job status updates and exception handling.
 
@@ -114,8 +114,8 @@ class TaskManager:
             status_already_set: If True, skip the initial IN_PROGRESS status update.
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
-            publish_terminal: Set False when the caller publishes the final status
-                after its transaction commits and records cancellation after rollback.
+            transactional: The caller publishes terminal status after commit and
+                records cancellation after rollback.
         """
         if not status_already_set:
             await self.set_status(Status.IN_PROGRESS)
@@ -129,7 +129,7 @@ class TaskManager:
                 "Job cancelled (worker shutdown or timeout)",
                 extra={"job_id": str(self.job_id)},
             )
-            if publish_terminal:
+            if not transactional:
                 await self.fail_job(JobFailureCode.CANCELLED)
             self.success = False
             raise  # Re-raise to let ARQ know the job was cancelled
@@ -147,10 +147,10 @@ class TaskManager:
                 facts["error_at"],
                 extra={"job_id": str(self.job_id), "failure_code": code.value, **facts},
             )
-            await self.fail_job(code, publish=publish_terminal)
+            await self.fail_job(code, publish=not transactional)
             self.success = False
         else:
-            await self.complete_job(publish=publish_terminal)
+            await self.complete_job(publish=not transactional)
             self.success = True
         finally:
             if self._cleanup_func is not None:

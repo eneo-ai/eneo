@@ -407,6 +407,7 @@ class Worker:
         channel_type: ChannelType | None = None,
         *,
         keep_result: int | None = None,
+        max_tries: int | None = None,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
@@ -442,7 +443,7 @@ class Worker:
                         )
 
                         async with task_manager.set_status_on_exception(
-                            status_already_set=True, publish_terminal=False
+                            status_already_set=True, transactional=True
                         ):
                             await task_manager.publish_status(Status.IN_PROGRESS)
                             task_manager.result_location = await func(
@@ -462,16 +463,16 @@ class Worker:
                             )
                     raise
 
-                if success is not None:
-                    await task_manager.publish_status(
-                        Status.COMPLETE if success else Status.FAILED
-                    )
+                assert success is not None
+                await task_manager.publish_status(
+                    Status.COMPLETE if success else Status.FAILED
+                )
                 return success
 
             traced = _traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, keep_result=keep_result, max_tries=max_tries)
+                if keep_result is not None or max_tries is not None
                 else traced
             )
             return wrapper
@@ -495,7 +496,7 @@ class Worker:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
                 failed = await container.job_service().fail_job(
-                    job_id, failure_code=code, only_if_active=True
+                    job_id, failure_code=code
                 )
             return failed is not None
         except Exception as error:
