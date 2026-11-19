@@ -166,6 +166,17 @@ def test_the_instructions_name_the_switch_to_redigera_in_the_uis_words() -> None
     assert "the person has named no HTTP, address or receiving system" in (instructions)
 
 
+def test_the_instructions_take_the_mode_from_the_turns_note() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert (
+        'When the person asks for a change while the chat is in "Fråga" (the note '
+        "after these instructions says which mode it is in now)"
+    ) in instructions
+    # The mode is never read off the tools the turn offers.
+    assert "tools that change the flow are absent" not in instructions
+
+
 def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 

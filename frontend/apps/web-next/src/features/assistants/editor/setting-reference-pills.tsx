@@ -3,7 +3,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
-import { mentionPattern, parseMention } from "@/features/references/mentions";
+import { mentionPattern } from "@/features/references/mentions";
 import {
   referenceComponents,
   referenceRemarkPlugins
@@ -17,6 +17,7 @@ import {
 import { PillButton, ReferenceToken } from "@/features/references/reference-pill";
 import {
   SETTING_SCHEME,
+  answerSettingMention,
   settingMention,
   settingParts,
   type SettingReference
@@ -74,12 +75,18 @@ function SettingMention({ name, settingKey }: { name: string; settingKey: string
 /** Stable, so Streamdown keeps one processor for every answer. */
 const remarkPlugins = referenceRemarkPlugins(mentionPattern(SETTING_SCHEME), [SETTING_SCHEME]);
 
+/**
+ * A mention in an answer, with the scheme or without it (`@[Namn](name)`):
+ * the setting's pill, or, for a mention of no setting the editor knows, its
+ * name, as the composer is given it.
+ */
 const components = referenceComponents(function SettingInAnswer({ raw, children }) {
-  const mention = parseMention(raw, SETTING_SCHEME);
-  return mention ? (
+  const mention = answerSettingMention(raw);
+  if (!mention) return <>{children}</>;
+  return mention.key ? (
     <SettingMention name={mention.name} settingKey={mention.key} />
   ) : (
-    <>{children}</>
+    <>{mention.name}</>
   );
 });
 
@@ -127,7 +134,8 @@ function SettingRow({ reference }: { reference: SettingReference }) {
  * the "@" button) lists every section of the editor with the settings it
  * shows and their values now; a pick becomes a pill in the field and
  * travels as `@[Name](setting:<key>)`; the same mentions are pills in sent
- * messages and in answers. `references` are the form's, in its order (see
+ * messages and in answers, where a known key without the scheme
+ * (`@[Name](<key>)`) is one too. `references` are the form's, in its order (see
  * `settingReferences`). Render the chat inside SettingReferences.
  */
 export function useSettingReferenceMenu(references: readonly SettingReference[]): {

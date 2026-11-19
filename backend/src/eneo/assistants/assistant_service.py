@@ -71,6 +71,7 @@ from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
 from eneo.helper_chats.binding import HelperChatBinding
+from eneo.helper_chats.personas.shared import mode_now
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
@@ -4216,21 +4217,34 @@ class AssistantService:
             )
 
         # A helper chat works on its target through the target's loopback
-        # tools; a model without tool calling only talks about it.
+        # tools; a model without tool calling only talks about it. The turn's
+        # instructions end with the mode the tools are chosen by, so what the
+        # model is told and what it is offered agree; the note is appended,
+        # because the start of the prompt belongs to the Skill runtime.
         helper_mcp_server = None
-        if (
-            prepared.helper_chat is not None
-            and prepared.effective_completion_model.supports_tool_calling
-        ):
-            from eneo.helper_chats.targets import target_for
-
-            helper_mcp_server = await target_for(
-                prepared.helper_chat.target_type
-            ).build_tool_server(
-                token=mint_scoped_token(),
-                tenant_id=self.user.tenant_id,
-                editing=prepared.helper_chat.editing,
+        if prepared.helper_chat is not None:
+            can_call_tools = prepared.effective_completion_model.supports_tool_calling
+            prompt_addendum = "\n\n".join(
+                part
+                for part in (
+                    prompt_addendum,
+                    mode_now(
+                        editing=prepared.helper_chat.editing,
+                        can_call_tools=can_call_tools,
+                    ),
+                )
+                if part
             )
+            if can_call_tools:
+                from eneo.helper_chats.targets import target_for
+
+                helper_mcp_server = await target_for(
+                    prepared.helper_chat.target_type
+                ).build_tool_server(
+                    token=mint_scoped_token(),
+                    tenant_id=self.user.tenant_id,
+                    editing=prepared.helper_chat.editing,
+                )
 
         # Referenced attachments: whenever signed reference URLs render in the
         # prompt, attach the loopback files server so the model always has at

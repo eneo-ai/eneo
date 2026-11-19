@@ -1,7 +1,10 @@
 """The helper chats' personas: the shared rules every target's persona
-carries, and what the assistant's own fragment says it may do."""
+carries, what the assistant's own fragment says it may do, and the note on
+the chat's mode that ends each turn's instructions."""
 
 from __future__ import annotations
+
+import pytest
 
 from eneo.helper_chats.personas.assistant import (
     ASSISTANT_FRAGMENT,
@@ -9,7 +12,14 @@ from eneo.helper_chats.personas.assistant import (
     SETTING_REFERENCE_KEYS,
     SETTING_REFERENCE_PARAGRAPH,
 )
-from eneo.helper_chats.personas.shared import HELPER_BASICS, PROMPT_WRITING
+from eneo.helper_chats.personas.shared import (
+    ASKING_NOW,
+    EDITING_NOW,
+    HELPER_BASICS,
+    PROMPT_WRITING,
+    WITHOUT_TOOLS_NOW,
+    mode_now,
+)
 
 
 def _unwrapped(text: str) -> str:
@@ -32,6 +42,9 @@ def test_the_personas_use_no_long_dashes():
         ASSISTANT_FRAGMENT,
         SETTING_REFERENCE_PARAGRAPH,
         PROMPT_WRITING,
+        EDITING_NOW,
+        ASKING_NOW,
+        WITHOUT_TOOLS_NOW,
     ):
         assert chr(0x2014) not in text
         assert chr(0x2013) not in text
@@ -52,6 +65,60 @@ def test_the_basics_keep_the_answer_brief_plain_and_in_the_persons_language():
     assert "Ask only when the answer changes what you do" in basics
     assert "with the question tool" in basics
     assert "never repeat one" in basics
+
+
+def test_the_basics_go_by_the_note_on_the_mode_the_chat_is_in_now():
+    basics = _unwrapped(HELPER_BASICS)
+
+    assert (
+        "a note after these instructions says which mode the chat is in now, "
+        "and you go by that note"
+    ) in basics
+    # A refusal for edit mode is the one case the note does not foresee.
+    assert (
+        "When a change is refused because edit mode is off, the chat has left "
+        '"Redigera" since the message was sent'
+    ) in basics
+
+
+def test_in_redigera_the_note_says_so_and_that_the_change_is_made():
+    note = mode_now(editing=True, can_call_tools=True)
+
+    assert note == EDITING_NOW
+    assert note.startswith('The chat is in "Redigera" now')
+    assert "you can change what this chat is about with your tools" in note
+    assert "make the changes the person asks for" in note
+    assert "Do not tell the person to switch modes" in note
+
+
+def test_in_fraga_the_note_says_nothing_changes_and_how_to_have_it_made():
+    note = mode_now(editing=False, can_call_tools=True)
+
+    assert note == ASKING_NOW
+    assert note.startswith('The chat is in "Fråga" now')
+    assert "you cannot change what this chat is about this turn" in note
+    assert "the tools that change it are not offered" in note
+    assert "as a proposal where you can show one" in note
+    assert 'they can switch to "Redigera" to have it made' in note
+
+
+@pytest.mark.parametrize("editing", [True, False])
+def test_without_tools_the_note_never_sends_the_person_to_another_mode(
+    editing: bool,
+):
+    note = mode_now(editing=editing, can_call_tools=False)
+
+    assert note == WITHOUT_TOOLS_NOW
+    assert "You have no tools this turn, whichever mode the chat is in" in note
+    assert "you can neither read nor change what this chat is about" in note
+    assert "do not tell them to switch modes" in note
+    assert '"Redigera"' not in note
+
+
+def test_each_note_is_one_plain_paragraph_that_names_no_tool():
+    for note in (EDITING_NOW, ASKING_NOW, WITHOUT_TOOLS_NOW):
+        assert "\n" not in note
+        assert "_" not in note
 
 
 def test_prompt_writing_has_no_protocol_of_its_own():

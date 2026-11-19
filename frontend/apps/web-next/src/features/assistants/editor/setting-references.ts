@@ -1,5 +1,11 @@
 import type { useFormatter, useTranslations } from "use-intl";
-import { mentionParts, mentionText, type MentionPart } from "@/features/references/mentions";
+import {
+  mentionParts,
+  mentionText,
+  parseBareMention,
+  parseMention,
+  type MentionPart
+} from "@/features/references/mentions";
 import type { Schema } from "@/lib/api/models";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import {
@@ -344,4 +350,18 @@ export function settingMention(reference: Pick<SettingReference, "key" | "label"
 /** A text split into plain text and setting mentions. */
 export function settingParts(text: string): MentionPart[] {
   return mentionParts(text, SETTING_SCHEME);
+}
+
+/**
+ * A mention in an answer: the name it was written with, and the setting it
+ * names. A model sometimes leaves out the scheme; `@[Namn](name)` then names
+ * the setting `@[Namn](setting:name)` does, for a key in
+ * SETTING_REFERENCE_KEYS as written. `key` is null for a mention of no such
+ * setting; the result is null for anything that is not a mention.
+ */
+export function answerSettingMention(raw: string): { name: string; key: string | null } | null {
+  const mention = parseMention(raw, SETTING_SCHEME) ?? parseBareMention(raw);
+  if (!mention) return null;
+  const key = SETTING_REFERENCE_KEYS.includes(mention.key) ? mention.key : null;
+  return { name: mention.name, key };
 }

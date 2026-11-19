@@ -112,6 +112,18 @@ function tokenValues() {
   );
 }
 
+/** An answer in the helper chat, its references read from what the form shows. */
+function Answer({ text, show }: { text: string; show: (key: string) => void }) {
+  const { references } = useSettingReferenceMenu(LIST);
+  return (
+    <SettingReferences references={MAP} show={show}>
+      <MessageResponse remarkPlugins={references.remarkPlugins} components={references.components}>
+        {text}
+      </MessageResponse>
+    </SettingReferences>
+  );
+}
+
 describe("The '@' menu of the assistant's settings", () => {
   it("lists the form's settings under their sections, with their values, and filters as typed", async () => {
     renderInApp(<ChatHarness onSubmit={vi.fn()} />);
@@ -215,21 +227,11 @@ describe("Setting references in a message", () => {
 
   it("draws an answer's references as pills, and the rest as the chat draws it", async () => {
     const show = vi.fn();
-    function Answer({ text }: { text: string }) {
-      const { references } = useSettingReferenceMenu(LIST);
-      return (
-        <SettingReferences references={MAP} show={show}>
-          <MessageResponse
-            remarkPlugins={references.remarkPlugins}
-            components={references.components}
-          >
-            {text}
-          </MessageResponse>
-        </SettingReferences>
-      );
-    }
     const { container } = renderInApp(
-      <Answer text="Byt @[Chattmodell](setting:completion_model) under @[AI-inställningar](setting:section:ai); `@[Namn](setting:name)` och @[Bortom](setting:section:widget) också." />
+      <Answer
+        show={show}
+        text="Byt @[Chattmodell](setting:completion_model) under @[AI-inställningar](setting:section:ai); `@[Namn](setting:name)` och @[Bortom](setting:section:widget) också."
+      />
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Chattmodell" }));
@@ -244,5 +246,39 @@ describe("Setting references in a message", () => {
     expect(container.textContent).toContain("Bortom också");
     expect(container.textContent).not.toContain("setting:");
     await expectNoAxeViolations(container);
+  });
+
+  it("draws an answer's mention of a known key without the scheme as the setting's pill", () => {
+    const show = vi.fn();
+    const { container } = renderInApp(
+      <Answer
+        show={show}
+        text="Jag föreslår att ändra @[Namn](name) till Hej Çagri, och @[Chattmodell](completion_model) under @[Allmänt](section:general)."
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Namn" }));
+    expect(show).toHaveBeenCalledWith("name");
+    expect(screen.getByRole("button", { name: "Chattmodell" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Allmänt" })).toBeTruthy();
+    expect(container.textContent).toBe(
+      "Jag föreslår att ändra Namn till Hej Çagri, och Chattmodell under Allmänt."
+    );
+  });
+
+  it("draws an answer's mention of no known setting as its name, and leaves links as links", () => {
+    const { container } = renderInApp(
+      <Answer
+        show={vi.fn()}
+        text="Se @[Namn](nonsense) och @[Modell](setting:nonsense), eller @[sidan](https://example.com) och [länk](name)."
+      />
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByRole("link", { name: "sidan" }).getAttribute("href")).toBe(
+      "https://example.com/"
+    );
+    // An ordinary link to an address that goes nowhere is the sanitiser's to refuse.
+    expect(container.textContent).toBe("Se Namn och Modell, eller @sidan och länk [blocked].");
   });
 });
