@@ -53,7 +53,7 @@ import { assistantHelperAvailabilityQueryOptions } from "./assistant-helper-api"
 import { settingLabel } from "./assistant-helper-cards";
 import { useChatChangeMarks, useHelperFormLock } from "./assistant-helper-feedback";
 import { AssistantHelperFormProvider } from "./assistant-helper-form";
-import { lockedAssistantModel } from "./effective-config";
+import { isPromptLocked, lockedAssistantModel } from "./effective-config";
 import {
   SettingReferences,
   insertSettingMessage,
@@ -199,6 +199,16 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
             })
           )
       : undefined;
+  // The prompt can be written here: by someone who may edit, where no policy sets it.
+  const askAboutPrompt =
+    helperAvailable && permissions.includes("edit") && !isPromptLocked(assistant.effective_config)
+      ? () =>
+          askHelper(
+            t("helper_ask_prompt_question", {
+              setting: settingMention({ key: "prompt", label: settingLabel("prompt", t) })
+            })
+          )
+      : undefined;
 
   const sections: (SettingsSection & { id: AssistantSectionId })[] = [
     {
@@ -220,6 +230,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
           assistant={assistant}
           contextModel={ai.effectiveModel}
           modelConfirmed={ai.confirmed}
+          onAskPrompt={askAboutPrompt}
         />
       )
     },

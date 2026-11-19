@@ -70,7 +70,15 @@ vi.mock("./security-section", async () => {
     )
   };
 });
-vi.mock("./instructions-section", () => ({ InstructionsSection: () => null }));
+// The prompt's own section is tested on its own; here it is the way into the helper the editor gives it.
+vi.mock("./instructions-section", () => ({
+  InstructionsSection: ({ onAskPrompt }: { onAskPrompt?: () => void }) =>
+    onAskPrompt ? (
+      <button type="button" onClick={onAskPrompt}>
+        Hjälp mig skriva instruktionerna
+      </button>
+    ) : null
+}));
 vi.mock("./knowledge-section", () => ({ KnowledgeSection: () => null }));
 vi.mock("./mcp-section", () => ({ McpSection: () => null }));
 vi.mock("./capabilities-section", () => ({
@@ -228,6 +236,7 @@ describe("'Fråga' on each section", () => {
     expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Fråga hjälpassistenten/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Hjälp mig välja modell" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Hjälp mig skriva instruktionerna" })).toBeNull();
   });
 
   it("is not offered on the personal chat's own assistant", () => {
@@ -279,6 +288,34 @@ describe("'Hjälp mig välja modell' under the chat model", () => {
     });
     expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Hjälp mig välja modell" })).toBeNull();
+  });
+});
+
+describe("'Hjälp mig skriva instruktionerna' beside the prompt", () => {
+  const ask = () => screen.queryByRole("button", { name: "Hjälp mig skriva instruktionerna" });
+
+  it("opens the helper with a request about the prompt in its composer", async () => {
+    renderEditor();
+    fireEvent.click(ask()!);
+
+    await waitFor(() => expect(pillsInComposer()).toEqual(["@[Prompt](setting:prompt)"]));
+    expect(composerField().textContent?.replace(/\s+/g, " ").trim()).toBe(
+      "Hjälp mig skriva Prompt"
+    );
+    expect(document.activeElement).toBe(composerField());
+    expect(state.sent).toEqual([]);
+  });
+
+  it("is not offered to someone who may not change the prompt", () => {
+    renderEditor({ assistant: { permissions: ["read"] } });
+    expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
+    expect(ask()).toBeNull();
+  });
+
+  it("is not offered where a policy sets the prompt", () => {
+    renderEditor({ assistant: { effective_config: { prompt_locked: true } } });
+    expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
+    expect(ask()).toBeNull();
   });
 });
 
