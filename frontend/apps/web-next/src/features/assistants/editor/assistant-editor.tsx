@@ -82,10 +82,12 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  * "Hjälpassistent" in the header (and in a phone's bar) opens the helper chat
  * beside the settings, or over them where the row has no room; it follows
  * the helper's availability. The personal chat's own assistant has no helper
- * (decision 11). While the helper is available, each section's "Fråga" and
- * "Hjälp mig välja modell" under the chat model put a reference to the
- * setting in its composer (never sending it), and a reference pill in the
- * chat shows its setting in the form.
+ * (decision 11). Each visit starts the helper on a new, empty conversation
+ * the first time it is shown; closing and opening it again within the visit
+ * keeps the conversation. While the helper is available, each section's
+ * "Fråga" and "Hjälp mig välja modell" under the chat model put a reference
+ * to the setting in its composer (never sending it), and a reference pill in
+ * the chat shows its setting in the form.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   return (
@@ -449,6 +451,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
           aside={(presentation) => (
             <HelperPanel
               adapter={helper}
+              open={helperOpen}
               close={{
                 label: presentation === "phone" ? t("helper_back") : t("helper_close"),
                 onClose: () => changeHelperOpen(false),

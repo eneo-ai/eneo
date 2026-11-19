@@ -43,7 +43,10 @@ from eneo.flows.enums import FlowInputSource, FlowOutputDelivery, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.helper_chats.application import helper_chat_service
-from eneo.helper_chats.application.helper_chat_service import OpenedChat
+from eneo.helper_chats.application.helper_chat_service import (
+    HelperChatConversationPublic,
+    OpenedChat,
+)
 from eneo.helper_chats.targets import (
     HelperChatAudit,
     HelperChatAuditEvent,
@@ -674,8 +677,9 @@ class FlowAuthoringChatPublic(BaseModel):
     session_id: UUID = Field(
         description=(
             "The chat's current conversation. Starting a new conversation "
-            "(explicitly, or by entering edit mode after a pause) replaces it; "
-            "earlier conversations are kept but never answered again."
+            "(explicitly, by entering edit mode after a pause, or by opening "
+            "with `fresh_start`) replaces it; earlier conversations are kept "
+            "and listed for their person but never answered again."
         )
     )
     editing: bool
@@ -959,12 +963,32 @@ async def require_authoring_edit(
 
 
 async def get_or_create_authoring_chat(
-    container: Container, *, flow_id: UUID, request: Request
+    container: Container,
+    *,
+    flow_id: UUID,
+    request: Request,
+    fresh_start: bool = False,
 ) -> FlowAuthoringChatPublic:
+    """The caller's chat, made on first use; with ``fresh_start`` on a new,
+    empty conversation (``helper_chat_service.get_or_create_chat``)."""
     return _public(
         await helper_chat_service.get_or_create_chat(
-            container, FLOW_TARGET, target_id=flow_id, request=request
+            container,
+            FLOW_TARGET,
+            target_id=flow_id,
+            request=request,
+            fresh_start=fresh_start,
         )
+    )
+
+
+async def list_authoring_conversations(
+    container: Container, *, flow_id: UUID, request: Request
+) -> list[HelperChatConversationPublic]:
+    """The caller's conversations in their chat on the flow that hold a
+    question, the latest question first."""
+    return await helper_chat_service.list_conversations(
+        container, FLOW_TARGET, target_id=flow_id, request=request
     )
 
 

@@ -31,7 +31,10 @@ from eneo.flows.domain.flow_authoring_chat_policy import (
     resolve_flow_authoring_chat_model_id,
 )
 from eneo.helper_chats.application import helper_chat_service
-from eneo.helper_chats.application.helper_chat_service import OpenedChat
+from eneo.helper_chats.application.helper_chat_service import (
+    HelperChatConversationPublic,
+    OpenedChat,
+)
 from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
 from eneo.helper_chats.personas.organisation_guidance import (
     with_organisation_guidance,
@@ -89,9 +92,9 @@ class AssistantHelperChatPublic(BaseModel):
     )
     session_id: UUID = Field(
         description=(
-            "The chat's current conversation. Starting a new conversation "
-            "replaces it; earlier conversations are kept but never answered "
-            "again."
+            "The chat's current conversation. Starting a new conversation, or "
+            "opening with `fresh_start`, replaces it; earlier conversations "
+            "are kept and listed for their person but never answered again."
         )
     )
     editing: bool = Field(
@@ -436,12 +439,32 @@ def _public(opened: OpenedChat) -> AssistantHelperChatPublic:
 
 
 async def get_or_create_assistant_chat(
-    container: Container, *, assistant_id: UUID, request: Request
+    container: Container,
+    *,
+    assistant_id: UUID,
+    request: Request,
+    fresh_start: bool = False,
 ) -> AssistantHelperChatPublic:
+    """The caller's chat, made on first use; with ``fresh_start`` on a new,
+    empty conversation (``helper_chat_service.get_or_create_chat``)."""
     return _public(
         await helper_chat_service.get_or_create_chat(
-            container, ASSISTANT_TARGET, target_id=assistant_id, request=request
+            container,
+            ASSISTANT_TARGET,
+            target_id=assistant_id,
+            request=request,
+            fresh_start=fresh_start,
         )
+    )
+
+
+async def list_assistant_conversations(
+    container: Container, *, assistant_id: UUID, request: Request
+) -> list[HelperChatConversationPublic]:
+    """The caller's conversations in their chat on the assistant that hold a
+    question, the latest question first."""
+    return await helper_chat_service.list_conversations(
+        container, ASSISTANT_TARGET, target_id=assistant_id, request=request
     )
 
 

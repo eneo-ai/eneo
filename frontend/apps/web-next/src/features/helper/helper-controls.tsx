@@ -1,10 +1,11 @@
+import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Text } from "@astryxdesign/core/Text";
-import { useQueryClient } from "@tanstack/react-query";
-import { MessageSquarePlus, SlidersHorizontal } from "lucide-react";
-import { useTranslations } from "use-intl";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { History, MessageSquarePlus, SlidersHorizontal } from "lucide-react";
+import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -17,8 +18,15 @@ import {
   reasoningEffortOptions
 } from "@/features/chat/reasoning-effort";
 import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
+import { mentionNames } from "@/features/references/mentions";
 import { useSpace } from "@/features/spaces/use-space";
-import type { HelperAdapter, HelperChat, HelperChatApi, HelperChatUpdate } from "./helper-adapter";
+import type {
+  HelperAdapter,
+  HelperChat,
+  HelperChatApi,
+  HelperChatUpdate,
+  HelperConversation
+} from "./helper-adapter";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
 type Refused = HelperAdapter["onRefused"];
@@ -188,11 +196,98 @@ function HelperChatSettingsFields({
   );
 }
 
+/** When a conversation was last active, as the panel shows it. */
+export function useConversationTime(): (instant: string) => string {
+  const format = useFormatter();
+  return (instant) =>
+    format.dateTime(new Date(instant), { dateStyle: "medium", timeStyle: "short" });
+}
+
+/**
+ * "Tidigare konversationer": the person's earlier conversations in the chat
+ * (not the current one), the latest first, each named by its first
+ * question with its mentions as their names, and when it was last active.
+ * The list is read each time the menu opens, and anew once another
+ * conversation is current. Picking one hands it to `onPick`.
+ */
+export function ConversationHistoryMenu({
+  chat,
+  api,
+  list,
+  onPick
+}: {
+  chat: HelperChat;
+  api: HelperChatApi;
+  list: NonNullable<HelperChatApi["listConversations"]>;
+  onPick: (conversation: HelperConversation) => void;
+}) {
+  const t = useTranslations();
+  const timeOf = useConversationTime();
+  const [open, setOpen] = useState(false);
+  const conversations = useQuery({
+    queryKey: ["helper-chat-conversations", ...api.key, chat.session_id],
+    queryFn: () => list(),
+    enabled: open,
+    staleTime: 0,
+    retry: false
+  });
+  const earlier = (conversations.data ?? []).filter((conversation) => !conversation.current);
+  const label = t("helper_history");
+
+  const items: DropdownMenuOption[] = conversations.isError
+    ? [
+        { id: "failed", label: t("helper_history_failed"), isDisabled: true },
+        {
+          id: "retry",
+          label: t("retry"),
+          description: conversations.isFetching ? t("loading") : undefined,
+          hasCloseOnSelect: false,
+          onClick: () => {
+            if (!conversations.isFetching) void conversations.refetch({ cancelRefetch: false });
+          }
+        }
+      ]
+    : conversations.data === undefined
+      ? [{ id: "loading", label: t("loading"), isDisabled: true }]
+      : earlier.length === 0
+        ? [{ id: "empty", label: t("helper_history_empty"), isDisabled: true }]
+        : earlier.map((conversation) => ({
+            id: conversation.session_id,
+            // One line, cut with an ellipsis; its name is the whole title.
+            label: (
+              <span className="block max-w-64 truncate">{mentionNames(conversation.title)}</span>
+            ),
+            description: timeOf(conversation.last_asked_at),
+            onClick: () => onPick(conversation)
+          }));
+
+  return (
+    <DropdownMenu
+      isMenuOpen={open}
+      onOpenChange={setOpen}
+      placement="below"
+      alignment="end"
+      menuWidth={288}
+      renderTrigger={(props) => (
+        <IconButton
+          {...props}
+          label={label}
+          tooltip={label}
+          variant="ghost"
+          size="sm"
+          icon={<History aria-hidden className="size-4" />}
+        />
+      )}
+      items={items}
+    />
+  );
+}
+
 /**
  * "Ny konversation": after a confirmation the chat continues in a new, empty
- * conversation. The old one is kept for traceability but never answered or
- * shown again; `description` says what the target keeps. The panel switches
- * to the new conversation without a reload.
+ * conversation. The old one is kept and listed under "Tidigare
+ * konversationer", read only; `description` says what the target keeps. The
+ * panel switches to the new conversation without a reload.
  */
 export function NewConversationButton({
   chat,

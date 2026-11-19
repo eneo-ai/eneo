@@ -2,10 +2,11 @@
 
 A person has one chat per target: a hidden assistant and the conversation
 that is current. Earlier conversations stay with the assistant for
-traceability, but only the current one is ever answered or sent to the model,
-because ``load_chat`` admits only the session the chat points at. What the
-chat helps with, who may read and change it and how its audit entries read
-is the target's (``helper_chats.targets``).
+traceability and are listed for their person (``list_conversations``), but
+only the current one is ever answered or sent to the model, because
+``load_chat`` admits only the session the chat points at. What the chat helps
+with, who may read and change it and how its audit entries read is the
+target's (``helper_chats.targets``).
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import Request
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import set_committed_value
 
@@ -112,8 +114,34 @@ async def _load_chat(
     lock: bool,
 ) -> tuple[HelperChats, Any]:
     """``load_chat``, with the target as its read check read it."""
-    user = container.user()
     await target.require_available(container)
+    chat, record = await _read_chat(
+        container,
+        target,
+        session_id=session_id,
+        assistant_id=assistant_id,
+        target_id=target_id,
+        lock=lock,
+    )
+    await _leave_edit_mode_after_pause(container, chat)
+    return chat, record
+
+
+async def _read_chat(
+    container: Container,
+    target: HelperChatTarget[Any],
+    *,
+    session_id: UUID | None,
+    assistant_id: UUID | None,
+    target_id: UUID | None,
+    lock: bool,
+) -> tuple[HelperChats, Any]:
+    """The caller's chat on ``target`` as it is stored, after the binding's
+    checks: the chat for ``session_id``, or without one the caller's chat on
+    ``target_id``. Its row, its current conversation and its hidden assistant
+    must all be the caller's own, and the target the caller's to read. The
+    caller asks whether the target is offered first. Nothing is written."""
+    user = container.user()
     query = (
         sa.select(HelperChats)
         .join(Sessions, Sessions.id == HelperChats.session_id)
@@ -121,7 +149,6 @@ async def _load_chat(
         .where(
             HelperChats.tenant_id == user.tenant_id,
             HelperChats.user_id == user.id,
-            HelperChats.session_id == session_id,
             HelperChats.target_type == target.target_type,
             Sessions.user_id == user.id,
             Sessions.api_key_id.is_(None),
@@ -132,6 +159,8 @@ async def _load_chat(
             target.target_exists(user.tenant_id),
         )
     )
+    if session_id is not None:
+        query = query.where(HelperChats.session_id == session_id)
     if assistant_id is not None:
         query = query.where(HelperChats.assistant_id == assistant_id)
     if target_id is not None:
@@ -154,7 +183,6 @@ async def _load_chat(
         )
         if chat is None:
             raise target.refusals.chat_not_found()
-    await _leave_edit_mode_after_pause(container, chat)
     return chat, record
 
 
@@ -423,6 +451,42 @@ async def _update_tools(
 # Why a conversation started or the edit mode changed: the person asked, or
 # the chat had been idle.
 ChangeReason = Literal["requested", "idle"]
+# Why a conversation started: a change's reasons, or the chat was opened with a
+# fresh start while its conversation held a question.
+ConversationStartReason = Literal["requested", "idle", "fresh_start"]
+
+# The most conversations a list holds, and the characters of a conversation's
+# first question that make its title.
+CONVERSATION_LIST_LIMIT = 50
+CONVERSATION_TITLE_LENGTH = 200
+
+
+class HelperChatConversationPublic(BaseModel):
+    """One of the person's conversations in their chat on a target."""
+
+    session_id: UUID = Field(
+        description=(
+            "The conversation. Read it with `GET /api/v1/conversations/{session_id}/`."
+        )
+    )
+    title: str = Field(
+        description=(
+            "The conversation's first question, its whitespace collapsed, cut "
+            f"to {CONVERSATION_TITLE_LENGTH} characters. Mentions stay as they "
+            "were written (`@[Namn](setting:key)`)."
+        )
+    )
+    started_at: datetime = Field(description="When the conversation started.")
+    last_asked_at: datetime = Field(
+        description="When the conversation's last question was asked."
+    )
+    current: bool = Field(
+        description=(
+            "Whether it is the chat's current conversation, the one its "
+            "questions go to. Every other conversation is read only: asking "
+            "in one returns not found."
+        )
+    )
 
 
 def _now() -> datetime:
@@ -527,8 +591,16 @@ async def _audit_mode_change(
     )
 
 
+async def _holds_a_question(container: Container, session_id: UUID) -> bool:
+    return bool(
+        await _session(container).scalar(
+            sa.select(sa.exists().where(Questions.session_id == session_id))
+        )
+    )
+
+
 async def _start_conversation(
-    container: Container, chat: HelperChats, *, reason: ChangeReason
+    container: Container, chat: HelperChats, *, reason: ConversationStartReason
 ) -> None:
     """Point the chat at a new, empty conversation with the same assistant."""
     target = target_for(chat.target_type)
@@ -602,9 +674,17 @@ async def get_or_create_chat(
     *,
     target_id: UUID,
     request: Request,
+    fresh_start: bool = False,
 ) -> OpenedChat:
     """The caller's chat on the target, made on first use with its hidden
-    assistant and first conversation; ``request`` is the caller's own."""
+    assistant and first conversation; ``request`` is the caller's own.
+
+    With ``fresh_start`` an existing chat whose current conversation holds a
+    question moves to a new, empty one, as a new conversation does, and an
+    empty current conversation is kept, so opening again and again leaves
+    no empty conversation behind. The model and the mode stay as they are.
+    The target's lock orders two openings, so the second finds the first's
+    empty conversation and keeps it."""
     user = container.user()
     await target.require_available(container)
     record = await target.require_edit(container, request, target_id)
@@ -623,6 +703,8 @@ async def get_or_create_chat(
         chat = await load_chat(
             container, target, session_id=existing.session_id, target_id=target_id
         )
+        if fresh_start and await _holds_a_question(container, chat.session_id):
+            await _start_conversation(container, chat, reason="fresh_start")
         return _opened(chat, await _sync_assistant(container, chat))
     space_id = target.space_id(record)
     name = target.name(record)
@@ -787,3 +869,71 @@ async def start_new_conversation(
     await _start_conversation(container, chat, reason="requested")
     space = await _load_space(container, chat)
     return _opened(chat, _chat_models(container, target, space).default)
+
+
+async def list_conversations(
+    container: Container,
+    target: HelperChatTarget[Any],
+    *,
+    target_id: UUID,
+    request: Request,
+) -> list[HelperChatConversationPublic]:
+    """The caller's conversations in their chat on the target that hold a
+    question, the latest question first, at most
+    ``CONVERSATION_LIST_LIMIT``; ``request`` is the caller's own.
+
+    The checks are opening's: the target is offered, the caller may edit it,
+    and the chat is found as ``load_chat`` finds it. Only the caller's own
+    conversations with the chat's hidden assistant in the caller's tenant
+    are read, in one query. Nothing is written, so a chat left in edit mode
+    stays as it is until it is opened or used."""
+    user = container.user()
+    await target.require_available(container)
+    await target.require_edit(container, request, target_id)
+    chat, _ = await _read_chat(
+        container,
+        target,
+        session_id=None,
+        assistant_id=None,
+        target_id=target_id,
+        lock=False,
+    )
+    first_question = (
+        sa.select(sa.func.substr(Questions.question, 1, CONVERSATION_TITLE_LENGTH))
+        .where(Questions.session_id == Sessions.id)
+        .order_by(Questions.created_at, Questions.id)
+        .limit(1)
+        .correlate(Sessions)
+        .scalar_subquery()
+    )
+    last_asked = sa.func.max(Questions.created_at)
+    rows = (
+        await _session(container).execute(
+            sa.select(Sessions.id, Sessions.created_at, last_asked, first_question)
+            .join(
+                Questions,
+                sa.and_(
+                    Questions.session_id == Sessions.id,
+                    Questions.tenant_id == user.tenant_id,
+                ),
+            )
+            .where(
+                Sessions.assistant_id == chat.assistant_id,
+                Sessions.user_id == user.id,
+                Sessions.api_key_id.is_(None),
+            )
+            .group_by(Sessions.id)
+            .order_by(last_asked.desc(), Sessions.id.desc())
+            .limit(CONVERSATION_LIST_LIMIT)
+        )
+    ).all()
+    return [
+        HelperChatConversationPublic(
+            session_id=session_id,
+            title=" ".join((title or "").split()),
+            started_at=started_at,
+            last_asked_at=last_asked_at,
+            current=session_id == chat.session_id,
+        )
+        for session_id, started_at, last_asked_at, title in rows
+    ]

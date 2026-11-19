@@ -85,6 +85,31 @@ describe("The assistant's helper chat endpoints", () => {
     expect(chat.key).toEqual(["helper-chats", "assistant", ID]);
   });
 
+  it("starts each visit afresh, asks for it on the open route, and lists the conversations", async () => {
+    const listed = [
+      {
+        session_id: "session-0",
+        title: "Vilken modell?",
+        started_at: "2026-11-18T09:00:00Z",
+        last_asked_at: "2026-11-18T09:05:00Z",
+        current: false
+      }
+    ];
+    api.POST.mockResolvedValue(ok(CHAT));
+    api.GET.mockResolvedValue(ok({ items: listed, count: 1 }));
+    const chat = assistantHelperApi(ID);
+
+    expect(chat.freshPerVisit).toBe(true);
+    await chat.open({ fresh: true });
+    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
+      params: { path: { id: ID }, query: { fresh_start: true } }
+    });
+    expect(await chat.listConversations?.()).toEqual(listed);
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/conversations/", {
+      params: { path: { id: ID } }
+    });
+  });
+
   it("reads whether the chat is available from the assistant's availability route", async () => {
     api.GET.mockResolvedValue(ok({ available: false, reason: "no_model" }));
 
@@ -314,7 +339,7 @@ describe("The helper panel on an assistant", () => {
     );
   }
 
-  it("opens the assistant's chat, in its own words, where it is available", async () => {
+  it("opens the assistant's chat on a new conversation, in its own words, where it is available", async () => {
     openChat(CHAT);
     renderInApp(<Panel availability={{ available: true }} />);
 
@@ -323,8 +348,28 @@ describe("The helper panel on an assistant", () => {
     expect(screen.getByText(messages.helper_placeholder)).toBeTruthy();
     expect(screen.getByText(messages.helper_partner_description)).toBeTruthy();
     expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/", {
-      params: { path: { id: ID } }
+      params: { path: { id: ID }, query: { fresh_start: true } }
     });
+    expect(screen.getByRole("button", { name: messages.helper_history })).toBeTruthy();
+  });
+
+  it("shows nothing of an earlier visit's conversation before the new one", async () => {
+    openChat(CHAT);
+    const queryClient = testQueryClient();
+    const first = renderInApp(<Panel availability={{ available: true }} />, { queryClient });
+    expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
+    first.unmount();
+
+    let land!: (value: unknown) => void;
+    api.POST.mockReturnValue(new Promise((resolve) => (land = resolve)));
+    renderInApp(<Panel availability={{ available: true }} />, { queryClient });
+
+    expect(screen.queryByText("partner: Hjälpassistenten")).toBeNull();
+    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
+      params: { path: { id: ID }, query: { fresh_start: true } }
+    });
+    land(ok({ ...CHAT, session_id: "session-2" }));
+    expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
   });
 
   it("has one mode: no picker and the same words, even for a chat the core holds in edit mode", async () => {

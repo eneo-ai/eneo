@@ -20,14 +20,20 @@ export const assistantHelperKeys = {
 /**
  * The assistant's helper chat endpoints. The chat has one mode, so a change
  * of it is its model or reasoning effort; the panel never sends a mode,
- * which the core would refuse.
+ * which the core would refuse. Each visit to the assistant's settings starts
+ * on a new, empty conversation; the earlier ones are listed.
  */
 export function assistantHelperApi(assistantId: string): HelperChatApi {
   const path = { id: assistantId };
   return {
     key: assistantHelperKeys.chat(assistantId),
-    open: () =>
-      unwrap(browserApi.POST("/api/v1/assistants/{id}/helper-chat/", { params: { path } })),
+    open: (options) =>
+      unwrap(
+        browserApi.POST("/api/v1/assistants/{id}/helper-chat/", {
+          params: { path, ...(options?.fresh ? { query: { fresh_start: true } } : {}) }
+        })
+      ),
+    freshPerVisit: true,
     update: (sessionId, body) =>
       unwrap(
         browserApi.PATCH("/api/v1/assistants/{id}/helper-chat/{session_id}/", {
@@ -40,7 +46,15 @@ export function assistantHelperApi(assistantId: string): HelperChatApi {
         browserApi.POST("/api/v1/assistants/{id}/helper-chat/{session_id}/conversations/", {
           params: { path: { ...path, session_id: sessionId } }
         })
-      )
+      ),
+    listConversations: async () =>
+      (
+        await unwrap(
+          browserApi.GET("/api/v1/assistants/{id}/helper-chat/conversations/", {
+            params: { path }
+          })
+        )
+      ).items
   };
 }
 

@@ -90,17 +90,25 @@ vi.mock("./publishing-section", () => ({ PublishingSection: () => null }));
 // The helper panel is the helper feature's: here it is the chat's real
 // composer on the adapter's references, and one message drawn with them.
 vi.mock("@/features/helper/helper-panel", () => ({
-  HelperPanel: (props: { adapter: HelperAdapter; close: HelperPanelClose }) => (
+  HelperPanel: (props: { adapter: HelperAdapter; close: HelperPanelClose; open?: boolean }) => (
     <HelperChat {...props} />
   )
 }));
 
-function HelperChat({ adapter, close }: { adapter: HelperAdapter; close: HelperPanelClose }) {
+function HelperChat({
+  adapter,
+  close,
+  open
+}: {
+  adapter: HelperAdapter;
+  close: HelperPanelClose;
+  open?: boolean;
+}) {
   const [value, setValue] = useState("");
   const attachments = useAttachments({ type: "assistant", id: "helper", name: "Hjälpen" });
   const references = adapter.references!;
   return (
-    <div>
+    <div data-testid="helper-chat" data-open={String(open)}>
       <button type="button" onClick={close.onClose}>
         {close.label}
       </button>
@@ -316,6 +324,22 @@ describe("'Hjälp mig skriva instruktionerna' beside the prompt", () => {
     renderEditor({ assistant: { effective_config: { prompt_locked: true } } });
     expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
     expect(ask()).toBeNull();
+  });
+});
+
+describe("The helper beside the settings", () => {
+  it("is told when it is put away and shown again, staying mounted, so it shows the current conversation", async () => {
+    renderEditor();
+    act(() => reportResize(document.querySelector("[data-companion-row]")!, { width: 1600 }));
+    fireEvent.click(headerToggle());
+    const chat = await screen.findByTestId("helper-chat");
+    expect(chat.getAttribute("data-open")).toBe("true");
+
+    fireEvent.click(headerToggle());
+    expect(screen.getByTestId("helper-chat")).toBe(chat);
+    expect(chat.getAttribute("data-open")).toBe("false");
+    fireEvent.click(headerToggle());
+    expect(chat.getAttribute("data-open")).toBe("true");
   });
 });
 

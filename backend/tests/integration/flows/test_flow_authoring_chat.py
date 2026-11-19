@@ -1696,6 +1696,70 @@ async def test_a_new_conversation_on_request_leaves_other_peoples_chats_alone(
             )
 
 
+async def test_a_fresh_opening_keeps_the_mode_and_the_list_names_the_conversation_left(
+    client, model_choices: ModelChoices, db_container, admin_user
+):
+    setup = model_choices
+    editing = await _set_editing(client, setup, setup.chat, True)
+    await _add_question(
+        db_container, editing, admin_user.tenant_id, age=timedelta(minutes=5)
+    )
+
+    opened = await client.post(
+        setup.url, headers=setup.headers, params={"fresh_start": True}
+    )
+
+    assert opened.status_code == 200, opened.text
+    fresh = opened.json()
+    assert fresh["session_id"] != editing["session_id"]
+    assert fresh["editing"] is True
+    assert fresh["completion_model_id"] == editing["completion_model_id"]
+    listed = await client.get(setup.url + "conversations/", headers=setup.headers)
+    assert listed.status_code == 200, listed.text
+    assert [
+        (item["session_id"], item["title"], item["current"])
+        for item in listed.json()["items"]
+    ] == [(editing["session_id"], "Lägg till ett steg.", False)]
+
+
+async def test_listing_the_conversations_leaves_a_chat_in_edit_mode_after_a_pause(
+    client, model_choices: ModelChoices, db_container, admin_user
+):
+    setup = model_choices
+    editing = await _left_in_edit_mode(
+        client, setup, db_container, admin_user.tenant_id
+    )
+
+    listed = await client.get(setup.url + "conversations/", headers=setup.headers)
+
+    assert listed.status_code == 200, listed.text
+    assert [item["current"] for item in listed.json()["items"]] == [True]
+    async with db_container() as container:
+        mode = await container.session().scalar(
+            sa.select(HelperChats.editing).where(
+                HelperChats.session_id == UUID(editing["session_id"])
+            )
+        )
+    assert mode is True
+
+
+async def test_the_list_refuses_another_person_as_the_opening_does(
+    client, model_choices: ModelChoices, db_container, admin_user
+):
+    setup = model_choices
+    await _add_question(
+        db_container, setup.chat, admin_user.tenant_id, age=timedelta(minutes=5)
+    )
+    other = await _member_headers(db_container, admin_user, setup.flow["space_id"])
+
+    listed = await client.get(setup.url + "conversations/", headers=other)
+    opened = await client.post(setup.url, headers=other)
+
+    assert listed.status_code == 403, listed.text
+    assert _not_found(listed) == _not_found(opened)
+    assert "Lägg till ett steg" not in listed.text
+
+
 def _not_found(response) -> tuple[int, dict]:
     """The status and body, without the request's own id."""
     body = response.json() if response.content else {}

@@ -124,18 +124,22 @@ export function unpublishFlow(
 
 /**
  * The flow's chat endpoints for the helper panel: the caller's chat for the
- * flow, created on first use (one per user and flow), and its changes. A
+ * flow, created on first use (one per user and flow), its changes and its
+ * earlier conversations. The panel resumes the current conversation. A
  * mode change carries the draft revision the caller has seen
  * (`expected_revision`, which the panel adds); turning edit mode on after a
  * pause may start a new conversation, and the answer then names another
  * `session_id`.
  */
 export function flowHelperApi(flowId: string): HelperChatApi {
+  const path = { id: flowId };
   return {
     key: flowKeys.authoringChat(flowId),
-    open: () =>
+    open: (options) =>
       unwrap(
-        browserApi.POST("/api/v1/flows/{id}/authoring-chat/", { params: { path: { id: flowId } } })
+        browserApi.POST("/api/v1/flows/{id}/authoring-chat/", {
+          params: { path, ...(options?.fresh ? { query: { fresh_start: true } } : {}) }
+        })
       ),
     update: (sessionId, body) =>
       unwrap(
@@ -149,7 +153,13 @@ export function flowHelperApi(flowId: string): HelperChatApi {
         browserApi.POST("/api/v1/flows/{id}/authoring-chat/{session_id}/conversations/", {
           params: { path: { id: flowId, session_id: sessionId } }
         })
-      )
+      ),
+    listConversations: async () =>
+      (
+        await unwrap(
+          browserApi.GET("/api/v1/flows/{id}/authoring-chat/conversations/", { params: { path } })
+        )
+      ).items
   };
 }
 
