@@ -30,6 +30,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.helper_chats.application import helper_chat_service
+from eneo.helper_chats.personas.assistant import SETTING_REFERENCE_KEYS
 from eneo.internal_mcp import assistant_settings
 from eneo.internal_mcp.assistant_settings import (
     AssistantReading,
@@ -184,7 +185,7 @@ def test_every_section_reads_the_assistant_without_a_credential():
     assert "Ärendesystemet" in everything
     assert "create_case (off), search_cases (on)" in everything
     assert "intra.example.org/docs" in everything
-    assert "(organisation knowledge)" in everything
+    assert '(under "Organisationskunskap")' in everything
     assert "Du är ärendehjälpen." in everything
 
 
@@ -192,22 +193,36 @@ def test_the_sections_say_what_the_editor_shows():
     reading = _reading()
 
     overview = _text(assistant_lines(reading, "overview"))
-    assert "Name: Ärendehjälpen" in overview
-    assert "Published: yes" in overview
-    assert "Chat model: Stor modell" in overview
-    assert "The person may: edit, publish" in overview
+    assert '"Namn" [name]: Ärendehjälpen' in overview
+    assert '"Status" under "Publicering": "Publicerad"' in overview
+    assert '"Chattmodell" [completion_model]: Stor modell' in overview
+    assert (
+        '"Kunskap": 1 in "Samlingar" [groups], 1 in "Webbplatser" [websites], 0 '
+        'in "Integrationer" [integration_knowledge_list]; "Bilagor": 1'
+    ) in overview
     assert "Locked by an organisation policy: nothing" in overview
 
     model = _text(assistant_lines(reading, "model"))
-    assert "context window: 128,000 tokens" in model
-    assert "reasoning efforts: low, medium, high" in model
-    assert "price per million tokens: input $2.00, output $8.00" in model
-    assert "reasoning effort: medium" in model
+    assert '"kontext" (context window): 128,000 tokens' in model
+    assert '"Verktyg" (tool calling): yes' in model
+    assert '"Vision" (reads images): no' in model
+    assert ('price per million tokens: "Indatapris" $2.00, "Utdatapris" $8.00') in model
+    assert (
+        '"Resonemangsnivå" [reasoning_effort]: "Medel" [medium] (the others are '
+        '"Standard" [null], "Låg" [low] and "Hög" [high])'
+    ) in model
 
     knowledge = _text(assistant_lines(reading, "knowledge"))
-    assert "the assistant searches its knowledge when it needs to" in knowledge
-    assert "Files uploaded in a chat: looked up when needed" in knowledge
-    assert "- mall.docx: always in the prompt" in knowledge
+    assert (
+        '"Sökning i kunskapskällor" [knowledge_mode]: "Vid behov" [tool], the '
+        "assistant searches its knowledge when it needs to (the other option is "
+        '"Inför varje svar" [inject], relevant parts go in the prompt before '
+        "every answer)"
+    ) in knowledge
+    assert '"Rankning av träffar" [rerank_model_id]: "Ingen omrankning" [null]' in (
+        knowledge
+    )
+    assert '- mall.docx: "Läs in inför varje svar"' in knowledge
 
     tools = _text(assistant_lines(reading, "tools"))
     assert (
@@ -215,13 +230,88 @@ def test_the_sections_say_what_the_editor_shows():
         "Excel files"
     ) in tools
     assert "can be used as the base; ready" in tools
-    assert "Document template: the organisation's default" in tools
+    assert (
+        '"Dokumentmall" [document_template]: "Organisationens standard" [default] '
+        '(the other options are "En annan mall" [selected] and "Eneos inbyggda '
+        'mall" [builtin])'
+    ) in tools
 
     access = _text(assistant_lines(reading, "access"))
-    assert "Insights: on" in access
-    assert "Conversation retention: follows the space, then the organisation" in (
-        access
+    assert (
+        '"Status" under "Publicering": "Publicerad" (the other option is "Utkast")'
+    ) in access
+    assert (
+        '"Insikter" [insight_enabled]: "Aktiverad" [true] (the other option is '
+        '"Inaktiverad" [false])'
+    ) in access
+    assert (
+        '"Gallring av konversationshistorik" [data_retention_days]: "Ytans '
+        'gallring" [null], so it follows the space, then the organisation'
+    ) in access
+
+
+def test_a_setting_with_options_is_read_as_its_option_and_the_others():
+    reading = _reading()
+    reading.assistant.inline_file_text = True
+    reading.assistant.attachment_inline_text = {
+        reading.assistant.attachments[0].id: False
+    }
+
+    knowledge = assistant_lines(reading, "knowledge")
+
+    assert (
+        '"Dokument från användare i chatten" [inline_file_text]: "Läs in direkt" '
+        '[true], put whole in the prompt (the other option is "Öppna vid behov" '
+        "[false], opened with a tool when needed)"
+    ) in knowledge
+    # An attachment's own choice is the editor's, by its option's name.
+    assert (
+        '"Bilagor" (1), each "Läs in inför varje svar" (always in the prompt) or '
+        '"Öppna vid behov" (opened with a tool when needed), which the person '
+        "chooses in the editor:"
+    ) in knowledge
+    assert '- mall.docx: "Öppna vid behov"' in knowledge
+    # A policy that sets it says so after the options.
+    governed = _text(assistant_lines(_reading(_policy()), "knowledge"))
+    assert (
+        '"Läs in direkt" [true], put whole in the prompt (the other option is '
+        '"Öppna vid behov" [false], opened with a tool when needed); set by an '
+        "organisation policy"
+    ) in governed
+
+
+def test_the_rights_line_says_in_words_what_the_person_may_and_may_not_do():
+    def rights(*permissions):
+        reading = replace(_reading(), permissions=list(permissions))
+        return next(
+            line
+            for line in assistant_lines(reading, "overview")
+            if line.startswith("The person may")
+        )
+
+    assert rights(ResourcePermission.EDIT, ResourcePermission.PUBLISH) == (
+        "The person may change its settings and publish or unpublish it under "
+        '"Publicering"; they may not see its "Insikter", switch "Insikter" on and '
+        "off or delete it."
     )
+    every = (
+        ResourcePermission.READ,
+        ResourcePermission.EDIT,
+        ResourcePermission.DELETE,
+        ResourcePermission.PUBLISH,
+        ResourcePermission.INSIGHT_VIEW,
+        ResourcePermission.INSIGHT_TOGGLE,
+    )
+    assert rights(*every) == (
+        "The person may change its settings, publish or unpublish it under "
+        '"Publicering", see its "Insikter", switch "Insikter" on and off and '
+        "delete it."
+    )
+    assert rights(ResourcePermission.READ).startswith(
+        "The person may only read it; they may not change its settings"
+    )
+    for key in ("insight_view", "insight_toggle", "edit"):
+        assert key not in rights(*every)
 
 
 def test_prices_are_left_out_for_a_person_who_may_not_see_them():
@@ -239,16 +329,25 @@ def test_what_a_policy_locks_is_named_where_it_applies():
     reading = _reading(_policy())
 
     overview = _text(assistant_lines(reading, "overview"))
-    assert "- instructions: set by the policy" in overview
-    assert "- chat model: locked to Liten modell" in overview
-    assert "- reasoning effort: set by the policy" in overview
-    assert "- MCP servers and functions: set by the policy" in overview
+    assert '- "Prompt" [prompt]: set by the policy' in overview
+    assert '- "Chattmodell" [completion_model]: locked to Liten modell' in overview
+    assert '- "Resonemangsnivå" [reasoning_effort]: set by the policy' in overview
+    assert (
+        '- "MCP-servrar" [mcp_servers] and "Funktioner" [enabled_capabilities]: '
+        "set by the policy"
+    ) in overview
+    assert (
+        '- "Dokument från användare i chatten" [inline_file_text]: set by the policy'
+    ) in overview
     instructions = _text(assistant_lines(reading, "instructions"))
     assert instructions.startswith("Locked: an organisation policy sets")
     assert "set by an organisation policy" in _text(
         assistant_lines(reading, "knowledge")
     )
-    assert "chat model: locked" in _text(assistant_lines(reading, "model"))
+    model = _text(assistant_lines(reading, "model"))
+    assert '- "Chattmodell" [completion_model]: locked' in model
+    assert '- "Resonemangsnivå" [reasoning_effort]: set by the policy' in model
+    assert "[mcp_servers]" not in model
 
 
 def test_an_unknown_section_is_refused():
@@ -383,24 +482,48 @@ def test_the_options_say_what_the_space_offers():
     offer = _offer()
 
     models = _text(option_lines(offer, "model"))
+    assert '"Chattmodell" [completion_model]: the models the space offers (2):' in (
+        models
+    )
     assert "Stor modell" in models and "(the space's default)" in models
     assert "Annan modell" in models and "(in use now)" in models
+    assert (
+        '"Resonemangsnivå" [reasoning_effort] options: "Låg" [low], "Medel" '
+        '[medium], "Hög" [high]'
+    ) in models
     assert "below its security classification" in models and "Öppen modell" in models
     assert "price" not in models
 
     knowledge = _text(option_lines(offer, "knowledge"))
-    assert "Rutiner" in knowledge and "organisation knowledge" in knowledge
+    assert '"Samlingar" [groups] (2):' in knowledge
+    assert "Rutiner [id " in knowledge and '(under "Organisationskunskap";' in (
+        knowledge
+    )
     assert "its embedding model is not enabled in the space" in knowledge
+    assert (
+        '"Rankning av träffar" [rerank_model_id]: "Ingen omrankning" [null] or one '
+        "of the models the space can use (1):"
+    ) in knowledge
     assert "Rankaren" in knowledge and "Spärrad" not in knowledge
 
     tools = _text(option_lines(offer, "tools"))
-    assert "Ärendesystemet" in tools and "search_cases" in tools
+    assert "Ärendesystemet" in tools and '"Verktyg" [mcp_tools]: search_cases' in (
+        tools
+    )
     assert '- "Diagram" [charts]: lets the assistant compare values' in tools
     assert (
         "; cannot be turned on: no source is active (an administrator configures "
         'its sources under "Verktyg" > "Funktioner")'
     ) in tools
-    assert "Kommunmall" in tools and "(the organisation's default)" in tools
+    assert (
+        '"Dokumentmall" [document_template]: "Organisationens standard" [default], '
+        '"Eneos inbyggda mall" [builtin] or "En annan mall" [selected] with one of '
+        "the organisation's templates:"
+    ) in tools
+    assert (
+        "Kommunmall [id " in tools
+        and ('(the one "Organisationens standard" [default] uses)') in tools
+    )
     assert _URL_KEY not in _text(option_lines(offer, "all"))
     assert "cases.example.org" not in _text(option_lines(offer, "all"))
 
@@ -418,13 +541,15 @@ def test_options_a_policy_decides_are_the_policys():
     )
 
     models = _text(option_lines(offer, "model"))
-    assert "Chat models the space offers (0)" in models
-    assert "chat model: locked to Liten modell" in models
+    assert "the models the space offers (0)" in models
+    assert '"Chattmodell" [completion_model]: locked to Liten modell' in models
     tools = _text(option_lines(offer, "tools"))
-    assert "the organisation's policy gives (1)" in tools
+    assert '"MCP-servrar" [mcp_servers] the organisation\'s policy gives (1)' in tools
     assert "Policyservern" in tools and "Ärendesystemet" not in tools
     # Only the policy's functions, with their sources' readiness.
-    assert "Functions the organisation's policy gives (1):" in tools
+    assert (
+        '"Funktioner" [enabled_capabilities] the organisation\'s policy gives (1):'
+    ) in tools
     assert '- "Beräkning" [compute]: lets the assistant run exact arithmetic' in tools
     assert "spreadsheets and documents; ready" in tools
     assert "[charts]" not in tools
@@ -491,11 +616,170 @@ _TURNED_OFF = (
     "turned off in the space's settings (someone who may edit the space turns "
     'it on there, under "Funktioner")'
 )
+_SET_BY_THE_POLICY = (
+    '- "MCP-servrar" [mcp_servers] and "Funktioner" [enabled_capabilities]: set '
+    "by the policy"
+)
 
 
 def test_the_tools_name_and_describe_every_function_as_the_editor_does():
     assert assistant_settings.FUNCTIONS == EDITOR_FUNCTIONS
     assert tuple(key for key, _, _ in EDITOR_FUNCTIONS) == CAPABILITY_PURPOSES
+
+
+# The same tables, in the same order, as the editor's names for its settings
+# and sections, the options of a setting, the values of a model setting, the
+# presets of "Modellbeteende" and the badges of a chat model, whose test in
+# frontend/apps/web-next/src/features/assistants/editor/setting-references.test.ts
+# holds the editor to these: change both together.
+EDITOR_SETTING_NAMES = (
+    ("name", "Namn"),
+    ("description", "Beskrivning"),
+    ("prompt", "Prompt"),
+    ("knowledge_mode", "Sökning i kunskapskällor"),
+    ("inline_file_text", "Dokument från användare i chatten"),
+    ("knowledge", "Kunskap"),
+    ("groups", "Samlingar"),
+    ("websites", "Webbplatser"),
+    ("integration_knowledge_list", "Integrationer"),
+    ("organization_knowledge", "Organisationskunskap"),
+    ("rerank_model_id", "Rankning av träffar"),
+    ("mcp_servers", "MCP-servrar"),
+    ("mcp_tools", "Verktyg"),
+    ("attachments", "Bilagor"),
+    ("completion_model", "Chattmodell"),
+    ("completion_model_kwargs", "Modellbeteende"),
+    ("completion_model_kwargs.temperature", "Temperatur"),
+    ("completion_model_kwargs.reasoning_effort", "Resonemangsnivå"),
+    ("completion_model_kwargs.verbosity", "Detaljnivå"),
+    ("completion_model_kwargs.top_p", "Top P"),
+    ("completion_model_kwargs.presence_penalty", "Närvarostraff"),
+    ("completion_model_kwargs.frequency_penalty", "Frekvensstraff"),
+    ("completion_model_kwargs.top_k", "Top K"),
+    ("enabled_capabilities", "Funktioner"),
+    ("document_template", "Dokumentmall"),
+    ("data_retention_days", "Gallring av konversationshistorik"),
+    ("published", "Status"),
+    ("insight_enabled", "Insikter"),
+    ("section:general", "Allmänt"),
+    ("section:instructions", "Instruktioner"),
+    ("section:knowledge", "Kunskap"),
+    ("section:skills", "Skills"),
+    ("section:mcp", "MCP-servrar"),
+    ("section:attachments", "Bilagor"),
+    ("section:ai", "AI-inställningar"),
+    ("section:capabilities", "Funktioner"),
+    ("section:security", "Säkerhet och integritet"),
+    ("section:api-keys", "API-nycklar"),
+    ("section:widget", "Webbwidget"),
+    ("section:publishing", "Publicering"),
+)
+EDITOR_SETTING_OPTIONS = (
+    ("knowledge_mode", "tool", "Vid behov"),
+    ("knowledge_mode", "inject", "Inför varje svar"),
+    ("inline_file_text", False, "Öppna vid behov"),
+    ("inline_file_text", True, "Läs in direkt"),
+    ("rerank_model_id", None, "Ingen omrankning"),
+    ("attachments", False, "Öppna vid behov"),
+    ("attachments", True, "Läs in inför varje svar"),
+    ("document_template", "default", "Organisationens standard"),
+    ("document_template", "selected", "En annan mall"),
+    ("document_template", "builtin", "Eneos inbyggda mall"),
+    ("data_retention_days", None, "Ytans gallring"),
+    ("published", False, "Utkast"),
+    ("published", True, "Publicerad"),
+    ("insight_enabled", False, "Inaktiverad"),
+    ("insight_enabled", True, "Aktiverad"),
+)
+EDITOR_MODEL_SETTING_OPTIONS = (
+    (None, "Standard"),
+    ("none", "Ingen"),
+    ("low", "Låg"),
+    ("medium", "Medel"),
+    ("high", "Hög"),
+)
+EDITOR_MODEL_BEHAVIOURS = (
+    ("creative", "Kreativ", {"temperature": 1.25}),
+    ("default", "Standard", {"temperature": None}),
+    ("deterministic", "Deterministisk", {"temperature": 0.25}),
+    ("custom", "Anpassad", None),
+)
+EDITOR_MODEL_BADGES = (
+    ("max_input_tokens", "kontext"),
+    ("vision", "Vision"),
+    ("supports_tool_calling", "Verktyg"),
+    ("reasoning", "Resonemang"),
+    ("input_cost_per_token", "Indatapris"),
+    ("output_cost_per_token", "Utdatapris"),
+)
+
+
+def test_the_tools_name_settings_options_presets_and_badges_as_the_editor_does():
+    assert assistant_settings.SETTING_NAMES == EDITOR_SETTING_NAMES
+    assert assistant_settings.SETTING_OPTIONS == EDITOR_SETTING_OPTIONS
+    assert assistant_settings.MODEL_SETTING_OPTIONS == EDITOR_MODEL_SETTING_OPTIONS
+    assert assistant_settings.MODEL_BEHAVIOURS == EDITOR_MODEL_BEHAVIOURS
+    assert assistant_settings.MODEL_BADGES == EDITOR_MODEL_BADGES
+    # Every field a change takes, and every key a setting reference names, has
+    # the editor's name.
+    named = {key for key, _ in EDITOR_SETTING_NAMES}
+    assert set(SETTING_REFERENCE_KEYS) <= named
+    assert set(assistant_settings._CHANGEABLE) <= named  # pyright: ignore[reportPrivateUsage]
+
+
+@pytest.mark.parametrize(
+    ("temperature", "preset"),
+    [
+        (1.25, "creative"),
+        (None, "default"),
+        (0.25, "deterministic"),
+        (0.7, "custom"),
+        (0, "custom"),
+    ],
+)
+def test_the_model_behaviour_is_the_preset_the_editor_shows(temperature, preset):
+    offered = _offering(temperature=_TEMPERATURE)
+
+    assert (
+        assistant_settings.model_behaviour(
+            ModelKwargs(temperature=temperature), offered
+        )
+        == preset
+    )
+    # A model without a temperature shows "Standard", whatever is stored.
+    assert (
+        assistant_settings.model_behaviour(
+            ModelKwargs(temperature=temperature), _offering()
+        )
+        == "default"
+    )
+
+
+def test_the_model_read_names_the_preset_and_the_temperature_it_sets():
+    reading = _reading()
+    model = reading.assistant.completion_model
+    offered = _offering(temperature=_TEMPERATURE, reasoning_effort=_EFFORTS)
+    model.get_supported_model_kwargs = lambda: offered
+
+    reading.assistant.completion_model_kwargs = ModelKwargs(temperature=0.25)
+    assert (
+        '"Modellbeteende" [completion_model_kwargs]: "Deterministisk" '
+        '[temperature: 0.25] (the other presets are "Kreativ" [temperature: '
+        '1.25] and "Standard" [temperature: null]; any other temperature is '
+        '"Anpassad")'
+    ) in assistant_lines(reading, "model")
+    reading.assistant.completion_model_kwargs = ModelKwargs(temperature=0.7)
+    assert (
+        '"Modellbeteende" [completion_model_kwargs]: "Anpassad", "Temperatur" '
+        '[temperature] 0.7 (the presets are "Kreativ" [temperature: 1.25], '
+        '"Standard" [temperature: null] and "Deterministisk" [temperature: 0.25])'
+    ) in assistant_lines(reading, "model")
+    # The editor reads a saved model the space no longer offers as none.
+    withdrawn = replace(reading, model_withdrawn_by="space")
+    assert (
+        '"Modellbeteende" [completion_model_kwargs]: "Standard" (the model takes '
+        "no temperature, so the editor offers no other)"
+    ) in assistant_lines(withdrawn, "model")
 
 
 def test_read_options_lists_every_function_and_why_one_cannot_be_turned_on():
@@ -512,7 +796,9 @@ def test_read_options_lists_every_function_and_why_one_cannot_be_turned_on():
 
     tools = option_lines(offer, "tools")
 
-    assert 'Functions (6), as the editor lists them under "Funktioner":' in tools
+    assert '"Funktioner" [enabled_capabilities] (6), as the editor lists them:' in (
+        tools
+    )
     assert f"{_FRAGA_FIL}; ready" in tools
     # One the space has turned off is listed with the editor's reason and who
     # changes it, where.
@@ -546,8 +832,9 @@ def test_read_assistant_names_the_functions_as_the_editor_does():
     tools = assistant_lines(reading, "tools")
 
     assert (
-        'functions: "Fråga fil" [file_analysis], "Webbsökning" [web_search] '
-        "(not available: turned off in the space's settings)"
+        '"Funktioner" [enabled_capabilities]: "Fråga fil" [file_analysis], '
+        '"Webbsökning" [web_search] (not available: turned off in the space\'s '
+        "settings)"
     ) in overview
     assert f"{_FRAGA_FIL}; ready" in tools
     assert f"{_WEB_SEARCH}; on, but not available: {_TURNED_OFF}" in tools
@@ -562,7 +849,10 @@ def test_a_saved_chat_model_the_space_no_longer_offers_is_named_as_such():
         "models, which read_options lists)"
     )
     reading = replace(_reading(), model_withdrawn_by="space")
-    line = f"Chat model: Stor modell [id {reading.assistant.completion_model.id}]"
+    line = (
+        '"Chattmodell" [completion_model]: Stor modell [id '
+        f"{reading.assistant.completion_model.id}]"
+    )
 
     assert line + note in assistant_lines(reading, "overview")
     assert line + note in assistant_lines(reading, "model")
@@ -641,9 +931,9 @@ def test_saved_choices_the_space_no_longer_offers_are_named_as_the_editor_shows(
         "space)"
     ) in knowledge
     assert (
-        "Result ranking: Rankaren (the space can no longer use it, so the editor "
-        'shows "Otillgänglig modell" under "Rankning av träffar", and the sources '
-        "are searched without it until another is chosen)"
+        '"Rankning av träffar" [rerank_model_id]: Rankaren (the space can no '
+        'longer use it, so the editor shows "Otillgänglig modell" in its place, '
+        "and the sources are searched without it until another is chosen)"
     ) in knowledge
     server = assistant.mcp_servers[0]
     assert (
@@ -651,13 +941,14 @@ def test_saved_choices_the_space_no_longer_offers_are_named_as_the_editor_shows(
         "Läser och skapar ärenden."
     ) in tools
     assert (
-        "Document template: one that is no longer among the organisation's "
-        f"templates [id {template_id}], so the documents use the organisation's "
-        "default, as the editor shows, until another is chosen"
+        '"Dokumentmall" [document_template]: "En annan mall" [selected], one that '
+        f"is no longer among the organisation's templates [id {template_id}], so "
+        'the documents use "Organisationens standard" [default], as the editor '
+        "shows, until another is chosen"
     ) in tools
     # The website's embedding model is enabled: only its origin is said.
     website = next(line for line in knowledge if "intra.example.org" in line)
-    assert website.endswith("(organisation knowledge)")
+    assert website.endswith('(under "Organisationskunskap")')
 
 
 # --- The chat a call reaches -------------------------------------------------
@@ -1000,16 +1291,20 @@ def test_model_settings_the_model_does_not_offer_are_refused_by_name():
             },
             space=space,
         )
-    assert "Liten modell does not offer reasoning effort" in str(refused.value)
+    assert ('Liten modell does not offer "Resonemangsnivå" [reasoning_effort]') in str(
+        refused.value
+    )
 
     with pytest.raises(BadRequestException) as out_of_range:
         _plan(assistant, {"completion_model_kwargs": {"temperature": 5}})
-    assert "does not offer temperature" in str(out_of_range.value)
+    assert 'does not offer "Temperatur" [temperature]' in str(out_of_range.value)
 
     without_model = _changeable(completion_model=None)
     with pytest.raises(BadRequestException) as no_model:
         _plan(without_model, {"completion_model_kwargs": {"temperature": 0.3}})
-    assert "Choose a chat model before its settings" in str(no_model.value)
+    assert (
+        'Choose a chat model under "Chattmodell" [completion_model] before its settings'
+    ) in str(no_model.value)
 
 
 def test_what_a_policy_sets_is_refused_and_the_rest_is_planned():
@@ -1019,15 +1314,23 @@ def test_what_a_policy_sets_is_refused_and_the_rest_is_planned():
     space = _space(assistant.completion_model, other)
 
     for changes, what in [
-        ({"prompt": {"text": "Ny text."}}, "the instructions"),
-        ({"completion_model": {"id": str(other.id)}}, "the chat models"),
-        ({"completion_model_kwargs": {"reasoning_effort": "high"}}, "reasoning"),
-        ({"inline_file_text": True}, "files uploaded in a chat"),
+        ({"prompt": {"text": "Ny text."}}, '"Prompt" [prompt]'),
+        (
+            {"completion_model": {"id": str(other.id)}},
+            'the models "Chattmodell" [completion_model] offers',
+        ),
+        (
+            {"completion_model_kwargs": {"reasoning_effort": "high"}},
+            '"Resonemangsnivå" [reasoning_effort]',
+        ),
+        (
+            {"inline_file_text": True},
+            '"Dokument från användare i chatten" [inline_file_text]',
+        ),
     ]:
         with pytest.raises(BadRequestException) as refused:
             _plan(assistant, changes, space=space, config=policy)
-        assert "An organisation policy sets" in str(refused.value)
-        assert what in str(refused.value)
+        assert str(refused.value).startswith(f"An organisation policy sets {what} ")
 
     planned = _plan(assistant, {"name": "Ärendestöd"}, space=space, config=policy)
     assert planned.update == {"name": "Ärendestöd"}
@@ -1054,12 +1357,28 @@ def test_only_the_allowed_settings_can_be_named():
         )
     text = str(refused.value)
     assert text.startswith(
-        "Skills, conversation logging, the response format and version id "
+        '"Skills", conversation logging, the response format and version id '
         "cannot be changed through the chat"
     )
     for key in ("skill_bindings", "logging_enabled", "response_format", "version_id"):
         assert key not in text
     assert "Nothing was changed." in text
+    # What the chat does change is named as the editor names it.
+    assert (
+        'The chat changes only "Namn" [name], "Beskrivning" [description], '
+        '"Prompt" [prompt], "Chattmodell" [completion_model], "Modellbeteende" '
+        '[completion_model_kwargs] and the model\'s settings ("Temperatur" '
+        '[temperature], "Top P" [top_p], "Resonemangsnivå" [reasoning_effort]'
+    ) in text
+    assert text.endswith(
+        '"Dokumentmall" [document_template], "Gallring av konversationshistorik" '
+        '[data_retention_days] and "Insikter" [insight_enabled].'
+    )
+    with pytest.raises(BadRequestException) as editor_only:
+        assistant_settings.require_changeable({"attachments": [], "published": True})
+    assert str(editor_only.value).startswith(
+        '"Bilagor" and "Status" under "Publicering" cannot be changed through the chat'
+    )
 
 
 def test_the_model_is_told_what_changed_without_ids_or_long_texts():
@@ -1086,14 +1405,40 @@ def test_the_model_is_told_what_changed_without_ids_or_long_texts():
         "En ny och längre beskrivning",
     ):
         assert hidden not in text
-    assert 'name (from "Ärendehjälpen" to "Ärendestöd")' in text
-    assert "chat model (from Stor modell to Liten modell)" in text
-    assert "temperature (from 0.7 to 0.2)" in text
-    assert "reasoning effort (from medium to the model's default)" in text
+    assert '"Namn" [name] (from "Ärendehjälpen" to "Ärendestöd")' in text
+    assert '"Beskrivning" [description];' in text
+    assert '"Prompt" [prompt] (new text of 44 characters)' in text
+    assert (
+        '"Chattmodell" [completion_model] (from Stor modell to Liten modell)'
+    ) in text
+    assert '"Temperatur" [temperature] (from 0.7 to 0.2)' in text
+    assert (
+        '"Resonemangsnivå" [reasoning_effort] (from "Medel" [medium] to "Standard" '
+        "[null])"
+    ) in text
     assert "published" in text
     proposed = assistant_settings.change_text(planned.changes, published=False)
     assert proposed.startswith("Proposed, nothing saved:")
     assert "do not paste them" in proposed
+
+
+def test_a_proposal_names_an_option_setting_by_its_options():
+    assistant = _changeable()
+
+    planned = _plan(assistant, {"knowledge_mode": "inject", "inline_file_text": True})
+    text = assistant_settings.change_text(planned.changes, published=False)
+
+    assert (
+        '"Sökning i kunskapskällor" [knowledge_mode] (from "Vid behov" [tool] to '
+        '"Inför varje svar" [inject]); "Dokument från användare i chatten" '
+        '[inline_file_text] (from "Öppna vid behov" [false] to "Läs in direkt" '
+        "[true])"
+    ) in text
+    # The structured content the cards read keeps its keys and values.
+    assert planned.changes == [
+        {"field": "knowledge_mode", "before": "tool", "after": "inject"},
+        {"field": "inline_file_text", "before": False, "after": True},
+    ]
 
 
 def test_a_refused_request_names_the_fields_but_not_what_was_sent():
@@ -1189,7 +1534,7 @@ async def test_a_setting_the_chat_may_not_change_is_refused_by_the_proposal(
 
     assert result.isError
     assert result.content[0].text.startswith(
-        "Skills cannot be changed through the chat"
+        '"Skills" cannot be changed through the chat'
     )
     assert "skill_bindings" not in result.content[0].text
     apply.assert_not_awaited()
@@ -1477,8 +1822,11 @@ def test_retention_and_insights_are_refused_without_the_right_for_them():
     without = _facts(rights=assistant_settings.NO_RIGHTS)
 
     for changes, what in (
-        ({"data_retention_days": 30}, "how long conversations are kept"),
-        ({"insight_enabled": True}, "whether insights are on"),
+        (
+            {"data_retention_days": 30},
+            '"Gallring av konversationshistorik" [data_retention_days]',
+        ),
+        ({"insight_enabled": True}, '"Insikter" [insight_enabled]'),
     ):
         for facts in (without, None):
             with pytest.raises(BadRequestException) as refused:
@@ -1504,7 +1852,7 @@ def test_retention_and_insights_are_refused_without_the_right_for_them():
     with pytest.raises(BadRequestException) as not_used:
         _plan_in(world, {"insight_enabled": True}, facts=personal)
     assert str(not_used.value) == (
-        "Insights are not used for an assistant in a personal space. "
+        '"Insikter" are not used for an assistant in a personal space. '
         "Nothing was changed."
     )
     # A value the assistant already has is no change, so nothing is refused.
@@ -1642,7 +1990,8 @@ def test_mcp_servers_tools_and_functions_a_policy_sets_are_refused():
         with pytest.raises(BadRequestException) as refused:
             _plan_in(world, changes, config=policy)
         assert str(refused.value).startswith(
-            "An organisation policy sets the MCP servers and functions"
+            'An organisation policy sets "MCP-servrar" [mcp_servers] and '
+            '"Funktioner" [enabled_capabilities]'
         )
 
 
@@ -1677,17 +2026,22 @@ def test_the_model_is_told_what_was_added_and_removed_by_name():
     text = assistant_settings.change_text(planned.changes, published=False)
 
     for line in (
-        'collections (added "Gamla rutiner")',
-        'websites (removed "intra.example.org/docs")',
-        'integration sources (removed "Delad mapp")',
-        "result ranking (from none to Rankaren)",
-        'MCP servers (added "Diariet")',
-        "MCP tools (search_cases off, create_case back to its server's setting)",
-        'functions (added "Webbsökning" [web_search]; removed "Skapa fil" '
-        "[file_creation])",
-        "document template (from the organisation's default to Kommunmall)",
-        "conversation retention (from following the space to 30 days)",
-        "insights (from off to on)",
+        '"Samlingar" [groups] (added "Gamla rutiner")',
+        '"Webbplatser" [websites] (removed "intra.example.org/docs")',
+        '"Integrationer" [integration_knowledge_list] (removed "Delad mapp")',
+        '"Rankning av träffar" [rerank_model_id] (from "Ingen omrankning" [null] '
+        "to Rankaren)",
+        '"MCP-servrar" [mcp_servers] (added "Diariet")',
+        '"Verktyg" [mcp_tools] (search_cases off, create_case back to its '
+        "server's setting)",
+        '"Funktioner" [enabled_capabilities] (added "Webbsökning" [web_search]; '
+        'removed "Skapa fil" [file_creation])',
+        '"Dokumentmall" [document_template] (from "Organisationens standard" '
+        "[default] to Kommunmall)",
+        '"Gallring av konversationshistorik" [data_retention_days] (from "Ytans '
+        'gallring" [null] to 30 days)',
+        '"Insikter" [insight_enabled] (from "Inaktiverad" [false] to "Aktiverad" '
+        "[true])",
     ):
         assert line in text
     for ident in (str(world.older.id), str(world.archive.id), str(_RANKER)):
@@ -1715,9 +2069,9 @@ def test_read_assistant_names_what_the_persons_role_does_not_let_them_change():
         text = _text(assistant_lines(reading, section))
         assert "Not the person's to change (their role does not allow it):" in text
         for setting in (
-            f"- conversation retention: {others}",
-            f"- insights (turning them on or off): {others}",
-            f"- publishing (publishing or unpublishing it): {others}",
+            f'- "Gallring av konversationshistorik" [data_retention_days]: {others}',
+            f'- "Insikter" [insight_enabled] (switching them on or off): {others}',
+            f'- "Status" under "Publicering" (publishing or unpublishing it): {others}',
         ):
             assert setting in text
 
@@ -1731,12 +2085,15 @@ def test_read_assistant_names_what_the_persons_role_does_not_let_them_change():
         ),
     )
     text = _text(assistant_lines(personal, "access"))
-    assert "- insights (turning them on or off): not used in a personal space" in text
     assert (
-        "- publishing (publishing or unpublishing it): not used in a personal space"
-        in (text)
-    )
-    assert "conversation retention:" not in text
+        '- "Insikter" [insight_enabled] (switching them on or off): not used in a '
+        "personal space"
+    ) in text
+    assert (
+        '- "Status" under "Publicering" (publishing or unpublishing it): not used '
+        "in a personal space"
+    ) in text
+    assert '- "Gallring av konversationshistorik"' not in text
 
     allowed = replace(_reading(), rights=_ALL_RIGHTS)
     assert "Not the person's to change" not in _text(assistant_lines(allowed, "all"))
@@ -1748,7 +2105,7 @@ def test_the_options_give_the_ids_a_change_of_a_tool_or_source_takes():
 
     tools = _text(option_lines(governed, "tools"))
     assert f"search_cases [id {server.tools[0].id}]" in tools
-    assert "- MCP servers and functions: set by the policy" in tools
+    assert _SET_BY_THE_POLICY in tools
 
     knowledge = _text(option_lines(_offer(), "knowledge"))
     assert knowledge.startswith(
@@ -1759,17 +2116,18 @@ def test_the_options_give_the_ids_a_change_of_a_tool_or_source_takes():
 
 # --- The editor's own rules --------------------------------------------------
 
+_NOT_COMBINED = (
+    '"Kunskap" and "MCP-servrar" [mcp_servers] are not combined on one assistant'
+)
 _HAS_SERVERS = (
-    "Knowledge and MCP servers are not combined on one assistant, and this one "
-    "has MCP servers, so no knowledge can be added to it. If the person wants "
-    "knowledge in their place, remove the MCP servers in the same change. "
-    "Nothing was changed."
+    f"{_NOT_COMBINED}, and this one has MCP servers, so no knowledge can be added "
+    "to it. If the person wants knowledge in their place, remove the MCP servers "
+    "in the same change. Nothing was changed."
 )
 _HAS_KNOWLEDGE = (
-    "Knowledge and MCP servers are not combined on one assistant, and this one "
-    "has knowledge, so no MCP server can be added to it. If the person wants MCP "
-    "servers in its place, remove its knowledge in the same change. Nothing was "
-    "changed."
+    f"{_NOT_COMBINED}, and this one has knowledge, so no MCP server can be added "
+    "to it. If the person wants MCP servers in its place, remove its knowledge in "
+    "the same change. Nothing was changed."
 )
 _NO_TOOLS = (
     "The chat model the assistant would answer with, Liten modell, cannot use "
@@ -1833,8 +2191,8 @@ def test_knowledge_and_mcp_servers_are_not_combined_by_a_change():
     with pytest.raises(BadRequestException) as refused:
         _plan_in(neither, {"groups": [routines], "mcp_servers": [server]})
     assert str(refused.value) == (
-        "Knowledge and MCP servers are not combined on one assistant, so both "
-        "cannot be added: add one or the other. Nothing was changed."
+        f"{_NOT_COMBINED}, so both cannot be added: add one or the other. Nothing "
+        "was changed."
     )
     assert _plan_in(neither, {"groups": [routines]}).update == {"groups": [routines]}
     assert _plan_in(neither, {"mcp_servers": [server]}).update == {
@@ -1913,7 +2271,7 @@ def test_mcp_servers_tools_and_functions_need_a_model_that_can_use_tools():
     for changes, what in (
         (
             {"mcp_servers": {"add": [{"id": str(world.archive.id)}]}},
-            "no MCP server can be added",
+            'no MCP server can be added under "MCP-servrar" [mcp_servers]',
         ),
         (
             {"enabled_capabilities": {"add": ["web_search"]}},
@@ -1951,7 +2309,10 @@ def test_mcp_servers_tools_and_functions_need_a_model_that_can_use_tools():
             _plan_in(world, changes)
         text = str(refused.value)
         assert text.startswith(_NO_TOOLS + what), changes
-        assert "Choose a chat model that can use tools first, or in the same" in text
+        assert (
+            'Choose a chat model that can use tools under "Chattmodell" '
+            "[completion_model] first, or in the same change"
+        ) in text
         assert text.endswith("Nothing was changed.")
 
     with pytest.raises(BadRequestException) as not_offered:
@@ -2020,26 +2381,27 @@ def test_read_assistant_says_what_the_editors_rules_hold_back():
     servers_only.assistant.collections = []
     servers_only.assistant.websites = []
     knowledge_line = (
-        "- knowledge: none can be added while the assistant has MCP servers (the "
+        '- "Kunskap": none can be added while the assistant has MCP servers (the '
         "two are not combined); removing the MCP servers comes first"
     )
     overview = _text(assistant_lines(servers_only, "overview"))
     assert f"{heading}\n{knowledge_line}" in overview
     assert knowledge_line in _text(assistant_lines(servers_only, "knowledge"))
-    assert "- knowledge:" not in _text(assistant_lines(servers_only, "tools"))
+    assert '- "Kunskap":' not in _text(assistant_lines(servers_only, "tools"))
 
     knowledge_only = _reading()
     knowledge_only.assistant.mcp_servers = []
     knowledge_only.assistant.completion_model.supports_tool_calling = False
     servers_line = (
-        "- MCP servers: none can be added while the assistant has knowledge (the "
-        "two are not combined); removing its knowledge comes first"
+        '- "MCP-servrar" [mcp_servers]: none can be added while the assistant has '
+        "knowledge (the two are not combined); removing its knowledge comes first"
     )
     model_line = (
-        "- MCP servers, their tools and functions: the chat model Stor modell "
-        "cannot use tools, so no MCP server or function can be turned on and no "
-        "single tool switched on or off; choosing a model that can use tools "
-        "comes first"
+        '- "MCP-servrar" [mcp_servers], "Verktyg" [mcp_tools] and "Funktioner" '
+        "[enabled_capabilities]: the chat model Stor modell cannot use tools, so "
+        "no MCP server or function can be turned on and no single tool switched "
+        'on or off; choosing a model that can use tools under "Chattmodell" '
+        "[completion_model] comes first"
     )
     for section in ("overview", "tools"):
         text = _text(assistant_lines(knowledge_only, section))
@@ -2048,7 +2410,7 @@ def test_read_assistant_says_what_the_editors_rules_hold_back():
     # Where a policy sets the MCP servers and functions, its lock says so.
     governed = replace(knowledge_only, effective_config=_policy())
     tools = _text(assistant_lines(governed, "tools"))
-    assert "- MCP servers and functions: set by the policy" in tools
+    assert _SET_BY_THE_POLICY in tools
     assert servers_line not in tools and model_line not in tools
 
 
@@ -2235,8 +2597,8 @@ async def test_publishing_is_refused_without_the_right_or_when_nothing_would_cha
     refused = await assistant_settings.publish_assistant(MagicMock(), published=True)
     assert refused.isError
     assert refused.content[0].text.startswith(
-        "The person's role does not let them change whether this assistant is "
-        "published; someone with more rights in the space"
+        'The person\'s role does not let them change "Status" under "Publicering"; '
+        "someone with more rights in the space"
     )
 
     _, publish_personal = _publishing(
@@ -2259,7 +2621,7 @@ async def test_publishing_is_refused_without_the_right_or_when_nothing_would_cha
     already = await assistant_settings.publish_assistant(MagicMock(), published=True)
     assert already.isError
     assert already.content[0].text == (
-        "The assistant is already published. Nothing was changed."
+        'The assistant is already published, "Publicerad". Nothing was changed.'
     )
     publish.assert_not_awaited()
     publish_personal.assert_not_awaited()
@@ -2285,7 +2647,10 @@ async def test_publishing_goes_through_the_shared_operation_in_the_persons_name(
         "changes": [{"field": "published", "before": False, "after": True}],
         "undo": None,
     }
-    assert result.content[0].text.startswith("Published: the assistant is now")
+    assert result.content[0].text.startswith(
+        'Published: the assistant is now published; "Status" under "Publicering" '
+        'is now "Publicerad".'
+    )
 
 
 def test_the_history_and_publishing_take_no_assistant_from_the_model():

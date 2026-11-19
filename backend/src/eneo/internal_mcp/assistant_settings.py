@@ -51,6 +51,7 @@ from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
 )
+from eneo.helper_chats.personas.assistant import SETTING_NAMES
 from eneo.internal_mcp.constants import ASSISTANT_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -153,6 +154,266 @@ _FUNCTION_TEXTS: dict[str, tuple[str, str]] = {
     key: (name, description) for key, name, description in FUNCTIONS
 }
 
+# The options of the settings the editor names by option, each setting's in
+# the editor's order: the setting (an attachment's own choice as
+# "attachments"), the value a change takes (a document template by its mode)
+# and the name the editor shows, in its form and on the helper's cards
+# (settingText in
+# frontend/apps/web-next/src/features/assistants/editor/assistant-helper-cards.tsx).
+# The settings themselves are named by SETTING_NAMES in the persona. A test on
+# each side holds its table to the same written-out one, so change both
+# together.
+SETTING_OPTIONS: tuple[tuple[str, object, str], ...] = (
+    ("knowledge_mode", "tool", "Vid behov"),
+    ("knowledge_mode", "inject", "Inför varje svar"),
+    ("inline_file_text", False, "Öppna vid behov"),
+    ("inline_file_text", True, "Läs in direkt"),
+    ("rerank_model_id", None, "Ingen omrankning"),
+    ("attachments", False, "Öppna vid behov"),
+    ("attachments", True, "Läs in inför varje svar"),
+    ("document_template", "default", "Organisationens standard"),
+    ("document_template", "selected", "En annan mall"),
+    ("document_template", "builtin", "Eneos inbyggda mall"),
+    ("data_retention_days", None, "Ytans gallring"),
+    ("published", False, "Utkast"),
+    ("published", True, "Publicerad"),
+    ("insight_enabled", False, "Inaktiverad"),
+    ("insight_enabled", True, "Aktiverad"),
+)
+
+# The values of a model setting the editor names (modelKwargOptionLabel in
+# model-kwargs.ts), with "Standard" for null, the model's own default; it
+# shows any other value as it is. A test on each side holds its table to the
+# same written-out one, so change both together.
+MODEL_SETTING_OPTIONS: tuple[tuple[str | None, str], ...] = (
+    (None, "Standard"),
+    ("none", "Ingen"),
+    ("low", "Låg"),
+    ("medium", "Medel"),
+    ("high", "Hög"),
+)
+
+# The presets of "Modellbeteende", in the editor's order, with the model
+# settings each sets (BEHAVIOURS in model-kwargs.ts): the editor shows the
+# first whose temperature the assistant has, and "Anpassad", which sets
+# none, for any other temperature. A test on each side holds its table to
+# the same written-out one, so change both together.
+MODEL_BEHAVIOURS: tuple[tuple[str, str, Mapping[str, float | None] | None], ...] = (
+    ("creative", "Kreativ", {"temperature": 1.25}),
+    ("default", "Standard", {"temperature": None}),
+    ("deterministic", "Deterministisk", {"temperature": 0.25}),
+    ("custom", "Anpassad", None),
+)
+
+# What the editor shows about a chat model under "Chattmodell", in its order
+# (ModelSummary in ai-section.tsx): the model's attribute and the name of its
+# badge. A test on each side holds its table to the same written-out one, so
+# change both together.
+MODEL_BADGES: tuple[tuple[str, str], ...] = (
+    ("max_input_tokens", "kontext"),
+    ("vision", "Vision"),
+    ("supports_tool_calling", "Verktyg"),
+    ("reasoning", "Resonemang"),
+    ("input_cost_per_token", "Indatapris"),
+    ("output_cost_per_token", "Utdatapris"),
+)
+
+# What an option or a badge stands for, in a few words, where the editor's
+# name alone does not tell the model enough to advise.
+_OPTION_NOTES: dict[tuple[str, object], str] = {
+    ("knowledge_mode", "tool"): "the assistant searches its knowledge when it needs to",
+    ("knowledge_mode", "inject"): "relevant parts go in the prompt before every answer",
+    ("inline_file_text", False): "opened with a tool when needed",
+    ("inline_file_text", True): "put whole in the prompt",
+    ("attachments", False): "opened with a tool when needed",
+    ("attachments", True): "always in the prompt",
+}
+_BADGE_NOTES: dict[str, str] = {
+    "max_input_tokens": "context window",
+    "supports_tool_calling": "tool calling",
+    "vision": "reads images",
+}
+
+_SETTING_NAMES = dict(SETTING_NAMES)
+_OPTION_NAMES: dict[tuple[str, object], str] = {
+    (setting, value): name for setting, value, name in SETTING_OPTIONS
+}
+_MODEL_OPTION_NAMES: dict[str | None, str] = dict(MODEL_SETTING_OPTIONS)
+_BEHAVIOUR_NAMES: dict[str, str] = {key: name for key, name, _ in MODEL_BEHAVIOURS}
+_BADGE_NAMES: dict[str, str] = dict(MODEL_BADGES)
+
+# The model's settings a change takes under completion_model_kwargs, in the
+# order a change lists them.
+_KWARGS = "completion_model_kwargs."
+_MODEL_SETTINGS: tuple[str, ...] = (
+    "temperature",
+    "top_p",
+    "reasoning_effort",
+    "verbosity",
+    "presence_penalty",
+    "frequency_penalty",
+    "top_k",
+)
+
+# What the chat may change, as the assistant's update request names it, in
+# the order a refusal lists it.
+_CHANGEABLE: tuple[str, ...] = (
+    "name",
+    "description",
+    "prompt",
+    "completion_model",
+    "completion_model_kwargs",
+    "knowledge_mode",
+    "inline_file_text",
+    "groups",
+    "websites",
+    "integration_knowledge_list",
+    "rerank_model_id",
+    "mcp_servers",
+    "mcp_tools",
+    "enabled_capabilities",
+    "document_template",
+    "data_retention_days",
+    "insight_enabled",
+)
+
+
+def setting_name(key: str) -> str:
+    """The name the editor shows for a setting or a section (SETTING_NAMES)."""
+    return _SETTING_NAMES.get(key, key)
+
+
+def _takes(key: str) -> bool:
+    """Whether a change takes ``key``: a setting the chat may change or one
+    of the model's settings."""
+    return key in _CHANGEABLE or key.startswith(_KWARGS)
+
+
+def setting_label(key: str) -> str:
+    """A setting as the tools name it to the model: the name the editor
+    shows, in quotes, and the key a change takes, where it takes one (a
+    model setting by its own key)."""
+    name = f'"{setting_name(key)}"'
+    return f"{name} [{key.removeprefix(_KWARGS)}]" if _takes(key) else name
+
+
+def _value(value: object) -> str:
+    """A value as a change takes it: a key as it is, anything else as JSON."""
+    return value if isinstance(value, str) else json.dumps(value)
+
+
+def _listing(names: Sequence[str], last: str = "and") -> str:
+    if len(names) < 2:
+        return "".join(names)
+    return ", ".join(names[:-1]) + f" {last} " + names[-1]
+
+
+def option_label(setting: str, value: object) -> str:
+    """An option of ``setting`` as the tools name it: the name the editor
+    shows, in quotes, and the value a change takes, where it takes one."""
+    name = f'"{_OPTION_NAMES.get((setting, value), str(value))}"'
+    return f"{name} [{_value(value)}]" if _takes(setting) else name
+
+
+def _noted(setting: str, value: object) -> str:
+    """An option by ``option_label``, with what it stands for where the model
+    needs that to advise."""
+    note = _OPTION_NOTES.get((setting, value))
+    return option_label(setting, value) + (f", {note}" if note else "")
+
+
+def _option_line(
+    setting: str, value: object, *, label: str | None = None, others: bool = True
+) -> str:
+    """A setting the editor names by option, as a read gives it: by its name
+    and key (or ``label``), its option now, and with ``others`` the other
+    options, each by the editor's name and the value a change takes."""
+    line = f"{label or setting_label(setting)}: {_noted(setting, value)}"
+    rest = [
+        _noted(setting, option)
+        for key, option, _ in SETTING_OPTIONS
+        if key == setting and option != value
+    ]
+    if not (others and rest):
+        return line
+    are = "options are" if len(rest) > 1 else "option is"
+    return f"{line} (the other {are} {_listing(rest)})"
+
+
+def _model_setting_value(value: object) -> str:
+    """A value of one of the model's settings as the tools give it: a named
+    one by the editor's name, in quotes, with the value a change takes, and a
+    number as it is."""
+    if value is None or isinstance(value, str):
+        return f'"{_MODEL_OPTION_NAMES.get(value, str(value))}" [{_value(value)}]'
+    return str(value)
+
+
+def _supports(offered: Any, key: str) -> bool:
+    return bool(getattr(getattr(offered, key, None), "supported", False))
+
+
+def model_behaviour(kwargs: Any | None, offered: Any | None) -> str:
+    """The preset of "Modellbeteende" the editor shows for model settings
+    ``kwargs`` on a model that offers ``offered`` (behaviourFromKwargs in
+    model-kwargs.ts, read as the editor's behaviour row reads it): "default"
+    for a model without a temperature, whose presets the editor switches off,
+    else the first preset whose temperature the settings have, and "custom"
+    for any other."""
+    if not _supports(offered, "temperature"):
+        return "default"
+    temperature = getattr(kwargs, "temperature", None)
+    return next(
+        (
+            key
+            for key, _, preset in MODEL_BEHAVIOURS
+            if preset is not None and preset["temperature"] == temperature
+        ),
+        "custom",
+    )
+
+
+def _preset_label(name: str, preset: Mapping[str, float | None]) -> str:
+    return f'"{name}" [temperature: {_value(preset["temperature"])}]'
+
+
+def _behaviour_line(kwargs: Any | None, offered: Any | None) -> str:
+    """The model's behaviour as a read gives it: the preset the editor shows,
+    by its name and the temperature a change sets for it, and the others."""
+    behaviour = model_behaviour(kwargs, offered)
+    label = setting_label("completion_model_kwargs")
+    custom = _BEHAVIOUR_NAMES["custom"]
+    if not _supports(offered, "temperature"):
+        return (
+            f'{label}: "{_BEHAVIOUR_NAMES[behaviour]}" (the model takes no '
+            "temperature, so the editor offers no other)"
+        )
+    presets = {
+        key: _preset_label(name, preset)
+        for key, name, preset in MODEL_BEHAVIOURS
+        if preset is not None
+    }
+    others = _listing([text for key, text in presets.items() if key != behaviour])
+    if behaviour == "custom":
+        temperature = getattr(kwargs, "temperature", None)
+        return (
+            f'{label}: "{custom}", {setting_label(_KWARGS + "temperature")} '
+            f"{temperature} (the presets are {others})"
+        )
+    return (
+        f"{label}: {presets[behaviour]} (the other presets are {others}; any "
+        f'other temperature is "{custom}")'
+    )
+
+
+def _badge(attribute: str, value: str) -> str:
+    """A fact the editor shows about a model as a badge, by the badge's name."""
+    note = _BADGE_NOTES.get(attribute)
+    return (
+        f'"{_BADGE_NAMES[attribute]}"' + (f" ({note})" if note else "") + f": {value}"
+    )
+
+
 # Why the editor shows a function as one that cannot be turned on, for each
 # reason it gives (the messages ``readinessKey`` picks in the editor's
 # capabilities): its sentence, in the words the model reads, and who changes
@@ -167,7 +428,8 @@ _FUNCTION_BLOCKS: dict[str, tuple[str, str]] = {
     ),
     "model_no_tool_calling": (
         "the chat model does not support tool calling",
-        'a chat model that does is chosen first, under "Chattmodell"',
+        "a chat model that does is chosen first, under "
+        f'"{setting_name("completion_model")}"',
     ),
     "permission": (
         "the person does not have permission to use it",
@@ -197,16 +459,6 @@ _FUNCTION_BLOCKS: dict[str, tuple[str, str]] = {
     ),
 }
 _UNKNOWN_BLOCK = ("the source is unavailable", _SOURCES_BY_AN_ADMINISTRATOR)
-
-_SETTINGS: tuple[tuple[str, str], ...] = (
-    ("temperature", "temperature"),
-    ("top_p", "top p"),
-    ("reasoning_effort", "reasoning effort"),
-    ("verbosity", "verbosity"),
-    ("presence_penalty", "presence penalty"),
-    ("frequency_penalty", "frequency penalty"),
-    ("top_k", "top k"),
-)
 
 
 # --- Calls -------------------------------------------------------------------
@@ -427,27 +679,30 @@ def _per_million(cost: Decimal | float | None) -> str | None:
     return f"${Decimal(str(cost)) * 1_000_000:.2f}"
 
 
-def _model_facts(model: Any, *, show_pricing: bool, offered: Any) -> list[str]:
-    """What the editor shows about a model, with the reasoning efforts it
-    offers (``offered``: its supported settings)."""
+def _model_facts(
+    model: Any, *, show_pricing: bool, offered: Any, efforts: bool = True
+) -> list[str]:
+    """What the editor shows about a model, by the names of its badges, and
+    with ``efforts`` the reasoning levels it offers (``offered``: its
+    supported settings)."""
     window = model.max_input_tokens
     facts = [
-        f"context window: {window:,} tokens" if window else "context window: unknown",
-        f"tool calling: {_yes(model.supports_tool_calling)}",
-        f"reasoning: {_yes(model.reasoning)}",
-        f"reads images: {_yes(model.vision)}",
+        _badge("max_input_tokens", f"{window:,} tokens" if window else "unknown"),
+        _badge("vision", _yes(model.vision)),
+        _badge("supports_tool_calling", _yes(model.supports_tool_calling)),
+        _badge("reasoning", _yes(model.reasoning)),
     ]
-    efforts = getattr(getattr(offered, "reasoning_effort", None), "options", None)
-    if getattr(getattr(offered, "reasoning_effort", None), "supported", False):
-        facts.append(f"reasoning efforts: {', '.join(efforts or [])}")
+    levels = getattr(getattr(offered, "reasoning_effort", None), "options", None)
+    if efforts and _supports(offered, "reasoning_effort"):
+        facts.append(
+            f"{setting_label(_KWARGS + 'reasoning_effort')} options: "
+            + ", ".join(_model_setting_value(level) for level in levels or [])
+        )
     if show_pricing:
         prices = [
-            f"{label} {price}"
-            for label, price in (
-                ("input", _per_million(model.input_cost_per_token)),
-                ("output", _per_million(model.output_cost_per_token)),
-            )
-            if price is not None
+            f'"{_BADGE_NAMES[attribute]}" {price}'
+            for attribute in ("input_cost_per_token", "output_cost_per_token")
+            if (price := _per_million(getattr(model, attribute))) is not None
         ]
         if prices:
             facts.append(f"price per million tokens: {', '.join(prices)}")
@@ -597,8 +852,28 @@ NO_RIGHTS = PersonRights(edit_retention=False, toggle_insight=False, publish=Fal
 
 # Who may change what the person's role withholds, as a person would say it.
 _WHO_CAN = "someone with more rights in the space, such as its administrators"
-_PERSONAL_INSIGHTS = "Insights are not used for an assistant in a personal space."
+_INSIGHTS = setting_name("insight_enabled")
+_PERSONAL_INSIGHTS = f'"{_INSIGHTS}" are not used for an assistant in a personal space.'
 _PERSONAL_PUBLISHING = "An assistant in a personal space is not published."
+
+# Whether the assistant is published, as the editor shows it: its status
+# under "Publicering", which publish_assistant changes.
+_PUBLISHED = (
+    f'"{setting_name("published")}" under "{setting_name("section:publishing")}"'
+)
+
+# What a right on the assistant lets the person do in the editor, in the
+# order the reads say them.
+_RIGHTS: tuple[tuple[str, str], ...] = (
+    ("edit", "change its settings"),
+    (
+        "publish",
+        f'publish or unpublish it under "{setting_name("section:publishing")}"',
+    ),
+    ("insight_view", f'see its "{_INSIGHTS}"'),
+    ("insight_toggle", f'switch "{_INSIGHTS}" on and off'),
+    ("delete", "delete it"),
+)
 
 
 def withheld_settings(rights: PersonRights | None) -> list[str]:
@@ -609,15 +884,15 @@ def withheld_settings(rights: PersonRights | None) -> list[str]:
     others = f"{_WHO_CAN}, can"
     withheld: list[str] = []
     if not rights.edit_retention:
-        withheld.append(f"conversation retention: {others}")
+        withheld.append(f"{setting_label('data_retention_days')}: {others}")
     if not rights.toggle_insight:
         withheld.append(
-            "insights (turning them on or off): "
+            f"{setting_label('insight_enabled')} (switching them on or off): "
             + ("not used in a personal space" if rights.personal_space else others)
         )
     if not rights.publish:
         withheld.append(
-            "publishing (publishing or unpublishing it): "
+            f"{_PUBLISHED} (publishing or unpublishing it): "
             + ("not used in a personal space" if rights.personal_space else others)
         )
     return withheld
@@ -708,35 +983,59 @@ def _model_note(reading: AssistantReading) -> str:
     why, instead = _WITHDRAWN_MODEL[who]
     return (
         f' ({why}, so the editor shows "Stöds ej vald modell" under '
-        f'"Chattmodell"; the assistant needs one of {instead}, which '
-        "read_options lists)"
+        f'"{setting_name("completion_model")}"; the assistant needs one of '
+        f"{instead}, which read_options lists)"
     )
 
 
-def policy_locks(config: Any | None) -> list[str]:
-    """The settings an organisation policy decides for the assistant."""
+# The MCP servers and the functions, which a policy sets together.
+_SERVERS_AND_FUNCTIONS = (
+    f"{setting_label('mcp_servers')} and {setting_label('enabled_capabilities')}"
+)
+
+
+def _policy_locks(config: Any | None) -> list[tuple[str, str]]:
+    """The settings an organisation policy decides for the assistant, each
+    with the section of the reads it belongs to."""
     if config is None:
         return []
-    locks: list[str] = []
+    locks: list[tuple[str, str]] = []
     if config.prompt_enforced:
-        locks.append("instructions: set by the policy")
+        locks.append(("instructions", f"{setting_label('prompt')}: set by the policy"))
     if config.models_enforced:
         locked = config.locked_model
+        model = setting_label("completion_model")
         locks.append(
-            f"chat model: locked to {_model_name(locked)}"
-            if locked is not None
-            else "chat model: only "
-            + ", ".join(_model_name(model) for model in config.available_models)
+            (
+                "model",
+                f"{model}: locked to {_model_name(locked)}"
+                if locked is not None
+                else f"{model}: only "
+                + ", ".join(_model_name(item) for item in config.available_models),
+            )
         )
     if config.reasoning_policy_configured and not (
         config.reasoning_effort_user_configurable
     ):
-        locks.append("reasoning effort: set by the policy")
+        effort = setting_label(_KWARGS + "reasoning_effort")
+        locks.append(("model", f"{effort}: set by the policy"))
     if config.mcp_enforced:
-        locks.append("MCP servers and functions: set by the policy")
+        locks.append(("tools", f"{_SERVERS_AND_FUNCTIONS}: set by the policy"))
     if config.inline_file_text is not None:
-        locks.append("handling of files uploaded in a chat: set by the policy")
+        locks.append(
+            ("knowledge", f"{setting_label('inline_file_text')}: set by the policy")
+        )
     return locks
+
+
+def policy_locks(config: Any | None) -> list[str]:
+    """The settings an organisation policy decides for the assistant."""
+    return [lock for _, lock in _policy_locks(config)]
+
+
+def _locks_in(config: Any | None, section: str) -> list[str]:
+    """What a policy decides of the settings in ``section``, as items."""
+    return [f"- {lock}" for where, lock in _policy_locks(config) if where == section]
 
 
 def answering_model(model: Any | None, config: Any | None) -> Any | None:
@@ -783,18 +1082,18 @@ def held_by_the_editor(assistant: Any, config: Any | None) -> list[tuple[str, st
         held.append(
             (
                 "knowledge",
-                "knowledge: none can be added while the assistant has MCP "
-                "servers (the two are not combined); removing the MCP servers "
-                "comes first",
+                f"{setting_label('knowledge')}: none can be added while the "
+                "assistant has MCP servers (the two are not combined); removing "
+                "the MCP servers comes first",
             )
         )
     if knowledge and not servers and not governed:
         held.append(
             (
                 "tools",
-                "MCP servers: none can be added while the assistant has "
-                "knowledge (the two are not combined); removing its knowledge "
-                "comes first",
+                f"{setting_label('mcp_servers')}: none can be added while the "
+                "assistant has knowledge (the two are not combined); removing "
+                "its knowledge comes first",
             )
         )
     model = None if governed else answering_model(assistant.completion_model, config)
@@ -802,10 +1101,12 @@ def held_by_the_editor(assistant: Any, config: Any | None) -> list[tuple[str, st
         held.append(
             (
                 "tools",
-                "MCP servers, their tools and functions: the chat model "
+                f"{setting_label('mcp_servers')}, {setting_label('mcp_tools')} and "
+                f"{setting_label('enabled_capabilities')}: the chat model "
                 f"{_model_name(model)} cannot use tools, so no MCP server or "
                 "function can be turned on and no single tool switched on or "
-                "off; choosing a model that can use tools comes first",
+                "off; choosing a model that can use tools under "
+                f"{setting_label('completion_model')} comes first",
             )
         )
     return held
@@ -824,31 +1125,41 @@ def _held_lines(reading: AssistantReading, section: str | None = None) -> list[s
     ]
 
 
+def _published_line(published: object, *, others: bool = True) -> str:
+    return _option_line("published", bool(published), label=_PUBLISHED, others=others)
+
+
 def _overview(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
     model = assistant.completion_model
     text = assistant.get_prompt_text()
+    sources = (
+        ("groups", assistant.collections),
+        ("websites", assistant.websites),
+        ("integration_knowledge_list", assistant.integration_knowledge_list),
+    )
     lines = [
-        f"Name: {assistant.name} [id {assistant.id}]",
-        f"Description: {_short(assistant.description) or 'none'}",
-        f"Published: {_yes(assistant.published)}",
-        "Chat model: "
+        f"{setting_label('name')}: {assistant.name} [id {assistant.id}]",
+        f"{setting_label('description')}: {_short(assistant.description) or 'none'}",
+        _published_line(assistant.published, others=False),
+        f"{setting_label('completion_model')}: "
         + (
             f"{_model_name(model)} [id {model.id}]{_model_note(reading)}"
             if model is not None
             else "none"
         ),
-        f"Instructions: {len(text):,} characters"
-        if text
-        else "Instructions: none saved",
+        f"{setting_label('prompt')}: "
+        + (f"{len(text):,} characters" if text else "none saved"),
         (
-            f"Knowledge: {len(assistant.collections)} collections, "
-            f"{len(assistant.websites)} websites, "
-            f"{len(assistant.integration_knowledge_list)} integration sources, "
-            f"{len(assistant.attachments)} attachments"
+            f"{setting_label('knowledge')}: "
+            + ", ".join(
+                f"{len(items)} in {setting_label(key)}" for key, items in sources
+            )
+            + f"; {setting_label('attachments')}: {len(assistant.attachments)}"
         ),
         (
-            f"Tools: {len(assistant.mcp_servers)} MCP servers; functions: "
+            f"{setting_label('mcp_servers')}: {len(assistant.mcp_servers)}; "
+            f"{setting_label('enabled_capabilities')}: "
             + (
                 ", ".join(
                     _function_mention(
@@ -870,8 +1181,14 @@ def _overview(reading: AssistantReading) -> list[str]:
 
 
 def _rights(reading: AssistantReading) -> list[str]:
-    rights = [getattr(item, "value", str(item)) for item in reading.permissions]
-    return [f"The person may: {', '.join(rights) or 'read only'}"]
+    """What the person may and may not do with the assistant, in words."""
+    held = {getattr(item, "value", str(item)) for item in reading.permissions}
+    may = [words for right, words in _RIGHTS if right in held]
+    may_not = [words for right, words in _RIGHTS if right not in held]
+    line = f"The person may {_listing(may)}" if may else "The person may only read it"
+    if may_not:
+        line += f"; they may not {_listing(may_not, 'or')}"
+    return [line + "."]
 
 
 def _locks_lines(reading: AssistantReading) -> list[str]:
@@ -900,34 +1217,64 @@ def _instructions(reading: AssistantReading) -> list[str]:
 def _model(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
     model = assistant.completion_model
+    label = setting_label("completion_model")
     if model is None:
-        lines = ["Chat model: none chosen"]
+        lines = [f"{label}: none chosen"]
         offered = None
     else:
         offered = model.get_supported_model_kwargs()
         lines = [
-            f"Chat model: {_model_name(model)} [id {model.id}]{_model_note(reading)}"
+            f"{label}: {_model_name(model)} [id {model.id}]{_model_note(reading)}"
         ] + [
             f"  {fact}"
             for fact in _model_facts(
-                model, show_pricing=reading.show_pricing, offered=offered
+                model, show_pricing=reading.show_pricing, offered=offered, efforts=False
             )
         ]
-    lines.append("Model settings:")
     stored = assistant.completion_model_kwargs
-    for key, label in _SETTINGS:
+    # The editor reads a saved model the space no longer offers as none, and
+    # shows the presets switched off.
+    lines.append(
+        _behaviour_line(
+            stored, None if reading.model_withdrawn_by == "space" else offered
+        )
+    )
+    for key in _MODEL_SETTINGS:
         value = getattr(stored, key, None) if stored is not None else None
         capability = getattr(offered, key, None)
-        if value is None and not getattr(capability, "supported", False):
+        if key == "temperature" or (
+            value is None and not getattr(capability, "supported", False)
+        ):
             continue
-        lines.append(
-            f"  {label}: {value if value is not None else 'the model default'}"
-        )
-    return lines + [
-        f"- {lock}"
-        for lock in policy_locks(reading.effective_config)
-        if lock.startswith(("chat model", "reasoning"))
-    ]
+        line = f"{setting_label(_KWARGS + key)}: {_model_setting_value(value)}"
+        options = getattr(capability, "options", None) or []
+        others = [
+            _model_setting_value(option)
+            for option in [None, *options]
+            if option != value
+        ]
+        if getattr(capability, "control", None) == "select" and others:
+            line += f" (the others are {_listing(others)})"
+        lines.append(line)
+    return lines + _locks_in(reading.effective_config, "model")
+
+
+def _rerank_line(reading: AssistantReading) -> str:
+    """The result ranking as a read gives it: the model chosen, by name, or
+    none, and that the space can no longer use the one chosen."""
+    chosen = reading.assistant.rerank_model_id
+    label = setting_label("rerank_model_id")
+    if chosen is None:
+        return f"{label}: {option_label('rerank_model_id', None)}"
+    gone = (
+        ' (the space can no longer use it, so the editor shows "Otillgänglig '
+        'modell" in its place, and the sources are searched without it until '
+        "another is chosen)"
+    )
+    return (
+        f"{label}: {reading.rerank_model_name or f'[id {chosen}]'}"
+        f"{'' if reading.rerank_selectable else gone}"
+    )
 
 
 def _knowledge(reading: AssistantReading) -> list[str]:
@@ -942,7 +1289,7 @@ def _knowledge(reading: AssistantReading) -> list[str]:
             note
             for note, applies in (
                 (
-                    "organisation knowledge",
+                    f'under "{setting_name("organization_knowledge")}"',
                     item.space_id is not None and item.space_id != assistant.space_id,
                 ),
                 (
@@ -954,78 +1301,80 @@ def _knowledge(reading: AssistantReading) -> list[str]:
         ]
         return f" ({'; '.join(notes)})" if notes else ""
 
-    lines = [
-        "Knowledge mode: "
-        + (
-            "the assistant searches its knowledge when it needs to"
-            if mode == "tool"
-            else "relevant parts are put in the prompt on every question"
-        )
-    ]
-    lines.append(f"Collections ({len(assistant.collections)}):")
+    lines = [_option_line("knowledge_mode", mode)]
+    lines.append(f"{setting_label('groups')} ({len(assistant.collections)}):")
     lines += [
         f"- {item.name} [id {item.id}]{origin(item)}" for item in assistant.collections
     ]
-    lines.append(f"Websites ({len(assistant.websites)}):")
+    lines.append(f"{setting_label('websites')} ({len(assistant.websites)}):")
     lines += [
         f"- {_website(item)} [id {item.id}]{origin(item)}"
         for item in assistant.websites
     ]
-    lines.append(f"Integration sources ({len(assistant.integration_knowledge_list)}):")
-    lines += [
-        f"- {item.name} [id {item.id}]{origin(item)}"
-        for item in assistant.integration_knowledge_list
-    ]
+    integrations = assistant.integration_knowledge_list
     lines.append(
-        "Result ranking: "
-        + (
-            reading.rerank_model_name
-            or (
-                f"[id {assistant.rerank_model_id}]"
-                if assistant.rerank_model_id
-                else "none"
-            )
-        )
-        + (
-            ' (the space can no longer use it, so the editor shows "Otillgänglig '
-            'modell" under "Rankning av träffar", and the sources are searched '
-            "without it until another is chosen)"
-            if assistant.rerank_model_id and not reading.rerank_selectable
-            else ""
-        )
+        f"{setting_label('integration_knowledge_list')} ({len(integrations)}):"
     )
+    lines += [f"- {item.name} [id {item.id}]{origin(item)}" for item in integrations]
+    lines.append(_rerank_line(reading))
     inline = assistant.inline_file_text
     config = reading.effective_config
-    if config is not None and config.inline_file_text is not None:
+    governed = config is not None and config.inline_file_text is not None
+    if governed:
         inline = config.inline_file_text
     lines.append(
-        "Files uploaded in a chat: "
-        + ("put whole in the prompt" if inline else "looked up when needed")
-        + (
-            " (set by an organisation policy)"
-            if config is not None and config.inline_file_text is not None
-            else ""
-        )
+        _option_line("inline_file_text", bool(inline))
+        + ("; set by an organisation policy" if governed else "")
     )
     attachments = assistant.attachments
-    lines.append(f"Attachments ({len(attachments)}):")
+    heading = f"{setting_label('attachments')} ({len(attachments)})"
+    if attachments:
+        ways = _listing(
+            [
+                f"{option_label('attachments', way)} "
+                f"({_OPTION_NOTES[('attachments', way)]})"
+                for way in (True, False)
+            ],
+            "or",
+        )
+        heading += f", each {ways}, which the person chooses in the editor"
+    lines.append(f"{heading}:")
     inline_text = assistant.attachment_inline_text
     lines += [
         f"- {item.name}: "
-        + (
-            "always in the prompt"
-            if inline_text.get(item.id, True)
-            else "opened with a tool when needed"
-        )
+        + option_label("attachments", bool(inline_text.get(item.id, True)))
         for item in attachments
     ]
     return lines + _held_lines(reading, "knowledge")
 
 
+def _template_line(reading: AssistantReading) -> str:
+    """The document template as a read gives it: the option chosen, a chosen
+    template by name, and one that is gone as the editor shows it."""
+    choice = reading.assistant.document_template
+    if choice.mode != "selected":
+        return _option_line("document_template", choice.mode)
+    selected = option_label("document_template", "selected")
+    label = setting_label("document_template")
+    if reading.document_template_name is not None:
+        return (
+            f"{label}: {selected}, {reading.document_template_name} "
+            f"[id {choice.template_id}]"
+        )
+    # A chosen template that is gone falls back as the default does, and the
+    # editor shows the organisation's default.
+    return (
+        f"{label}: {selected}, one that is no longer among the organisation's "
+        f"templates [id {choice.template_id}], so the documents use "
+        f"{option_label('document_template', 'default')}, as the editor shows, "
+        "until another is chosen"
+    )
+
+
 def _tools(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
     overrides = dict(assistant.mcp_tools)
-    lines = [f"MCP servers ({len(assistant.mcp_servers)}):"]
+    lines = [f"{setting_label('mcp_servers')} ({len(assistant.mcp_servers)}):"]
     for server in assistant.mcp_servers:
         description = _short(server.description)
         # The editor shows a server an administrator turned off as such.
@@ -1038,61 +1387,48 @@ def _tools(reading: AssistantReading) -> list[str]:
         tools = sorted(_loaded_tools(server), key=lambda tool: tool.name)
         if tools:
             lines.append(
-                "  tools: "
+                f"  {setting_label('mcp_tools')}: "
                 + ", ".join(
                     f"{tool.display_name or tool.name} "
                     f"({'on' if overrides.get(tool.id, tool.is_enabled) else 'off'})"
                     for tool in tools
                 )
             )
-    lines.append(f"Functions on ({len(assistant.enabled_capabilities)}):")
+    lines.append(
+        f"{setting_label('enabled_capabilities')} on "
+        f"({len(assistant.enabled_capabilities)}):"
+    )
     lines += [
         _function_line(purpose, _assistant_function_block(assistant, purpose), on=True)
         for purpose in assistant.enabled_capabilities
     ]
-    choice = assistant.document_template
-    name = reading.document_template_name
-    if choice.mode == "default":
-        template = "the organisation's default"
-    elif choice.mode == "builtin":
-        template = "Eneo's built-in look"
-    elif name is not None:
-        template = f"{name} [id {choice.template_id}]"
-    else:
-        # A chosen template that is gone falls back as the default does, and
-        # the editor shows the organisation's default.
-        template = (
-            "one that is no longer among the organisation's templates [id "
-            f"{choice.template_id}], so the documents use the organisation's "
-            "default, as the editor shows, until another is chosen"
-        )
-    lines.append(f"Document template: {template}")
+    lines.append(_template_line(reading))
     return (
         lines
-        + [
-            f"- {lock}"
-            for lock in policy_locks(reading.effective_config)
-            if lock.startswith("MCP")
-        ]
+        + _locks_in(reading.effective_config, "tools")
         + _held_lines(reading, "tools")
+    )
+
+
+def _retention_line(days: int | None) -> str:
+    label = setting_label("data_retention_days")
+    if days is not None:
+        return f"{label}: {days} days"
+    return (
+        f"{label}: {option_label('data_retention_days', None)}, so it follows "
+        "the space, then the organisation"
     )
 
 
 def _access(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
-    retention = assistant.data_retention_days
     return [
-        f"Published: {_yes(assistant.published)}",
+        _published_line(assistant.published),
         *_rights(reading),
         *_withheld_lines(reading),
-        f"Insights: {'on' if assistant.insight_enabled else 'off'}",
+        _option_line("insight_enabled", bool(assistant.insight_enabled)),
         f"Conversation logging: {'on' if assistant.logging_enabled else 'off'}",
-        "Conversation retention: "
-        + (
-            f"{retention} days"
-            if retention is not None
-            else "follows the space, then the organisation"
-        ),
+        _retention_line(assistant.data_retention_days),
         f"The space's own chat assistant: {_yes(assistant.is_default)}",
     ]
 
@@ -1190,11 +1526,13 @@ async def _document_templates(container: Any) -> list[Any]:
 async def read_assistant(
     ctx: Context, section: AssistantSection = "overview", offset: int = 0
 ) -> CallToolResult:
-    """Read the assistant this chat is about, as saved, in plain text. The
-    overview (default) is short: name, description, published, chat model
-    (and whether the space still offers it), the length of the instructions,
-    counts of knowledge and tools, the functions by the names the editor
-    shows, what the person may do, what their role does not let them change
+    """Read the assistant this chat is about, as saved, in plain text, each
+    setting, option and function by the name the editor shows, with the key
+    or value a change takes in brackets. The overview (default) is short:
+    name, description, published, chat model (and whether the space still
+    offers it), the length of the instructions, counts of knowledge and
+    tools, the functions, what the person may do, what their role does not
+    let them change
     and what an organisation policy locks (suggest neither), and what the
     editor's rules hold back as the assistant is set up now (knowledge and MCP
     servers are not combined, and tools need a chat model that can use them;
@@ -1255,7 +1593,10 @@ def _model_options(offer: SpaceOffer) -> list[str]:
         allowed = {model.id for model in config.available_models}
         listed = [model for model in listed if model.id in allowed]
     models = [model for model in listed if model.can_access]
-    lines = [f"Chat models the space offers ({len(models)}):"]
+    lines = [
+        f"{setting_label('completion_model')}: the models the space offers "
+        f"({len(models)}):"
+    ]
     for model in models:
         marks = [
             mark
@@ -1297,14 +1638,11 @@ def _model_options(offer: SpaceOffer) -> list[str]:
         lines.append(
             "The assistant's saved chat model, "
             f"{offer.current_model_name or 'unnamed'}, is not among them, so the "
-            'editor shows "Stöds ej vald modell" under "Chattmodell": the '
-            "assistant needs one of these."
+            'editor shows "Stöds ej vald modell" under '
+            f'"{setting_name("completion_model")}": the assistant needs one of '
+            "these."
         )
-    return lines + [
-        f"- {lock}"
-        for lock in policy_locks(config)
-        if lock.startswith(("chat model", "reasoning"))
-    ]
+    return lines + _locks_in(config, "model")
 
 
 def _knowledge_options(offer: SpaceOffer) -> list[str]:
@@ -1328,7 +1666,7 @@ def _knowledge_options(offer: SpaceOffer) -> list[str]:
             and item.space_id == organisation
             and (item.space_id != space.id)
         ):
-            notes.append("organisation knowledge")
+            notes.append(f'under "{setting_name("organization_knowledge")}"')
         if item.embedding_model.id not in usable:
             notes.append("its embedding model is not enabled in the space")
         if several:
@@ -1344,23 +1682,27 @@ def _knowledge_options(offer: SpaceOffer) -> list[str]:
         if several
         else []
     )
-    lines.append(f"Collections ({len(knowledge.groups.items)}):")
-    lines += [item_line(item, item.name) for item in knowledge.groups.items]
-    lines.append(f"Websites ({len(knowledge.websites.items)}):")
-    lines += [item_line(item, _website(item)) for item in knowledge.websites.items]
-    lines.append(
-        f"Integration sources ({len(knowledge.integration_knowledge_list.items)}):"
-    )
-    lines += [
-        item_line(item, item.name)
-        for item in knowledge.integration_knowledge_list.items
-    ]
+    for key, items, shown in (
+        ("groups", knowledge.groups.items, lambda item: item.name),
+        ("websites", knowledge.websites.items, _website),
+        (
+            "integration_knowledge_list",
+            knowledge.integration_knowledge_list.items,
+            lambda item: item.name,
+        ),
+    ):
+        lines.append(f"{setting_label(key)} ({len(items)}):")
+        lines += [item_line(item, shown(item)) for item in items]
     rerankers = [
         model
         for model in offer.rerank_models
         if model.can_access and model.meets_security_classification is not False
     ]
-    lines.append(f"Result ranking models ({len(rerankers)}):")
+    lines.append(
+        f"{setting_label('rerank_model_id')}: "
+        f"{option_label('rerank_model_id', None)} or one of the models the space "
+        f"can use ({len(rerankers)}):"
+    )
     lines += [f"- {_model_name(model)} [id {model.id}]" for model in rerankers]
     return lines
 
@@ -1373,7 +1715,7 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
     governed = source is not None
     servers = source.available_mcp_servers if source else space.mcp_servers
     lines = [
-        "MCP servers"
+        setting_label("mcp_servers")
         + (" the organisation's policy gives" if governed else " the space offers")
         + f" ({len(servers)}):"
     ]
@@ -1386,15 +1728,18 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
             + (f": {description}" if description else "")
         )
         if server["tools"]:
-            lines.append("  tools: " + ", ".join(server["tools"]))
+            lines.append(
+                f"  {setting_label('mcp_tools')}: " + ", ".join(server["tools"])
+            )
     # The editor lists every function, and the space's switch is the first
     # reason one cannot be turned on; under a policy that sets them, only the
     # policy's, with their sources' readiness.
+    functions = setting_label("enabled_capabilities")
     if source:
         listed = list(source.enabled_capabilities)
         offered = set(listed)
         availability = source.available_capabilities
-        lines.append(f"Functions the organisation's policy gives ({len(listed)}):")
+        lines.append(f"{functions} the organisation's policy gives ({len(listed)}):")
     else:
         listed = [key for key, _, _ in FUNCTIONS]
         offered = set(space.enabled_capabilities)
@@ -1403,9 +1748,7 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
             if offer.function_availability is not None
             else space.available_capabilities
         )
-        lines.append(
-            f'Functions ({len(listed)}), as the editor lists them under "Funktioner":'
-        )
+        lines.append(f"{functions} ({len(listed)}), as the editor lists them:")
     lines += [
         _function_line(
             purpose,
@@ -1418,18 +1761,26 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
         )
         for purpose in listed
     ]
+    default = option_label("document_template", "default")
+    choices = _listing(
+        [
+            default,
+            option_label("document_template", "builtin"),
+            option_label("document_template", "selected")
+            + " with one of the organisation's templates",
+        ],
+        "or",
+    )
     lines.append(
-        "Document templates: the organisation's default, Eneo's built-in look"
-        + ("" if offer.document_templates else ", and no others")
+        f"{setting_label('document_template')}: {choices}"
+        + (":" if offer.document_templates else ", though it has none")
     )
     lines += [
         f"- {item.name} [id {item.id}]"
-        + (" (the organisation's default)" if item.is_default else "")
+        + (f" (the one {default} uses)" if item.is_default else "")
         for item in offer.document_templates
     ]
-    return lines + [
-        f"- {lock}" for lock in policy_locks(config) if lock.startswith("MCP")
-    ]
+    return lines + _locks_in(config, "tools")
 
 
 def _server_view(server: Any) -> dict[str, Any]:
@@ -1525,7 +1876,8 @@ async def read_options(
     ctx: Context, section: OptionsSection = "all", offset: int = 0
 ) -> CallToolResult:
     """Read what the assistant's space offers to choose from, in plain text,
-    before suggesting a choice, with the ids a change takes. Section "model"
+    before suggesting a choice, with the ids a change takes and each setting
+    and option by the name the editor shows. Section "model"
     gives the chat models the assistant may use, with what each can do
     (context window, tool calling, reasoning and its efforts, images, price
     when shown), the space's default and the one in use, those below the
@@ -1557,31 +1909,22 @@ async def read_options(
 # How the audit entry of a change made through the chat names its origin.
 HELPER_CHAT_ORIGIN = "helper_chat"
 
-# What the chat may change, as the assistant's update request names it, with
-# what the editor calls it.
-_CHANGEABLE: dict[str, str] = {
-    "name": "name",
-    "description": "description",
-    "prompt": "instructions",
-    "completion_model": "chat model",
-    "completion_model_kwargs": "model settings",
-    "knowledge_mode": "knowledge mode",
-    "inline_file_text": "handling of files uploaded in a chat",
-    "groups": "knowledge (collections)",
-    "websites": "knowledge (websites)",
-    "integration_knowledge_list": "knowledge (integration sources)",
-    "rerank_model_id": "result ranking",
-    "mcp_servers": "MCP servers",
-    "mcp_tools": "MCP tools",
-    "enabled_capabilities": "functions",
-    "document_template": "the document template",
-    "data_retention_days": "conversation retention",
-    "insight_enabled": "insights",
-}
 _PROMPT_KEYS = frozenset({"text", "description"})
 _MODEL_KEYS = frozenset({"id"})
-_SETTING_KEYS = frozenset(key for key, _ in _SETTINGS)
+_SETTING_KEYS = frozenset(_MODEL_SETTINGS)
 _TEMPLATE_KEYS = frozenset({"mode", "template_id"})
+
+# What the chat changes, by the editor's names, as a refusal lists it.
+_CHANGEABLE_NAMES = _listing(
+    [
+        f"{setting_label(key)} and the model's settings ("
+        + _listing([setting_label(_KWARGS + inner) for inner in _MODEL_SETTINGS])
+        + ")"
+        if key == "completion_model_kwargs"
+        else setting_label(key)
+        for key in _CHANGEABLE
+    ]
+)
 
 # The list settings: the assistant's update request replaces each whole, and
 # the chat also takes additions and removals, which it applies to the list as
@@ -1596,9 +1939,9 @@ _LIST_SETTINGS = frozenset(
 _UNCHANGEABLE: dict[str, str] = {
     "id": "the assistant's identity",
     "space_id": "the space",
-    "attachments": "attachments",
-    "skill_bindings": "skills",
-    "published": "publishing",
+    "attachments": setting_label("attachments"),
+    "skill_bindings": setting_label("section:skills"),
+    "published": _PUBLISHED,
     "logging_enabled": "conversation logging",
     "icon_id": "the icon",
     "metadata_json": "metadata",
@@ -1613,9 +1956,42 @@ _UNCHANGEABLE: dict[str, str] = {
 _VERSION_DESCRIPTION_CHARS = 200
 _CHANGED_WITH_HELPER = "Changed with the helper assistant."
 
+
+def _options_take(setting: str) -> str:
+    """The values a change takes for ``setting``, each with the name the
+    editor shows for it."""
+
+    def one(value: object, name: str) -> str:
+        note = _OPTION_NOTES.get((setting, value))
+        return f'{json.dumps(value)} ("{name}"' + (f", {note}" if note else "") + ")"
+
+    return _listing(
+        [one(value, name) for key, value, name in SETTING_OPTIONS if key == setting],
+        "or",
+    )
+
+
+def _quoted(key: str) -> str:
+    return f'"{setting_name(key)}"'
+
+
+_PRESETS_TAKE = (
+    f"{_quoted('completion_model_kwargs')} is a preset of the temperature: "
+    + _listing(
+        [
+            f'"{name}" {json.dumps(preset["temperature"])}'
+            for _, name, preset in MODEL_BEHAVIOURS
+            if preset is not None
+        ]
+    )
+    + f'; any other temperature is "{_BEHAVIOUR_NAMES["custom"]}".'
+)
+
 _CHANGES_TAKE = (
     "changes holds only these fields of the assistant; a field left out keeps "
-    "its value. name: the new name. description: the new description, or null "
+    "its value. The reads give each field in brackets after the name the "
+    "editor shows, and each option's value after its name. name: the new "
+    "name. description: the new description, or null "
     'to clear it. prompt: {"text": the whole new instructions, "description": '
     "one short line in the person's language, at most 200 characters, saying "
     "what changed and that it was made with the helper; it shows in the "
@@ -1623,15 +1999,15 @@ _CHANGES_TAKE = (
     "read_options lists}. completion_model_kwargs: any of temperature, top_p, "
     "reasoning_effort, verbosity, presence_penalty, frequency_penalty and "
     "top_k; a setting you send replaces it, null returns it to the model's "
-    "default, settings you leave out are kept, and null in place of the whole "
-    'object returns them all to the defaults. knowledge_mode: "tool" (the '
-    'assistant searches its knowledge when it needs to) or "inject" '
-    "(relevant parts go in the prompt on every question). inline_file_text: "
-    "true (files uploaded in a chat go whole into the prompt) or false "
-    "(looked up when needed). "
+    f'default ("{_MODEL_OPTION_NAMES[None]}"), settings you leave out are kept, '
+    "and null in place of the whole object returns them all to the defaults. "
+    + _PRESETS_TAKE
+    + f" knowledge_mode: {_options_take('knowledge_mode')}. inline_file_text "
+    f"(files uploaded in a chat): {_options_take('inline_file_text')}. "
     "Knowledge and tools take the ids read_options lists. groups "
-    "(collections), websites, integration_knowledge_list (integration "
-    "sources) and mcp_servers: to add or remove some, send "
+    f"({_quoted('groups')}), websites ({_quoted('websites')}), "
+    f"integration_knowledge_list ({_quoted('integration_knowledge_list')}) "
+    f"and mcp_servers ({_quoted('mcp_servers')}): to add or remove some, send "
     '{"add": [{"id": ...}], "remove": [{"id": ...}]}; the rest of the list '
     'is kept. Use this form. A list in its place ([{"id": ...}, ...]) '
     "replaces the whole list, and whatever it leaves out is removed. All the "
@@ -1641,35 +2017,42 @@ _CHANGES_TAKE = (
     "knowledge, unless it has both already. MCP servers and functions are "
     "turned on, and single MCP tools switched, only while the chat model the "
     "assistant answers with can use tools. "
-    "enabled_capabilities (functions, by the keys the reads give in brackets): "
-    '{"add": ["web_search"], "remove": ["charts"]} in the same way, or the '
-    "whole list of functions. mcp_tools "
-    "(single tools of the assistant's MCP servers): "
+    f"enabled_capabilities ({_quoted('enabled_capabilities')}, by the keys the "
+    'reads give in brackets): {"add": ["web_search"], "remove": ["charts"]} in '
+    f"the same way, or the whole list of functions. mcp_tools ({_quoted('mcp_tools')}, "
+    "single tools of the assistant's MCP servers): "
     '{"add": [{"tool_id": ..., "is_enabled": false}], "remove": '
     '[{"tool_id": ...}]}, where add switches a tool on or off for this '
     "assistant and remove returns it to its server's own setting; a whole "
     'list [{"tool_id": ..., "is_enabled": ...}] replaces every such setting. '
-    "rerank_model_id: a result ranking model read_options lists, or null for "
-    'none. document_template: {"mode": "default"} (the organisation\'s '
-    'default), {"mode": "builtin"} (Eneo\'s built-in look) or {"mode": '
-    '"selected", "template_id": a template read_options lists}. '
-    "data_retention_days: how many days conversations are kept, "
-    f"{MIN_RETENTION_DAYS} to {MAX_RETENTION_DAYS}, or null to follow the "
-    "space. insight_enabled: true or false. Leave out what read_assistant "
-    "says the person may not change or a policy locks. Attachments, skills, "
-    "the icon, API keys, the web widget and conversation logging are changed "
-    "in the editor; publishing has a tool of its own."
+    f"rerank_model_id ({_quoted('rerank_model_id')}): a model read_options "
+    f'lists, or null for "{_OPTION_NAMES[("rerank_model_id", None)]}". '
+    f"document_template ({_quoted('document_template')}): "
+    + _listing(
+        [
+            f'{{"mode": "{mode}"}} ("{_OPTION_NAMES[("document_template", mode)]}")'
+            for mode in ("default", "builtin")
+        ]
+        + [
+            '{"mode": "selected", "template_id": a template read_options lists} '
+            f'("{_OPTION_NAMES[("document_template", "selected")]}")'
+        ],
+        "or",
+    )
+    + f". data_retention_days ({_quoted('data_retention_days')}): how many days "
+    f"conversations are kept, {MIN_RETENTION_DAYS} to {MAX_RETENTION_DAYS}, or "
+    "null to follow the space "
+    f'("{_OPTION_NAMES[("data_retention_days", None)]}"). insight_enabled '
+    f"({_quoted('insight_enabled')}): {_options_take('insight_enabled')}. "
+    "Leave out what read_assistant says the person may not change or a policy "
+    f"locks. Attachments ({_quoted('attachments')}), skills, the icon, API "
+    "keys, the web widget and conversation logging are changed in the editor; "
+    "publishing has a tool of its own."
 )
 
 
 def _person_name(key: str) -> str:
     return _UNCHANGEABLE.get(key) or key.replace("_", " ")
-
-
-def _listing(names: Sequence[str]) -> str:
-    if len(names) < 2:
-        return "".join(names)
-    return ", ".join(names[:-1]) + " and " + names[-1]
 
 
 def require_changeable(changes: dict[str, Any]) -> None:
@@ -1695,12 +2078,7 @@ def require_changeable(changes: dict[str, Any]) -> None:
     raise BadRequestException(
         f"{listed[:1].upper()}{listed[1:]} cannot be changed through the chat; the "
         f"person changes {'it' if len(names) == 1 else 'them'} in the editor. "
-        "Nothing was changed. The chat changes only the name, the description, "
-        "the instructions, the chat model and its settings ("
-        + ", ".join(label for _, label in _SETTINGS)
-        + "), the knowledge mode, the handling of files uploaded in a chat, the "
-        "knowledge and its result ranking, the MCP servers and their tools, the "
-        "functions, the document template, conversation retention and insights."
+        f"Nothing was changed. The chat changes only {_CHANGEABLE_NAMES}."
         + (
             " Publishing and unpublishing have a tool of their own, which asks "
             "the person first."
@@ -1952,10 +2330,7 @@ def assistant_settings_of(
         "description": assistant.description,
         "prompt": assistant.get_prompt_text(),
         "completion_model": _model_value(model) if model is not None else None,
-        **{
-            f"completion_model_kwargs.{key}": getattr(kwargs, key)
-            for key, _ in _SETTINGS
-        },
+        **{f"{_KWARGS}{key}": getattr(kwargs, key) for key in _MODEL_SETTINGS},
         "knowledge_mode": getattr(
             assistant.knowledge_mode, "value", assistant.knowledge_mode
         ),
@@ -2011,7 +2386,10 @@ def _role_refusal(
     )
 
 
-_NOT_COMBINED = "Knowledge and MCP servers are not combined on one assistant"
+_NOT_COMBINED = (
+    f"{setting_label('knowledge')} and {setting_label('mcp_servers')} are not "
+    "combined on one assistant"
+)
 
 
 def _not_combined_refusal(
@@ -2042,8 +2420,8 @@ def _tools_refusal(model: Any, what: str) -> BadRequestException:
     return BadRequestException(
         f"The chat model the assistant would answer with, {_model_name(model)}, "
         f"cannot use tools, so {what}. Choose a chat model that can use tools "
-        "first, or in the same change; read_options says which can. Nothing was "
-        "changed."
+        f"under {setting_label('completion_model')} first, or in the same change; "
+        "read_options says which can. Nothing was changed."
     )
 
 
@@ -2088,8 +2466,8 @@ def _require_offered(model: Any, merged: ModelKwargs, stored: ModelKwargs | None
         validate_model_kwargs_update(merged, supported, stored=stored)
     except BadRequestException:
         refused = [
-            label
-            for key, label in _SETTINGS
+            setting_label(_KWARGS + key)
+            for key in _MODEL_SETTINGS
             if getattr(merged, key) is not None
             and (stored is None or getattr(merged, key) != getattr(stored, key))
             and not getattr(supported, key).accepts(getattr(merged, key))
@@ -2119,7 +2497,9 @@ def _chosen_model(space: Any, config: Any | None, model_id: UUID) -> Any:
         )
     if config is not None and config.models_enforced:
         if model_id not in {model.id for model in config.available_models}:
-            raise _policy_refusal("the chat models")
+            raise _policy_refusal(
+                f"the models {setting_label('completion_model')} offers"
+            )
     return space.get_completion_model(model_id)
 
 
@@ -2203,11 +2583,11 @@ def one_embedding_model(assistant: Any, lists: Mapping[str, Sequence[Any]]) -> b
     return integrations is None or fits(integrations)
 
 
-# What each knowledge list holds, one and several, as a person says it.
-_SOURCES: dict[str, tuple[str, str]] = {
-    "groups": ("collection", "collections"),
-    "websites": ("website", "websites"),
-    "integration_knowledge_list": ("integration source", "integration sources"),
+# What one entry of each knowledge list is, as a person says it.
+_SOURCES: dict[str, str] = {
+    "groups": "collection",
+    "websites": "website",
+    "integration_knowledge_list": "integration source",
 }
 
 
@@ -2283,20 +2663,20 @@ def _plan_knowledge(
             continue
         offered = {item.id: item for item in offered_by_space[key]}
         known = {item.id: item for item in current}
-        one, several = _SOURCES[key]
+        label = setting_label(key)
         for item_id in ids:
             if item_id in offered:
                 continue
             if item_id in known:
                 name = _source_value(known[item_id], key)["name"]
                 raise BadRequestException(
-                    f'The space no longer offers "{_short(name, 80)}", so the '
-                    f"{several} cannot be saved with it: remove it as well. "
+                    f'The space no longer offers "{_short(name, 80)}", so '
+                    f"{label} cannot be saved with it: remove it as well. "
                     "Nothing was changed."
                 )
             raise BadRequestException(
-                f"The space does not offer that {one}; read_options lists the "
-                f"{several} it offers. Nothing was changed."
+                f"The space does not offer that {_SOURCES[key]} ({label}); "
+                "read_options lists those it offers. Nothing was changed."
             )
         changed[key] = [offered[item_id] for item_id in ids]
     if not changed:
@@ -2338,9 +2718,10 @@ def _plan_mcp(
     servers_change = ids is not None and set(ids) != {
         server.id for server in current_servers
     }
+    servers_label = setting_label("mcp_servers")
     if ids is not None and servers_change:
         if governed:
-            raise _policy_refusal("the MCP servers and functions")
+            raise _policy_refusal(_SERVERS_AND_FUNCTIONS)
         offered = {server.id: server for server in space.mcp_servers}
         known = {server.id: server for server in current_servers}
         for server_id in ids:
@@ -2349,29 +2730,32 @@ def _plan_mcp(
                 if server_id in known:
                     raise BadRequestException(
                         f'The space no longer offers "{known[server_id].name}", so '
-                        "the MCP servers cannot be saved with it: remove it as "
+                        f"{servers_label} cannot be saved with it: remove it as "
                         "well. Nothing was changed."
                     )
                 raise BadRequestException(
-                    "The space does not offer that MCP server; read_options "
-                    "lists the servers it offers. Nothing was changed."
+                    f"The space does not offer that MCP server ({servers_label}); "
+                    "read_options lists the servers it offers. Nothing was changed."
                 )
             if is_capability_purpose(server.purpose):
                 raise BadRequestException(
                     f'"{server.name}" provides a function: switch functions on '
-                    "and off with enabled_capabilities. Nothing was changed."
+                    f"and off under {setting_label('enabled_capabilities')}. "
+                    "Nothing was changed."
                 )
             if not server.is_enabled:
                 raise BadRequestException(
-                    f'"{server.name}" is turned off by an administrator, so the '
-                    "MCP servers cannot be saved with it"
+                    f'"{server.name}" is turned off by an administrator, so '
+                    f"{servers_label} cannot be saved with it"
                     + (": remove it as well" if server_id in known else "")
                     + ". Nothing was changed."
                 )
         if _cannot_use_tools(answering) and any(
             server_id not in known for server_id in ids
         ):
-            raise _tools_refusal(answering, "no MCP server can be added")
+            raise _tools_refusal(
+                answering, f"no MCP server can be added under {servers_label}"
+            )
         servers = [offered[server_id] for server_id in ids]
         update["mcp_servers"] = [{"id": str(server.id)} for server in servers]
         after["mcp_servers"] = _by_name(_server_value(server) for server in servers)
@@ -2395,7 +2779,8 @@ def _plan_mcp(
     if overrides == current:
         return
     if governed:
-        raise _policy_refusal("the MCP servers and functions")
+        raise _policy_refusal(_SERVERS_AND_FUNCTIONS)
+    tools_label = setting_label("mcp_tools")
     reachable = _tool_names(servers)
     if any(
         tool_id not in reachable
@@ -2403,15 +2788,15 @@ def _plan_mcp(
         if current.get(tool_id) != on
     ):
         raise BadRequestException(
-            "That tool is not a tool of the assistant's MCP servers; "
-            "read_options lists each server's tools with their ids. Nothing was "
-            "changed."
+            f"That tool ({tools_label}) is not a tool of the assistant's MCP "
+            "servers; read_options lists each server's tools with their ids. "
+            "Nothing was changed."
         )
     if overrides != kept and _cannot_use_tools(answering):
         raise _tools_refusal(
             answering,
-            "no single MCP tool can be switched on or off (an MCP server can "
-            "still be removed)",
+            f"no single MCP tool can be switched on or off under {tools_label} "
+            "(an MCP server can still be removed)",
         )
     if tool_edit is not None or tool_list is not None:
         update["mcp_tools"] = [
@@ -2449,7 +2834,7 @@ def _plan_functions(
     if purposes is None or set(purposes) == set(current):
         return
     if config is not None and config.mcp_enforced:
-        raise _policy_refusal("the MCP servers and functions")
+        raise _policy_refusal(_SERVERS_AND_FUNCTIONS)
     added = [purpose for purpose in purposes if purpose not in current]
 
     not_offered = [p for p in added if p not in space.enabled_capabilities]
@@ -2489,8 +2874,9 @@ def _plan_choices(
         if chosen != assistant.rerank_model_id:
             if chosen is not None and chosen not in facts.selectable_rerank_models:
                 raise BadRequestException(
-                    "The space cannot use that result ranking model; "
-                    "read_options lists those it can. Nothing was changed."
+                    "The space cannot use that result ranking model "
+                    f"({setting_label('rerank_model_id')}); read_options lists "
+                    "those it can. Nothing was changed."
                 )
             update["rerank_model_id"] = str(chosen) if chosen is not None else None
             after["rerank_model_id"] = _rerank_value(chosen, facts.rerank_models)
@@ -2503,9 +2889,9 @@ def _plan_choices(
             )
         except ValueError:
             raise BadRequestException(
-                'A template is chosen with "mode": "selected" and its '
-                "template_id, and only then is a template_id given. Nothing "
-                "was changed."
+                f"A template is chosen as {option_label('document_template', 'selected')}"
+                ', with "mode": "selected" and its template_id, and only then is a '
+                "template_id given. Nothing was changed."
             ) from None
         if choice != assistant.document_template:
             if (
@@ -2513,8 +2899,9 @@ def _plan_choices(
                 and choice.template_id not in facts.document_templates
             ):
                 raise BadRequestException(
-                    "The organisation has no such document template; "
-                    "read_options lists them. Nothing was changed."
+                    "The organisation has no such document template "
+                    f"({setting_label('document_template')}); read_options lists "
+                    "them. Nothing was changed."
                 )
             update["document_template"] = {
                 "mode": choice.mode,
@@ -2530,14 +2917,14 @@ def _plan_choices(
         days = request.update.data_retention_days
         if days != assistant.data_retention_days:
             if not facts.rights.edit_retention:
-                raise _role_refusal("how long conversations are kept", facts.rights)
+                raise _role_refusal(setting_label("data_retention_days"), facts.rights)
             update["data_retention_days"] = after["data_retention_days"] = days
 
     insight = request.update.insight_enabled
     if insight is not None and insight != bool(assistant.insight_enabled):
         if not facts.rights.toggle_insight:
             raise _role_refusal(
-                "whether insights are on",
+                setting_label("insight_enabled"),
                 facts.rights,
                 in_personal_space=_PERSONAL_INSIGHTS,
             )
@@ -2591,7 +2978,7 @@ def plan_change(
         update["description"] = after["description"] = request.description
     if request.prompt is not None and request.prompt.text != before["prompt"]:
         if config is not None and config.prompt_enforced:
-            raise _policy_refusal("the instructions")
+            raise _policy_refusal(setting_label("prompt"))
         update["prompt"] = {
             "text": request.prompt.text,
             "description": version_description(request.prompt.description),
@@ -2617,7 +3004,9 @@ def plan_change(
             else request.completion_model_kwargs,
         )
         changed = [
-            key for key, _ in _SETTINGS if getattr(merged, key) != getattr(stored, key)
+            key
+            for key in _MODEL_SETTINGS
+            if getattr(merged, key) != getattr(stored, key)
         ]
         if changed:
             if (
@@ -2626,10 +3015,12 @@ def plan_change(
                 and config.reasoning_policy_configured
                 and not config.reasoning_effort_user_configurable
             ):
-                raise _policy_refusal("the reasoning effort")
+                raise _policy_refusal(setting_label(_KWARGS + "reasoning_effort"))
             if model is None:
                 raise BadRequestException(
-                    "Choose a chat model before its settings. Nothing was changed."
+                    "Choose a chat model under "
+                    f"{setting_label('completion_model')} before its settings. "
+                    "Nothing was changed."
                 )
             same_model = (
                 assistant.completion_model is not None
@@ -2651,7 +3042,7 @@ def plan_change(
         and request.inline_file_text != before["inline_file_text"]
     ):
         if config is not None and config.inline_file_text is not None:
-            raise _policy_refusal("the handling of files uploaded in a chat")
+            raise _policy_refusal(setting_label("inline_file_text"))
         update["inline_file_text"] = after["inline_file_text"] = (
             request.inline_file_text
         )
@@ -2754,21 +3145,8 @@ async def _planned_change(
     )
 
 
-_MODES = {
-    "tool": "searched when needed",
-    "inject": "put in the prompt on every question",
-}
-_FILES = {True: "put whole in the prompt", False: "looked up when needed"}
-
-
-# What a list setting holds, as the editor names it.
-_LISTS: dict[str, str] = {
-    "groups": "collections",
-    "websites": "websites",
-    "integration_knowledge_list": "integration sources",
-    "mcp_servers": "MCP servers",
-    "enabled_capabilities": "functions",
-}
+# The list settings a change names by what it adds and removes.
+_LISTS = frozenset({*_KNOWLEDGE_LISTS, "mcp_servers", "enabled_capabilities"})
 
 
 def _list_line(
@@ -2813,78 +3191,50 @@ def _tools_line(before: list[dict[str, Any]], after: list[dict[str, Any]]) -> st
             parts.append(f"{name} back to its server's setting")
         elif then is None or then["is_enabled"] != now["is_enabled"]:
             parts.append(f"{name} {'on' if now['is_enabled'] else 'off'}")
-    return f"MCP tools ({', '.join(parts)})"
+    return f"{setting_label('mcp_tools')} ({', '.join(parts)})"
 
 
-def _choice_line(key: str, before: Any, after: Any) -> str:
-    """A change of the result ranking, the document template, the retention
-    or the insights switch."""
-
-    def shown(value: Any) -> str:
-        if key == "rerank_model_id":
-            return "none" if value is None else value["name"] or "another model"
-        if key == "document_template":
-            if value["mode"] == "default":
-                return "the organisation's default"
-            if value["mode"] == "builtin":
-                return "Eneo's built-in look"
-            return value["name"] or "a template"
-        if key == "data_retention_days":
-            return "following the space" if value is None else f"{value} days"
-        return "on" if value else "off"
-
-    label = {
-        "rerank_model_id": "result ranking",
-        "document_template": "document template",
-        "data_retention_days": "conversation retention",
-    }.get(key, "insights")
-    return f"{label} (from {shown(before)} to {shown(after)})"
+def _shown(key: str, value: Any) -> str:
+    """A setting's value in a change: an option by the editor's name and the
+    value a change takes, a chosen model or template by its name, a number of
+    days as such, and a model setting as the reads give it."""
+    if key in ("knowledge_mode", "insight_enabled", "inline_file_text"):
+        return option_label(key, value if key == "knowledge_mode" else bool(value))
+    if key == "rerank_model_id":
+        if value is None:
+            return option_label(key, None)
+        return value["name"] or "another model"
+    if key == "document_template":
+        if value["mode"] != "selected":
+            return option_label(key, value["mode"])
+        return value["name"] or option_label(key, "selected")
+    if key == "data_retention_days":
+        return option_label(key, None) if value is None else f"{value} days"
+    return _model_setting_value(value)
 
 
 def _change_line(change: dict[str, Any]) -> str:
-    """One proposed change for the model: the setting as the editor calls
-    it, with its values when they are short, and a function by the editor's
-    name with its key. Never an id, and never the text of the instructions
-    or the description."""
+    """One proposed change for the model: the setting by the editor's name
+    and the key a change takes, with its values when they are short, an
+    option by the editor's name and its value, and a function by the
+    editor's name with its key. Never an id, and never the text of the
+    instructions or the description."""
     key, before, after = change["field"], change["before"], change["after"]
+    label = setting_label(key)
     if key == "prompt":
-        return f"instructions (new text of {len(after or ''):,} characters)"
+        return f"{label} (new text of {len(after or ''):,} characters)"
     if key == "description":
-        return "description (cleared)" if not after else "description"
+        return f"{label} (cleared)" if not after else label
     if key == "name":
-        return f'name (from "{_short(before, 80)}" to "{_short(after, 80)}")'
+        return f'{label} (from "{_short(before, 80)}" to "{_short(after, 80)}")'
     if key == "completion_model":
         old = before["name"] if before else "none"
-        return f"chat model (from {old} to {after['name']})"
-    if key == "knowledge_mode":
-        return (
-            f"knowledge mode (from {_MODES.get(before, before)} to "
-            f"{_MODES.get(after, after)})"
-        )
-    if key == "inline_file_text":
-        return (
-            f"files uploaded in a chat (from {_FILES[bool(before)]} to "
-            f"{_FILES[bool(after)]})"
-        )
+        return f"{label} (from {old} to {after['name']})"
     if key in _LISTS:
-        return _list_line(
-            _LISTS[key], before, after, keyed=key == "enabled_capabilities"
-        )
+        return _list_line(label, before, after, keyed=key == "enabled_capabilities")
     if key == "mcp_tools":
         return _tools_line(before, after)
-    if key in (
-        "rerank_model_id",
-        "document_template",
-        "data_retention_days",
-        "insight_enabled",
-    ):
-        return _choice_line(key, before, after)
-    label = dict(_SETTINGS).get(key.removeprefix("completion_model_kwargs."), key)
-
-    def shown(value: Any) -> str:
-        return "the model's default" if value is None else str(value)
-
-    return f"{label} (from {shown(before)} to {shown(after)})"
+    return f"{label} (from {_shown(key, before)} to {_shown(key, after)})"
 
 
 def change_text(changes: Sequence[dict[str, Any]], *, published: bool) -> str:
@@ -3100,14 +3450,17 @@ async def read_prompt_history(
 def publish_text(published: bool) -> str:
     """What the model is told when the assistant was published or
     unpublished."""
+    status = f"{_PUBLISHED} is now {option_label('published', published)}"
     if published:
         return (
-            "Published: the assistant is now published. The card shows the "
-            "change and has no undo; to unpublish it, the person asks for that."
+            f"Published: the assistant is now published; {status}. The card "
+            "shows the change and has no undo; to unpublish it, the person asks "
+            "for that."
         )
     return (
-        "Unpublished: the assistant is no longer published. The card shows the "
-        "change and has no undo; to publish it again, the person asks for that."
+        f"Unpublished: the assistant is no longer published; {status}. The card "
+        "shows the change and has no undo; to publish it again, the person asks "
+        "for that."
     )
 
 
@@ -3129,16 +3482,14 @@ async def publish_assistant(ctx: Context, published: bool) -> CallToolResult:
         rights = await _person_rights(container, chat.space_id)
         if not rights.publish:
             raise _role_refusal(
-                "whether this assistant is published",
-                rights,
-                in_personal_space=_PERSONAL_PUBLISHING,
+                _PUBLISHED, rights, in_personal_space=_PERSONAL_PUBLISHING
             )
         before = bool(assistant.published)
         if before == published:
             raise BadRequestException(
                 "The assistant is already "
                 + ("published" if published else "unpublished")
-                + ". Nothing was changed."
+                + f", {option_label('published', published)}. Nothing was changed."
             )
         applied = await apply_assistant_publish(
             container,

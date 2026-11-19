@@ -11,6 +11,7 @@ import pytest
 from eneo.helper_chats.personas.assistant import (
     ASSISTANT_FRAGMENT,
     ASSISTANT_INSTRUCTIONS,
+    SETTING_NAMES,
     SETTING_REFERENCE_KEYS,
     SETTING_REFERENCE_PARAGRAPH,
 )
@@ -24,6 +25,7 @@ from eneo.helper_chats.personas.shared import (
     WITHOUT_TOOLS_NOW,
     turn_note,
 )
+from eneo.internal_mcp import assistant_settings
 
 
 def _unwrapped(text: str) -> str:
@@ -298,13 +300,19 @@ def test_the_assistant_fragment_matches_the_editors_names_before_denying_one():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
     assert (
-        "the reads name each function as the editor does, in quotes, with its key "
-        "in brackets"
+        "the reads name each setting and function as the editor does, in quotes, "
+        "with the key a change takes in brackets"
+    ) in fragment
+    # A setting's options are named the same way, with the value a change takes.
+    assert (
+        "They name a setting's options the same way, with the value a change "
+        'takes: "Dokument från användare i chatten" [inline_file_text] is "Läs in '
+        'direkt" [true] or "Öppna vid behov" [false].'
     ) in fragment
     assert (
-        "Before you say that a setting or function does not exist, match what the "
-        "person wrote against the names the reads give and the parts above, "
-        "allowing for case, spacing and near spellings"
+        "Before you say that a setting, an option or a function does not exist, "
+        "match what the person wrote against the names the reads give and the "
+        "parts above, allowing for case, spacing and near spellings"
     ) in fragment
     assert (
         '"fråga fil" and "frågafil" are "Fråga fil", and "webbsök" is "Webbsökning"'
@@ -315,9 +323,26 @@ def test_the_assistant_fragment_matches_the_editors_names_before_denying_one():
         'i chatten", ask which, with the two names as the choice'
     ) in fragment
     assert (
-        "call a setting or function by the name the editor shows, never by its key "
-        "or a translation of the key"
+        "call a setting, an option or a function by the name the editor shows, "
+        "never by its key, its value or a translation of either"
     ) in fragment
+
+
+def test_the_names_the_persona_gives_are_the_ones_the_tools_give():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+    paragraph = fragment.split("Names: ", 1)[1].split(" Choosing a model:", 1)[0]
+    given = {
+        *(name for _, name, _ in assistant_settings.FUNCTIONS),
+        *(name for _, name in SETTING_NAMES),
+        *(name for _, _, name in assistant_settings.SETTING_OPTIONS),
+    }
+    # The person's own spellings are what the names are matched against.
+    spellings = {"fråga fil", "frågafil", "webbsök"}
+
+    quoted = set(re.findall(r'"([^"]+)"', paragraph)) - spellings
+    assert quoted and quoted <= given, quoted - given
+    for key in re.findall(r"\[([a-z_]+)\]", paragraph):
+        assert key in {key for key, _ in SETTING_NAMES} | {"true", "false"}
 
 
 def test_earlier_versions_of_the_instructions_can_be_read():
