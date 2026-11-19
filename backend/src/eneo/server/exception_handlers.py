@@ -11,6 +11,11 @@ from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
+from eneo.analysis.insight_exceptions import (
+    InsightsModelNotAllowedError,
+    InsightsModelUnavailableError,
+    InvalidTimezoneError,
+)
 from eneo.authentication.browser_session import SessionGenerationMismatchError
 from eneo.authentication.oidc.errors import (
     OidcLoginUnavailableError,
@@ -410,6 +415,10 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "Crawler cleanup is still in progress; retry deletion shortly.",
         ErrorCodes.WEBSITE_CRAWL_CLEANUP_PENDING,
     ),
+    # --- Insights chat: the string ``code`` tells the cases apart ---
+    InsightsModelUnavailableError: (400, None, ErrorCodes.BAD_REQUEST),
+    InsightsModelNotAllowedError: (400, None, ErrorCodes.BAD_REQUEST),
+    InvalidTimezoneError: (400, None, ErrorCodes.BAD_REQUEST),
     # --- Object content and files ---
     ObjectContentUnavailableError: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectContentIntegrityError: (503, None, ErrorCodes.RESOURCE_NOT_READY),

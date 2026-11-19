@@ -209,8 +209,9 @@ class ConversationUnitRepository:
         authoring chat's session goes like any other, its chat row with it. The
         unit's proof locked and charged the session row, which the lock and
         proof here read again; this charges the session and the one row its
-        deletion cascades to (a helper run or an authoring chat): at most
-        `_RELEASE_ROWS`, which `delete_unit` reserves first.
+        deletion cascades to (a helper run, an authoring chat or an insights
+        conversation's link): at most `_RELEASE_ROWS`, which `delete_unit`
+        reserves first.
         """
         # No grace: the session held a question that was due, so it is no new
         # chat waiting for its first question. The no-question predicate is the

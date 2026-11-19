@@ -42,6 +42,14 @@ becomes…") was verified against these versions. See
   into an `EneoApiError` (status, code, reason, trace id) before the SDK sees
   it, so the chat can say what happened in a sentence (`chat-error.ts`); no
   stream is opened.
+- A conversation on other endpoints (the insights chat,
+  `src/features/insights/chat/insights-chat-api.ts`) passes
+  `createChatTransport(endpoint)` an endpoint whose `request` gives each
+  turn's URL and body. The response is this same stream, held to this same
+  contract (the `data-*` allow-list and the terminal-part rule included).
+  A refusal with status `410` or reason `derived_source_removed` means the
+  conversation was removed with content it was based on: `chat-error.ts`
+  marks it `gone`, and the chat offers a new conversation instead of a retry.
 
 ### Request body (`ConversationBody`, `types.ts`)
 
@@ -498,6 +506,7 @@ turn each:
 | `file-part`              | `finish`  | Generated image with a signed url (token pinned to `fixture-token`). |
 | `generated-document`     | `finish`  | A bundled call's Markdown `file` part, `tool_call_id` set.           |
 | `tool-input-streaming`   | `finish`  | View-bearing bundled call: start → two deltas → input → output.      |
+| `insights-tool-call`     | `finish`  | Insights server call: start → input → output; cites a `session`.     |
 | `sources`                | `finish`  | Pre-retrieved and in-stream citations, deduplicated.                 |
 | `cancelled-mid-stream`   | truncated | The prefix a cancelled client saw: no `finish`, no `[DONE]`.         |
 | `backend-error`          | `error`   | Partial text, `data-error` + `error`, then the trailing close.       |

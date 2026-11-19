@@ -9,6 +9,7 @@ import {
   errorReferenceLines,
   extractTraceId,
   getErrorMessage,
+  isDerivedSourceRemoved,
   orOn404,
   unwrap
 } from "./errors";
@@ -96,6 +97,24 @@ describe("apiErrorFromResponse", () => {
     expect(apiErrorFromResponse(errorResponse(502), "upstream died").message).toBe(
       "Request failed with status 502"
     );
+  });
+});
+
+describe("isDerivedSourceRemoved", () => {
+  it("tells content removed with what it was based on from other refusals", () => {
+    expect(
+      isDerivedSourceRemoved(
+        new EneoApiError("Gone", { status: 410, reason: "derived_source_removed" })
+      )
+    ).toBe(true);
+    expect(isDerivedSourceRemoved(new EneoApiError("Gone", { status: 410 }))).toBe(true);
+    expect(
+      isDerivedSourceRemoved(
+        new EneoApiError("Gone", { status: 404, reason: "derived_source_removed" })
+      )
+    ).toBe(true);
+    expect(isDerivedSourceRemoved(new EneoApiError("Not found", { status: 404 }))).toBe(false);
+    expect(isDerivedSourceRemoved(new Error("Gone"))).toBe(false);
   });
 });
 
@@ -222,7 +241,10 @@ describe("getErrorMessage", () => {
     ["provider_error", "eneo_error_9010"],
     ["stream_error", "chat_answer_failed_internal"],
     ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
-    ["user_quota_exceeded", "job_failure_user_quota_exceeded"]
+    ["user_quota_exceeded", "job_failure_user_quota_exceeded"],
+    ["insights_model_unavailable", "insights_chat_model_unavailable"],
+    ["insights_model_not_allowed", "insights_chat_model_not_allowed"],
+    ["invalid_timezone", "insights_chat_invalid_timezone"]
   ])("describes %s before its less specific numeric code", (reason, key) => {
     const error = apiErrorFromResponse(errorResponse(503), {
       message: "Refused",

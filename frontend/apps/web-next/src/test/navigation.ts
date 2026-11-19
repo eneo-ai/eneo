@@ -116,6 +116,15 @@ export function readUrlState(): UrlState {
   return window.history.state ?? {};
 }
 
+/**
+ * No entry identities here: `setRoute` changes the route without a history
+ * entry, so a page sees every change as coming from outside. Back and
+ * Forward between a page's own entries are tested in a real router.
+ */
+export function readHistoryEntryKey(): string | undefined {
+  return undefined;
+}
+
 export function useSpaceSegments(): string[] {
   return url.pathname.split("/").filter(Boolean).slice(2);
 }

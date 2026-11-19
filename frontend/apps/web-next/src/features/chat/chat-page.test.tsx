@@ -5,8 +5,8 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { composerValue } from "@/test/composer";
 import { renderInApp, testAppContext } from "@/test/render";
-import { replaceUrl, setRoute } from "@/test/navigation";
-import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
+import { pushUrl, setRoute } from "@/test/navigation";
+import { setViewport } from "@/test/setup-dom";
 import { ChatPage } from "./chat-page";
 import { CHAT_PANEL_IDS } from "./chat-url";
 
@@ -108,16 +108,55 @@ const api = vi.hoisted(() => ({
           response: new Response()
         };
       }
-      if (path === "/api/v1/analysis/conversation-insights/") {
+      if (path === "/api/v1/analysis/conversation-insights/summary/") {
+        const counts = { total: 12, user: 12, widget: 0, api_key: 0 };
         return {
           data: {
-            total_conversations: 12,
-            total_questions: 30,
-            feedback: { positive: 3, negative: 1 }
+            timezone: "UTC",
+            source: null,
+            previous: null,
+            period: {
+              start: "2026-09-01T00:00:00Z",
+              end: "2026-10-01T00:00:00Z",
+              conversations: counts,
+              questions: { ...counts, total: 30, user: 30 },
+              followups: 18,
+              users: 4,
+              single_question_conversations: 5,
+              returning_users: 1,
+              unanswered: 2,
+              knowledge: null,
+              answer_ratings: {
+                positive: 3,
+                negative: 1,
+                with_comment: 0,
+                negative_with_comment: 0
+              },
+              conversation_ratings: {
+                positive: 0,
+                negative: 0,
+                with_comment: 0,
+                negative_with_comment: 0
+              }
+            }
           },
           response: new Response()
         };
       }
+      if (path === "/api/v1/analysis/conversation-insights/activity/") {
+        return {
+          data: { timezone: "UTC", source: null, start: "", end: "", days: [] },
+          response: new Response()
+        };
+      }
+      // Nothing to improve, no common questions, knowledge or tools.
+      const empty = {
+        "/api/v1/analysis/conversation-insights/findings/": { findings: [] },
+        "/api/v1/analysis/conversation-insights/questions/top/": { groups: [] },
+        "/api/v1/analysis/conversation-insights/knowledge/": { sources: [], unused: [] },
+        "/api/v1/analysis/conversation-insights/tools/": { tools: [] }
+      }[path];
+      if (empty) return { data: empty, response: new Response() };
       return { data: { items: [], next_cursor: null }, response: new Response() };
     }
   ),
@@ -132,6 +171,11 @@ const api = vi.hoisted(() => ({
   DELETE: vi.fn(async () => ({ data: null, response: new Response(null, { status: 204 }) }))
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+// The insights chat's own endpoints: no earlier analyses.
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: vi.fn(async () => Response.json({ items: [], total_count: 0 }))
+}));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
@@ -438,10 +482,12 @@ describe("ChatPage Historik tab, as in Svelte", () => {
   it("switches views past the leave guard: the conversation and its draft stay", () => {
     renderPage(null);
     fireEvent.change(composer(), { target: { value: "Unsent question" } });
+    // Each view is a history entry of its own.
     openHistory();
-    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(pushUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
     fireEvent.click(tab("Chatt"));
-    expect(replaceUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
+    expect(pushUrl).toHaveBeenCalledTimes(2);
+    expect(pushUrl).toHaveBeenLastCalledWith(expect.any(URL), { ignoreBlocker: true });
     expect(composer().value).toBe("Unsent question");
     // The draft is kept for the tab (sessionStorage); the next test starts without it.
     fireEvent.change(composer(), { target: { value: "" } });
@@ -617,14 +663,14 @@ describe("ChatPage while an answer streams", () => {
     askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
-    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    expect(await screen.findByText("Besvarade frågor")).toBeTruthy();
     await act(async () => answer(spies.streams[0]!, "session-late", "Gränsen är 700 000 kr."));
     await waitFor(() =>
       expect(new URLSearchParams(window.location.search).get("session_id")).toBe("session-late")
     );
     expect(new URLSearchParams(window.location.search).get("tab")).toBe("insights");
     expect(screen.getByRole("tab", { name: "Insikter", selected: true })).toBeTruthy();
-    expect(screen.getByText("Totala konversationer")).toBeTruthy();
+    expect(screen.getByText("Besvarade frågor")).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
     const log = screen.getByRole("log", { name: "Konversation" });
     expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
@@ -640,7 +686,7 @@ describe("ChatPage while an answer streams", () => {
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
-    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    expect(await screen.findByText("Besvarade frågor")).toBeTruthy();
     expect(screen.queryByRole("log")).toBeNull();
 
     fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
@@ -656,11 +702,34 @@ describe("ChatPage while an answer streams", () => {
     });
     setRoute("/chat?tab=insights");
     rerender(null);
-    expect(await screen.findByText("Totala konversationer")).toBeTruthy();
+    expect(await screen.findByText("Besvarade frågor")).toBeTruthy();
     setRoute("/chat?other=tab%3Dinsights");
     rerender(null);
     expect(composer()).toBeTruthy();
-    expect(screen.queryByText("Totala konversationer")).toBeNull();
+    expect(document.getElementById(CHAT_PANEL_IDS.insights)?.hidden).toBe(true);
+  });
+
+  it("keeps an analysis in Insikter when switching to Chatt and back", async () => {
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen" }));
+    const field = await screen.findByRole("textbox", { name: "Fråga om användningen" });
+    fireEvent.change(field, { target: { value: "Vad frågar folk om?" } });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    await waitFor(() => expect(spies.streams).toHaveLength(1));
+    await act(async () => answer(spies.streams[0]!, "analysis-1", "Mest om parkering."));
+    expect(await within(screen.getByRole("log")).findByText("Mest om parkering.")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chatt" }));
+    expect(composer()).toBeTruthy();
+    expect(document.getElementById(CHAT_PANEL_IDS.insights)?.hidden).toBe(true);
+
+    // Over the view the analysis is a place of Insikter's own, left with the
+    // tab: Insikter opens on its overview, and the analysis comes back as it was.
+    fireEvent.click(screen.getByRole("tab", { name: "Insikter" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Fråga analysen" }));
+    expect(within(screen.getByRole("log")).getByText("Mest om parkering.")).toBeTruthy();
+    expect(within(screen.getByRole("log")).getByText("Vad frågar folk om?")).toBeTruthy();
   });
 
   it.each([false, true])(

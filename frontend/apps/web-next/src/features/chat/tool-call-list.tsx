@@ -4,17 +4,17 @@ import { Item } from "@astryxdesign/core/Item";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { ScrollableArea } from "@astryxdesign/core/ScrollableArea";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { use, useState } from "react";
 import { Ban, CircleCheck, CircleX, Clock, Copy, LoaderCircle, Square, Wrench } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
-import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { EneoApiError } from "@/lib/api/errors";
 import { retryTransientFailure } from "@/lib/api/query";
 import { cn } from "@/lib/utils";
 import type { StepStatus, ToolCall, ToolPart } from "./activity";
 import { callTimingKey, type TurnDurations } from "./activity-timings";
 import { formatSeconds } from "./format";
+import { ToolResultsContext } from "./tool-results";
 import {
   fileIdFromUrl,
   toolPresentation,
@@ -146,25 +146,19 @@ function CallResult({
   const t = useTranslations();
   const locale = useLocale();
   const { copy } = useCopy();
+  const results = use(ToolResultsContext);
   const finished = part.state === "output-available" || part.state === "output-error";
   const loadable = Boolean(sessionId && part.toolCallId && finished);
   const canLoad = loadable && shown && stored;
   const result = useQuery({
-    queryKey: ["conversations", "tool-call-result", sessionId, part.toolCallId],
+    queryKey: [results.scope, "tool-call-result", sessionId, part.toolCallId],
     enabled: canLoad,
     staleTime: Infinity,
     retry: (failures, error) =>
       error instanceof EneoApiError && error.status === 404
         ? failures < NOT_STORED_YET_TRIES
         : retryTransientFailure(failures, error),
-    queryFn: async () => {
-      const response = await unwrap(
-        browserApi.GET("/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/", {
-          params: { path: { session_id: sessionId!, tool_call_id: part.toolCallId } }
-        })
-      );
-      return response.result ?? null;
-    }
+    queryFn: () => results.read(sessionId!, part.toolCallId)
   });
   const errorText = part.state === "output-error" ? part.errorText : undefined;
   if (loadable && !stored && !errorText) {

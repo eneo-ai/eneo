@@ -14,13 +14,17 @@ const PRESET_KEY: Record<(typeof INSIGHT_PRESET_DAYS)[number], string> = {
  * The period insights cover: Astryx DateRangeInput with the last 7, 30 and
  * 90 days as presets and a calendar for any other range up to today. A
  * period is always set (no clear button): the statistics need one.
+ * `compact` fits it in a toolbar: the field under its label, without the
+ * description.
  */
 export function InsightsRangePicker({
   value,
-  onChange
+  onChange,
+  compact = false
 }: {
   value: InsightRange;
   onChange: (range: InsightRange) => void;
+  compact?: boolean;
 }) {
   const t = useTranslations();
   const presets = useMemo<DateRangePreset[]>(
@@ -35,7 +39,7 @@ export function InsightsRangePicker({
   return (
     <DateRangeInput
       label={t("insights_period_label")}
-      description={t("choose_timeframe_for_insights")}
+      description={compact ? undefined : t("choose_timeframe_for_insights")}
       placeholder={t("insights_period_placeholder")}
       value={value}
       onChange={(next) => {

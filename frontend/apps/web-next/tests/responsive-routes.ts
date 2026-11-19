@@ -71,6 +71,7 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/help-assistants/$": { skip: "Needs a help assistant fixture." },
   "/admin/insights": open("/admin/insights"),
   "/admin/insights/assistant/$": { skip: "Needs an assistant with conversations." },
+  "/admin/insights/group-chat/$": { url: (f) => `/admin/insights/group-chat/${f.groupChat}` },
   "/admin/integrations": open("/admin/integrations"),
   "/admin/mcp-servers": open("/admin/mcp-servers"),
   "/admin/mcp-servers/$": {

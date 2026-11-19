@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Annotated, AsyncIterator, Optional, cast
+from typing import Annotated, AsyncIterator, Literal, Optional, cast
 from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -19,11 +19,23 @@ from eneo.analysis.analysis import (
     ConversationInsightRequest,
     ConversationInsightResponse,
     Counts,
+    InsightActivity,
+    InsightFindingCasePage,
+    InsightFindings,
+    InsightKnowledgeUse,
+    InsightRating,
+    InsightSummary,
+    InsightTargetPage,
+    InsightToolUsage,
+    InsightTopQuestions,
     MessageFeedbackCounts,
     MetadataStatistics,
     MetadataStatisticsAggregated,
 )
 from eneo.analysis.analysis_job_manager import AnalysisJobManager
+from eneo.analysis.insight_figures_service import resolve_window
+from eneo.analysis.insight_scope import FindingCaseKind
+from eneo.analysis.insights_repo import TargetSort
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -46,11 +58,12 @@ from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
-from eneo.sessions.session import SessionMetadataPublic, SessionPublic
+from eneo.sessions.session import SourcedSessionMetadata, SourcedSessionPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
-    to_session_public,
+    to_sourced_session_public,
 )
+from eneo.sessions.session_source import SessionSource
 
 _TENANT_ANALYTICS_ACCESS_REASON = "Tenant analytics require the insights permission."
 _RESOURCE_INSIGHTS_ACCESS_REASON = (
@@ -63,6 +76,39 @@ router = APIRouter()
 DEFAULT_INSIGHTS_DAYS = 30
 DEFAULT_SESSIONS_PAGE_LIMIT = 50
 DEFAULT_QUESTIONS_PAGE_LIMIT = 100
+DEFAULT_RATINGS_PAGE_LIMIT = 50
+DEFAULT_TARGETS_PAGE_LIMIT = 50
+DEFAULT_TOP_QUESTIONS = 10
+MAX_TOP_QUESTIONS = 50
+DEFAULT_FINDING_CASES_PAGE_LIMIT = 50
+
+SourceQuery = Annotated[
+    SessionSource | None,
+    Query(
+        description=(
+            "Only conversations of this source: 'user', 'api_key' or 'widget'. "
+            "All sources when omitted."
+        )
+    ),
+]
+TimezoneQuery = Annotated[
+    str,
+    Query(
+        alias="timezone",
+        max_length=64,
+        description="IANA time zone for local days; 400 invalid_timezone when unknown.",
+    ),
+]
+StartTimeQuery = Annotated[
+    datetime | None,
+    Query(
+        description="Start of the period, inclusive. Defaults to 30 days before the end."
+    ),
+]
+EndTimeQuery = Annotated[
+    datetime | None,
+    Query(description="End of the period, exclusive. Defaults to now."),
+]
 
 
 def _normalize_datetime_range(
@@ -308,10 +354,12 @@ async def get_most_recent_questions_paginated(
     limit: Annotated[int, Query(ge=1, le=200)] = DEFAULT_QUESTIONS_PAGE_LIMIT,
     cursor: str | None = None,
     q: str | None = None,
+    source: SourceQuery = None,
 ):
     """Get paginated question history for an assistant.
 
-    Optimized for admin insights history view and large datasets.
+    Optimized for admin insights history view and large datasets. Questions
+    of every source are listed, each tagged with its conversation's source.
     """
     from_date, to_date = _normalize_datetime_range(
         from_date=from_date,
@@ -330,6 +378,7 @@ async def get_most_recent_questions_paginated(
         limit=limit,
         query=q,
         cursor=cursor,
+        source=source,
     )
 
     return CursorPaginatedResponse(
@@ -359,6 +408,7 @@ async def get_assistant_feedback_counts(
     from_date: datetime | None = None,
     to_date: datetime | None = None,
     include_followups: bool = False,
+    source: SourceQuery = None,
 ):
     """Count the ratings of the answers `/questions/` lists for the same filters.
 
@@ -376,6 +426,7 @@ async def get_assistant_feedback_counts(
         from_date=from_date,
         to_date=to_date,
         include_followups=include_followups,
+        source=source,
     )
 
 
@@ -627,6 +678,7 @@ async def get_conversation_insights(
         group_chat_id=request.group_chat_id,
         start_time=start_time,
         end_time=end_time,
+        source=request.source,
     )
 
 
@@ -665,7 +717,7 @@ async def get_conversation_insight_job(
 
 @router.get(
     "/conversation-insights/sessions/",
-    response_model=CursorPaginatedResponse[SessionMetadataPublic],
+    response_model=CursorPaginatedResponse[SourcedSessionMetadata],
     responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
@@ -683,10 +735,12 @@ async def get_conversation_insight_sessions(
     name_filter: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    source: SourceQuery = None,
 ):
     """
-    Get all sessions for an assistant or group chat across all
-    users in the tenant (with insight access).
+    Get all sessions for an assistant or group chat in the tenant, from
+    every source (users, service API keys, widget visitors) unless `source`
+    names one; each carries its source (with insight access).
 
     This endpoint requires the user to be OWNER or EDITOR,
     and the assistant/group chat must have insight_enabled set to true.
@@ -738,6 +792,7 @@ async def get_conversation_insight_sessions(
             name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
+            source=source,
         )
     else:
         assert group_chat_id is not None
@@ -749,6 +804,7 @@ async def get_conversation_insight_sessions(
             name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
+            source=source,
         )
 
     return to_session_metadata_paginated_response(
@@ -762,7 +818,7 @@ async def get_conversation_insight_sessions(
 
 @router.get(
     "/conversation-insights/sessions/{session_id}/",
-    response_model=SessionPublic,
+    response_model=SourcedSessionPublic,
     responses=responses.get_responses([403, 404, 410]),
 )
 @endpoint_access(
@@ -792,4 +848,438 @@ async def get_conversation_insight_session(
     service = container.analysis_service()
     session = await service.get_insight_session(session_id=session_id)
     assert session is not None
-    return to_session_public(session=session)
+    return to_sourced_session_public(session)
+
+
+_FIGURES_TARGET_DESCRIPTION = (
+    "Exactly one of assistant_id or group_chat_id. Conversations of every source "
+    "count (users, service API keys, widget visitors) unless source names one; "
+    "a conversation counts in the period when it has a question in it."
+)
+
+
+@router.get(
+    "/conversation-insights/summary/",
+    response_model=InsightSummary,
+    description=(
+        "Figures for an assistant or group chat over a period, optionally "
+        f"beside the previous period of equal length. {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_summary(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+    compare: Annotated[
+        bool,
+        Query(description="Also return the previous period of equal length."),
+    ] = False,
+) -> InsightSummary:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_summary(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+        compare=compare,
+    )
+
+
+@router.get(
+    "/conversation-insights/activity/",
+    response_model=InsightActivity,
+    description=(
+        "Conversations and questions per local day of an assistant or group "
+        f"chat, split by source. {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_activity(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+) -> InsightActivity:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_activity(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+    )
+
+
+@router.get(
+    "/conversation-insights/feedback/",
+    response_model=CursorPaginatedResponse[InsightRating],
+    description=(
+        "Ratings of an assistant's or group chat's answers and conversations, "
+        "newest first, never who gave them. An answer rating belongs to the "
+        "period of its question, a conversation rating to every period the "
+        "conversation had a question in. Pass a page's next_cursor back as "
+        f"cursor for the next page. {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_feedback(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    source: SourceQuery = None,
+    value: Annotated[
+        int | None,
+        Query(description="Only good (1) or bad (-1) ratings; 400 for anything else."),
+    ] = None,
+    has_comment: Annotated[
+        bool | None,
+        Query(description="Only ratings with (true) or without (false) a comment."),
+    ] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = DEFAULT_RATINGS_PAGE_LIMIT,
+    cursor: Annotated[
+        str | None,
+        Query(description="The next_cursor of the previous page, as given."),
+    ] = None,
+) -> CursorPaginatedResponse[InsightRating]:
+    if value not in (None, 1, -1):
+        raise BadRequestException("value must be 1 or -1")
+    window = resolve_window(start_time, end_time, "UTC")
+    items, total, next_cursor = await container.insight_figures_service().list_ratings(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+        value=1 if value == 1 else -1 if value == -1 else None,
+        has_comment=has_comment,
+        limit=limit,
+        cursor=cursor,
+    )
+    return CursorPaginatedResponse(
+        items=items,
+        total_count=total,
+        limit=limit,
+        previous_cursor=cursor,
+        next_cursor=next_cursor,
+    )
+
+
+@router.get(
+    "/conversation-insights/knowledge/",
+    response_model=InsightKnowledgeUse,
+    description=(
+        "Per knowledge source (collection, website or integration knowledge), "
+        "the answers of the period that cited at least one passage from it, "
+        "injected or fetched through the knowledge tool, and the attached "
+        "sources no answer cited; a group chat's attached sources are its "
+        "member assistants' together. A target without knowledge gets empty "
+        "lists. A refreshed document (a re-crawled page, a re-uploaded file, a "
+        "synced integration item) keeps its earlier versions, so its citations "
+        "keep counting; when a document is removed (deleted, gone from the "
+        "website at a re-crawl, removed at the integration's source), its "
+        "citations go with it and are no longer counted. "
+        f"{_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_knowledge(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+) -> InsightKnowledgeUse:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_knowledge_use(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+    )
+
+
+@router.get(
+    "/conversation-insights/questions/top/",
+    response_model=InsightTopQuestions,
+    description=(
+        "The commonest questions of the period, grouped by their text after "
+        "normalisation (whitespace, letter case and trailing ?!. ignored; "
+        "different wordings are different groups), each with how its answers "
+        "fared: answers that say they cannot answer (indicative), answer "
+        "ratings, and knowledge searched and missed as the summary counts them "
+        f"(indicative). {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_top_questions(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+    limit: Annotated[
+        int, Query(ge=1, le=MAX_TOP_QUESTIONS, description="Groups to return.")
+    ] = DEFAULT_TOP_QUESTIONS,
+    include_followups: Annotated[
+        bool,
+        Query(
+            description=(
+                "Group every question; by default only each conversation's "
+                "opening question."
+            )
+        ),
+    ] = False,
+) -> InsightTopQuestions:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_top_questions(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+        limit=limit,
+        include_followups=include_followups,
+    )
+
+
+@router.get(
+    "/conversation-insights/tools/",
+    response_model=InsightToolUsage,
+    description=(
+        "Tool calls of the period's answers per capability (web search, image "
+        "generation and the other purposes, whichever server backs them) or "
+        "per server and tool, with failed and denied calls, most called first. "
+        "Calls of Eneo's own knowledge server and Skill activations are left "
+        "out. An empty list when no answer called a tool. "
+        f"{_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_tools(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+) -> InsightToolUsage:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_tool_use(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+    )
+
+
+@router.get(
+    "/conversation-insights/findings/",
+    response_model=InsightFindings,
+    description=(
+        "What to look at in the period, computed from the figures on every "
+        "read and stored nowhere: answers that searched the knowledge without "
+        "a usable hit, answers that say they cannot answer, conversations "
+        "where the person seems to ask again, attached knowledge nobody cited, "
+        "bad ratings with comments and tools that often fail. A finding needs "
+        "a minimum number of cases and a minimum share; the thresholds are "
+        "provisional. Indicative: most signals come from pattern matching or "
+        f"stored scores. {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_findings(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+) -> InsightFindings:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_findings(
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+    )
+
+
+@router.get(
+    "/conversation-insights/findings/{kind}/",
+    response_model=InsightFindingCasePage,
+    description=(
+        "The cases behind one finding, a page at a time, in the order the "
+        "finding's examples come in: knowledge_missed and unanswered list "
+        "answers newest first, rephrasing lists conversations with similar "
+        "consecutive questions first. Listed whether or not the finding "
+        "passes its thresholds; knowledge_missed is empty for a target without "
+        "knowledge. Pass a page's next_cursor back as cursor for the next "
+        f"page. {_FIGURES_TARGET_DESCRIPTION}"
+    ),
+    responses=responses.get_responses([400, 403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_RESOURCE_INSIGHTS_ACCESS_REASON,
+)
+async def get_conversation_insight_finding_cases(
+    kind: FindingCaseKind,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    assistant_id: UUID | None = None,
+    group_chat_id: UUID | None = None,
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+    source: SourceQuery = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = DEFAULT_FINDING_CASES_PAGE_LIMIT,
+    cursor: Annotated[
+        str | None,
+        Query(description="The next_cursor of the previous page, as given."),
+    ] = None,
+) -> InsightFindingCasePage:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().list_finding_cases(
+        kind,
+        assistant_id=assistant_id,
+        group_chat_id=group_chat_id,
+        window=window,
+        source=source,
+        limit=limit,
+        cursor=cursor,
+    )
+
+
+@router.get(
+    "/targets/activity/",
+    response_model=InsightActivity,
+    description=(
+        "Conversations and questions per local day for the whole organisation, "
+        "split by source: every assistant people see and every group chat, "
+        "listed and in personal spaces, counted by the rules of the target "
+        "list. A conversation counts on every day it had a question, so the "
+        "days of a period can add up to more conversations than the target "
+        "list's totals. source is always null."
+    ),
+    responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
+)
+async def get_insight_targets_activity(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    time_zone: TimezoneQuery = "UTC",
+) -> InsightActivity:
+    window = resolve_window(start_time, end_time, time_zone)
+    return await container.insight_figures_service().get_tenant_activity(window=window)
+
+
+@router.get(
+    "/targets/",
+    response_model=InsightTargetPage,
+    description=(
+        "Every assistant people see and every group chat of the tenant outside "
+        "personal spaces, with its usage in the period: conversations by source "
+        "and questions, the previous period of equal length when compare is "
+        "set, and answer ratings where insights are on (usage only where they "
+        "are off). A conversation counts when it has a question in the period. "
+        "Targets in personal spaces are never rows: personal gives their number "
+        "and usage together, without ratings, the same on every page and "
+        "whatever q and activity say. totals is everything the organisation "
+        "used: every listed target that matches the filters, not only the page, "
+        "plus the personal usage. counts gives the listed targets q finds, "
+        "whatever activity says; users the signed-in users with a question on "
+        "any target people see, whatever the filters."
+    ),
+    responses=responses.get_responses([400, 403]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_ANALYTICS_ACCESS_REASON,
+)
+async def get_insight_targets(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+    start_time: StartTimeQuery = None,
+    end_time: EndTimeQuery = None,
+    compare: Annotated[
+        bool,
+        Query(description="Also return each target's previous period."),
+    ] = False,
+    sort: TargetSort = "conversations",
+    order: Literal["asc", "desc"] = "desc",
+    q: Annotated[
+        str | None, Query(max_length=200, description="Part of the name.")
+    ] = None,
+    activity: Annotated[
+        Literal["all", "unused"],
+        Query(
+            description="'unused': only targets without conversations in the period."
+        ),
+    ] = "all",
+    limit: Annotated[int, Query(ge=1, le=200)] = DEFAULT_TARGETS_PAGE_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> InsightTargetPage:
+    window = resolve_window(start_time, end_time, "UTC")
+    return await container.insight_figures_service().list_targets(
+        window=window,
+        compare=compare,
+        query=(q.strip() or None) if q is not None else None,
+        unused_only=activity == "unused",
+        sort=sort,
+        descending=order == "desc",
+        offset=offset,
+        limit=limit,
+    )

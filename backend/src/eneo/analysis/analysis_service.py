@@ -28,6 +28,7 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.static_prompts import ANALYSIS_PROMPT
 from eneo.data_retention.derivations import DerivedSourceRemovedError
 from eneo.group_chat.application.group_chat_service import GroupChatService
+from eneo.group_chat.domain.entities.group_chat import GroupChat
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -38,8 +39,9 @@ from eneo.observability.error_log import log_error
 from eneo.questions.question import MessageFeedback, Question
 from eneo.questions.questions_repo import QuestionRepository
 from eneo.roles.permissions import Permission, validate_permissions
-from eneo.sessions.session import SessionInDB, SessionMetadataPublic
+from eneo.sessions.session import SessionInDB, SourcedSessionMetadata
 from eneo.sessions.session_service import SessionService
+from eneo.sessions.session_source import SessionSource
 from eneo.sessions.sessions_repo import SessionRepository
 from eneo.spaces.space import Space
 from eneo.spaces.space_service import SpaceService
@@ -640,13 +642,14 @@ class AnalysisService:
         self,
         group_chat_id: UUID | None = None,
         assistant_id: UUID | None = None,
-    ):
+    ) -> tuple[Assistant | GroupChat, Space]:
         if assistant_id:
             space = await self.space_service.get_space_by_assistant(
                 assistant_id=assistant_id
             )
             assistant = space.get_assistant(assistant_id=assistant_id)
             self._require_assistant_insight_access(space=space, assistant=assistant)
+            return assistant, space
 
         elif group_chat_id:
             space = await self.space_service.get_space_by_group_chat(
@@ -661,6 +664,7 @@ class AnalysisService:
                 raise UnauthorizedException(
                     "Insights are not enabled for this group chat"
                 )
+            return group_chat, space
         else:
             raise BadRequestException(
                 "Either assistant_id or group_chat_id must be provided"
@@ -676,6 +680,32 @@ class AnalysisService:
             assistant_id=job.assistant_id,
             group_chat_id=job.group_chat_id,
         )
+
+    async def assert_insight_access(
+        self,
+        *,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+    ) -> tuple[Assistant | GroupChat, Space]:
+        """The insight-view decision for one assistant or group chat, as the
+        insights chat and its tools ask it on every read.
+
+        The target's insight access, and in a personal space the insights
+        permission. Returns the target and its space, so a caller that needs
+        them (the chat picks its model from the space) loads them once.
+        """
+        target, space = await self._check_insight_access(
+            assistant_id=assistant_id, group_chat_id=group_chat_id
+        )
+        self.check_space_permissions(space)
+        return target, space
+
+    def check_space_permissions(self, space: Space) -> None:
+        """Insights in a personal space need the insights permission."""
+        if space.is_personal() and Permission.INSIGHTS not in self.user.permissions:
+            raise UnauthorizedException(
+                f"Need permission {Permission.INSIGHTS.value} in order to access"
+            )
 
     async def get_questions_since(
         self,
@@ -856,6 +886,7 @@ class AnalysisService:
         limit: int,
         query: str | None = None,
         cursor: str | None = None,
+        source: SessionSource | None = None,
     ) -> tuple[list[AssistantInsightQuestion], int, str | None]:
         assistant, _ = await self.assistant_service.get_assistant(assistant_id)
         await self._check_assistant_question_access(
@@ -878,6 +909,7 @@ class AnalysisService:
             query=query,
             cursor_created_at=cursor_created_at,
             cursor_id=cursor_id,
+            source=source,
         )
 
         next_cursor: str | None = None
@@ -907,6 +939,7 @@ class AnalysisService:
                     question=row.question,
                     created_at=row.created_at,
                     session_id=row.session_id,
+                    source=row.source,
                     # The comment follows the question text's visibility: whoever
                     # may read the question here may read its rating.
                     feedback=(
@@ -930,6 +963,7 @@ class AnalysisService:
         from_date: datetime,
         to_date: datetime,
         include_followups: bool,
+        source: SessionSource | None = None,
     ) -> MessageFeedbackCounts:
         """Answer ratings for the answers the question history lists.
 
@@ -945,6 +979,7 @@ class AnalysisService:
             from_date=from_date,
             to_date=to_date,
             include_followups=include_followups,
+            source=source,
         )
 
     async def get_assistant_insight_sessions(
@@ -956,8 +991,10 @@ class AnalysisService:
         name_filter: str | None = None,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
-    ) -> Tuple[List[SessionMetadataPublic], int]:
-        """Get all sessions for an assistant across all users in the tenant (with insight access)
+        source: SessionSource | None = None,
+    ) -> Tuple[List[SourcedSessionMetadata], int]:
+        """Get all sessions for an assistant in the tenant, from every source
+        unless ``source`` names one, each tagged with it (with insight access)
 
         Args:
             assistant_id: UUID of the assistant
@@ -977,7 +1014,7 @@ class AnalysisService:
 
         await self._check_insight_access(assistant_id=assistant_id)
 
-        sessions, total = await self.session_repo.get_metadata_by_assistant(
+        sessions, total = await self.session_repo.get_sourced_metadata(
             assistant_id=assistant_id,
             limit=limit,
             cursor=cursor,
@@ -986,6 +1023,7 @@ class AnalysisService:
             start_date=start_date,
             end_date=end_date,
             tenant_id=self.user.tenant_id,
+            source=source,
         )
         return sessions, int(total or 0)
 
@@ -998,8 +1036,10 @@ class AnalysisService:
         name_filter: str | None = None,
         start_date: datetime | None = None,
         end_date: datetime | None = None,
-    ) -> Tuple[List[SessionMetadataPublic], int]:
-        """Get all sessions for a group chat across all users in the tenant (with insight access)
+        source: SessionSource | None = None,
+    ) -> Tuple[List[SourcedSessionMetadata], int]:
+        """Get all sessions for a group chat in the tenant, from every source
+        unless ``source`` names one, each tagged with it (with insight access)
 
         Args:
             group_chat_id: UUID of the group chat
@@ -1019,7 +1059,7 @@ class AnalysisService:
 
         await self._check_insight_access(group_chat_id=group_chat_id)
 
-        sessions, total = await self.session_repo.get_metadata_by_group_chat(
+        sessions, total = await self.session_repo.get_sourced_metadata(
             group_chat_id=group_chat_id,
             limit=limit,
             cursor=cursor,
@@ -1028,6 +1068,7 @@ class AnalysisService:
             start_date=start_date,
             end_date=end_date,
             tenant_id=self.user.tenant_id,
+            source=source,
         )
         return sessions, int(total or 0)
 
@@ -1074,6 +1115,7 @@ class AnalysisService:
         group_chat_id: Optional[UUID] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
+        source: Optional[SessionSource] = None,
     ) -> ConversationInsightResponse:
         """
         Get statistics about conversations for either an assistant or a group chat.
@@ -1126,6 +1168,7 @@ class AnalysisService:
                 from_date=start_time,
                 to_date=end_time,
                 tenant_id=self.user.tenant_id,
+                source=source,
             )
         else:
             assert group_chat_id is not None
@@ -1137,6 +1180,7 @@ class AnalysisService:
                 from_date=start_time,
                 to_date=end_time,
                 tenant_id=self.user.tenant_id,
+                source=source,
             )
 
         feedback = await self.repo.get_message_feedback_counts(
@@ -1145,6 +1189,7 @@ class AnalysisService:
             group_chat_id=group_chat_id,
             from_date=start_time,
             to_date=end_time,
+            source=source,
         )
 
         logger.info(

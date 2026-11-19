@@ -99,6 +99,8 @@ CATEGORY_MAPPINGS = {
     ActionType.GROUP_CHAT_CREATED.value: "user_actions",
     ActionType.SESSION_STARTED.value: "user_actions",
     ActionType.SESSION_ENDED.value: "user_actions",
+    ActionType.INSIGHT_CONVERSATION_STARTED.value: "user_actions",
+    ActionType.INSIGHT_CONVERSATION_DELETED.value: "user_actions",
     ActionType.TOOL_APPROVAL_SUBMITTED.value: "user_actions",
     ActionType.COMPLETION_MODEL_CREATED.value: "user_actions",
     ActionType.COMPLETION_MODEL_UPDATED.value: "user_actions",

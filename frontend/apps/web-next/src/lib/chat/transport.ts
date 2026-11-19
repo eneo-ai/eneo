@@ -80,11 +80,25 @@ class EneoChatTransport extends DefaultChatTransport<EneoUIMessage> {
 }
 
 /**
+ * A conversation whose turns go to other endpoints than the chat API (the
+ * insights chat): the URL and body of a turn, from the question and the
+ * options the view sends it with. The answer is the same version 3 stream,
+ * held to the same contract.
+ */
+export type ChatEndpoint = {
+  request: (turn: { question: string; options: ChatSendOptions }) => {
+    api: string;
+    body: object;
+  };
+};
+
+/**
  * Transport for the backend's v3 conversation stream. The backend owns the
  * history (session_id continues a conversation), so only the latest user
- * question is sent — never the message array.
+ * question is sent, never the message array. `endpoint` sends the turns
+ * elsewhere; without it they go to the chat API.
  */
-export function createChatTransport() {
+export function createChatTransport(endpoint?: ChatEndpoint) {
   return new EneoChatTransport({
     api: CHAT_API,
     fetch: fetchOrThrow,
@@ -97,6 +111,7 @@ export function createChatTransport() {
           .join("\n") ?? "";
 
       const sendOptions = (body ?? {}) as ChatSendOptions;
+      if (endpoint) return endpoint.request({ question, options: sendOptions });
       const conversationBody: ConversationBody = {
         ...sendOptions,
         files: sendOptions.files ?? [],

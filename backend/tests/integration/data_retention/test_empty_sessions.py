@@ -25,6 +25,7 @@ from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
+from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
@@ -420,6 +421,132 @@ async def test_history_removes_an_authoring_chat_with_its_last_question(
     assert {chat_id: 2} in charged
     assert await retention_session.get(Sessions, chat_id) is None
     assert await retention_session.get(FlowAuthoringChats, chat_id) is None
+
+
+async def _insights_conversation(
+    session: AsyncSession,
+    *,
+    tenant_id: UUID,
+    user_id: UUID,
+    assistant: Assistants,
+    created_at: datetime,
+) -> UUID:
+    """An operator's analysis of `assistant`: a session with the link row that
+    hides it, which the session's deletion cascades to."""
+    conversation = await _session(session, user_id=user_id, created_at=created_at)
+    conversation.assistant_id = assistant.id
+    session.add(
+        InsightConversations(
+            tenant_id=tenant_id,
+            session_id=conversation.id,
+            assistant_id=assistant.id,
+            actor_user_id=user_id,
+            timezone="Europe/Stockholm",
+        )
+    )
+    await session.flush()
+    return conversation.id
+
+
+async def _links(session: AsyncSession, session_id: UUID) -> int:
+    return (
+        await session.scalar(
+            sa.select(sa.func.count()).where(
+                InsightConversations.session_id == session_id
+            )
+        )
+        or 0
+    )
+
+
+async def test_an_empty_insights_conversation_goes_with_its_link_row(
+    retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
+):
+    """An insights conversation is made with its first question, so an empty
+    one is left over: the sweep removes it with its link row and charges that
+    row. Mutants: the sweep passes it, so an empty hidden session and its link
+    stay for good; the lock does not charge the link row."""
+    old = datetime.now(timezone.utc) - timedelta(days=3)
+    assistant = await _assistant(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    analysis_id = await _insights_conversation(
+        retention_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        assistant=assistant,
+        created_at=old,
+    )
+    (step,) = EmptySessionRetentionTask(
+        retention_session, now=datetime.now(timezone.utc), grace=timedelta(days=1)
+    ).steps()
+
+    result = await step.run(
+        RetentionBatch(
+            job_run_id=uuid4(), batch_seq=1, rows=8, files=0, deadline=math.inf
+        )
+    )
+
+    # Discovery 1, the lock 1, then the session and its link row.
+    assert result.rows == 1 + 1 + 2
+    assert await retention_session.get(Sessions, analysis_id) is None
+    assert await _links(retention_session, analysis_id) == 0
+
+
+async def test_history_removes_an_insights_conversation_with_its_last_question(
+    retention_session: AsyncSession,
+    test_tenant,
+    admin_user,
+    completion_model_factory,
+    monkeypatch,
+):
+    """An analysis of an assistant follows that assistant's period like its
+    other conversations, although every other read hides it: its last due
+    question goes, then its session and the link row, which the release
+    charges. Mutants: retention applies the hidden-session rule; the release
+    does not charge the link row."""
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    assistant = await _assistant(
+        retention_session,
+        completion_model_factory,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+    )
+    analysis_id = await _insights_conversation(
+        retention_session,
+        tenant_id=test_tenant.id,
+        user_id=admin_user.id,
+        assistant=assistant,
+        created_at=old,
+    )
+    await _question(
+        retention_session,
+        tenant_id=test_tenant.id,
+        session_id=analysis_id,
+        assistant_id=assistant.id,
+        created_at=old,
+    )
+    charged: list[Mapping[UUID, int]] = []
+    lock_empty = EmptySessionRepository.lock_empty
+
+    async def recorded(self: EmptySessionRepository, ids: Sequence[UUID]):
+        costs = await lock_empty(self, ids)
+        charged.append(dict(costs))
+        return costs
+
+    monkeypatch.setattr(EmptySessionRepository, "lock_empty", recorded)
+
+    report = await run_registered_retention(retention_session)
+
+    assert report.counts["questions.questions_deleted"] == 1
+    assert report.counts["questions.sessions_deleted"] == 1
+    # The session row and its link row.
+    assert {analysis_id: 2} in charged
+    assert await retention_session.get(Sessions, analysis_id) is None
+    assert await _links(retention_session, analysis_id) == 0
 
 
 @pytest.mark.xfail(

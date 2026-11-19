@@ -412,6 +412,8 @@
   --color-ax-yellow-muted: var(--color-background-yellow);
   --color-ax-red: var(--color-text-red);
   --color-ax-red-muted: var(--color-background-red);
+  /* data marks (chart bars, share bars): 3:1 on the surfaces they sit on, never text */
+  --color-ax-data-amber: var(--eneo-color-data-amber);
 
   /* Radius. Legacy names follow the Eneo shape scale (sm inner 6 · md element
      10 · lg container 12 · xl 14 · 2xl page 18 · 3xl chat 20); rounded-ax-* are

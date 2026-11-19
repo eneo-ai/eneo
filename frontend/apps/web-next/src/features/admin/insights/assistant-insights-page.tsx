@@ -1,539 +1,192 @@
 import { Button } from "@astryxdesign/core/Button";
-import { Card } from "@astryxdesign/core/Card";
-import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
-import { revealProblems } from "@/components/composites/field-problem";
-import { Switch } from "@astryxdesign/core/Switch";
-import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
-import { Table } from "@/components/astryx/table";
-import { TextArea } from "@astryxdesign/core/TextArea";
-import { TextInput } from "@/components/astryx/text-input";
-import { useInfiniteQuery, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  BarChart3,
-  Check,
-  Copy,
-  ExternalLink,
-  History,
-  RotateCcw,
-  Search,
-  SendHorizontal,
-  Square
-} from "lucide-react";
-import { useFormatter, useTranslations } from "use-intl";
-import { useDeferredValue, useEffect, useId, useRef, useState } from "react";
-import { MessageResponse } from "@/components/ai-elements/message";
-import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
-import { LoadingState } from "@/components/composites/loading-state";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { BarChart3, Lock, PowerOff } from "lucide-react";
+import { useTranslations } from "use-intl";
+import { useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
-import { cursorPagination, flattenPages } from "@/lib/api/pagination";
-import { useCopy } from "@/lib/hooks/use-copy";
-import {
-  askAssistantInsightQuestion,
-  assistantQuestionHistoryQueryOptions,
-  fetchAssistantQuestionHistory,
-  type AssistantInsightFilters,
-  type AssistantInsightQuestion
-} from "./insights";
-import { AnswerFeedbackCell } from "./answer-feedback-cell";
-import { AnswerFeedbackSummary } from "./answer-feedback-summary";
+import { replaceUrl, useSearchParams } from "@/lib/navigation";
+import { ViewSearchParams } from "@/lib/view-search-params";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
-import { QuestionDetails } from "./question-details";
-import {
-  readAssistantInsightView,
-  assistantInsightViewSearch,
-  type AssistantInsightView
-} from "./assistant-insights-view";
-import { useSearchParams, replaceUrl } from "@/lib/navigation";
-import { insightPeriod } from "./insights";
-import { insightRangeOfDays } from "@/features/insights/insights-range";
-import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
-import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { groupChatQueryOptions } from "@/features/group-chats/use-group-chat";
+import { AssistantInsights, type InsightsPartner } from "@/features/insights/assistant-insights";
+import { INSIGHT_VIEW_PARAMS, useInsightViewUrl } from "@/features/insights/insight-view-url";
+import { insightViewSearch, readInsightViewSearch } from "./assistant-insights-view";
+import { insightsPageHref } from "./insights-page-search";
 
-type InsightsTab = AssistantInsightView["tab"];
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <Card className="flex flex-col gap-1">
-      <dt className="text-ax-text-secondary text-sm">{label}</dt>
-      <dd className="text-2xl font-semibold wrap-anywhere tabular-nums">{value}</dd>
-    </Card>
-  );
+/**
+ * The height from the top of `frame` to the end of the page panel (main),
+ * less the padding below the frame, so the insights view in it fills the
+ * page and scrolls its overview on its own, as it does under the chat's
+ * header (the flow page fits its chat below lg the same way). Kept as main
+ * resizes (the window, a phone's keyboard). `null` until measured.
+ */
+function useHeightToPanelEnd(frame: RefObject<HTMLElement | null>): number | null {
+  const [height, setHeight] = useState<number | null>(null);
+  useLayoutEffect(() => {
+    const element = frame.current;
+    const main = element?.closest("main");
+    if (!element || !main) return;
+    const fit = () => {
+      const top =
+        element.getBoundingClientRect().top - main.getBoundingClientRect().top + main.scrollTop;
+      let below = 0;
+      for (let node: HTMLElement | null = element.parentElement; node; node = node.parentElement) {
+        below += Number.parseFloat(getComputedStyle(node).paddingBottom) || 0;
+        if (node === main) break;
+      }
+      setHeight(Math.max(0, Math.round(main.clientHeight - top - below)));
+    };
+    fit();
+    const observer = new ResizeObserver(fit);
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, [frame]);
+  return height;
 }
 
-function FilterBar({
-  view,
-  onChange
-}: {
-  view: AssistantInsightView;
-  onChange: (view: AssistantInsightView) => void;
-}) {
-  const t = useTranslations();
+/** The rest of the page, for the insights view to fill. */
+function FilledFrame({ children }: { children: ReactNode }) {
+  const frame = useRef<HTMLDivElement>(null);
+  const height = useHeightToPanelEnd(frame);
   return (
-    <Card className="flex flex-wrap items-end gap-3">
-      <div className="min-w-0 flex-1">
-        <InsightsRangePicker
-          value={view.range}
-          onChange={(range) => onChange({ ...view, range })}
-        />
-      </div>
-      <Switch
-        label={t("include_follow_up_questions")}
-        value={view.includeFollowups}
-        onChange={(checked) => onChange({ ...view, includeFollowups: checked })}
-      />
-      <Button
-        label={t("reset")}
-        icon={<RotateCcw className="size-4" aria-hidden="true" />}
-        onClick={() => onChange({ ...view, range: insightRangeOfDays(30), includeFollowups: true })}
-      />
-    </Card>
-  );
-}
-
-type AnalysisResult = { context: string; answer: string } & (
-  { status: "streaming" | "complete" | "stopped" } | { status: "error"; error: unknown }
-);
-
-function AnalysisTab({
-  assistantId,
-  assistantName,
-  filters
-}: {
-  assistantId: string;
-  assistantName: string;
-  filters: AssistantInsightFilters;
-}) {
-  const t = useTranslations();
-  const announce = useAnnounce();
-  const coarse = useMediaQuery("(pointer: coarse)");
-  const [question, setQuestion] = useState("");
-  const [asked, setAsked] = useState(false);
-  const questionRef = useRef<HTMLTextAreaElement>(null);
-  const questionProblem = asked && !question.trim() ? t("required_field") : null;
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const context = `${assistantId}|${filters.start}|${filters.end}|${filters.includeFollowups}`;
-  const [previousContext, setPreviousContext] = useState(context);
-  if (previousContext !== context) {
-    setPreviousContext(context);
-    setResult(null);
-  }
-  const current = result?.context === context ? result : null;
-  const answer = current?.answer ?? "";
-  const running = current?.status === "streaming";
-  const request = useRef<AbortController | null>(null);
-  const { copy, isCopied } = useCopy();
-  useEffect(() => () => request.current?.abort(), [context]);
-
-  async function askQuestion() {
-    if (request.current && !request.current.signal.aborted) return;
-    const text = question.trim();
-    if (!text) {
-      revealProblems(() => setAsked(true), questionRef.current);
-      return;
-    }
-    const controller = new AbortController();
-    request.current = controller;
-    const active = () => request.current === controller && !controller.signal.aborted;
-    setResult({ context, answer: "", status: "streaming" });
-    try {
-      const text = await askAssistantInsightQuestion({
-        api: browserApi,
-        assistantId,
-        filters,
-        question: question.trim(),
-        signal: controller.signal,
-        onAnswer: (part) => {
-          if (active())
-            setResult((previous) =>
-              previous?.context === context
-                ? { ...previous, answer: previous.answer + part }
-                : previous
-            );
-        }
-      });
-      if (!active()) return;
-      setResult({ context, answer: text, status: "complete" });
-      announce(t("chat_announce_answer_ready"));
-    } catch (error) {
-      if (!active()) return;
-      setResult((previous) => ({
-        context,
-        answer: previous?.context === context ? previous.answer : "",
-        status: "error",
-        error
-      }));
-      announce(t("request_failed"));
-    } finally {
-      if (request.current === controller) request.current = null;
-    }
-  }
-
-  function stop() {
-    request.current?.abort();
-    setResult((previous) =>
-      previous?.context === context ? { ...previous, status: "stopped" } : previous
-    );
-    announce(t("chat_announce_stopped"));
-  }
-
-  return (
-    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
-      <Card className="flex min-h-96 min-w-0 flex-col gap-4">
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void askQuestion();
-          }}
-        >
-          <TextArea
-            ref={questionRef}
-            label={t("ask_about_insights")}
-            description={coarse ? undefined : t("insights_enter_hint")}
-            rows={4}
-            value={question}
-            onChange={setQuestion}
-            status={questionProblem ? { type: "error", message: questionProblem } : undefined}
-            onKeyDown={(event) => {
-              if (
-                event.key !== "Enter" ||
-                event.shiftKey ||
-                event.nativeEvent.isComposing ||
-                coarse
-              )
-                return;
-              event.preventDefault();
-              event.currentTarget.closest("form")?.requestSubmit();
-            }}
-          />
-          <Button
-            type={running ? "button" : "submit"}
-            variant="primary"
-            label={running ? t("stop_generating") : t("submit_your_question")}
-            onClick={running ? stop : undefined}
-            icon={
-              running ? (
-                <Square className="size-4" aria-hidden="true" />
-              ) : (
-                <SendHorizontal className="size-4" aria-hidden="true" />
-              )
-            }
-            className="self-end"
-          />
-        </form>
-
-        <div className="bg-ax-sunken border-ax-border rounded-ax-container flex min-h-52 flex-1 flex-col gap-3 border p-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium">{t("answer")}</p>
-            {answer ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                label={isCopied ? t("copied") : t("copy")}
-                icon={
-                  isCopied ? (
-                    <Check className="size-4" aria-hidden="true" />
-                  ) : (
-                    <Copy className="size-4" aria-hidden="true" />
-                  )
-                }
-                onClick={() => void copy(answer)}
-              />
-            ) : null}
-          </div>
-          {running && !answer ? (
-            <LoadingState variant="text" rows={3} label={t("chat_insights_generating")} />
-          ) : null}
-          {current?.status === "error" ? <ListError error={current.error} compact /> : null}
-          {answer ? (
-            <MessageResponse className="text-sm leading-7">{answer}</MessageResponse>
-          ) : !current ? (
-            <p className="text-ax-text-secondary text-sm">
-              {t("ask_question_about_conversation_history")}
-            </p>
-          ) : null}
-        </div>
-      </Card>
-
-      <Card className="flex h-fit flex-col gap-3">
-        <p className="font-medium">{t("included_timeframe")}</p>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-ax-text-secondary">{t("from")}</dt>
-          <dd>
-            <ClientTime value={filters.start} format="date" />
-          </dd>
-          <dt className="text-ax-text-secondary">{t("to")}</dt>
-          <dd>
-            <ClientTime value={filters.end} format="date" />
-          </dd>
-          <dt className="text-ax-text-secondary">{t("assistant")}</dt>
-          <dd className="truncate">{assistantName}</dd>
-        </dl>
-      </Card>
+    <div
+      ref={frame}
+      style={height === null ? undefined : { height }}
+      className="flex min-h-80 min-w-0 flex-col"
+    >
+      {children}
     </div>
   );
 }
 
 /**
- * Opens the conversation a question was asked in. Every row has one, so its
- * name adds the question's time, as the row's Skapad cell shows it.
+ * An assistant's or group chat's insights in the administration: its name
+ * with the way back to the organisation's insights (on the same period and
+ * comparison), over the same insights
+ * view as the chat page's Insikter tab. The filters, the finding open in
+ * place of the overview, the feedback inbox's filter and the analysis open
+ * over the view live in the address
+ * (`?from=&to=&source=&compare=&finding=&feedback=&analysis=`), so a link or
+ * a reload keeps them; an opened finding, "Läs kommentarerna" and the
+ * analysis over the view are history entries of their own
+ * (`useInsightViewUrl`).
+ * The editor's links are there for a caller who may edit the target. A
+ * target with insights switched off, or whose insights the caller may not
+ * see, says so instead of asking for them.
  */
-function SessionLink({
-  assistantId,
-  question
+function TargetInsightsPage({
+  partner,
+  editorHref,
+  offDescription
 }: {
-  assistantId: string;
-  question: AssistantInsightQuestion;
+  partner: InsightsPartner;
+  /** The target's editor, where the caller may edit it; null otherwise. */
+  editorHref: string | null;
+  /** Where the insights switch is ("Slå på insikter i assistentens inställningar …"). */
+  offDescription: string;
 }) {
   const t = useTranslations();
-  const time = useClientTimeText(question.created_at, "date_time");
-  return (
-    <Button
-      href={`/dashboard/${assistantId}/${question.session_id}`}
-      variant="ghost"
-      size="sm"
-      label={time ? t("insights_session_from", { time }) : t("session")}
-      icon={<ExternalLink className="size-4" aria-hidden="true" />}
-    >
-      {t("session")}
-    </Button>
-  );
-}
-
-function QuestionsTab({
-  assistantId,
-  filters
-}: {
-  assistantId: string;
-  filters: AssistantInsightFilters;
-}) {
-  const t = useTranslations();
-  const announce = useAnnounce();
-  const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<AssistantInsightQuestion | null>(null);
-  const questionTrigger = useRef<HTMLButtonElement | null>(null);
-  const deferredSearch = useDeferredValue(search.trim());
-
-  const query = useInfiniteQuery({
-    ...cursorPagination,
-    queryKey: ["admin-insights-assistant-questions", assistantId, filters, deferredSearch],
-    queryFn: ({ pageParam }) =>
-      fetchAssistantQuestionHistory({
-        api: browserApi,
-        assistantId,
-        filters,
-        cursor: pageParam,
-        query: deferredSearch || undefined
-      })
-  });
-  const items = flattenPages(query.data?.pages);
-  const total = query.data?.pages[0]?.total_count ?? 0;
-  const countLabel = t("loaded_questions_count", { loaded: items.length, total });
-
-  // Announce the count once a new search has its results (WCAG 4.1.3), not
-  // on the first load.
-  const announcedFor = useRef(deferredSearch);
-  const settled = query.isSuccess && !query.isFetching;
-  useEffect(() => {
-    if (!settled || announcedFor.current === deferredSearch) return;
-    announcedFor.current = deferredSearch;
-    announce(countLabel);
-  }, [announce, countLabel, deferredSearch, settled]);
-
-  const columns: TableColumn<AssistantInsightQuestion>[] = [
-    {
-      key: "created_at",
-      header: t("created"),
-      width: pixel(176),
-      renderCell: (item) => <ClientTime value={item.created_at} format="date_time" />
-    },
-    // Room for whole words: on a phone the table scrolls sideways instead.
-    {
-      key: "question",
-      header: t("question"),
-      width: proportional(1, { minWidth: 240 }),
-      renderCell: (item) => (
-        <Button
-          variant="ghost"
-          label={item.question || t("untitled")}
-          className="max-w-full text-left whitespace-normal"
-          onClick={(event) => {
-            questionTrigger.current = event.currentTarget;
-            setSelected(item);
-          }}
-        />
-      )
-    },
-    {
-      key: "feedback",
-      header: t("feedback_column"),
-      width: proportional(0.5),
-      renderCell: (item) => <AnswerFeedbackCell feedback={item.feedback} />
-    },
-    {
-      key: "session_id",
-      header: t("session"),
-      width: pixel(136),
-      renderCell: (item) => <SessionLink assistantId={assistantId} question={item} />
-    }
-  ];
-
-  return (
-    <Card className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="min-w-0 flex-1 basis-64">
-          <TextInput
-            label={t("search")}
-            isLabelHidden
-            placeholder={t("assistant_questions_search_placeholder")}
-            startIcon={Search}
-            {...KEYBOARD.search}
-            value={search}
-            onChange={setSearch}
-            hasClear
-            autoComplete="off"
-            width="100%"
-          />
-        </div>
-        <span className="text-ax-text-secondary text-sm">{countLabel}</span>
-      </div>
-
-      <QueryStateBoundary query={query} rows={5}>
-        {() =>
-          items.length === 0 ? (
-            <p className="text-ax-text-secondary text-sm">
-              {t("no_questions_found_current_settings")}
-            </p>
-          ) : (
-            <Table
-              aria-label={t("question_history")}
-              data={items}
-              columns={columns}
-              idKey="id"
-              verticalAlign="top"
-            />
-          )
-        }
-      </QueryStateBoundary>
-
-      {!query.hasNextPage && items.length > 0 ? (
-        <span className="text-ax-text-secondary self-end text-sm">
-          {t("loaded_all_questions", { total })}
-        </span>
-      ) : null}
-      <LoadMore query={query} label={t("load_more_questions")} />
-      {selected ? (
-        <QuestionDetails
-          key={selected.id}
-          question={selected}
-          triggerRef={questionTrigger}
-          onClose={() => setSelected(null)}
-        />
-      ) : null}
-    </Card>
-  );
-}
-
-export function AssistantInsightsPage({ assistantId }: { assistantId: string }) {
-  const t = useTranslations();
-  const format = useFormatter();
   const searchParams = useSearchParams();
-  const view = readAssistantInsightView(searchParams);
-  const { tab } = view;
-  const filters = { ...insightPeriod(view.range), includeFollowups: view.includeFollowups };
-  const changeView = (next: AssistantInsightView) =>
-    replaceUrl(assistantInsightViewSearch(next, searchParams.toString()));
-  // Panels stay mounted once opened (hidden when inactive), so a question and
-  // its answer survive a look at the history; the history loads on first visit.
-  const [visited, setVisited] = useState<ReadonlySet<InsightsTab>>(() => new Set([tab]));
-  const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
-  const stats = useQuery(
-    assistantQuestionHistoryQueryOptions({ api: browserApi, assistantId, filters, limit: 1 })
+  const filters = readInsightViewSearch(searchParams);
+  const view = useInsightViewUrl();
+
+  const header = (
+    <PageHeader
+      title={partner.name}
+      actions={
+        <Button
+          // The way back keeps the period and the comparison.
+          href={insightsPageHref(filters.range, filters.compare)}
+          label={t("insights")}
+          icon={<BarChart3 className="size-4" aria-hidden="true" />}
+        />
+      }
+    />
   );
-  const count = stats.data?.total_count;
 
-  const baseId = useId();
-  const tabId = (value: InsightsTab) => `${baseId}-tab-${value}`;
-  const panelId = (value: InsightsTab) => `${baseId}-panel-${value}`;
-
-  if (!visited.has(tab)) setVisited(new Set([...visited, tab]));
-
-  function selectTab(next: InsightsTab) {
-    changeView({ ...view, tab: next });
+  // The per-target endpoints refuse both (403): the page says which, without asking.
+  const blocked = !partner.insightEnabled
+    ? { icon: <PowerOff />, title: t("insights_off_title"), description: offDescription }
+    : !partner.permissions?.includes("insight_view")
+      ? {
+          icon: <Lock />,
+          title: t("insights_refused_title"),
+          description: t("insights_refused_description")
+        }
+      : null;
+  if (blocked) {
+    return (
+      <div className="flex w-full min-w-0 flex-col gap-6">
+        {header}
+        <EmptyState {...blocked} />
+      </div>
+    );
   }
 
-  const panel = (value: InsightsTab, content: React.ReactNode) => (
-    <div
-      role="tabpanel"
-      id={panelId(value)}
-      aria-labelledby={tabId(value)}
-      hidden={tab !== value}
-      className="pt-4"
-    >
-      {visited.has(value) ? content : null}
-    </div>
-  );
-
   return (
-    <div className="flex w-full min-w-0 flex-col gap-6">
-      <PageHeader
-        title={assistant.name}
-        actions={
-          <Button
-            href="/admin/insights"
-            label={t("insights")}
-            icon={<BarChart3 className="size-4" aria-hidden="true" />}
-          />
-        }
-      />
-
-      <dl className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("assistant")} value={assistant.name} />
-        <Stat
-          label={t("question_history")}
-          value={count == null ? t("loading") : format.number(count)}
+    // A change of where the insights view is keeps the analysis mounted: its leave guard does not ask.
+    <ViewSearchParams value={INSIGHT_VIEW_PARAMS}>
+      <FilledFrame>
+        <AssistantInsights
+          partner={partner}
+          filters={filters}
+          onFiltersChange={(next) => replaceUrl(insightViewSearch(next, searchParams.toString()))}
+          view={view}
+          editorHref={editorHref}
+          header={header}
+          framed
         />
-        <Stat
-          label={t("include_follow_up_questions")}
-          value={filters.includeFollowups ? t("yes") : t("no")}
-        />
-      </dl>
-      <AnswerFeedbackSummary assistantId={assistantId} filters={filters} />
+      </FilledFrame>
+    </ViewSearchParams>
+  );
+}
 
-      <FilterBar view={view} onChange={changeView} />
+/** `/admin/insights/assistant/$assistantId`. */
+export function AssistantInsightsPage({ assistantId }: { assistantId: string }) {
+  const t = useTranslations();
+  const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
+  return (
+    <TargetInsightsPage
+      partner={{
+        type: "assistant",
+        id: assistant.id,
+        name: assistant.name,
+        iconId: assistant.icon_id ?? null,
+        insightEnabled: assistant.insight_enabled,
+        permissions: assistant.permissions
+      }}
+      editorHref={
+        assistant.permissions?.includes("edit")
+          ? `/spaces/${assistant.space_id}/assistants/${assistant.id}/edit`
+          : null
+      }
+      offDescription={t("insights_off_description")}
+    />
+  );
+}
 
-      <div className="flex flex-col">
-        <TabList
-          role="tablist"
-          aria-label={t("legacy_insights_tabs_label")}
-          value={tab}
-          onChange={(value) => selectTab(value === "questions" ? "questions" : "chat")}
-          hasDivider
-        >
-          <Tab
-            id={tabId("chat")}
-            value="chat"
-            label={t("analyse")}
-            icon={<BarChart3 className="size-4" aria-hidden="true" />}
-            panelId={panelId("chat")}
-          />
-          <Tab
-            id={tabId("questions")}
-            value="questions"
-            label={t("question_history")}
-            icon={<History className="size-4" aria-hidden="true" />}
-            panelId={panelId("questions")}
-          />
-        </TabList>
-        {panel(
-          "chat",
-          <AnalysisTab assistantId={assistantId} assistantName={assistant.name} filters={filters} />
-        )}
-        {panel("questions", <QuestionsTab assistantId={assistantId} filters={filters} />)}
-      </div>
-    </div>
+/** `/admin/insights/group-chat/$groupChatId`: the same view for a group chat. */
+export function GroupChatInsightsPage({ groupChatId }: { groupChatId: string }) {
+  const t = useTranslations();
+  const { data: groupChat } = useSuspenseQuery(groupChatQueryOptions(browserApi, groupChatId));
+  return (
+    <TargetInsightsPage
+      partner={{
+        type: "group-chat",
+        id: groupChat.id,
+        name: groupChat.name,
+        iconId: groupChat.icon_id ?? null,
+        insightEnabled: groupChat.insight_enabled,
+        permissions: groupChat.permissions
+      }}
+      editorHref={
+        groupChat.permissions?.includes("edit")
+          ? `/spaces/${groupChat.space_id}/group-chats/${groupChat.id}/edit`
+          : null
+      }
+      offDescription={t("insights_off_description_group_chat")}
+    />
   );
 }

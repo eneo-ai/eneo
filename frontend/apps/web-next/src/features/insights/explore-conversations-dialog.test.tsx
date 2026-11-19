@@ -11,9 +11,10 @@ const spies = vi.hoisted(() => ({
   listCalls: [] as Record<string, unknown>[]
 }));
 
-const session = (id: string, name: string) => ({
+const session = (id: string, name: string, source = id === "s-2" ? "widget" : "user") => ({
   id,
   name,
+  source,
   created_at: "2026-09-30T10:00:00Z",
   updated_at: "2026-09-30T10:00:00Z"
 });
@@ -59,6 +60,7 @@ vi.mock("@/lib/api/browser", () => ({
             data: {
               id,
               name: "Direktupphandling",
+              source: id === "s-2" ? "widget" : "user",
               messages:
                 id === "s-3"
                   ? []
@@ -150,6 +152,23 @@ describe("ExploreConversationsDialog", () => {
     ).toBeTruthy();
   });
 
+  it("opens on a conversation an analysis cited, read beside the period's list", async () => {
+    renderInApp(
+      <ExploreConversationsDialog
+        partner={partner}
+        range={{ start: "2026-09-02", end: "2026-10-02" }}
+        isOpen
+        onOpenChange={vi.fn()}
+        initialSessionId="s-1"
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    const preview = within(dialog).getByRole("region", { name: "Vald konversation" });
+    expect(await within(preview).findByText("Vad är gränsen?")).toBeTruthy();
+    const row = await within(dialog).findByRole("button", { name: /Direktupphandling/ });
+    expect(row.getAttribute("aria-pressed")).toBe("true");
+  });
+
   it("filters by title once typing pauses", async () => {
     renderDialog();
     const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
@@ -164,6 +183,32 @@ describe("ExploreConversationsDialog", () => {
       expect(within(dialog).queryByRole("button", { name: /Direktupphandling/ })).toBeNull()
     );
     expect(within(dialog).getByRole("button", { name: /LOU-gränser/ })).toBeTruthy();
+  });
+
+  it("tags each conversation with its source and lists only the filter's source", async () => {
+    renderInApp(
+      <ExploreConversationsDialog
+        partner={partner}
+        range={{ start: "2026-09-02", end: "2026-10-02" }}
+        source="widget"
+        isOpen
+        onOpenChange={vi.fn()}
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "Utforska konversationer" });
+    const widget = await within(dialog).findByRole("button", { name: /LOU-gränser/ });
+    expect(spies.listCalls[0]).toMatchObject({ source: "widget" });
+    expect(within(widget).getByText("Widget")).toBeTruthy();
+    expect(
+      within(within(dialog).getByRole("button", { name: /Direktupphandling/ })).getByText(
+        "Användare"
+      )
+    ).toBeTruthy();
+
+    // The opened conversation says where it came from too.
+    fireEvent.click(widget);
+    const preview = within(dialog).getByRole("region", { name: "Vald konversation" });
+    expect(await within(preview).findByText("Widget")).toBeTruthy();
   });
 
   it("closes with Escape and has no axe violations", async () => {

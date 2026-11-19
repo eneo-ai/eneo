@@ -1,4 +1,5 @@
 import { useChat } from "@ai-sdk/react";
+import type { ChatTransport } from "ai";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Collapsible } from "@/components/astryx/collapsible";
@@ -93,9 +94,10 @@ import { partnerCannotAnswer } from "./partner-model";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState, type StartHeadingLevel } from "./start-state";
+import { ToolResultsContext, conversationToolResults, type ToolResultSource } from "./tool-results";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
-import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
+import { chatDraftOwner, useChatDraft, withLine } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -160,22 +162,24 @@ function quietLog(element: HTMLDivElement | null) {
 
 /**
  * A message of the conversation. Every finished answer of a saved
- * conversation can be rated on its own; the rating starts from the one stored
- * with the answer.
+ * conversation can be rated on its own (where the chat API holds the
+ * conversation); the rating starts from the one stored with the answer.
  */
 const ConversationMessage = memo(function ConversationMessage({
   sessionId,
+  rateable,
   onToggleActivity,
   ...props
 }: Omit<ComponentProps<typeof ChatMessage>, "feedback" | "onActivityToggle"> & {
   sessionId: string | null;
+  rateable: boolean;
   /** One handler for every message, so a finished message's props stay the same. */
   onToggleActivity: (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => void;
 }) {
   const { message, isStreaming } = props;
   const [rating, rate] = useAnswerFeedback(message.id, message.metadata?.feedback ?? null);
   const feedback =
-    sessionId !== null && message.role === "assistant" && !isStreaming
+    rateable && sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
   return (
@@ -208,6 +212,39 @@ function previewFilesKey(files: readonly PreviewFile[]): string {
 
 /** Opens the latest answer's Felsökning tab; false when there is none to show yet. */
 export type ChatDebugHandle = { openDebug: (trigger: HTMLElement | null) => boolean };
+
+/**
+ * What a page may do with the composer's unsent text (the insights analysis
+ * offers a question about a finding): read it and put text in it. Both
+ * writes are decided on the draft as it is when they land, so doing one
+ * twice does it once. Nothing either does sends a question.
+ */
+export type ComposerDraftHandle = {
+  /** The text in the composer, not yet sent. */
+  text: () => string;
+  /** Puts `text` in the composer when it is empty; a draft is never replaced. */
+  fill: (text: string) => void;
+  /**
+   * Puts `text` in the composer after what is typed there, on a line of its
+   * own (`withLine`), and focuses the field.
+   */
+  offer: (text: string) => void;
+};
+
+/**
+ * A conversation on other endpoints than the chat API (the insights chat):
+ * its turns go through its own transport (`createChatTransport` with the
+ * endpoints' request) and its tool calls' results are read from its own
+ * source. It has only what the stream contract carries: no generated title,
+ * no answer ratings, no Felsökning and no context estimate, which belong to
+ * the chat API.
+ */
+export type ConversationApi = {
+  transport: ChatTransport<EneoUIMessage>;
+  toolResults: ToolResultSource;
+  /** Keeps its drafts apart from the chat API's conversations with the same partner. */
+  draftScope: string;
+};
 
 type ChatViewProps = {
   leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
@@ -266,6 +303,30 @@ type ChatViewProps = {
   placeholder?: string;
   /** The text field's name, when the page names it by more than its partner (the flow chat's mode). */
   composerLabel?: string;
+  /** The conversation's own endpoints, when they are not the chat API's (the insights chat). */
+  api?: ConversationApi;
+  /**
+   * The page's own start state in place of the partner's greeting, given the
+   * centred composer to place (false where the view docks it instead).
+   */
+  start?: (composer: ReactNode) => ReactNode;
+  /** What the page shows above the messages once the conversation has started, scrolling with them. */
+  lead?: ReactNode;
+  /**
+   * A question was refused because the conversation is gone: removed with
+   * content it was based on. The page replaces the conversation with what it
+   * says about that (and announces it). Without it the failure shows in the
+   * conversation, offering a new one.
+   */
+  onGone?: () => void;
+  /** The composer's unsent text, for a page that offers a question to send. */
+  draftRef?: Ref<ComposerDraftHandle>;
+  /**
+   * A question failed: refused, or its answer broke off. The conversation
+   * says so and returns the question as it always does; the page may act on
+   * the cause too (the insights analysis reloads its models on a refused one).
+   */
+  onTurnFailed?: (error: unknown) => void;
 };
 
 /**
@@ -308,12 +369,21 @@ function ConversationView({
   toolCards,
   footerActions,
   placeholder,
-  composerLabel: label
+  composerLabel: label,
+  api,
+  start,
+  lead,
+  onGone,
+  draftRef,
+  onTurnFailed
 }: ChatViewProps) {
   const t = useTranslations();
   const locale = useLocale();
   const { can, user, tenant } = useAppContext();
   const queryClient = useQueryClient();
+  // The chat API's own extras (titles, ratings, Felsökning, the context
+  // estimate) apply to the conversations it holds.
+  const chatApi = api === undefined;
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
   const uploadsRef = useRef<PreviewFile[]>([]);
@@ -322,7 +392,7 @@ function ConversationView({
   });
   const panel = useSidePanel()!;
   // The Felsök tab reads a saved turn's diagnostics; group chats have none.
-  const debugAvailable = can("assistant_debug") && partner.type !== "group-chat";
+  const debugAvailable = chatApi && can("assistant_debug") && partner.type !== "group-chat";
   // Astryx's shared polite live region (mounted empty, cleared after a moment):
   // only "Svaret är klart", errors and tool approvals go there, never tokens.
   const announce = useAnnounce();
@@ -334,7 +404,7 @@ function ConversationView({
 
   const [input, setInput] = useChatDraft(
     chatDraftOwner(tenant.id, user.id),
-    `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
+    `${api ? `${api.draftScope}:` : ""}${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
   );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -449,7 +519,8 @@ function ConversationView({
     if (focusComposerIfLost) rescue(() => startField()?.element ?? null);
   }, [focusComposerIfLost, rescue]);
 
-  const transport = useMemo(() => createChatTransport(), []);
+  // The transport the view was mounted with: remount it (a new `key`) for another.
+  const [transport] = useState(() => api?.transport ?? createChatTransport());
   const { messages, sendMessage, setMessages, status, stop, error, clearError } =
     useChat<EneoUIMessage>({
       transport,
@@ -510,7 +581,14 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
+        onTurnFailed?.(failure);
         const described = describeChatFailure(failure, streamErrorRef.current, t);
+        if (described.gone && onGone) {
+          // The page takes the conversation away and says why itself.
+          if (pending) releasePreviews(pending.attachments);
+          onGone();
+          return;
+        }
         announce(described.message);
         if (!pending) return;
         if (streamStartedRef.current) {
@@ -549,6 +627,8 @@ function ConversationView({
           else if (!isError) announce(t("chat_announce_answer_ready"));
           onAnswerFinished?.();
         }
+        // The page refreshes the lists of a conversation on its own endpoints.
+        if (!chatApi) return;
         // Auto-title after the first exchange of a fresh conversation (also when
         // the view has gone: the history then lists it under its title).
         if (isNewSession.current && sessionIdRef.current) {
@@ -727,7 +807,8 @@ function ConversationView({
     fileIds: attachments.fileIds,
     sessionId,
     assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
-    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null
+    groupChatId: !sessionId && partner.type === "group-chat" ? partner.id : null,
+    enabled: chatApi
   });
 
   const usage = deriveContextUsage({
@@ -758,6 +839,19 @@ function ConversationView({
   // A question that has left the composer keeps the view in the conversation while
   // it waits, for its uploads and then a partner save, until `sendMessage` adds it.
   const started = messages.length > 0 || pendingQuestion !== null || queuedQuestion !== null;
+  useImperativeHandle(
+    draftRef,
+    () => ({
+      text: () => input,
+      fill: (text) => setInput((current) => (current.trim() ? current : text)),
+      offer: (text) => {
+        setInput((current) => withLine(current, text));
+        const field = started ? dockInputRef : startDocked ? startDockInputRef : startInputRef;
+        field.current?.focus();
+      }
+    }),
+    [input, started, startDocked, setInput]
+  );
 
   // A tool waiting for a decision in the latest answer: on a phone the
   // decision takes the composer's place (decision 26); wider, the card in
@@ -1218,7 +1312,7 @@ function ConversationView({
       <span className="flex flex-col items-center gap-2">
         <span className="flex flex-wrap items-center justify-center gap-2">
           <span className="text-ax-error">{failure.message}</span>
-          {failure.context && onNewConversation && !sending && (
+          {(failure.context || failure.gone) && onNewConversation && !sending && (
             <Button
               label={t("new_conversation")}
               size="sm"
@@ -1226,7 +1320,8 @@ function ConversationView({
               onClick={onNewConversation}
             />
           )}
-          {lastQuestion && !sending && (
+          {/* A conversation that is gone cannot answer a retry. */}
+          {lastQuestion && !sending && !failure.gone && (
             <Button
               label={t("chat_retry")}
               size="sm"
@@ -1284,32 +1379,31 @@ function ConversationView({
   );
 
   if (!started) {
+    const centredComposer = !startDocked && (
+      // Centred under the greeting until the conversation starts.
+      <div data-start-composer="" {...trackStartFocus} className="flex w-full flex-col gap-3">
+        {errorNotice}
+        <Composer
+          {...composerProps}
+          variant="start"
+          partnerToken={partnerToken}
+          inputRef={startInputRef}
+        />
+      </div>
+    );
     return (
       <>
         {leaveConfirmation}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
-          <StartState
-            partner={partner}
-            headingLevel={startHeadingLevel}
-            composer={
-              !startDocked && (
-                // Centred under the greeting until the conversation starts.
-                <div
-                  data-start-composer=""
-                  {...trackStartFocus}
-                  className="flex w-full flex-col gap-3"
-                >
-                  {errorNotice}
-                  <Composer
-                    {...composerProps}
-                    variant="start"
-                    partnerToken={partnerToken}
-                    inputRef={startInputRef}
-                  />
-                </div>
-              )
-            }
-          />
+          {start ? (
+            start(centredComposer)
+          ) : (
+            <StartState
+              partner={partner}
+              headingLevel={startHeadingLevel}
+              composer={centredComposer}
+            />
+          )}
         </div>
         {startDocked && (
           // Docked from the first frame where it stays once the conversation
@@ -1372,26 +1466,29 @@ function ConversationView({
             ? {
                 detail: t("chat_activity_steps", { count: activityForPanel.steps.length }),
                 onClose: closeActivity,
+                // A step's result is read where the conversation is held.
                 body: (
-                  <ActivityPanelBody
-                    messageId={activityMessage.id}
-                    activity={activityForPanel}
-                    durations={timings.durations(activityMessage.id)}
-                    sessionId={sessionId}
-                    tab={activity.tab}
-                    onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
-                    focusSource={activity.source}
-                    claimFocus={claimActivityFocus}
-                    debug={
-                      debugAvailable && sessionId !== null
-                        ? {
-                            sessionId,
-                            onSelectTurn: (messageId) =>
-                              onActivityChange({ messageId, tab: "debug", source: null })
-                          }
-                        : null
-                    }
-                  />
+                  <ToolResultsContext value={api?.toolResults ?? conversationToolResults}>
+                    <ActivityPanelBody
+                      messageId={activityMessage.id}
+                      activity={activityForPanel}
+                      durations={timings.durations(activityMessage.id)}
+                      sessionId={sessionId}
+                      tab={activity.tab}
+                      onTabChange={(tab) => onActivityChange({ ...activity, tab, source: null })}
+                      focusSource={activity.source}
+                      claimFocus={claimActivityFocus}
+                      debug={
+                        debugAvailable && sessionId !== null
+                          ? {
+                              sessionId,
+                              onSelectTurn: (messageId) =>
+                                onActivityChange({ messageId, tab: "debug", source: null })
+                            }
+                          : null
+                      }
+                    />
+                  </ToolResultsContext>
                 )
               }
             : null
@@ -1422,6 +1519,7 @@ function ConversationView({
               </div>
             }
           >
+            {lead}
             {/* The conversation is a section of the page under its h1: the headings in an answer start
                 at h3 (markdown-components.tsx), so this is the h2 between them (1.3.1, 2.4.6). */}
             <h2 className="sr-only">{t("chat_conversation_label")}</h2>
@@ -1438,6 +1536,7 @@ function ConversationView({
                   <ConversationMessage
                     key={message.id}
                     sessionId={sessionId}
+                    rateable={chatApi}
                     message={message}
                     assistant={assistantIdentity}
                     isStreaming={streaming}

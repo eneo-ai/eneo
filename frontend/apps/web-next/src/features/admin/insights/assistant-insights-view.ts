@@ -1,54 +1,86 @@
 import { calendarDate, type IsoDate } from "@/lib/calendar-date";
-import { insightRangeOfDays, type InsightRange } from "@/features/insights/insights-range";
+import { parseInsightSource, type InsightFilters } from "@/features/insights/insight-figures";
+import {
+  readInsightAnalysisSearch,
+  readInsightFeedbackSearch,
+  readInsightFindingSearch
+} from "@/features/insights/insight-view-url";
+import {
+  DEFAULT_INSIGHT_DAYS,
+  insightRangeOfDays,
+  type InsightRange
+} from "@/features/insights/insights-range";
 
-export type AssistantInsightView = {
-  range: InsightRange;
-  includeFollowups: boolean;
-  tab: "chat" | "questions";
-};
+type SearchReader = Pick<URLSearchParams, "get">;
 
-/** One parser for direct links, navigation and the page's visible filters. */
-export function readAssistantInsightView(
-  params: Pick<URLSearchParams, "get">,
-  fallback = insightRangeOfDays(30)
-): AssistantInsightView {
+/** The period in `?from=&to=` (Svelte's calendar dates), or `fallback` for a missing or invalid one. */
+export function readInsightRangeSearch(
+  params: SearchReader,
+  fallback = insightRangeOfDays(DEFAULT_INSIGHT_DAYS)
+): InsightRange {
   const from = calendarDate(params.get("from"));
   const to = calendarDate(params.get("to"));
+  return from && to && from <= to ? { start: from as IsoDate, end: to as IsoDate } : fallback;
+}
+
+/**
+ * The insights view's filters in the address: the period (`from`, `to`),
+ * the source (`source`, left out for every source) and the comparison
+ * (`compare=1`). Anything unknown reads as the default.
+ */
+export function readInsightViewSearch(
+  params: SearchReader,
+  fallback = insightRangeOfDays(DEFAULT_INSIGHT_DAYS)
+): InsightFilters {
   return {
-    range: from && to && from <= to ? { start: from as IsoDate, end: to as IsoDate } : fallback,
-    includeFollowups: params.get("followups") !== "false",
-    tab: params.get("tab") === "questions" ? "questions" : "chat"
+    range: readInsightRangeSearch(params, fallback),
+    source: parseInsightSource(params.get("source")),
+    compare: params.get("compare") === "1"
   };
 }
 
-export function assistantInsightViewSearch(view: AssistantInsightView, current = ""): string {
+/** The address's query with the filters in it; other parameters stay. */
+export function insightViewSearch(filters: InsightFilters, current = ""): string {
   const params = new URLSearchParams(current);
-  params.set("from", view.range.start);
-  params.set("to", view.range.end);
-  params.set("followups", String(view.includeFollowups));
-  params.set("tab", view.tab);
+  params.set("from", filters.range.start);
+  params.set("to", filters.range.end);
+  if (filters.source) params.set("source", filters.source);
+  else params.delete("source");
+  if (filters.compare) params.set("compare", "1");
+  else params.delete("compare");
   return `?${params.toString()}`;
 }
 
 /** Router search values are flat strings (or repeated strings), just like URLSearchParams. */
-export function validateAssistantInsightSearch(
+export function validateInsightViewSearch(
   search: Record<string, unknown>,
-  fallback = insightRangeOfDays(30)
-) {
-  const view = readAssistantInsightView(
-    {
-      get: (key) => {
-        const value = search[key];
-        const first = Array.isArray(value) ? value[0] : value;
-        return typeof first === "string" ? first : null;
-      }
-    },
-    fallback
-  );
+  fallback = insightRangeOfDays(DEFAULT_INSIGHT_DAYS)
+): {
+  from: string;
+  to: string;
+  source?: string;
+  compare?: string;
+  finding?: string;
+  feedback?: string;
+  analysis?: string;
+} {
+  const reader: SearchReader = {
+    get: (key) => {
+      const value = search[key];
+      const first = Array.isArray(value) ? value[0] : value;
+      return typeof first === "string" ? first : null;
+    }
+  };
+  const filters = readInsightViewSearch(reader, fallback);
+  const finding = readInsightFindingSearch(reader);
+  const feedback = readInsightFeedbackSearch(reader);
   return {
-    from: view.range.start,
-    to: view.range.end,
-    followups: String(view.includeFollowups),
-    tab: view.tab
+    from: filters.range.start,
+    to: filters.range.end,
+    ...(filters.source ? { source: filters.source } : {}),
+    ...(filters.compare ? { compare: "1" } : {}),
+    ...(finding ? { finding } : {}),
+    ...(feedback === "all" ? {} : { feedback }),
+    ...(readInsightAnalysisSearch(reader) ? { analysis: "open" } : {})
   };
 }

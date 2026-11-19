@@ -529,6 +529,7 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
         from_date=ANY,
         to_date=ANY,
         tenant_id=service.user.tenant_id,
+        source=None,
     )
     # Every answer in the window counts, follow-ups included, like the totals.
     service.repo.get_message_feedback_counts.assert_awaited_once_with(
@@ -537,6 +538,7 @@ async def test_get_conversation_stats_assistant(service: AnalysisService):
         group_chat_id=None,
         from_date=ANY,
         to_date=ANY,
+        source=None,
     )
 
 
@@ -568,6 +570,7 @@ async def test_get_conversation_stats_group_chat(service: AnalysisService):
         group_chat_id=group_chat_id,
         from_date=ANY,
         to_date=ANY,
+        source=None,
     )
 
 
@@ -587,6 +590,7 @@ async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
         session_id=uuid4(),
         feedback_value=None,
         feedback_text=None,
+        source="widget",
     )
     service.repo.get_assistant_question_history_page = AsyncMock(
         return_value=([row], 123, True)
@@ -600,11 +604,13 @@ async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
         limit=100,
         query="foo",
         cursor=cursor,
+        source="widget",
     )
 
     assert total_count == 123
     assert len(items) == 1
     assert items[0].question == "test question"
+    assert items[0].source == "widget"
     assert next_cursor is not None
 
     service.repo.get_assistant_question_history_page.assert_awaited_once_with(
@@ -617,6 +623,7 @@ async def test_get_assistant_question_history_page_passes_tenant_and_cursor(
         query="foo",
         cursor_created_at=datetime(2026, 2, 10, 12, 30, 0, tzinfo=timezone.utc),
         cursor_id=UUID("3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+        source="widget",
     )
 
 
@@ -634,6 +641,7 @@ async def test_get_assistant_question_history_page_carries_answer_ratings(
         session_id=uuid4(),
         feedback_value=-1,
         feedback_text="Missade LOU-gränsen",
+        source="user",
     )
     unrated = MagicMock(
         id=uuid4(),
@@ -642,6 +650,7 @@ async def test_get_assistant_question_history_page_carries_answer_ratings(
         session_id=uuid4(),
         feedback_value=None,
         feedback_text=None,
+        source="api_key",
     )
     service.repo.get_assistant_question_history_page = AsyncMock(
         return_value=([rated, unrated], 2, False)
@@ -692,6 +701,7 @@ async def test_get_assistant_feedback_counts_checks_access_and_passes_filters(
         from_date=datetime(2026, 2, 1),
         to_date=datetime(2026, 2, 11),
         include_followups=False,
+        source=None,
     )
 
 
@@ -786,18 +796,21 @@ async def test_get_conversation_stats_with_date_range(service: AnalysisService):
         from_date=start_time,
         to_date=end_time,
         tenant_id=service.user.tenant_id,
+        source=None,
     )
 
 
-async def test_get_assistant_insight_sessions_passes_tenant_id(
+async def test_get_assistant_insight_sessions_passes_tenant_id_and_source(
     service: AnalysisService,
 ):
     assistant_id = uuid4()
-    service.session_repo.get_metadata_by_assistant = AsyncMock(return_value=([], 0))
+    service.session_repo.get_sourced_metadata = AsyncMock(return_value=([], 0))
 
-    await service.get_assistant_insight_sessions(assistant_id=assistant_id)
+    await service.get_assistant_insight_sessions(
+        assistant_id=assistant_id, source="widget"
+    )
 
-    service.session_repo.get_metadata_by_assistant.assert_awaited_once_with(
+    service.session_repo.get_sourced_metadata.assert_awaited_once_with(
         assistant_id=assistant_id,
         limit=ANY,
         cursor=ANY,
@@ -806,18 +819,19 @@ async def test_get_assistant_insight_sessions_passes_tenant_id(
         start_date=ANY,
         end_date=ANY,
         tenant_id=service.user.tenant_id,
+        source="widget",
     )
 
 
-async def test_get_group_chat_insight_sessions_passes_tenant_id(
+async def test_get_group_chat_insight_sessions_passes_tenant_id_and_source(
     service: AnalysisService,
 ):
     group_chat_id = uuid4()
-    service.session_repo.get_metadata_by_group_chat = AsyncMock(return_value=([], 0))
+    service.session_repo.get_sourced_metadata = AsyncMock(return_value=([], 0))
 
     await service.get_group_chat_insight_sessions(group_chat_id=group_chat_id)
 
-    service.session_repo.get_metadata_by_group_chat.assert_awaited_once_with(
+    service.session_repo.get_sourced_metadata.assert_awaited_once_with(
         group_chat_id=group_chat_id,
         limit=ANY,
         cursor=ANY,
@@ -826,6 +840,7 @@ async def test_get_group_chat_insight_sessions_passes_tenant_id(
         start_date=ANY,
         end_date=ANY,
         tenant_id=service.user.tenant_id,
+        source=None,
     )
 
 

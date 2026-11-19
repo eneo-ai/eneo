@@ -1,4 +1,4 @@
-from collections.abc import Collection, Sequence
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, NamedTuple
@@ -20,8 +20,8 @@ from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.group_chats_table import GroupChatsTable
-from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import (
     InfoBlobReferences,
     QuestionFeedback,
@@ -32,6 +32,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
+from eneo.database.tables.widgets_table import Widgets
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
@@ -41,13 +42,16 @@ from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
 )
 from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
     SessionUpdate,
+    SourcedSessionMetadata,
 )
+from eneo.sessions.session_source import SessionSource, has_source, session_source
 from eneo.user_groups.user_group import UserGroupState
 
 
@@ -198,15 +202,24 @@ class SessionRepository:
     def _filter_by_tenant(query: sa.Select[Any], tenant_id: UUID) -> sa.Select[Any]:
         """Restrict a sessions query to a single tenant.
 
-        Sessions.user_id is NULL for service-key sessions (the principal is on
-        api_key_id instead), so an INNER JOIN on Users would silently drop
-        them. We LEFT JOIN both principal tables and match against whichever
-        tenant_id is present.
+        A session has exactly one principal (see
+        :mod:`eneo.sessions.session_source`): only a user session has a
+        ``users`` row, so an INNER JOIN on Users would silently drop API-key
+        and widget sessions. We LEFT JOIN every principal table and match
+        against whichever tenant_id is present. A listing for one principal
+        still filters on that principal's column, so a user's own list never
+        shows another source's conversations.
         """
         return (
             query.outerjoin(Users, Sessions.user_id == Users.id)
             .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
-            .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
+            .outerjoin(Widgets, Sessions.widget_id == Widgets.id)
+            .where(
+                sa.func.coalesce(
+                    Users.tenant_id, ApiKeysV2.tenant_id, Widgets.tenant_id
+                )
+                == tenant_id
+            )
         )
 
     # IMPORTANT: every method in this repo that returns session or question
@@ -217,21 +230,16 @@ class SessionRepository:
     # ownership and the chat partner do not, so a refusal can be explained.
     @staticmethod
     def _exclude_helper_run_sessions(query: sa.Select[Any]) -> sa.Select[Any]:
-        """Exclude sessions referenced by a help_assistant_runs row.
+        """Exclude hidden sessions: helper runs and insights conversations.
 
-        Helper conversations live in the regular sessions/questions tables so
-        streaming, RAG, model selection, and tool calling all work — but they
+        Hidden conversations live in the regular sessions/questions tables so
+        streaming, RAG, model selection, and tool calling all work, but they
         must never appear in normal session / conversation / insights / export
-        endpoints. This is the single rule, one place. Every method in this
-        repo that returns session rows must apply it. See PRD §4.
+        endpoints. The rule itself is :mod:`eneo.sessions.hidden_sessions`.
+        Every method in this repo that returns session rows must apply it.
+        See PRD §4.
         """
-        return query.where(
-            ~sa.exists(
-                sa.select(HelpAssistantRuns.id).where(
-                    HelpAssistantRuns.session_id == Sessions.id
-                )
-            )
-        )
+        return query.where(hidden_session_clause(Sessions.id))
 
     @staticmethod
     def _exclude_unreadable_copies(query: sa.Select[Any]) -> sa.Select[Any]:
@@ -705,6 +713,36 @@ class SessionRepository:
             sa.delete(QuestionFeedback).where(QuestionFeedback.question_id.in_(owned))
         )
 
+    async def get_for_insight_conversation(
+        self, id: UUID, tenant_id: UUID
+    ) -> SessionInDB | None:
+        """Load an insights conversation with its prior questions eager-loaded.
+
+        Documented exception to ``_exclude_helper_run_sessions``: the
+        InsightConversationService needs the hidden session for follow-up
+        turns, history and tool results. Restricted to sessions that carry an
+        ``insight_conversations`` row and tenant-scoped via
+        :meth:`_filter_by_tenant`; the caller authorizes against that row's
+        actor and the target's insight access. A copy whose source was
+        removed is still excluded. No other code path may call this method.
+        """
+        query = self._exclude_unreadable_copies(
+            self._filter_by_tenant(
+                sa.select(Sessions).where(
+                    Sessions.id == id,
+                    sa.exists(
+                        sa.select(InsightConversations.id).where(
+                            InsightConversations.session_id == Sessions.id
+                        )
+                    ),
+                ),
+                tenant_id,
+            )
+        )
+        return await self._hydrate_optional(
+            await self.delegate.get_model_from_query(query)
+        )
+
     async def get_for_helper_run(self, id: UUID, tenant_id: UUID) -> SessionInDB | None:
         """Load a helper-run session with its prior questions eager-loaded.
 
@@ -726,21 +764,23 @@ class SessionRepository:
             await self.delegate.get_model_from_query(query)
         )
 
-    async def _get_total_count(
+    def _listing_filters(
         self,
-        assistant_id: UUID | None = None,
-        user_id: UUID | None = None,
-        api_key_id: UUID | None = None,
-        widget_id: UUID | None = None,
-        visitor_id: UUID | None = None,
-        group_chat_id: UUID | None = None,
-        name_filter: str | None = None,
-        start_date: datetime | None = None,
-        end_date: datetime | None = None,
-        tenant_id: UUID | None = None,
-    ) -> int:
-        query = sa.select(sa.func.count()).select_from(Sessions)
-
+        query: sa.Select[Any],
+        *,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+        user_id: UUID | None,
+        api_key_id: UUID | None,
+        widget_id: UUID | None,
+        visitor_id: UUID | None,
+        name_filter: str | None,
+        start_date: datetime | None,
+        end_date: datetime | None,
+        tenant_id: UUID | None,
+        source: SessionSource | None,
+    ) -> sa.Select[Any]:
+        """The filters a conversation listing and its total share."""
         if tenant_id is not None:
             query = self._filter_by_tenant(query, tenant_id)
         query = self._exclude_unreadable_copies(
@@ -762,6 +802,8 @@ class SessionRepository:
             query = query.where(
                 Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
             )
+        if source is not None:
+            query = query.where(has_source(source))
 
         if name_filter is not None:
             query = query.where(Sessions.name.ilike(f"%{name_filter}%"))
@@ -772,21 +814,106 @@ class SessionRepository:
         if end_date is not None:
             query = query.where(Sessions.created_at <= end_date)
 
-        count = await self.session.scalar(query)
-        return count if count is not None else 0
+        return query
+
+    async def _metadata_page(
+        self,
+        *,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        user_id: UUID | None = None,
+        api_key_id: UUID | None = None,
+        widget_id: UUID | None = None,
+        visitor_id: UUID | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+        previous: bool = False,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+        tenant_id: UUID | None = None,
+        source: SessionSource | None = None,
+    ) -> tuple[list[SourcedSessionMetadata], int]:
+        """One page of a conversation listing, each row with its source, and
+        the listing's total. One more row than ``limit`` tells the caller a
+        next page exists."""
+
+        def filtered(query: sa.Select[Any]) -> sa.Select[Any]:
+            return self._listing_filters(
+                query,
+                assistant_id=assistant_id,
+                group_chat_id=group_chat_id,
+                user_id=user_id,
+                api_key_id=api_key_id,
+                widget_id=widget_id,
+                visitor_id=visitor_id,
+                name_filter=name_filter.strip() if name_filter else None,
+                start_date=start_date,
+                end_date=end_date,
+                tenant_id=tenant_id,
+                source=source,
+            )
+
+        total_count = (
+            await self.session.scalar(
+                filtered(sa.select(sa.func.count()).select_from(Sessions))
+            )
+            or 0
+        )
+        query = filtered(
+            sa.select(
+                Sessions.id,
+                Sessions.name,
+                Sessions.created_at,
+                Sessions.updated_at,
+                session_source().label("source"),
+            )
+        )
+
+        if cursor is not None and previous:
+            query = query.where(Sessions.created_at > cursor).order_by(
+                Sessions.created_at.asc(),
+                Sessions.id.asc(),
+            )
+        elif cursor is not None:
+            query = query.where(Sessions.created_at <= cursor).order_by(
+                Sessions.created_at.desc(),
+                Sessions.id.desc(),
+            )
+        else:
+            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
+
+        if limit is not None:
+            query = query.limit(limit + 1)
+
+        rows = [
+            SourcedSessionMetadata(
+                id=row.id,
+                name=row.name,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
+                source=row.source,
+            )
+            for row in await self.session.execute(query)
+        ]
+        if cursor is not None and previous:
+            rows.reverse()
+        return rows, total_count
 
     @staticmethod
-    def _to_session_metadata(
-        items: Sequence[tuple[UUID, str, datetime | None, datetime | None]],
+    def _unsourced(
+        rows: list[SourcedSessionMetadata],
     ) -> list[SessionMetadataPublic]:
+        """A principal's own listing: its conversations all have its source,
+        so the rows carry no source."""
         return [
             SessionMetadataPublic(
-                id=item[0],
-                name=item[1],
-                created_at=item[2],
-                updated_at=item[3],
+                id=row.id,
+                name=row.name,
+                created_at=row.created_at,
+                updated_at=row.updated_at,
             )
-            for item in items
+            for row in rows
         ]
 
     async def get_metadata_by_assistant(
@@ -804,73 +931,21 @@ class SessionRepository:
         end_date: datetime | None = None,
         tenant_id: UUID | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(
-            Sessions.id, Sessions.name, Sessions.created_at, Sessions.updated_at
-        ).where(Sessions.assistant_id == assistant_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_unreadable_copies(
-            self._exclude_helper_run_sessions(query)
-        )
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-        if widget_id is not None:
-            query = query.where(
-                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
-            )
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
+        rows, total_count = await self._metadata_page(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
             widget_id=widget_id,
             visitor_id=visitor_id,
-            name_filter=normalized_name_filter,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+            name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
             tenant_id=tenant_id,
         )
-
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                result = await self.session.execute(query)
-                items = list(result.tuples())
-                items.reverse()
-                return (self._to_session_metadata(items), total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        result = await self.session.execute(query)
-        items = list(result.tuples())
-        return self._to_session_metadata(items), total_count
+        return self._unsourced(rows), total_count
 
     async def get_metadata_by_group_chat(
         self,
@@ -887,73 +962,53 @@ class SessionRepository:
         end_date: datetime | None = None,
         tenant_id: UUID | None = None,
     ) -> tuple[list[SessionMetadataPublic], int]:
-        normalized_name_filter = name_filter.strip() if name_filter else None
-        query = sa.select(
-            Sessions.id, Sessions.name, Sessions.created_at, Sessions.updated_at
-        ).where(Sessions.group_chat_id == group_chat_id)
-
-        if tenant_id is not None:
-            query = self._filter_by_tenant(query, tenant_id)
-        query = self._exclude_unreadable_copies(
-            self._exclude_helper_run_sessions(query)
-        )
-
-        if user_id is not None:
-            query = query.where(Sessions.user_id == user_id)
-        if api_key_id is not None:
-            query = query.where(Sessions.api_key_id == api_key_id)
-        if widget_id is not None:
-            query = query.where(
-                Sessions.widget_id == widget_id, Sessions.visitor_id == visitor_id
-            )
-
-        if normalized_name_filter is not None:
-            query = query.where(Sessions.name.ilike(f"%{normalized_name_filter}%"))
-
-        if start_date is not None:
-            query = query.where(Sessions.created_at >= start_date)
-
-        if end_date is not None:
-            query = query.where(Sessions.created_at <= end_date)
-
-        total_count = await self._get_total_count(
+        rows, total_count = await self._metadata_page(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,
             widget_id=widget_id,
             visitor_id=visitor_id,
-            name_filter=normalized_name_filter,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+            name_filter=name_filter,
             start_date=start_date,
             end_date=end_date,
             tenant_id=tenant_id,
         )
+        return self._unsourced(rows), total_count
 
-        if cursor is not None:
-            if previous:
-                query = query.where(Sessions.created_at > cursor).order_by(
-                    Sessions.created_at.asc(),
-                    Sessions.id.asc(),
-                )
-                if limit is not None:
-                    query = query.limit(limit + 1)
-                result = await self.session.execute(query)
-                items = list(result.tuples())
-                items.reverse()
-                return (self._to_session_metadata(items), total_count)
-            else:
-                query = query.where(Sessions.created_at <= cursor).order_by(
-                    Sessions.created_at.desc(),
-                    Sessions.id.desc(),
-                )
-        else:
-            query = query.order_by(Sessions.created_at.desc(), Sessions.id.desc())
-
-        if limit is not None:
-            query = query.limit(limit + 1)
-
-        result = await self.session.execute(query)
-        items = list(result.tuples())
-        return self._to_session_metadata(items), total_count
+    async def get_sourced_metadata(
+        self,
+        *,
+        tenant_id: UUID,
+        assistant_id: UUID | None = None,
+        group_chat_id: UUID | None = None,
+        source: SessionSource | None = None,
+        limit: int | None = None,
+        cursor: datetime | None = None,
+        previous: bool = False,
+        name_filter: str | None = None,
+        start_date: datetime | None = None,
+        end_date: datetime | None = None,
+    ) -> tuple[list[SourcedSessionMetadata], int]:
+        """Every conversation of one assistant or group chat in the tenant,
+        whatever its source, each tagged with it: the insights explore list.
+        ``source`` narrows it to one source."""
+        if (assistant_id is None) == (group_chat_id is None):
+            raise ValueError("Exactly one of assistant_id or group_chat_id is required")
+        return await self._metadata_page(
+            assistant_id=assistant_id,
+            group_chat_id=group_chat_id,
+            limit=limit,
+            cursor=cursor,
+            previous=previous,
+            name_filter=name_filter,
+            start_date=start_date,
+            end_date=end_date,
+            tenant_id=tenant_id,
+            source=source,
+        )
 
     async def get_by_tenant(
         self,

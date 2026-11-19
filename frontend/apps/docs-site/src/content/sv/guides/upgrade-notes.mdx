@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@62bd9f053595
+translationSource: guides/upgrade-notes.mdx@48e43636809e
 ---
 
 import { Callout } from "nextra/components";
@@ -134,6 +134,7 @@ flowchart TB
 |---|---|---|
 | [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
+| [Insikter räknar alla konversationskällor](#insights-count-every-source) | Administratörer som följer insikternas siffror; API-konsumenter av `/api/v1/analysis/` | Räkna med högre summor; skicka `source=user` för det tidigare urvalet |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
 | [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar. Inte påslaget än: stegen för utgång, oanvända nycklar och rotationsfrist i nattens underhåll är inte påslagna; det gäller när de har slagits på |
 
@@ -340,6 +341,14 @@ En migrering tömmer ikoner som pekar över organisationsgränser. Att ta bort e
 **Gör:** driftsätt backend och båda frontends tillsammans; ladda upp tömda ikoner igen. Se [Icons](/docs/api#icons).
 
 **Återställning:** tömningen går inte att ångra.
+
+### Insikter räknar alla konversationskällor [#insights-count-every-source]
+
+Insikter och statistiken under `/api/v1/analysis/` räknade bara inloggade användares konversationer. Nu räknas också konversationer som förs med en tjänstenyckel och, nytt i den här versionen, genom en webbwidget. Konversationer, frågor och betyg blir fler där sådana konversationer finns, även för perioder före uppgraderingen: siffrorna räknas fram ur de lagrade konversationerna. Antal användare räknar fortfarande bara inloggade användare.
+
+Konversationerna och frågorna som listas har fältet `source`: `user`, `api_key` eller `widget`. `GET /api/v1/analysis/conversation-insights/`, dess lista `sessions/` och assistentens `questions/` och `feedback/` tar en parameter `source`. `/api/v1/analysis/counts/` och `metadata-statistics` har inget sådant filter.
+
+**Gör:** räkna med högre summor när ni jämför med siffror som exporterats före uppgraderingen. Skicka `source=user` där ni vill ha det tidigare urvalet. En klient med en fast svarsmodell godtar det nya fältet `source`.
 
 ### API-nycklar som borde ha gått ut slutar fungera [#api-keys-expire]
 

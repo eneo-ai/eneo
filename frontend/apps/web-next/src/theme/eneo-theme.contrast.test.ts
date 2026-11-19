@@ -227,6 +227,8 @@ const GROUPS: Record<string, Pair[]> = {
       onTint("--eneo-color-border-control", tint, RAISED, NON_TEXT)
     )
   ],
+  // Marks in charts and source bars, drawn in cards and on the page panel.
+  "data marks (1.4.11)": onSurfaces(["--eneo-color-data-amber"], ["surface", "card"], NON_TEXT),
   "focus ring, checked controls and accent icons (1.4.11)": onSurfaces(
     ["--color-accent", "--color-icon-accent"],
     ALL_SURFACES,

@@ -3,7 +3,7 @@ from uuid import uuid4
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-from eneo.internal_mcp.foundation import build_ephemeral_server
+from eneo.internal_mcp.foundation import build_ephemeral_server, fit_lines
 from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_session import (
     declares_destructive,
 )
@@ -52,3 +52,14 @@ async def test_ephemeral_loopback_server_is_marked_internal():
 
     assert server.is_internal is True
     assert server.name == "knowledge"
+
+
+def test_fit_lines_cuts_by_characters_and_keeps_order():
+    lines = ["a" * 10, "b" * 10, "c" * 10]
+
+    assert fit_lines(lines, budget=25) == lines[:2]
+
+
+def test_fit_lines_always_keeps_the_first_line():
+    """A single oversized line cannot stall paging."""
+    assert fit_lines(["x" * 100], budget=5) == ["x" * 100]

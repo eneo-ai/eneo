@@ -10,7 +10,6 @@ from sqlalchemy.orm import selectinload, undefer
 from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
-from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.logging_table import logging_table
 from eneo.database.tables.mcp_tool_references_table import (
@@ -30,6 +29,7 @@ from eneo.info_blobs.info_blob_repo import InfoBlobRepository
 from eneo.logging.logging import LoggingDetails
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.hidden_sessions import hidden_session_clause
 from eneo.skills.domain.skill import (
     SkillActivationEvidence,
     SkillExecutionReference,
@@ -564,15 +564,10 @@ class QuestionRepository:
         stmt = (
             sa.select(Questions)
             .where(Questions.service_id == service_id)
-            # Helper-assistant questions must never surface in exports/analysis
-            # (PRD §4) — same exclusion as sessions_repo / analysis_repo.
-            .where(
-                ~sa.exists(
-                    sa.select(HelpAssistantRuns.id).where(
-                        HelpAssistantRuns.session_id == Questions.session_id
-                    )
-                )
-            )
+            # Hidden-session questions (helper runs, insights conversations)
+            # must never surface in exports/analysis (PRD §4): the same rule as
+            # sessions_repo / analysis_repo.
+            .where(hidden_session_clause(Questions.session_id))
             .order_by(Questions.created_at)
         )
 
@@ -588,13 +583,10 @@ class QuestionRepository:
             .join(Sessions)
             .join(Users)
             .where(Users.tenant_id == tenant_id)
-            # Exclude helper-assistant questions from tenant-wide exports.
+            # Exclude hidden-session questions (helper runs, insights
+            # conversations) from tenant-wide exports.
             .where(
-                ~sa.exists(
-                    sa.select(HelpAssistantRuns.id).where(
-                        HelpAssistantRuns.session_id == Sessions.id
-                    )
-                )
+                hidden_session_clause(Sessions.id),
             )
             .where(copy_session_valid(Sessions.id.expression))
             .filter(Questions.created_at >= start_date)

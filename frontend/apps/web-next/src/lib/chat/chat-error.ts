@@ -2,7 +2,8 @@ import {
   EneoApiError,
   errorReferenceLines,
   getErrorMessageForCode,
-  getErrorMessageForReason
+  getErrorMessageForReason,
+  isDerivedSourceRemoved
 } from "@/lib/api/errors";
 
 import type { EneoDataParts } from "./types";
@@ -20,6 +21,12 @@ export type ChatFailure = {
    */
   details: string[];
   context?: ContextErrorInfo;
+  /**
+   * The conversation is gone: it was removed with content it was based on
+   * (410, `derived_source_removed`). Asking again cannot help; a new
+   * conversation can.
+   */
+  gone?: true;
 };
 
 /** Longer backend text is cut so a stack trace or HTML page never fills the chat. */
@@ -184,6 +191,9 @@ export function describeChatFailure(
   t: Translate
 ): ChatFailure {
   const failure = describeGeneralFailure(error, streamError, t);
+  if (isDerivedSourceRemoved(error)) {
+    return { ...failure, message: t("derived_source_removed"), gone: true };
+  }
   const context = getContextErrorInfo(error, streamError);
   return context ? { ...failure, message: t("context_window_exceeded"), context } : failure;
 }

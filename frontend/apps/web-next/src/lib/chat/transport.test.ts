@@ -89,6 +89,45 @@ describe("a well-formed stream", () => {
   });
 });
 
+describe("a conversation on other endpoints", () => {
+  it("posts each turn where its endpoint says, with the body it builds", async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse(toSseBody([start, session, textStart, textDelta, textEnd, finish]))
+    );
+    const request = vi.fn(({ question, options }: { question: string; options: object }) => ({
+      api: "/api/v1/elsewhere/s-1/",
+      body: { question, seen: options }
+    }));
+    const chat = new Chat<EneoUIMessage>({ transport: createChatTransport({ request }) });
+    await chat.sendMessage({ text: "Hi" }, { body: { session_id: "s-1", files: [] } });
+
+    expect(chat.status).toBe("ready");
+    expect(request).toHaveBeenCalledWith({
+      question: "Hi",
+      options: { session_id: "s-1", files: [] }
+    });
+    const [url, init] = transportFetch.mock.calls[0]!;
+    expect(url).toBe("/api/v1/elsewhere/s-1/");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      question: "Hi",
+      seen: { session_id: "s-1", files: [] }
+    });
+  });
+
+  it("holds its answer to the same contract", async () => {
+    fetchMock.mockResolvedValueOnce(
+      sseResponse(toSseBody([start, session, textStart, textDelta], { done: false }))
+    );
+    const chat = new Chat<EneoUIMessage>({
+      transport: createChatTransport({ request: () => ({ api: "/elsewhere/", body: {} }) }),
+      onError: () => {}
+    });
+    await chat.sendMessage({ text: "Hi" });
+    expect(chat.status).toBe("error");
+    expect(chat.error?.name).toBe("StreamContractError");
+  });
+});
+
 describe("a refused response", () => {
   it("fails as an EneoApiError carrying the status, code and message, never the raw body", async () => {
     const result = await run(

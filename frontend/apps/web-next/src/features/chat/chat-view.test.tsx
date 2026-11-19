@@ -426,7 +426,7 @@ describe("ChatView composer drafts", () => {
 
   it("draws a question's references while it waits for a model switch to be saved", async () => {
     sessionStorage.clear();
-    const tokens = vi.fn<ChatReferences["tokens"]>(() => []);
+    const tokens = vi.fn<NonNullable<ChatReferences["tokens"]>>(() => []);
     renderInApp(
       <Harness
         partner={assistant}

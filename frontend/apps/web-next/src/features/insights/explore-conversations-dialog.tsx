@@ -17,7 +17,9 @@ import type { ChatPartner } from "@/lib/chat/types";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/features/chat/chat-message";
+import { insightSourceQuery, type InsightSource } from "./insight-figures";
 import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./insights-range";
+import { SourceTag } from "./source-tag";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
@@ -27,11 +29,13 @@ type Partner = ChatPartner & { type: "assistant" | "group-chat" };
 function SessionList({
   partner,
   range,
+  source,
   selectedId,
   onSelect
 }: {
   partner: Partner;
   range: InsightRange;
+  source: InsightSource | null;
   selectedId: string | null;
   onSelect: (sessionId: string) => void;
 }) {
@@ -55,6 +59,7 @@ function SessionList({
       partner.id,
       params.fromDate,
       params.toDate,
+      source,
       filter
     ],
     queryFn: ({ pageParam, signal }) =>
@@ -63,6 +68,7 @@ function SessionList({
           params: {
             query: {
               ...query,
+              ...insightSourceQuery(source),
               limit: PAGE_SIZE,
               cursor: pageParam,
               name_filter: filter || undefined,
@@ -146,11 +152,14 @@ function SessionList({
                           <span className="w-full truncate">
                             {session.name || t("chat_history_untitled")}
                           </span>
-                          {session.created_at && (
-                            <span className="text-ax-text-secondary text-xs font-normal tabular-nums">
-                              <ClientTime value={session.created_at} format="date_time" />
-                            </span>
-                          )}
+                          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            {session.created_at && (
+                              <span className="text-ax-text-secondary text-xs font-normal tabular-nums">
+                                <ClientTime value={session.created_at} format="date_time" />
+                              </span>
+                            )}
+                            <SourceTag source={session.source} />
+                          </span>
                         </button>
                       </li>
                     );
@@ -202,9 +211,12 @@ function SessionPreview({ partner, sessionId }: { partner: Partner; sessionId: s
       aria-labelledby={headingId}
       className="bg-ax-sunken border-ax-border rounded-ax-container flex min-h-0 flex-col gap-3 border p-3"
     >
-      <h3 id={headingId} className="text-sm font-semibold">
-        {t("insights_preview_label")}
-      </h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 id={headingId} className="text-sm font-semibold">
+          {t("insights_preview_label")}
+        </h3>
+        {sessionId !== null && session.data ? <SourceTag source={session.data.source} /> : null}
+      </div>
       <div className="min-h-0 flex-1 overflow-y-auto">
         {sessionId === null ? (
           <p className="text-ax-text-secondary text-sm">{t("insights_select_conversation")}</p>
@@ -232,24 +244,31 @@ function SessionPreview({ partner, sessionId }: { partner: Partner; sessionId: s
 }
 
 /**
- * "Utforska konversationer": every conversation users had with the partner
- * in the chosen period (owners and editors of a partner with insights on),
- * searchable by title and loaded a page at a time, with the picked one
- * readable beside the list.
+ * "Utforska konversationer": every conversation with the partner in the
+ * chosen period (owners and editors of a partner with insights on), from
+ * signed-in users, the widget and API keys alike unless `source` names one,
+ * each tagged with where it came from. Searchable by title and loaded a page
+ * at a time, with the picked one readable beside the list. `initialSessionId`
+ * opens it on one conversation (one an analysis cited or a rating belongs
+ * to), read beside the list whether the list holds it or not.
  */
 export function ExploreConversationsDialog({
   partner,
   range,
+  source = null,
   isOpen,
-  onOpenChange
+  onOpenChange,
+  initialSessionId = null
 }: {
   partner: Partner;
   range: InsightRange;
+  source?: InsightSource | null;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
+  initialSessionId?: string | null;
 }) {
   const t = useTranslations();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSessionId);
 
   return (
     <Dialog isOpen={isOpen} onOpenChange={onOpenChange} width={960} maxHeight="85dvh">
@@ -262,6 +281,7 @@ export function ExploreConversationsDialog({
         <SessionList
           partner={partner}
           range={range}
+          source={source}
           selectedId={selectedId}
           onSelect={setSelectedId}
         />

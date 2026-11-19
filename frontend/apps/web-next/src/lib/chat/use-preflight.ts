@@ -23,6 +23,8 @@ export function usePreflight(request: {
   assistantId?: string | null;
   groupChatId?: string | null;
   revision?: string | null;
+  /** False for a conversation the chat API does not hold (the insights chat): nothing is estimated. */
+  enabled?: boolean;
 }): { estimate: PreflightState; pending: boolean } {
   const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
     null
@@ -40,7 +42,9 @@ export function usePreflight(request: {
     groupChatId ?? null,
     request.revision ?? null
   ]);
-  const shouldRequest = Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
+  const shouldRequest =
+    request.enabled !== false &&
+    Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
 
   useEffect(() => {
     const current = ++generation.current;

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { clearChatDrafts, useChatDraft } from "./use-chat-draft";
+import { clearChatDrafts, useChatDraft, withLine } from "./use-chat-draft";
 
 const ME = "tenant-1.user-1";
 const SOMEONE_ELSE = "tenant-1.user-2";
@@ -134,4 +134,12 @@ it("removes an emptied draft at once, so a scope change before the pause cannot 
   act(() => view.result.current[1](""));
   view.rerender({ scope: "assistant:a1:session-1" });
   expect(sessionStorage.getItem(`eneo:chat-draft:${ME}|assistant:a1:new`)).toBeNull();
+});
+
+it("adds offered text on a line of its own, once", () => {
+  expect(withLine("", "Varför?")).toBe("Varför?");
+  expect(withLine("Min fråga", "Varför?")).toBe("Min fråga\nVarför?");
+  // Already the last line (trailing whitespace aside): unchanged.
+  expect(withLine("Min fråga\nVarför?", "Varför?")).toBe("Min fråga\nVarför?");
+  expect(withLine("Varför?\n", "Varför?")).toBe("Varför?\n");
 });

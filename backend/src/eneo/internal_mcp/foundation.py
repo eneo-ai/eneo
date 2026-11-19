@@ -23,7 +23,7 @@ on their throwaway ids never accumulates (by design).
 
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping
+from collections.abc import AsyncGenerator, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, NamedTuple
 from uuid import UUID, uuid4
@@ -106,11 +106,13 @@ def mcp_server_id_from_token(token: str) -> UUID:
     return server_id
 
 
-def session_id_from_token(token: str) -> UUID | None:
-    """The chat session the completion this token was minted for runs in.
+def verified_claims(token: str) -> dict[str, object]:
+    """Signature-verified raw claims of an account's loopback token.
 
-    None when the token carries no ``session_id`` claim (a token minted for a
-    provider check or outside a conversation).
+    Each server reads its own scope claims from here; the token is verified
+    again by ``authenticate_internal_mcp_token`` when the container is
+    bootstrapped. A widget visitor's token has another audience and is
+    refused.
     """
     settings = get_settings()
     _, claims = AuthService().get_jwt_payload_with_claims(
@@ -119,20 +121,22 @@ def session_id_from_token(token: str) -> UUID | None:
         aud=INTERNAL_MCP_AUDIENCE,
         algs=[settings.jwt_algorithm],
     )
-    raw = claims.get("session_id")
+    return claims
+
+
+def session_id_from_token(token: str) -> UUID | None:
+    """The chat session the completion this token was minted for runs in.
+
+    None when the token carries no ``session_id`` claim (a token minted for a
+    provider check or outside a conversation).
+    """
+    raw = verified_claims(token).get("session_id")
     return UUID(str(raw)) if raw else None
 
 
 def table_tools_from_token(token: str) -> bool:
     """Whether the completion this token was minted for attached the table tools."""
-    settings = get_settings()
-    _, claims = AuthService().get_jwt_payload_with_claims(
-        token,
-        key=str(settings.jwt_secret),
-        aud=INTERNAL_MCP_AUDIENCE,
-        algs=[settings.jwt_algorithm],
-    )
-    return claims.get("table_tools") is True
+    return verified_claims(token).get("table_tools") is True
 
 
 VISITORS_NOT_SERVED_MESSAGE = "This tool is not available to widget visitors."
@@ -210,6 +214,46 @@ async def internal_tool_context(
             async with session.begin():
                 scope = await authenticated_scope()
             yield scope
+
+
+@asynccontextmanager
+async def account_tool_container(
+    token: str,
+) -> AsyncGenerator[tuple[Container, UserInDB], None]:
+    """A user-bound container for a loopback token scoped to something other
+    than one assistant (the insights server's analysed target).
+
+    Yields ``(container, user)``. Like :func:`internal_tool_context`, loading
+    resources runs the normal permission checks for the token's account, and
+    the transaction commits when the block exits normally. The caller reads
+    and checks its own scope claims; widget visitors are never served.
+    """
+    from eneo.main.container.container_overrides import override_user
+    from eneo.main.container.request_container import request_container
+
+    async with sessionmanager.session() as session, session.begin():
+        container = request_container(session=providers.Object(session))
+        user = await container.user_service().authenticate_internal_mcp_token(token)
+        override_user(container=container, user=user)
+        yield container, user
+
+
+def fit_lines(lines: Sequence[str], budget: int) -> list[str]:
+    """As many leading lines as fit the character budget, in order.
+
+    Cut by characters rather than a fixed row count: line lengths vary by an
+    order of magnitude, and a fixed page would either waste the budget or
+    force a large listing through many more calls than it needs. Always keeps
+    at least the first line so a single oversized line cannot stall paging.
+    """
+    kept: list[str] = []
+    used = 0
+    for line in lines:
+        if used + len(line) + 1 > budget and kept:
+            break
+        used += len(line) + 1
+        kept.append(line)
+    return kept
 
 
 def default_page_cap() -> int:

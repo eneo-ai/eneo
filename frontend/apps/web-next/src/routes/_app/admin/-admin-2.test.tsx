@@ -38,6 +38,9 @@ vi.mock("@/features/admin/insights/insights-page", () => ({
 vi.mock("@/features/admin/insights/assistant-insights-page", () => ({
   AssistantInsightsPage: ({ assistantId }: { assistantId: string }) => (
     <h1>Insights {assistantId}</h1>
+  ),
+  GroupChatInsightsPage: ({ groupChatId }: { groupChatId: string }) => (
+    <h1>Insights {groupChatId}</h1>
   )
 }));
 vi.mock("@/features/admin/overview/overview-page", () => ({

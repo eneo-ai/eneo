@@ -129,6 +129,7 @@ flowchart TB
 |---|---|---|
 | [One error format](#error-envelope) | API consumers, generated clients | Read `code` and `message` |
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
+| [Insights count every conversation source](#insights-count-every-source) | Administrators who follow insights figures; API consumers of `/api/v1/analysis/` | Expect higher totals; pass `source=user` for the earlier scope |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days. Not applied yet: the nightly maintenance's steps for expiry, unused keys and rotation grace periods are not turned on; this applies once they are |
 
@@ -335,6 +336,14 @@ A migration clears icons that point across tenants. Deleting an icon in use answ
 **Do:** deploy backend and both frontends together; re-upload cleared icons. See [Icons](/docs/api#icons).
 
 **Rollback:** the clearing cannot be undone.
+
+### Insights count every conversation source [#insights-count-every-source]
+
+Insights and the statistics under `/api/v1/analysis/` counted only the conversations of signed-in users. They now also count conversations held with a service API key and, new in this release, through a web widget. Conversations, questions and ratings rise where such conversations exist, also for periods before the upgrade: the figures are computed from the stored conversations. User counts still count signed-in users only.
+
+The conversations and questions these endpoints list carry `source`: `user`, `api_key` or `widget`. `GET /api/v1/analysis/conversation-insights/`, its `sessions/` list, and the assistant's `questions/` and `feedback/` endpoints take a `source` parameter. `/api/v1/analysis/counts/` and the `metadata-statistics` endpoints have no such filter.
+
+**Do:** expect higher totals when you compare with figures exported before the upgrade. Pass `source=user` where you want the earlier scope. A client with a fixed response model accepts the new `source` field.
 
 ### API keys that should have expired stop working [#api-keys-expire]
 

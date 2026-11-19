@@ -10,14 +10,16 @@ export type ComposerInsert = {
 
 /**
  * What a page lets a conversation refer to (the flow chat's steps and
- * values): a menu the composer opens on a character, pills for the
- * references a question holds, and how an answer's references are drawn.
+ * values, the insights chat's cited conversations): a menu the composer
+ * opens on a character, pills for the references a question holds, and how
+ * an answer's references are drawn. A page whose answers alone refer to
+ * things leaves the composer's parts out.
  */
 export type ChatReferences = {
   /** Menus the text field opens as their character is typed. */
-  triggers: ChatComposerTrigger[];
+  triggers?: ChatComposerTrigger[];
   /** The references a sent text holds, as tokens drawn in its place. */
-  tokens: (text: string) => ChatComposerToken[];
+  tokens?: (text: string) => ChatComposerToken[];
   /** Turns an answer's references into links the components draw as pills. */
   remarkPlugins: NonNullable<MessageResponseProps["remarkPlugins"]>;
   components: NonNullable<MessageResponseProps["components"]>;

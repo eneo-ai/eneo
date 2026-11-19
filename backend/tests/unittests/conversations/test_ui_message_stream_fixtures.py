@@ -56,6 +56,7 @@ MODEL_ID = UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
 DOCUMENT_FILE_ID = UUID("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
 VIEW_ID = UUID("cccccccc-cccc-cccc-cccc-cccccccccccc")
 MCP_SERVER_ID = UUID("dddddddd-dddd-dddd-dddd-dddddddddddd")
+CITED_SESSION_ID = UUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
 BASE_URL = "http://backend:8123/"
 
 
@@ -140,6 +141,31 @@ def _document_tool(
             "ui": {"prefersBorder": True},
         },
     )
+
+
+def _insights_tool(
+    status: str, arguments: dict[str, object] | None
+) -> ToolCallMetadata:
+    """A call on the loopback insights server, as the insights chat streams it."""
+    return ToolCallMetadata(
+        server_name="insights",
+        tool_name="search_questions",
+        title="Search questions",
+        arguments=arguments,
+        tool_call_id="call-insights",
+        result_status=status,
+        mcp_tool_name="insights__search_questions",
+        is_internal=True,
+        is_bundled=False,
+    )
+
+
+_INSIGHTS_ARGUMENTS: dict[str, object] = {
+    "query": "parkering",
+    "start": "2026-10-12T00:00:00+02:00",
+    "end": "2026-11-12T00:00:00+01:00",
+    "timezone": "Europe/Stockholm",
+}
 
 
 def _argument_delta(piece: str) -> Completion:
@@ -320,6 +346,20 @@ SCENARIOS: dict[
             _tool_call(_document_tool(status="succeeded", arguments={"title": "Plan"})),
             _generated_document(),
             _text("Here is the plan."),
+            _usage(),
+        ],
+        [],
+    ),
+    # The insights chat's turn: its own server's call, announced, written and
+    # run, then an answer that cites a conversation by its session id.
+    "insights-tool-call": lambda: (
+        [
+            _tool_call(_insights_tool(status="pending", arguments=None)),
+            _tool_call(_insights_tool(status="pending", arguments=_INSIGHTS_ARGUMENTS)),
+            _tool_call(
+                _insights_tool(status="succeeded", arguments=_INSIGHTS_ARGUMENTS)
+            ),
+            _text(f"Most ask where to park (session {CITED_SESSION_ID})."),
             _usage(),
         ],
         [],

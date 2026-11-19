@@ -147,8 +147,9 @@ class AuthService:
         self,
         user: UserInDB,
         *,
-        assistant_id: UUID,
+        assistant_id: UUID | None = None,
         session_id: UUID | None = None,
+        insight_target: tuple[Literal["assistant", "group_chat"], UUID] | None = None,
         mcp_server_id: UUID | None = None,
         table_tools: bool = False,
         expires_in: int = 15,
@@ -161,9 +162,13 @@ class AuthService:
         with the same claims as a normal access token, but is minted for
         ``INTERNAL_MCP_AUDIENCE``: only the loopback endpoints accept it (via
         ``UserService.authenticate_internal_mcp_token``), so it cannot be
-        replayed against the rest of the API. It additionally carries an
-        ``assistant_id`` claim so tools need no scope argument and cannot be
-        redirected to another assistant. Unknown claims ride through
+        replayed against the rest of the API. It additionally carries a scope
+        claim so tools need no scope argument and cannot be redirected: an
+        ``assistant_id`` for the knowledge, files and flows servers, or
+        ``insight_target_type`` / ``insight_target_id`` (``insight_target``)
+        for the insights server's analysed assistant or group chat. An
+        insights token carries no ``assistant_id``, so it cannot double as a
+        knowledge-search token for its target. Unknown claims ride through
         ``JWTPayload`` (which ignores them on decode) and are read out
         separately by the loopback endpoint.
         Widget visitors instead receive ``WIDGET_MCP_AUDIENCE`` and their
@@ -201,7 +206,14 @@ class AuthService:
                 algorithm=JWT_ALGORITHM,
             )
 
-        claims: dict[str, object] = {"assistant_id": str(assistant_id)}
+        if assistant_id is None and insight_target is None:
+            raise ValueError("A scoped MCP token needs at least one scope.")
+        claims: dict[str, object] = {}
+        if assistant_id is not None:
+            claims["assistant_id"] = str(assistant_id)
+        if insight_target is not None:
+            claims["insight_target_type"] = insight_target[0]
+            claims["insight_target_id"] = str(insight_target[1])
         if session_id is not None:
             claims["session_id"] = str(session_id)
         if mcp_server_id is not None:
