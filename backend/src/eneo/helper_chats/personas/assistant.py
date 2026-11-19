@@ -24,15 +24,18 @@ settings), Kunskap, Organisationskunskap, Rankning av träffar, Hantering av
 material, MCP-servrar, Funktioner, Bilagor, Säkerhet och integritet (how long
 conversations are kept), Publicering and Insikter.
 
-Names: the reads name each function as the editor does, in quotes, with its
-key in brackets. Before you say that a setting or function does not exist,
-match what the person wrote against the names the reads give and the parts
-above, allowing for case, spacing and near spellings: "fråga fil" and
-"frågafil" are "Fråga fil", and "webbsök" is "Webbsökning". When it could mean
-two things, such as the function "Fråga fil" and the setting "Dokument från
-användare i chatten", ask which, with the two names as the choice. In an
-answer, call a setting or function by the name the editor shows, never by its
-key or a translation of the key.
+Names: the reads name each setting and function as the editor does, in quotes,
+with the key a change takes in brackets. They name a setting's options the
+same way, with the value a change takes: "Dokument från användare i chatten"
+[inline_file_text] is "Läs in direkt" [true] or "Öppna vid behov" [false].
+Before you say that a setting, an option or a function does not exist, match
+what the person wrote against the names the reads give and the parts above,
+allowing for case, spacing and near spellings: "fråga fil" and "frågafil" are
+"Fråga fil", and "webbsök" is "Webbsökning". When it could mean two things,
+such as the function "Fråga fil" and the setting "Dokument från användare i
+chatten", ask which, with the two names as the choice. In an answer, call a
+setting, an option or a function by the name the editor shows, never by its
+key, its value or a translation of either.
 
 Choosing a model: read the models the space offers. When it is not clear what
 matters most (the quality of reasoning, speed, cost, a large window for long
@@ -96,46 +99,99 @@ the assistant. When the person wants one of them changed, say where in the
 editor they change it and what to choose.
 """
 
+# The editor's own names for its settings and sections, the one place the
+# helper takes them from: its setting references and its tools
+# (backend/src/eneo/internal_mcp/assistant_settings.py) name a setting or a
+# section by these. Each is keyed by what a change takes (a field of the
+# assistant's update request, a model setting as
+# ``completion_model_kwargs.<setting>``) or by the key a setting reference
+# names (a section as ``section:<id>``); the organisation's knowledge has a
+# row of its own in Kunskap. The editor's frontend names each the same: a
+# test on each side holds its table to the same written-out one, so change
+# both together.
+SETTING_NAMES: tuple[tuple[str, str], ...] = (
+    ("name", "Namn"),
+    ("description", "Beskrivning"),
+    ("prompt", "Prompt"),
+    ("knowledge_mode", "Sökning i kunskapskällor"),
+    ("inline_file_text", "Dokument från användare i chatten"),
+    ("knowledge", "Kunskap"),
+    ("groups", "Samlingar"),
+    ("websites", "Webbplatser"),
+    ("integration_knowledge_list", "Integrationer"),
+    ("organization_knowledge", "Organisationskunskap"),
+    ("rerank_model_id", "Rankning av träffar"),
+    ("mcp_servers", "MCP-servrar"),
+    ("mcp_tools", "Verktyg"),
+    ("attachments", "Bilagor"),
+    ("completion_model", "Chattmodell"),
+    ("completion_model_kwargs", "Modellbeteende"),
+    ("completion_model_kwargs.temperature", "Temperatur"),
+    ("completion_model_kwargs.reasoning_effort", "Resonemangsnivå"),
+    ("completion_model_kwargs.verbosity", "Detaljnivå"),
+    ("completion_model_kwargs.top_p", "Top P"),
+    ("completion_model_kwargs.presence_penalty", "Närvarostraff"),
+    ("completion_model_kwargs.frequency_penalty", "Frekvensstraff"),
+    ("completion_model_kwargs.top_k", "Top K"),
+    ("enabled_capabilities", "Funktioner"),
+    ("document_template", "Dokumentmall"),
+    ("data_retention_days", "Gallring av konversationshistorik"),
+    ("published", "Status"),
+    ("insight_enabled", "Insikter"),
+    ("section:general", "Allmänt"),
+    ("section:instructions", "Instruktioner"),
+    ("section:knowledge", "Kunskap"),
+    ("section:skills", "Skills"),
+    ("section:mcp", "MCP-servrar"),
+    ("section:attachments", "Bilagor"),
+    ("section:ai", "AI-inställningar"),
+    ("section:capabilities", "Funktioner"),
+    ("section:security", "Säkerhet och integritet"),
+    ("section:api-keys", "API-nycklar"),
+    ("section:widget", "Webbwidget"),
+    ("section:publishing", "Publicering"),
+)
+
+_NAME = dict(SETTING_NAMES)
+
+# The editor's sections, in its order, as a reference names them.
+_SECTIONS = tuple(key for key, _ in SETTING_NAMES if key.startswith("section:"))
+
 # What a setting reference can name, and what each key is. The editor's
 # frontend lists the same keys (SETTING_REFERENCE_KEYS in
 # frontend/apps/web-next/src/features/assistants/editor/setting-references.ts);
 # a test on each side holds its list to the same written-out one, so change
 # both together.
 SETTING_REFERENCES: tuple[tuple[str, str], ...] = (
-    ("name", "the name (Namn)"),
-    ("description", "the description (Beskrivning)"),
-    ("prompt", "the instructions (Prompt)"),
+    ("name", f"the name ({_NAME['name']})"),
+    ("description", f"the description ({_NAME['description']})"),
+    ("prompt", f"the instructions ({_NAME['prompt']})"),
     ("knowledge_mode", "when the knowledge is searched"),
     ("inline_file_text", "how files uploaded in a chat are read"),
     ("knowledge", "the knowledge sources the assistant uses"),
-    ("rerank_model_id", "the ranking of search results (Rankning av träffar)"),
+    (
+        "rerank_model_id",
+        f"the ranking of search results ({_NAME['rerank_model_id']})",
+    ),
     ("mcp_servers", "the MCP servers"),
     ("attachments", "the attachments"),
-    ("completion_model", "the chat model (Chattmodell)"),
-    ("completion_model_kwargs", "how the model behaves (Modellbeteende)"),
+    ("completion_model", f"the chat model ({_NAME['completion_model']})"),
+    (
+        "completion_model_kwargs",
+        f"how the model behaves ({_NAME['completion_model_kwargs']})",
+    ),
     ("completion_model_kwargs.reasoning_effort", "the reasoning level"),
     ("completion_model_kwargs.verbosity", "how long the answers are"),
     ("completion_model_kwargs.top_p", "the model's top_p setting"),
     ("completion_model_kwargs.presence_penalty", "the presence penalty"),
     ("completion_model_kwargs.frequency_penalty", "the frequency penalty"),
     ("completion_model_kwargs.top_k", "the model's top_k setting"),
-    ("enabled_capabilities", "the functions (Funktioner)"),
+    ("enabled_capabilities", f"the functions ({_NAME['enabled_capabilities']})"),
     ("document_template", "the document template generated documents use"),
     ("data_retention_days", "how long conversations are kept"),
     ("published", "whether the assistant is published"),
-    ("insight_enabled", "whether insights are on (Insikter)"),
-    ("section:general", "the whole of Allmänt"),
-    ("section:instructions", "the whole of Instruktioner"),
-    ("section:knowledge", "the whole of Kunskap"),
-    ("section:skills", "the whole of Skills"),
-    ("section:mcp", "the whole of MCP-servrar"),
-    ("section:attachments", "the whole of Bilagor"),
-    ("section:ai", "the whole of AI-inställningar"),
-    ("section:capabilities", "the whole of Funktioner"),
-    ("section:security", "the whole of Säkerhet och integritet"),
-    ("section:api-keys", "the whole of API-nycklar"),
-    ("section:widget", "the whole of Webbwidget"),
-    ("section:publishing", "the whole of Publicering"),
+    ("insight_enabled", f"whether insights are on ({_NAME['insight_enabled']})"),
+    *((key, f"the whole of {_NAME[key]}") for key in _SECTIONS),
 )
 
 SETTING_REFERENCE_KEYS: tuple[str, ...] = tuple(key for key, _ in SETTING_REFERENCES)

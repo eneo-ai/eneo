@@ -691,7 +691,7 @@ async def test_the_tools_find_the_assistant_through_the_chat_only(
 
     read = await assistant_settings.read_assistant(own)
     assert not read.isError, read.content[0].text
-    assert "Name: Ärendehjälpen" in read.content[0].text
+    assert '"Namn" [name]: Ärendehjälpen' in read.content[0].text
     assert read.structuredContent["assistant_id"] == setup.assistant_id
 
     for session_id in [str(uuid4()), setup.assistant_id]:
@@ -704,6 +704,42 @@ async def test_the_tools_find_the_assistant_through_the_chat_only(
         refused = await assistant_settings.read_assistant(stray)
         assert refused.isError
         assert "Ärendehjälpen" not in refused.content[0].text
+
+
+async def test_the_reads_name_settings_options_and_rights_as_the_editor_does(
+    client, setup: Setup, db_container, admin_user
+):
+    saved = await _saved(
+        client, setup, {"knowledge_mode": "inject", "insight_enabled": False}
+    )
+    chat = await _open(client, setup)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+
+    read = await assistant_settings.read_assistant(ctx, section="all")
+
+    assert not read.isError, read.content[0].text
+    text = read.content[0].text
+    assert (
+        '"Sökning i kunskapskällor" [knowledge_mode]: "Inför varje svar" [inject], '
+        "relevant parts go in the prompt before every answer (the other option is "
+        '"Vid behov" [tool], the assistant searches its knowledge when it needs to)'
+    ) in text
+    assert (
+        '"Insikter" [insight_enabled]: "Inaktiverad" [false] (the other option is '
+        '"Aktiverad" [true])'
+    ) in text
+    status = "Publicerad" if saved["published"] else "Utkast"
+    assert f'"Status" under "Publicering": "{status}"' in text
+    # The person's rights are said in words, never as keys.
+    rights = next(line for line in text.splitlines() if line.startswith("The person"))
+    assert rights.startswith("The person may change its settings")
+    for key in ("insight_toggle", "insight_view", "edit,", "read only"):
+        assert key not in rights
 
 
 async def test_what_the_tools_read_holds_no_credential(
@@ -1191,7 +1227,7 @@ async def test_a_saved_chat_model_the_space_no_longer_offers_is_read_as_such(
     model_line = next(
         line
         for line in read.content[0].text.splitlines()
-        if line.startswith("Chat model: ")
+        if line.startswith('"Chattmodell" [completion_model]: ')
     )
     assert model_line.endswith(
         '(the space no longer offers it, so the editor shows "Stöds ej vald '
@@ -1247,7 +1283,7 @@ async def test_instructions_a_policy_sets_are_not_proposed(
 
     assert result.isError
     assert result.content[0].text.startswith(
-        "An organisation policy sets the instructions for this assistant"
+        'An organisation policy sets "Prompt" [prompt] for this assistant'
     )
     assert await _stored(db_container, default_id) == stored
 
@@ -1495,7 +1531,9 @@ async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_
     _holds_no_secret(result, offered)
     assert _UUID.search(result.content[0].text) is None
     # A function is named as the editor names it, with its key.
-    assert 'functions (added "Webbsökning" [web_search])' in result.content[0].text
+    assert (
+        '"Funktioner" [enabled_capabilities] (added "Webbsökning" [web_search])'
+    ) in result.content[0].text
     proposal = result.structuredContent["proposal"]
     assert {change["field"] for change in proposal["changes"]} == {
         "groups",
@@ -1609,15 +1647,15 @@ async def test_the_editors_rules_are_named_and_refused_by_the_proposal(
     read = await assistant_settings.read_assistant(ctx)
     assert not read.isError, read.content[0].text
     assert (
-        "- MCP servers: none can be added while the assistant has knowledge"
-        in read.content[0].text
+        '- "MCP-servrar" [mcp_servers]: none can be added while the assistant has '
+        "knowledge" in read.content[0].text
     )
     add_server = {"mcp_servers": {"add": [{"id": offered.server_id}]}}
     result = await propose(ctx, changes=add_server)
     assert result.isError
     assert result.content[0].text.startswith(
-        "Knowledge and MCP servers are not combined on one assistant, and this "
-        "one has knowledge, so no MCP server can be added to it."
+        '"Kunskap" and "MCP-servrar" [mcp_servers] are not combined on one '
+        "assistant, and this one has knowledge, so no MCP server can be added to it."
     )
     # Knowledge that goes in the same change makes way for the server.
     swapped = await propose(ctx, changes={**add_server, "groups": []})
@@ -1684,16 +1722,23 @@ async def test_what_an_editors_role_withholds_is_named_and_refused_by_the_propos
     text = read.content[0].text
     assert "Not the person's to change (their role does not allow it):" in text
     others = "someone with more rights in the space, such as its administrators, can"
-    assert f"- conversation retention: {others}" in text
-    assert f"- insights (turning them on or off): {others}" in text
+    assert f'- "Gallring av konversationshistorik" [data_retention_days]: {others}' in (
+        text
+    )
+    assert f'- "Insikter" [insight_enabled] (switching them on or off): {others}' in (
+        text
+    )
     # An editor publishes assistants in a shared space.
-    assert "- publishing" not in text
+    assert '- "Status" under "Publicering"' not in text
 
     for changes, what in (
-        ({"data_retention_days": 30}, "how long conversations are kept"),
+        (
+            {"data_retention_days": 30},
+            '"Gallring av konversationshistorik" [data_retention_days]',
+        ),
         (
             {"insight_enabled": not before["insight_enabled"]},
-            "whether insights are on",
+            '"Insikter" [insight_enabled]',
         ),
     ):
         result = await assistant_settings.propose_changes(ctx, changes=changes)
@@ -1742,12 +1787,15 @@ async def test_publishing_and_insights_are_refused_in_a_personal_space(
 
     read = await assistant_settings.read_assistant(ctx, section="access")
     text = read.content[0].text
-    assert "- insights (turning them on or off): not used in a personal space" in text
     assert (
-        "- publishing (publishing or unpublishing it): not used in a personal space"
-        in (text)
+        '- "Insikter" [insight_enabled] (switching them on or off): not used in a '
+        "personal space"
+    ) in text
+    assert (
+        '- "Status" under "Publicering" (publishing or unpublishing it): not used '
+        "in a personal space" in (text)
     )
-    assert "- conversation retention" not in text
+    assert '- "Gallring av konversationshistorik"' not in text
 
     published = await assistant_settings.publish_assistant(ctx, published=True)
     assert published.isError
@@ -1759,7 +1807,7 @@ async def test_publishing_and_insights_are_refused_in_a_personal_space(
     )
     assert result.isError
     assert result.content[0].text == (
-        "Insights are not used for an assistant in a personal space. "
+        '"Insikter" are not used for an assistant in a personal space. '
         "Nothing was changed."
     )
 
@@ -1812,7 +1860,7 @@ async def test_publishing_from_the_chat_is_audited_as_the_person(
     again = await assistant_settings.publish_assistant(ctx, published=True)
     assert again.isError
     assert again.content[0].text == (
-        "The assistant is already published. Nothing was changed."
+        'The assistant is already published, "Publicerad". Nothing was changed.'
     )
 
 

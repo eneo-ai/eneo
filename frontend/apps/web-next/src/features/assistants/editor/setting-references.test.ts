@@ -1,7 +1,11 @@
 import { createFormatter } from "use-intl";
 import { describe, expect, it } from "vitest";
+import { modelFacts } from "@/components/ai-elements/model-selector";
 import { CAPABILITIES } from "@/features/capabilities/capabilities";
 import { testTranslator } from "@/test/i18n";
+import { settingLabel, settingText } from "./assistant-helper-cards";
+import { BEHAVIOUR_LIST, kwargsForBehaviour } from "./model-kwargs";
+import { BEHAVIOUR_LABEL_KEYS } from "./model-kwargs-rows";
 import {
   ASSISTANT_SECTION_IDS,
   SETTING_REFERENCE_KEYS,
@@ -188,6 +192,204 @@ describe("The functions the helper's tools name", () => {
         en(capability.assistantHint)
       ])
     ).toEqual(TOOLS_FUNCTIONS);
+  });
+});
+
+describe("The settings, options, presets and badges the helper's tools name", () => {
+  /**
+   * The same tables, in the same order, as `SETTING_NAMES` in the helper's
+   * persona (backend/src/eneo/helper_chats/personas/assistant.py) and
+   * `SETTING_OPTIONS`, `MODEL_SETTING_OPTIONS`, `MODEL_BEHAVIOURS` and
+   * `MODEL_BADGES` in its tools (backend/src/eneo/internal_mcp/assistant_settings.py).
+   * The tools' test holds its tables to these: change both together.
+   */
+  const TOOLS_SETTING_NAMES = [
+    ["name", "Namn"],
+    ["description", "Beskrivning"],
+    ["prompt", "Prompt"],
+    ["knowledge_mode", "Sökning i kunskapskällor"],
+    ["inline_file_text", "Dokument från användare i chatten"],
+    ["knowledge", "Kunskap"],
+    ["groups", "Samlingar"],
+    ["websites", "Webbplatser"],
+    ["integration_knowledge_list", "Integrationer"],
+    ["organization_knowledge", "Organisationskunskap"],
+    ["rerank_model_id", "Rankning av träffar"],
+    ["mcp_servers", "MCP-servrar"],
+    ["mcp_tools", "Verktyg"],
+    ["attachments", "Bilagor"],
+    ["completion_model", "Chattmodell"],
+    ["completion_model_kwargs", "Modellbeteende"],
+    ["completion_model_kwargs.temperature", "Temperatur"],
+    ["completion_model_kwargs.reasoning_effort", "Resonemangsnivå"],
+    ["completion_model_kwargs.verbosity", "Detaljnivå"],
+    ["completion_model_kwargs.top_p", "Top P"],
+    ["completion_model_kwargs.presence_penalty", "Närvarostraff"],
+    ["completion_model_kwargs.frequency_penalty", "Frekvensstraff"],
+    ["completion_model_kwargs.top_k", "Top K"],
+    ["enabled_capabilities", "Funktioner"],
+    ["document_template", "Dokumentmall"],
+    ["data_retention_days", "Gallring av konversationshistorik"],
+    ["published", "Status"],
+    ["insight_enabled", "Insikter"],
+    ["section:general", "Allmänt"],
+    ["section:instructions", "Instruktioner"],
+    ["section:knowledge", "Kunskap"],
+    ["section:skills", "Skills"],
+    ["section:mcp", "MCP-servrar"],
+    ["section:attachments", "Bilagor"],
+    ["section:ai", "AI-inställningar"],
+    ["section:capabilities", "Funktioner"],
+    ["section:security", "Säkerhet och integritet"],
+    ["section:api-keys", "API-nycklar"],
+    ["section:widget", "Webbwidget"],
+    ["section:publishing", "Publicering"]
+  ];
+  const TOOLS_SETTING_OPTIONS = [
+    ["knowledge_mode", "tool", "Vid behov"],
+    ["knowledge_mode", "inject", "Inför varje svar"],
+    ["inline_file_text", false, "Öppna vid behov"],
+    ["inline_file_text", true, "Läs in direkt"],
+    ["rerank_model_id", null, "Ingen omrankning"],
+    ["attachments", false, "Öppna vid behov"],
+    ["attachments", true, "Läs in inför varje svar"],
+    ["document_template", "default", "Organisationens standard"],
+    ["document_template", "selected", "En annan mall"],
+    ["document_template", "builtin", "Eneos inbyggda mall"],
+    ["data_retention_days", null, "Ytans gallring"],
+    ["published", false, "Utkast"],
+    ["published", true, "Publicerad"],
+    ["insight_enabled", false, "Inaktiverad"],
+    ["insight_enabled", true, "Aktiverad"]
+  ] as const;
+  const TOOLS_MODEL_SETTING_OPTIONS = [
+    [null, "Standard"],
+    ["none", "Ingen"],
+    ["low", "Låg"],
+    ["medium", "Medel"],
+    ["high", "Hög"]
+  ] as const;
+  const TOOLS_MODEL_BEHAVIOURS = [
+    ["creative", "Kreativ", { temperature: 1.25 }],
+    ["default", "Standard", { temperature: null }],
+    ["deterministic", "Deterministisk", { temperature: 0.25 }],
+    ["custom", "Anpassad", null]
+  ];
+  const TOOLS_MODEL_BADGES = [
+    ["max_input_tokens", "kontext"],
+    ["vision", "Vision"],
+    ["supports_tool_calling", "Verktyg"],
+    ["reasoning", "Resonemang"],
+    ["input_cost_per_token", "Indatapris"],
+    ["output_cost_per_token", "Utdatapris"]
+  ];
+
+  /**
+   * The messages the editor names a section by (its section list in
+   * assistant-editor.tsx) and the organisation's knowledge row by
+   * (knowledge-section.tsx): neither has a name of its own outside the form.
+   */
+  const FORM_MESSAGES: Record<string, string> = {
+    organization_knowledge: "organization_knowledge",
+    "section:general": "general",
+    "section:instructions": "instructions",
+    "section:knowledge": "knowledge",
+    "section:skills": "skills",
+    "section:mcp": "mcp_servers",
+    "section:attachments": "attachments",
+    "section:ai": "ai_settings",
+    "section:capabilities": "capabilities",
+    "section:security": "security_and_privacy",
+    "section:api-keys": "api_keys",
+    "section:widget": "widget_admin_title",
+    "section:publishing": "publishing"
+  };
+
+  it("name each setting and section as the editor does", () => {
+    const everySetting = {
+      supported_model_kwargs: Object.fromEntries(
+        ["temperature", "reasoning_effort", "verbosity", "top_p", "presence_penalty"]
+          .concat(["frequency_penalty", "top_k"])
+          .map((name) => [name, { supported: true }])
+      )
+    };
+    // A setting reference by the name the "@" menu gives it, the rest of a
+    // change's fields as the helper's cards name them.
+    const references = new Map(
+      settingReferences(
+        input({
+          kwargsModel: everySetting as SettingReferenceInput["kwargsModel"],
+          assistant: assistant({ enabled_capabilities: ["file_creation"] }),
+          spaceModels: { rerank_models: [RERANKER] } as SettingReferenceInput["spaceModels"]
+        })
+      ).map((reference) => [reference.key, reference.label])
+    );
+    const name = (key: string) => {
+      const message = FORM_MESSAGES[key];
+      if (message) return t(message);
+      return references.get(key) ?? settingLabel(key, t);
+    };
+    expect(TOOLS_SETTING_NAMES.map(([key]) => [key, name(key!)])).toEqual(TOOLS_SETTING_NAMES);
+  });
+
+  it("name each option as the editor's form and the helper's cards do", () => {
+    // An attachment's own choice is named by the options of Bilagor
+    // (resource-attachments-section.tsx); every other option as the cards name it.
+    const option = (setting: string, value: unknown) =>
+      setting === "attachments"
+        ? t(value ? "material_file_always_option" : "material_open_when_needed")
+        : settingText(
+            setting,
+            setting === "document_template" ? { mode: value } : value,
+            t,
+            format
+          );
+    expect(
+      TOOLS_SETTING_OPTIONS.map(([setting, value]) => [setting, value, option(setting, value)])
+    ).toEqual(TOOLS_SETTING_OPTIONS);
+    for (const setting of ["reasoning_effort", "verbosity"]) {
+      expect(
+        TOOLS_MODEL_SETTING_OPTIONS.map(([value]) => [
+          value,
+          settingText(`completion_model_kwargs.${setting}`, value, t, format)
+        ])
+      ).toEqual(TOOLS_MODEL_SETTING_OPTIONS);
+    }
+  });
+
+  it("name the presets of Modellbeteende with the temperature each sets", () => {
+    expect(
+      BEHAVIOUR_LIST.map((behaviour) => [
+        behaviour,
+        t(BEHAVIOUR_LABEL_KEYS[behaviour]),
+        kwargsForBehaviour(behaviour)
+      ])
+    ).toEqual(TOOLS_MODEL_BEHAVIOURS);
+  });
+
+  it("name a chat model's badges as the editor does", () => {
+    const facts = (model: Record<string, unknown>) =>
+      modelFacts(
+        {
+          max_input_tokens: null,
+          vision: false,
+          reasoning: false,
+          supports_tool_calling: false,
+          ...model
+        } as unknown as Parameters<typeof modelFacts>[0],
+        false,
+        t
+      );
+    expect([
+      // The window is a number of tokens before the badge's name.
+      ["max_input_tokens", facts({ max_input_tokens: 128_000 }).replace(/^\S+ /, "")],
+      ["vision", facts({ vision: true })],
+      ["supports_tool_calling", facts({ supports_tool_calling: true })],
+      ["reasoning", facts({ reasoning: true })],
+      // The prices are badges of the model's summary under Chattmodell (ai-section.tsx).
+      ["input_cost_per_token", t("model_selector_input_price")],
+      ["output_cost_per_token", t("model_selector_output_price")]
+    ]).toEqual(TOOLS_MODEL_BADGES);
   });
 });
 
