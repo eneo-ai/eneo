@@ -11,21 +11,35 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, getErrorMessageForCode, unwrap } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
+import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
-import type { HelperAdapter, HelperChat, HelperChatApi, HelperModes } from "./helper-adapter";
-import { HelperChatSettings, NewConversationButton } from "./helper-controls";
+import { EarlierConversation } from "./earlier-conversation";
+import type {
+  HelperAdapter,
+  HelperChat,
+  HelperChatApi,
+  HelperConversation,
+  HelperModes
+} from "./helper-adapter";
+import {
+  ConversationHistoryMenu,
+  HelperChatSettings,
+  NewConversationButton,
+  useConversationTime
+} from "./helper-controls";
 
 /** The mode switch of one chat: its saves run one after another in its own queue. */
 const modeSwitchId = (api: HelperChatApi) => `helper-mode:${hashKey(api.key)}`;
@@ -179,15 +193,71 @@ function useWritingTurn(chat: HelperChat, editing: boolean, adapter: HelperAdapt
   return (sending: boolean) => setTurn(sending ? { session: chat.session_id, editing } : null);
 }
 
+/**
+ * What the page is told of the conversation's composer: the composer while
+ * the conversation is on screen. While an earlier conversation is read in
+ * its place, a stand-in: what the page puts in (a prepared question, a
+ * card's request) brings the conversation back and goes into its composer
+ * once it shows. The composer leaves with the conversation: what the page
+ * puts into it then has nowhere to go until a composer reports itself again.
+ * Returns the references the conversation itself is given.
+ */
+function useComposerOnScreen(
+  references: ChatReferences | undefined,
+  shown: boolean,
+  onShowCurrent: () => void
+): ChatReferences | undefined {
+  const onComposer = references?.onComposer;
+  const [composer, setComposer] = useState<ComposerInsert | null>(null);
+  // What the page put in while the conversation was away, in order.
+  const waiting = useRef<((input: ComposerInsert) => void)[]>([]);
+  const standIn = useMemo<ComposerInsert | null>(
+    () =>
+      composer && {
+        insertText: (text) => {
+          waiting.current.push((input) => input.insertText(text));
+          onShowCurrent();
+        },
+        insertToken: (token) => {
+          waiting.current.push((input) => input.insertToken(token));
+          onShowCurrent();
+        }
+      },
+    [composer, onShowCurrent]
+  );
+  const reported = shown ? composer : standIn;
+  useEffect(() => {
+    if (reported !== null) onComposer?.(reported);
+  }, [onComposer, reported]);
+  useEffect(() => () => onComposer?.(null), [onComposer]);
+  useEffect(() => {
+    if (!shown || composer === null) return;
+    for (const put of waiting.current.splice(0)) put(composer);
+  }, [shown, composer]);
+  return useMemo(
+    () => (references ? { ...references, onComposer: setComposer } : undefined),
+    [references]
+  );
+}
+
 /** The conversation itself, once the chat, its assistant and its history are loaded. */
-function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
+function HelperConversation({
+  chat,
+  adapter,
+  shown,
+  onShowCurrent
+}: {
+  chat: HelperChat;
+  adapter: HelperAdapter;
+  /** False while an earlier conversation is read in this one's place. */
+  shown: boolean;
+  /** Brings this conversation back in place of an earlier one. */
+  onShowCurrent: () => void;
+}) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const { api, lock, texts, modes, references } = adapter;
-  // The composer leaves with the conversation: what the page puts into it
-  // has nowhere to go until a composer reports itself again.
-  const onComposer = references?.onComposer;
-  useEffect(() => () => onComposer?.(null), [onComposer]);
+  const { api, lock, texts, modes } = adapter;
+  const references = useComposerOnScreen(adapter.references, shown, onShowCurrent);
   const { space } = useSpace();
   const spaceName = useSpaceDisplayName();
   const [activity, setActivity] = useState<ActivityState | null>(null);
@@ -358,6 +428,31 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
 }
 
 /**
+ * A target that starts each visit afresh (`freshPerVisit`): what the panel
+ * read of the chat is forgotten when the panel goes with its page, so the
+ * next visit shows no conversation before its own fresh one.
+ */
+function useForgetChatAfterVisit(chatHash: string, fresh: boolean) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!fresh) return;
+    return () => {
+      const cache = queryClient.getQueryCache();
+      const read = cache.get(chatHash);
+      if (read) cache.remove(read);
+    };
+  }, [chatHash, fresh, queryClient]);
+}
+
+/** The composer's text field in `root`: the last one, under the messages. */
+function composerField(root: HTMLElement | null): HTMLElement | null {
+  const fields = root?.querySelectorAll<HTMLElement>(
+    "textarea, [contenteditable]:not([contenteditable='false'])"
+  );
+  return fields && fields.length > 0 ? fields[fields.length - 1]! : null;
+}
+
+/**
  * Says `text` when a read of the chat (after an answer, on the window's
  * focus) finds that the server left edit mode after a pause, politely and
  * without moving focus. The person's own changes are written into the
@@ -434,26 +529,46 @@ export type HelperPanelClose = {
  * target without modes has no picker: its chat proposes each change for the
  * person to apply. The adapter says what the target is; everything else is
  * the same on every page. A page that shows the panel only on request
- * passes `close`.
+ * passes `close`, and `open` while it keeps the panel mounted when it is
+ * put away.
+ *
+ * Where the target lists its conversations, "Tidigare konversationer" in
+ * the title row shows an earlier one in the current one's place, read
+ * only. The current conversation stays as it was meanwhile (an answer on its
+ * way goes on); going back, starting a new conversation, or putting the
+ * panel away and opening it again shows it once more.
  */
 export function HelperPanel({
   adapter,
-  close
+  close,
+  open = true
 }: {
   adapter: HelperAdapter;
   close?: HelperPanelClose;
+  /** False while the page has put the panel away and keeps it mounted. */
+  open?: boolean;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
+  const rescue = useFocusRescue();
+  const timeOf = useConversationTime();
+  const queryClient = useQueryClient();
   const { api, lock, modes, texts } = adapter;
   const canUse = adapter.unavailable === null;
+  const chatHash = hashKey(api.key);
+  const freshPerVisit = api.freshPerVisit === true;
   // The person's chat for the target, created on first use. Reading it
   // again returns the same chat, but the server turns edit mode off when
   // the chat has been idle: it is read again when the window regains focus
   // (and after each answer), so a tab left open shows Fråga before the next
-  // message is typed.
+  // message is typed. A target that starts each visit afresh asks for that
+  // on the visit's first read only: a later read finds the chat read.
   const chat = useQuery<HelperChat>({
     queryKey: api.key,
-    queryFn: () => api.open(),
+    queryFn: () =>
+      api.open({
+        fresh: freshPerVisit && queryClient.getQueryData(api.key) === undefined
+      }),
     staleTime: Infinity,
     refetchOnWindowFocus: "always",
     retry: false,
@@ -461,7 +576,31 @@ export function HelperPanel({
     // (a 403 still says so, should the page's reading be out of date).
     enabled: canUse
   });
-  useAnnounceModeFallback(hashKey(api.key), lock || !modes ? null : modes.askAfterPause);
+  useForgetChatAfterVisit(chatHash, freshPerVisit);
+  useAnnounceModeFallback(chatHash, lock || !modes ? null : modes.askAfterPause);
+
+  // The earlier conversation read in the current one's place, with the
+  // current conversation it was picked from: another current conversation
+  // (one started here) shows instead, as does putting the panel away.
+  const [earlier, setEarlier] = useState<{
+    conversation: HelperConversation;
+    from: string;
+  } | null>(null);
+  if (!open && earlier !== null) setEarlier(null);
+  const shownEarlier =
+    earlier !== null && earlier.from === chat.data?.session_id ? earlier.conversation : null;
+  const showCurrent = useCallback(() => setEarlier(null), []);
+  const current = useRef<HTMLDivElement>(null);
+  const pickEarlier = (conversation: HelperConversation) => {
+    if (!chat.data) return;
+    setEarlier({ conversation, from: chat.data.session_id });
+    announce(t("helper_earlier_shown", { time: timeOf(conversation.last_asked_at) }));
+  };
+  // Back in the current conversation, its composer takes the focus the bar had.
+  const backToCurrent = () => {
+    showCurrent();
+    rescue(() => composerField(current.current));
+  };
   const unavailable: Unavailable | null =
     adapter.unavailable !== null
       ? { status: "info", text: adapter.unavailable }
@@ -504,6 +643,14 @@ export function HelperPanel({
               {chat.data ? (
                 <>
                   {adapter.headerActions}
+                  {api.listConversations ? (
+                    <ConversationHistoryMenu
+                      chat={chat.data}
+                      api={api}
+                      list={api.listConversations}
+                      onPick={pickEarlier}
+                    />
+                  ) : null}
                   <NewConversationButton
                     chat={chat.data}
                     api={api}
@@ -524,7 +671,31 @@ export function HelperPanel({
         ) : null}
       </div>
       {chat.data ? (
-        <HelperConversation chat={chat.data} adapter={adapter} />
+        <>
+          {shownEarlier ? (
+            <EarlierConversation
+              key={shownEarlier.session_id}
+              chat={chat.data}
+              conversation={shownEarlier}
+              adapter={adapter}
+              onBack={backToCurrent}
+            />
+          ) : null}
+          {/* Kept while an earlier conversation is read, so an answer on its
+              way and what is typed in the composer stay. */}
+          <div
+            ref={current}
+            hidden={shownEarlier !== null}
+            className="flex min-h-0 flex-1 flex-col"
+          >
+            <HelperConversation
+              chat={chat.data}
+              adapter={adapter}
+              shown={shownEarlier === null}
+              onShowCurrent={showCurrent}
+            />
+          </div>
+        </>
       ) : canUse && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
       ) : (

@@ -13,8 +13,9 @@ export type HelperChat = {
   /** The chat's own assistant, hidden from lists, which answers its questions. */
   assistant_id: string;
   /**
-   * The current conversation. Starting a new one (explicitly, or Redigera
-   * after a pause) replaces it; earlier ones are never answered again.
+   * The current conversation. Starting a new one (explicitly, Redigera after
+   * a pause, or an opening with a fresh start) replaces it; earlier ones are
+   * listed and read but never answered again.
    */
   session_id: string;
   /**
@@ -40,16 +41,46 @@ export type HelperChatUpdate = {
   expected_revision?: number;
 };
 
+/**
+ * One of the person's conversations in the chat that holds a question, as
+ * every target's list returns it.
+ */
+export type HelperConversation = {
+  session_id: string;
+  /** The first question, cut to a length; its mentions as they were written. */
+  title: string;
+  started_at: string;
+  last_asked_at: string;
+  /** The conversation questions go to; every other one is read only. */
+  current: boolean;
+};
+
 /** The chat's endpoints for one target. */
 export type HelperChatApi = {
   /** Where the chat is cached; every change of it is written there. */
   key: QueryKey;
-  /** The person's chat for the target, created on first use. */
-  open: () => Promise<HelperChat>;
+  /**
+   * The person's chat for the target, created on first use. With `fresh`
+   * it opens on a new, empty conversation; a current one that holds no
+   * question yet is kept as it is, so asking twice starts one at most.
+   */
+  open: (options?: { fresh?: boolean }) => Promise<HelperChat>;
+  /**
+   * Each visit opens on a new, empty conversation: the panel's first read of
+   * the chat asks for a fresh start, a later read (on the window's focus,
+   * after an answer) never does, and what the panel read is forgotten when
+   * it goes, so the next visit never shows it first.
+   */
+  freshPerVisit?: boolean;
   /** Changes the chat's mode, model or reasoning effort. */
   update: (sessionId: string, body: HelperChatUpdate) => Promise<HelperChat>;
   /** Leaves the conversation for a new, empty one with the same assistant. */
   startConversation: (sessionId: string) => Promise<HelperChat>;
+  /**
+   * The person's conversations in the chat that hold a question, the latest
+   * question first. Without it the panel offers no earlier conversations.
+   */
+  listConversations?: () => Promise<HelperConversation[]>;
 };
 
 /**

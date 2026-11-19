@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 // The flow is the helper's one target so far: its endpoints stand in for any target's.
-import { flowHelperApi } from "@/features/flows/flows-api";
+import { flowHelperApi, flowKeys } from "@/features/flows/flows-api";
 import type { HelperAdapter, HelperModes, HelperTexts } from "./helper-adapter";
 import { HelperPanel } from "./helper-panel";
 
@@ -17,7 +17,9 @@ const announce = vi.hoisted(() => vi.fn());
  */
 const conversation = vi.hoisted(() => ({
   sent: [] as boolean[],
-  waiting: undefined as (() => Promise<boolean>) | undefined
+  waiting: undefined as (() => Promise<boolean>) | undefined,
+  /** The composer the conversation reports through the page's references, if any. */
+  composer: null as { insertText: (text: string) => void; insertToken: () => void } | null
 }));
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -34,8 +36,11 @@ vi.mock("@/features/spaces/use-space", async () => {
 });
 // The conversation is the chat feature's; the panel decides its welcome, footer and
 // placeholder, and hands on what the conversation reports.
-vi.mock("@/features/chat/chat-view", () => ({
-  ChatView: ({
+vi.mock("@/features/chat/chat-view", async () => {
+  const { useEffect } = await import("react");
+  return { ChatView: MockChatView };
+
+  function MockChatView({
     footerActions,
     placeholder,
     composerLabel,
@@ -43,7 +48,8 @@ vi.mock("@/features/chat/chat-view", () => ({
     onToolCallFinished,
     onAnswerFinished,
     onSendingChange,
-    beforeSend
+    beforeSend,
+    references
   }: {
     footerActions?: unknown;
     placeholder?: string;
@@ -53,48 +59,56 @@ vi.mock("@/features/chat/chat-view", () => ({
     onAnswerFinished?: () => void;
     onSendingChange?: (sending: boolean) => void;
     beforeSend?: () => Promise<boolean>;
-  }) => (
-    <div>
-      <p>partner: {partner?.name}</p>
-      <p>{partner?.description}</p>
-      {partner?.personalSpace ? <p>personal lists</p> : null}
-      {footerActions as React.ReactNode}
-      <p>{placeholder}</p>
-      <p>composer: {composerLabel ?? "partner"}</p>
-      <button
-        type="button"
-        onClick={() => onToolCallFinished?.({ serverName: "target", isInternal: true })}
-      >
-        Verktyg klart
-      </button>
-      <button type="button" onClick={() => onAnswerFinished?.()}>
-        Svar klart
-      </button>
-      <button
-        type="button"
-        onClick={() => void beforeSend?.().then((go) => conversation.sent.push(go))}
-      >
-        Skicka
-      </button>
-      <button type="button" onClick={() => (conversation.waiting = beforeSend)}>
-        Skicka med filer
-      </button>
-      <button
-        type="button"
-        onClick={() => void conversation.waiting?.().then((go) => conversation.sent.push(go))}
-      >
-        Filerna uppladdade
-      </button>
-      <button type="button" onClick={() => onSendingChange?.(true)}>
-        Tur börjar
-      </button>
-      <button type="button" onClick={() => onSendingChange?.(false)}>
-        Tur slut
-      </button>
-      <p>{beforeSend ? "asks before sending" : "sends at once"}</p>
-    </div>
-  )
-}));
+    references?: { onComposer?: (input: unknown) => void };
+  }) {
+    const onComposer = references?.onComposer;
+    useEffect(() => {
+      if (conversation.composer) onComposer?.(conversation.composer);
+    }, [onComposer]);
+    return (
+      <div>
+        <p>partner: {partner?.name}</p>
+        <p>{partner?.description}</p>
+        {partner?.personalSpace ? <p>personal lists</p> : null}
+        {footerActions as React.ReactNode}
+        <p>{placeholder}</p>
+        <p>composer: {composerLabel ?? "partner"}</p>
+        <button
+          type="button"
+          onClick={() => onToolCallFinished?.({ serverName: "target", isInternal: true })}
+        >
+          Verktyg klart
+        </button>
+        <button type="button" onClick={() => onAnswerFinished?.()}>
+          Svar klart
+        </button>
+        <button
+          type="button"
+          onClick={() => void beforeSend?.().then((go) => conversation.sent.push(go))}
+        >
+          Skicka
+        </button>
+        <button type="button" onClick={() => (conversation.waiting = beforeSend)}>
+          Skicka med filer
+        </button>
+        <button
+          type="button"
+          onClick={() => void conversation.waiting?.().then((go) => conversation.sent.push(go))}
+        >
+          Filerna uppladdade
+        </button>
+        <button type="button" onClick={() => onSendingChange?.(true)}>
+          Tur börjar
+        </button>
+        <button type="button" onClick={() => onSendingChange?.(false)}>
+          Tur slut
+        </button>
+        <p>{beforeSend ? "asks before sending" : "sends at once"}</p>
+        <textarea aria-label="Meddelande" />
+      </div>
+    );
+  }
+});
 
 /** A target's words, none of them the flow's. */
 const TEXTS: HelperTexts = {
@@ -170,6 +184,7 @@ afterEach(() => {
   vi.clearAllMocks();
   conversation.sent = [];
   conversation.waiting = undefined;
+  conversation.composer = null;
 });
 
 describe("HelperPanel when the chat cannot open", () => {
@@ -600,5 +615,188 @@ describe("HelperPanel while a message is on its way", () => {
     openChat(false);
     renderPanel();
     expect(await screen.findByText("asks before sending")).toBeTruthy();
+  });
+});
+
+describe("HelperPanel's visits", () => {
+  /** A target that starts each visit on a new conversation. */
+  const freshApi = () => ({ ...flowHelperApi("flow-1"), freshPerVisit: true });
+  const OPEN = "/api/v1/flows/{id}/authoring-chat/";
+
+  it("asks for a fresh start on a visit's first read only, never on a read after an answer", async () => {
+    openChat(false);
+    renderPanel(adapter({ api: freshApi() }));
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledWith(OPEN, {
+      params: { path: { id: "flow-1" }, query: { fresh_start: true } }
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Svar klart" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    expect(api.POST).toHaveBeenLastCalledWith(OPEN, { params: { path: { id: "flow-1" } } });
+  });
+
+  it("forgets the chat when the panel goes, so the next visit asks afresh and shows none of it first", async () => {
+    openChat(false);
+    const queryClient = testQueryClient();
+    const first = renderInApp(<HelperPanel adapter={adapter({ api: freshApi() })} />, {
+      queryClient
+    });
+    expect(await screen.findByText(`partner: ${TEXTS.partnerName}`)).toBeTruthy();
+    first.unmount();
+    expect(queryClient.getQueryData(flowKeys.authoringChat("flow-1"))).toBeUndefined();
+
+    let land!: (value: unknown) => void;
+    api.POST.mockReturnValue(new Promise((resolve) => (land = resolve)));
+    renderInApp(<HelperPanel adapter={adapter({ api: freshApi() })} />, { queryClient });
+    expect(screen.getByText(messages.flows_chat_loading)).toBeTruthy();
+    expect(screen.queryByText(`partner: ${TEXTS.partnerName}`)).toBeNull();
+    expect(api.POST).toHaveBeenLastCalledWith(OPEN, {
+      params: { path: { id: "flow-1" }, query: { fresh_start: true } }
+    });
+
+    land(ok({ ...CHAT, session_id: "session-2", editing: false }));
+    expect(await screen.findByText(`partner: ${TEXTS.partnerName}`)).toBeTruthy();
+  });
+
+  it("resumes a target that does not start afresh, and keeps what it read", async () => {
+    openChat(false);
+    const queryClient = testQueryClient();
+    const view = renderInApp(<HelperPanel adapter={adapter()} />, { queryClient });
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+
+    expect(api.POST).toHaveBeenCalledWith(OPEN, { params: { path: { id: "flow-1" } } });
+    view.unmount();
+    expect(queryClient.getQueryData(flowKeys.authoringChat("flow-1"))).toBeDefined();
+  });
+});
+
+describe("HelperPanel's earlier conversations", () => {
+  const EARLIER = {
+    session_id: "session-0",
+    title: "Hur börjar flödet?",
+    started_at: "2026-11-18T09:00:00Z",
+    last_asked_at: "2026-11-18T09:05:00Z",
+    current: false
+  };
+
+  /** The chat opens; the list holds one earlier conversation, which reads as one question and its answer. */
+  function openWithHistory() {
+    openChat(false);
+    api.GET.mockImplementation(async (path: string, init?: { params?: { path?: object } }) => {
+      if (path === "/api/v1/assistants/{id}/") {
+        return ok({ id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] });
+      }
+      if (path === "/api/v1/flows/{id}/authoring-chat/conversations/") {
+        return ok({ items: [{ ...EARLIER }], count: 1 });
+      }
+      const session = (init?.params?.path as { session_id?: string } | undefined)?.session_id;
+      return session === "session-0"
+        ? ok({
+            id: "session-0",
+            name: "",
+            messages: [
+              {
+                id: "q-0",
+                question: "Hur börjar flödet?",
+                answer: "Med ett formulär.",
+                created_at: "2026-11-18T09:05:00Z",
+                updated_at: "2026-11-18T09:05:10Z"
+              }
+            ]
+          })
+        : ok({ id: "session-1", name: "", messages: [] });
+    });
+  }
+
+  /** Picks the earlier conversation from the title row's menu. */
+  async function pickEarlier() {
+    fireEvent.click(await screen.findByRole("button", { name: messages.helper_history }));
+    const item = await screen.findByRole("menuitem", { name: /Hur börjar flödet\?/ });
+    // The menu takes the focus once it has opened, as it does before a person can pick.
+    await waitFor(() => expect(document.activeElement?.closest("[role='menu']")).not.toBeNull());
+    fireEvent.click(item);
+    return screen.findByRole("heading", { level: 3, name: messages.helper_earlier_heading });
+  }
+
+  /** Whether the current conversation is out of sight. */
+  const currentHidden = async () =>
+    (await screen.findByText(`partner: ${TEXTS.partnerName}`)).closest("[hidden]") !== null;
+
+  it("offers them only where the target lists its conversations", async () => {
+    openChat(false);
+    renderPanel(adapter({ api: { ...flowHelperApi("flow-1"), listConversations: undefined } }));
+
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.helper_history })).toBeNull();
+  });
+
+  it("shows a picked one read only, says so, and goes back to the composer", async () => {
+    openWithHistory();
+    renderPanel();
+
+    const heading = await pickEarlier();
+    await waitFor(() => expect(document.activeElement).toBe(heading));
+    expect(announce).toHaveBeenCalledWith(
+      expect.stringMatching(/^Du läser en tidigare konversation från .*2026/)
+    );
+    expect(await screen.findByText("Med ett formulär.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.helper_earlier_back })).toBeTruthy();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+    expect(await currentHidden()).toBe(true);
+    expect(screen.queryByRole("textbox", { name: "Meddelande" })).toBeNull();
+    // The title row stays: a new conversation and the settings can be reached.
+    expect(screen.getByRole("button", { name: messages.flows_chat_new_conversation })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.helper_earlier_back }));
+
+    expect(screen.queryByRole("heading", { name: messages.helper_earlier_heading })).toBeNull();
+    expect(await currentHidden()).toBe(false);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Meddelande" }))
+    );
+  });
+
+  it("gives way to the current conversation when the panel is put away, and to a new one", async () => {
+    openWithHistory();
+    const panel = (open: boolean) => <HelperPanel adapter={adapter()} open={open} />;
+    const { rerender } = renderInApp(panel(true));
+
+    await pickEarlier();
+    rerender(panel(false));
+    rerender(panel(true));
+    expect(screen.queryByRole("heading", { name: messages.helper_earlier_heading })).toBeNull();
+    expect(await currentHidden()).toBe(false);
+
+    await pickEarlier();
+    api.POST.mockResolvedValue(ok({ ...CHAT, session_id: "session-2", editing: false }));
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_chat_new_conversation }));
+    fireEvent.click(
+      within(await screen.findByRole("alertdialog")).getByRole("button", {
+        name: messages.flows_chat_new_conversation_confirm
+      })
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("heading", { name: messages.helper_earlier_heading })).toBeNull()
+    );
+    expect(await currentHidden()).toBe(false);
+  });
+
+  it("brings the current conversation back for what the page puts in its composer", async () => {
+    openWithHistory();
+    const typed: string[] = [];
+    conversation.composer = { insertText: (text) => typed.push(text), insertToken: () => {} };
+    const onComposer = vi.fn();
+    renderPanel(adapter({ references: { remarkPlugins: [], components: {}, onComposer } }));
+    await waitFor(() => expect(onComposer).toHaveBeenLastCalledWith(conversation.composer));
+
+    await pickEarlier();
+    await waitFor(() => expect(onComposer.mock.lastCall?.[0]).not.toBe(conversation.composer));
+    const standIn = onComposer.mock.lastCall?.[0] as { insertText: (text: string) => void };
+    act(() => standIn.insertText("Hjälp mig med steg 2"));
+
+    await waitFor(() => expect(typed).toEqual(["Hjälp mig med steg 2"]));
+    expect(screen.queryByRole("heading", { name: messages.helper_earlier_heading })).toBeNull();
+    expect(onComposer).toHaveBeenLastCalledWith(conversation.composer);
   });
 });

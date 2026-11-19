@@ -1,10 +1,11 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -14,19 +15,34 @@ from eneo.flows.api.flow_api_common import error_response
 from eneo.flows.application.flow_authoring_chat import (
     FlowAuthoringChatPublic,
     get_or_create_authoring_chat,
+    list_authoring_conversations,
     start_authoring_conversation,
     update_authoring_chat,
 )
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.helper_chats.application.helper_chat_service import (
+    CONVERSATION_LIST_LIMIT,
+    HelperChatConversationPublic,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
-from eneo.main.models import NOT_PROVIDED
+from eneo.main.models import NOT_PROVIDED, PaginatedResponse
 from eneo.server.dependencies.container import get_container
 
 _Container = Annotated[
     Container, Depends(get_container(with_user=True, transaction_scope="function"))
 ]
+_Reading = Annotated[Container, Depends(get_container(with_user=True))]
+
+
+async def _require_user_for_chat(container: _Container) -> None:
+    """``require_user_for_creation`` on the user the route's one
+    authentication resolved: opening a chat makes its conversation, which a
+    service key cannot own, and the flows feature gate still runs inside that
+    authentication."""
+    await require_user_for_creation(container.user())
+
 
 _FLOW_ID = Annotated[UUID, Path(description="Identifier of the draft flow to edit.")]
 
@@ -56,6 +72,36 @@ _CHAT_EXAMPLE = {
     "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
 }
 _MODEL_ID_EXAMPLE = "00000000-0000-0000-0000-000000000402"
+_CONVERSATIONS_EXAMPLE = {
+    "items": [
+        {
+            "session_id": "00000000-0000-0000-0000-000000000301",
+            "title": "Lägg till ett steg efter @[Steg 1](step:1)",
+            "started_at": "2026-11-19T09:12:00Z",
+            "last_asked_at": "2026-11-19T09:20:41Z",
+            "current": True,
+        },
+        {
+            "session_id": "00000000-0000-0000-0000-000000000300",
+            "title": "Bygg ett flöde som sammanfattar ett protokoll",
+            "started_at": "2026-11-18T14:02:10Z",
+            "last_asked_at": "2026-11-18T14:05:37Z",
+            "current": False,
+        },
+    ],
+    "count": 2,
+}
+_FRESH_START = Annotated[
+    bool,
+    Query(
+        description=(
+            "Open on a new, empty conversation: a current conversation that "
+            "holds a question is left for a new one, as starting a new "
+            "conversation does, and an empty one is kept as it is. The mode "
+            "and the model choice stay."
+        )
+    ),
+]
 _SESSION_ID = Annotated[
     UUID,
     Path(
@@ -144,7 +190,9 @@ class FlowAuthoringChatUpdateRequest(BaseModel):
         "reaches only this flow through its tools, and it starts in view mode: "
         "the tools read the flow but change nothing until the caller turns on "
         "edit mode. Each user has one chat per flow; calling again returns it "
-        "with its current conversation, and gives its assistant the current "
+        "with its current conversation, or with `fresh_start` on a new, empty "
+        "one (an empty current conversation is kept, so repeated opens leave "
+        "no empty conversation behind), and gives its assistant the current "
         "instructions and the model in force: the caller's own choice, else the "
         "organisation's default for flow chats when the space allows it, else "
         "the space's default among models that support tools."
@@ -167,9 +215,15 @@ class FlowAuthoringChatUpdateRequest(BaseModel):
     reason=flow_action_access_reason(FlowApiAction.EDIT),
 )
 async def create_authoring_chat(
-    id: _FLOW_ID, request: Request, container: _Container
+    id: _FLOW_ID,
+    request: Request,
+    container: _Container,
+    _user_for_creation: Annotated[None, Depends(_require_user_for_chat)],
+    fresh_start: _FRESH_START = False,
 ) -> FlowAuthoringChatPublic:
-    return await get_or_create_authoring_chat(container, flow_id=id, request=request)
+    return await get_or_create_authoring_chat(
+        container, flow_id=id, request=request, fresh_start=fresh_start
+    )
 
 
 @router.patch(
@@ -290,8 +344,10 @@ async def change_authoring_chat(
     description=(
         "Leave the chat's current conversation and continue in a new, empty one "
         "with the same assistant, edit mode and model. Earlier conversations are "
-        "kept for traceability but are never answered or sent to the model "
-        "again: asking in one returns not found. The response carries the new "
+        "kept for traceability and listed for their person (`GET "
+        ".../authoring-chat/conversations/`), but are never answered or sent "
+        "to the model again: asking in one returns not found. The response "
+        "carries the new "
         "`session_id`; the flow itself, its revisions and the audit log stay the "
         "record of what changed."
     ),
@@ -320,6 +376,41 @@ async def start_conversation(
 ) -> FlowAuthoringChatPublic:
     return await start_authoring_conversation(
         container, flow_id=id, session_id=session_id
+    )
+
+
+@router.get(
+    "/{id}/authoring-chat/conversations/",
+    response_model=PaginatedResponse[HelperChatConversationPublic],
+    operation_id="list_flow_authoring_conversations",
+    summary="List Flow Authoring Conversations",
+    description=(
+        "The caller's conversations in their chat on this flow that hold a "
+        "question, the latest question first, at most "
+        f"{CONVERSATION_LIST_LIMIT}. Each names its first question as its "
+        "title and says whether it is the chat's current conversation; read "
+        "one with `GET /api/v1/conversations/{session_id}/`. Only the current "
+        "conversation is ever answered. The checks are the open endpoint's, "
+        "and a caller without a chat on the flow gets not found. Creates and "
+        "changes nothing: a chat left in edit mode stays in it until it is "
+        "opened or used."
+    ),
+    responses={
+        200: {"content": {"application/json": {"example": _CONVERSATIONS_EXAMPLE}}},
+        403: _FORBIDDEN,
+        404: _NOT_FOUND,
+    },
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def list_conversations(
+    id: _FLOW_ID, request: Request, container: _Reading
+) -> PaginatedResponse[HelperChatConversationPublic]:
+    return PaginatedResponse(
+        items=await list_authoring_conversations(container, flow_id=id, request=request)
     )
 
 

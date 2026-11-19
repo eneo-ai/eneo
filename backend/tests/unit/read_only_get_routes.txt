@@ -96,6 +96,7 @@ GET /api/v1/apps/{id}/runs/
 GET /api/v1/assistants/
 GET /api/v1/assistants/{id}/
 GET /api/v1/assistants/{id}/helper-chat/availability
+GET /api/v1/assistants/{id}/helper-chat/conversations/
 GET /api/v1/assistants/{id}/mcp-servers/
 GET /api/v1/assistants/{id}/prompts/
 GET /api/v1/assistants/{id}/sessions/
@@ -138,6 +139,7 @@ GET /api/v1/flows/runs/capacity/
 GET /api/v1/flows/runs/status-capabilities/
 GET /api/v1/flows/{id}/
 GET /api/v1/flows/{id}/assistants/{assistant_id}/
+GET /api/v1/flows/{id}/authoring-chat/conversations/
 GET /api/v1/flows/{id}/graph/
 GET /api/v1/flows/{id}/published/
 GET /api/v1/flows/{id}/run-contract/

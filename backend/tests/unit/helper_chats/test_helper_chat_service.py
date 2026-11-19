@@ -1,7 +1,8 @@
 """The helper chat mechanics every target shares: what an audit entry records,
 what a target without an action for an event leaves out, the read-only gates
-an entry point can ask about, and what edit mode means on a target with and
-without modes."""
+an entry point can ask about, what edit mode means on a target with and
+without modes, when an opening starts a new conversation, and how the
+person's conversations are listed."""
 
 from __future__ import annotations
 
@@ -350,3 +351,100 @@ async def test_whether_a_chat_exists_is_asked_for_the_caller_and_the_target():
     assert person.id in params.values()
     assert target_id in params.values()
     assert HelperChatTargetType.ASSISTANT in params.values()
+
+
+def _opening_target() -> MagicMock:
+    target = MagicMock(target_type=HelperChatTargetType.ASSISTANT)
+    target.require_available = AsyncMock()
+    target.require_edit = AsyncMock(return_value=SimpleNamespace())
+    target.lock = AsyncMock(return_value=True)
+    return target
+
+
+@pytest.mark.parametrize(
+    ("fresh_start", "holds_a_question", "starts"),
+    [
+        pytest.param(True, True, True, id="fresh-over-a-question"),
+        pytest.param(True, False, False, id="fresh-over-an-empty-one"),
+        pytest.param(False, True, False, id="resuming"),
+    ],
+)
+async def test_an_opening_starts_a_conversation_only_fresh_over_a_question(
+    monkeypatch: pytest.MonkeyPatch,
+    fresh_start: bool,
+    holds_a_question: bool,
+    starts: bool,
+):
+    container = _container(_person())
+    chat = _row("assistant", editing=False)
+    container.session.return_value.scalar = AsyncMock(return_value=chat)
+    monkeypatch.setattr(helper_chat_service, "load_chat", AsyncMock(return_value=chat))
+    asked = AsyncMock(return_value=holds_a_question)
+    monkeypatch.setattr(helper_chat_service, "_holds_a_question", asked)
+    started = AsyncMock()
+    monkeypatch.setattr(helper_chat_service, "_start_conversation", started)
+    monkeypatch.setattr(
+        helper_chat_service, "_sync_assistant", AsyncMock(return_value=None)
+    )
+
+    opened = await helper_chat_service.get_or_create_chat(
+        container,
+        _opening_target(),
+        target_id=chat.target_id,
+        request=MagicMock(),
+        fresh_start=fresh_start,
+    )
+
+    assert opened.chat is chat
+    if starts:
+        started.assert_awaited_once_with(container, chat, reason="fresh_start")
+    else:
+        started.assert_not_awaited()
+    # A resuming opening never asks what the conversation holds.
+    assert asked.await_count == (1 if fresh_start else 0)
+
+
+async def test_the_conversations_are_read_in_one_query_for_the_caller_and_the_chat(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    person = _person()
+    container = _container(person)
+    chat = _row("assistant", editing=False)
+    read = AsyncMock(return_value=(chat, SimpleNamespace()))
+    monkeypatch.setattr(helper_chat_service, "_read_chat", read)
+    earlier = uuid4()
+    now = datetime.now(timezone.utc)
+    result = MagicMock()
+    result.all.return_value = [
+        (
+            chat.session_id,
+            now,
+            now,
+            "Hjälp mig\n  skriva  @[Instruktioner](setting:prompt)",
+        ),
+        (earlier, now - timedelta(days=1), now - timedelta(days=1), "Vilken modell?"),
+    ]
+    container.session.return_value.execute = AsyncMock(return_value=result)
+    target = _opening_target()
+
+    listed = await helper_chat_service.list_conversations(
+        container, target, target_id=chat.target_id, request=MagicMock()
+    )
+
+    assert [(item.session_id, item.current) for item in listed] == [
+        (chat.session_id, True),
+        (earlier, False),
+    ]
+    assert listed[0].title == "Hjälp mig skriva @[Instruktioner](setting:prompt)"
+    # The checks are opening's, and the chat is read without its pause upkeep.
+    target.require_available.assert_awaited_once()
+    target.require_edit.assert_awaited_once()
+    assert read.await_args.kwargs["session_id"] is None
+    assert read.await_args.kwargs["target_id"] == chat.target_id
+    container.session.return_value.execute.assert_awaited_once()
+    query = container.session.return_value.execute.await_args.args[0]
+    params = query.compile().params
+    assert person.id in params.values()
+    assert person.tenant_id in params.values()
+    assert chat.assistant_id in params.values()
+    assert helper_chat_service.CONVERSATION_LIST_LIMIT in params.values()

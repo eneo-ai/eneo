@@ -7,7 +7,12 @@ import { renderInApp, testQueryClient } from "@/test/render";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 // The flow is the helper's one target so far: its endpoints stand in for any target's.
 import { flowHelperApi, flowKeys, type FlowAuthoringChat } from "@/features/flows/flows-api";
-import { HelperChatSettings, NewConversationButton, helperChatModelId } from "./helper-controls";
+import {
+  ConversationHistoryMenu,
+  HelperChatSettings,
+  NewConversationButton,
+  helperChatModelId
+} from "./helper-controls";
 
 type Reply = { data?: unknown; error?: unknown; response: Response };
 
@@ -279,5 +284,103 @@ describe("NewConversationButton", () => {
 
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(api.POST).not.toHaveBeenCalled();
+  });
+});
+
+describe("ConversationHistoryMenu", () => {
+  const conversation = (session: string, title: string, lastAsked: string, current = false) => ({
+    session_id: session,
+    title,
+    started_at: "2026-11-18T08:00:00Z",
+    last_asked_at: lastAsked,
+    current
+  });
+
+  function renderMenu(reply: Reply) {
+    api.GET.mockResolvedValue(reply);
+    const onPick = vi.fn();
+    const chatApi = flowHelperApi(CHAT.flow_id);
+    const view = renderInApp(
+      <ConversationHistoryMenu
+        chat={CHAT}
+        api={chatApi}
+        list={chatApi.listConversations!}
+        onPick={onPick}
+      />
+    );
+    return { ...view, onPick };
+  }
+
+  const openMenu = () =>
+    fireEvent.click(screen.getByRole("button", { name: messages.helper_history }));
+
+  it("is a named button that opens a menu, and reads the list only once it opens", async () => {
+    const { container } = renderMenu(ok({ items: [], count: 0 }));
+    const trigger = screen.getByRole("button", { name: messages.helper_history });
+
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    await expectNoAxeViolations(container);
+    expect(api.GET).not.toHaveBeenCalled();
+    openMenu();
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/authoring-chat/conversations/", {
+        params: { path: { id: "flow-1" } }
+      })
+    );
+  });
+
+  it("lists the earlier conversations, latest first, by plain name and when last active", async () => {
+    const { onPick } = renderMenu(
+      ok({
+        items: [
+          conversation("session-1", "Den aktuella", "2026-11-19T10:00:00Z", true),
+          conversation(
+            "session-0",
+            "Hjälp mig med @[Steg 1](step:abc) och @[Modell](setting:completion_model)",
+            "2026-11-18T09:05:00Z"
+          ),
+          conversation("session-old", "En äldre fråga", "2026-10-02T12:00:00Z")
+        ],
+        count: 3
+      })
+    );
+    openMenu();
+
+    await screen.findByRole("menuitem", { name: /En äldre fråga/ });
+    const items = screen.getAllByRole("menuitem");
+    expect(items.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Hjälp mig med Steg 1 och Modell"),
+      expect.stringContaining("En äldre fråga")
+    ]);
+    expect(items[0]!.textContent).toContain("2026");
+    expect(screen.queryByText("Den aktuella")).toBeNull();
+    fireEvent.click(items[1]!);
+    expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ session_id: "session-old" }));
+  });
+
+  it("says so when there is no earlier conversation", async () => {
+    renderMenu(
+      ok({ items: [conversation("session-1", "Den aktuella", "2026-11-19T10:00:00Z", true)] })
+    );
+    openMenu();
+
+    const empty = await screen.findByRole("menuitem", { name: messages.helper_history_empty });
+    expect(empty.getAttribute("aria-disabled")).toBe("true");
+  });
+
+  it("says when the list could not be read, and reads it again on request", async () => {
+    renderMenu(refused(500, { message: "Boom." }));
+    openMenu();
+
+    expect(
+      await screen.findByRole("menuitem", { name: messages.helper_history_failed })
+    ).toBeTruthy();
+    api.GET.mockResolvedValue(
+      ok({ items: [conversation("session-0", "Andra försöket", "2026-11-18T09:05:00Z")] })
+    );
+    fireEvent.click(screen.getByRole("menuitem", { name: messages.retry }));
+
+    expect(await screen.findByRole("menuitem", { name: /Andra försöket/ })).toBeTruthy();
+    expect(screen.queryByText("Boom.")).toBeNull();
   });
 });

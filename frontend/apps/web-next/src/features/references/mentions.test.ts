@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  mentionNames,
   mentionParts,
   mentionPattern,
   mentionText,
@@ -70,5 +71,14 @@ describe("mentions", () => {
     ]) {
       expect(parseBareMention(raw)).toBeNull();
     }
+  });
+
+  it("reads every mention by its name, whatever its scheme, and one cut off at the end too", () => {
+    expect(
+      mentionNames("Hjälp mig skriva @[Instruktioner](setting:prompt) och @[Steg 1](step:abc)")
+    ).toBe("Hjälp mig skriva Instruktioner och Steg 1");
+    expect(mentionNames("Läs @[Steg 2](step:a")).toBe("Läs Steg 2");
+    expect(mentionNames("Läs @[Ste")).toBe("Läs Ste");
+    expect(mentionNames("Inga omnämnanden här.")).toBe("Inga omnämnanden här.");
   });
 });

@@ -44,6 +44,21 @@ through its own `helper_chats` row. The insights target list, its user count
 and the organisation's activity count the targets people see, so a hidden
 assistant's conversations are not in them.
 
+A helper chat's row points at its current conversation, the only one that is
+answered. Its earlier conversations stay with the chat's hidden assistant and
+are listed for their owner alone (`helper_chat_service.list_conversations`,
+behind each target's `GET .../conversations/`): only conversations that hold
+a question, read through the same checks as opening the chat. The owner reads
+one through the conversations API like any of their conversations; asking in
+it is refused. An opening can start a new conversation: the assistant
+helper opens with `fresh_start`, which leaves a current conversation that
+holds a question for a new, empty one and keeps an empty one as it is. The
+conversation left behind holds a question, so retention treats it like any
+other conversation, and the empty one is the chat's current, which the
+empty-session cleanup passes. An empty conversation left behind by "Ny
+konversation" is no chat's current, so that cleanup removes it after its
+grace period.
+
 ## Sources are another rule
 
 A conversation's principal is its source (`eneo.sessions.session_source`): a

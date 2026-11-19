@@ -46,6 +46,7 @@ from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.services.service import DatastoreResult
+from eneo.sessions.session import SessionAdd
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.users.user import UserAdd, UserState
 from init_db import add_tenant_user
@@ -310,6 +311,266 @@ async def test_the_chat_is_the_persons_alone(
     assert theirs.status_code == 200, theirs.text
     assert theirs.json()["assistant_id"] != chat["assistant_id"]
     assert (await _open(client, setup))["session_id"] == chat["session_id"]
+
+
+# --- Fresh starts and earlier conversations ---------------------------------
+
+
+async def _ask_in(
+    db_container,
+    tenant_id: UUID,
+    *,
+    session_id: str,
+    assistant_id: str,
+    question: str,
+    age: timedelta = timedelta(0),
+) -> None:
+    """A question in the conversation, asked ``age`` ago."""
+    async with db_container() as container:
+        await container.session().execute(
+            sa.insert(Questions).values(
+                question=question,
+                answer="Svar.",
+                num_tokens_question=4,
+                num_tokens_answer=1,
+                session_id=UUID(session_id),
+                tenant_id=tenant_id,
+                assistant_id=UUID(assistant_id),
+                created_at=datetime.now(timezone.utc) - age,
+            )
+        )
+
+
+async def _open_fresh(client, setup: Setup, headers=None) -> dict:
+    opened = await client.post(
+        setup.url,
+        headers=headers or setup.headers,
+        params={"fresh_start": True},
+    )
+    assert opened.status_code == 200, opened.text
+    return opened.json()
+
+
+def _answer_without_a_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def ask(self, question, completion_service, references_service, **kwargs):
+        model = kwargs.get("completion_model_override") or self.completion_model
+        return (
+            CompletionModelResponse(
+                completion=Completion(text="Svar."), model=model, total_token_count=1
+            ),
+            DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[]),
+        )
+
+    monkeypatch.setattr(Assistant, "ask", ask)
+
+
+async def test_a_fresh_opening_leaves_a_conversation_with_a_question_for_a_new_one(
+    client, setup: Setup, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    chat = await _open(client, setup)
+    # An empty conversation is kept, however often the chat is opened afresh.
+    assert (await _open_fresh(client, setup))["session_id"] == chat["session_id"]
+    chosen = await client.patch(
+        setup.url + chat["session_id"] + "/",
+        headers=setup.headers,
+        json={"completion_model_id": chat["default_completion_model_id"]},
+    )
+    assert chosen.status_code == 200, chosen.text
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=chat["session_id"],
+        assistant_id=chat["assistant_id"],
+        question="Vad gör assistenten?",
+    )
+    entries: list[dict] = []
+    log_async = AuditService.log_async
+
+    async def record(self, **kwargs):
+        entries.append(kwargs)
+        return await log_async(self, **kwargs)
+
+    monkeypatch.setattr(AuditService, "log_async", record)
+
+    fresh = await _open_fresh(client, setup)
+
+    assert fresh["session_id"] != chat["session_id"]
+    assert fresh["assistant_id"] == chat["assistant_id"]
+    assert fresh["completion_model_id"] == chat["default_completion_model_id"]
+    assert [entry["action"] for entry in entries] == [
+        ActionType.HELPER_CHAT_CONVERSATION_STARTED
+    ]
+    assert entries[0]["metadata"]["extra"] == {
+        "session_id": fresh["session_id"],
+        "previous_session_id": chat["session_id"],
+        "reason": "fresh_start",
+    }
+    # The new conversation is empty, so opening afresh again keeps it, and
+    # an opening without a fresh start resumes it.
+    assert (await _open_fresh(client, setup))["session_id"] == fresh["session_id"]
+    assert (await _open(client, setup))["session_id"] == fresh["session_id"]
+
+    _answer_without_a_model(monkeypatch)
+    turn = f"/api/v1/assistants/{chat['assistant_id']}/sessions/"
+    earlier = await client.post(
+        turn + chat["session_id"] + "/",
+        headers=setup.headers,
+        json={"question": "Fortsätt.", "stream": False},
+    )
+    current = await client.post(
+        turn + fresh["session_id"] + "/",
+        headers=setup.headers,
+        json={"question": "Börja om.", "stream": False},
+    )
+    assert earlier.status_code == 404, earlier.text
+    assert current.status_code == 200, current.text
+    async with db_container() as container:
+        kept = await container.session().scalar(
+            sa.select(sa.func.count())
+            .select_from(Questions)
+            .where(Questions.session_id == UUID(chat["session_id"]))
+        )
+    assert kept == 1
+
+
+async def test_the_person_lists_their_conversations_that_hold_a_question(
+    client, setup: Setup, db_container, admin_user
+):
+    chat = await _open(client, setup)
+    long_question = "Hjälp mig skriva\n  @[Instruktioner](setting:prompt). " + (
+        "Mer text. " * 40
+    )
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=chat["session_id"],
+        assistant_id=chat["assistant_id"],
+        question=long_question,
+        age=timedelta(hours=2),
+    )
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=chat["session_id"],
+        assistant_id=chat["assistant_id"],
+        question="En följdfråga.",
+        age=timedelta(hours=1),
+    )
+    second = await _open_fresh(client, setup)
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=second["session_id"],
+        assistant_id=second["assistant_id"],
+        question="Vilken modell passar?",
+    )
+    # The person's own conversation with the assistant itself is not the chat's.
+    async with db_container() as container:
+        own = await container.session_repo().add(
+            SessionAdd(
+                name="Egen",
+                user_id=admin_user.id,
+                assistant_id=UUID(setup.assistant_id),
+            )
+        )
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=str(own.id),
+        assistant_id=setup.assistant_id,
+        question="Hej assistenten.",
+    )
+
+    listed = await client.get(setup.url + "conversations/", headers=setup.headers)
+
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["items"]
+    assert [(item["session_id"], item["current"]) for item in items] == [
+        (second["session_id"], True),
+        (chat["session_id"], False),
+    ]
+    assert items[0]["title"] == "Vilken modell passar?"
+    title = items[1]["title"]
+    assert title.startswith("Hjälp mig skriva @[Instruktioner](setting:prompt). Mer")
+    assert len(title) <= 200
+    # Its last question is the follow-up, asked an hour ago.
+    last_asked = datetime.fromisoformat(items[1]["last_asked_at"])
+    hours_ago = (datetime.now(timezone.utc) - last_asked) / timedelta(hours=1)
+    assert 0.5 < hours_ago < 1.5
+
+    # A fresh opening leaves the empty conversation out of the list.
+    third = await _open_fresh(client, setup)
+    again = (
+        await client.get(setup.url + "conversations/", headers=setup.headers)
+    ).json()["items"]
+    assert third["session_id"] not in {item["session_id"] for item in again}
+    assert [item["current"] for item in again] == [False, False]
+
+
+async def test_an_earlier_conversation_is_read_and_listed_by_its_person_alone(
+    client, setup: Setup, db_container, admin_user, other_tenant_headers
+):
+    chat = await _open(client, setup)
+    await _ask_in(
+        db_container,
+        admin_user.tenant_id,
+        session_id=chat["session_id"],
+        assistant_id=chat["assistant_id"],
+        question="Vad heter assistenten?",
+    )
+    await _open_fresh(client, setup)
+    conversation = f"/api/v1/conversations/{chat['session_id']}/"
+
+    read = await client.get(conversation, headers=setup.headers)
+
+    assert read.status_code == 200, read.text
+    assert [message["question"] for message in read.json()["messages"]] == [
+        "Vad heter assistenten?"
+    ]
+    colleague = await _member_headers(
+        db_container, admin_user.tenant_id, setup.space_id, SpaceRoleValue.ADMIN
+    )
+    refused = {
+        who: await client.get(conversation, headers=headers)
+        for who, headers in [("colleague", colleague), ("other", other_tenant_headers)]
+    }
+    assert {who: response.status_code for who, response in refused.items()} == {
+        "colleague": 403,
+        "other": 403,
+    }, {who: response.text for who, response in refused.items()}
+    assert "Vad heter" not in "".join(response.text for response in refused.values())
+    # Without a chat of their own the colleague has no list; with one, it
+    # holds none of the person's conversations.
+    no_chat = await client.get(setup.url + "conversations/", headers=colleague)
+    assert no_chat.status_code == 404, no_chat.text
+    await _open(client, replace(setup, headers=colleague))
+    their_list = await client.get(setup.url + "conversations/", headers=colleague)
+    assert their_list.status_code == 200, their_list.text
+    assert their_list.json()["items"] == []
+    other_tenant = await client.get(
+        setup.url + "conversations/", headers=other_tenant_headers
+    )
+    assert other_tenant.status_code == 403, other_tenant.text
+
+
+async def test_the_list_answers_like_the_opening_for_someone_who_may_not_edit(
+    client, setup: Setup, db_container, admin_user
+):
+    published = await client.post(
+        f"/api/v1/assistants/{setup.assistant_id}/publish/",
+        headers=setup.headers,
+        params={"published": True},
+    )
+    assert published.status_code == 200, published.text
+    viewer = await _member_headers(
+        db_container, admin_user.tenant_id, setup.space_id, SpaceRoleValue.VIEWER
+    )
+
+    listed = await client.get(setup.url + "conversations/", headers=viewer)
+    opened = await client.post(setup.url, headers=viewer)
+
+    assert _body(listed) == _body(opened)
+    assert listed.json()["code"] == "helper_chat_no_edit_rights"
 
 
 async def test_the_persons_turn_reaches_the_model_with_the_assistant_tools(

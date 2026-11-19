@@ -59,3 +59,14 @@ export function parseBareMention(raw: string): { name: string; key: string } | n
   const match = /^@\[([^\]\n]+)\]\(([^)\s]+)\)$/.exec(raw);
   return match && !isLinkAddress(match[2]!) ? { name: match[1]!, key: match[2]! } : null;
 }
+
+/**
+ * The text as a person reads it: each mention, whatever its scheme, as its
+ * name (`@[Steg 1](step:id)` reads "Steg 1"). A mention cut off at the end,
+ * as in a title cut to a length, reads as much of its name as is left.
+ */
+export function mentionNames(text: string): string {
+  return text
+    .replace(/@\[([^\]\n]+)\]\([a-z][a-z0-9+.-]*:[^)\s]+\)/gi, "$1")
+    .replace(/@\[([^\]\n]*)(?:\](?:\([^)\s]*)?)?$/, "$1");
+}

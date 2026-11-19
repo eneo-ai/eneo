@@ -73,7 +73,9 @@ function openChat(editing: boolean) {
   api.GET.mockImplementation(async (path: string) =>
     path === "/api/v1/assistants/{id}/"
       ? ok({ id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] })
-      : ok({ id: "session-1", name: "", messages: [] })
+      : path === "/api/v1/flows/{id}/authoring-chat/conversations/"
+        ? ok({ items: [], count: 0 })
+        : ok({ id: "session-1", name: "", messages: [] })
   );
 }
 
@@ -153,6 +155,25 @@ describe("The flow's helper chat on a published flow", () => {
     expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
     expect(screen.getByText(messages.flows_chat_partner_description_ask)).toBeTruthy();
     expect(screen.queryByText(messages.flows_chat_partner_description)).toBeNull();
+  });
+});
+
+describe("The flow's helper chat's conversations", () => {
+  it("resumes the current conversation and offers the earlier ones from the flow's list", async () => {
+    openChat(false);
+    renderPanel();
+
+    expect(await screen.findByRole("button", { name: "Läge: Fråga" })).toBeTruthy();
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/flows/{id}/authoring-chat/", {
+      params: { path: { id: "flow-1" } }
+    });
+    fireEvent.click(screen.getByRole("button", { name: messages.helper_history }));
+    expect(
+      await screen.findByRole("menuitem", { name: messages.helper_history_empty })
+    ).toBeTruthy();
+    expect(api.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/authoring-chat/conversations/", {
+      params: { path: { id: "flow-1" } }
+    });
   });
 });
 

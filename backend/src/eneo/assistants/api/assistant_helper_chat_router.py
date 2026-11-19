@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from eneo.assistants.application.assistant_helper_chat import (
@@ -10,17 +10,23 @@ from eneo.assistants.application.assistant_helper_chat import (
     AssistantHelperChatPublic,
     assistant_chat_availability,
     get_or_create_assistant_chat,
+    list_assistant_conversations,
     start_assistant_conversation,
     update_assistant_chat,
 )
+from eneo.authentication.auth_dependencies import require_user_for_creation
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
+from eneo.helper_chats.application.helper_chat_service import (
+    CONVERSATION_LIST_LIMIT,
+    HelperChatConversationPublic,
+)
 from eneo.main.container.container import Container
 from eneo.main.exceptions import ErrorCodes
-from eneo.main.models import NOT_PROVIDED, GeneralError
+from eneo.main.models import NOT_PROVIDED, GeneralError, PaginatedResponse
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -57,6 +63,36 @@ _CHAT_EXAMPLE = {
     "reasoning_effort": None,
     "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
 }
+_CONVERSATIONS_EXAMPLE = {
+    "items": [
+        {
+            "session_id": "00000000-0000-0000-0000-000000000301",
+            "title": "Hjälp mig skriva @[Instruktioner](setting:prompt)",
+            "started_at": "2026-11-19T09:12:00Z",
+            "last_asked_at": "2026-11-19T09:20:41Z",
+            "current": True,
+        },
+        {
+            "session_id": "00000000-0000-0000-0000-000000000300",
+            "title": "Vilken modell passar för korta svar?",
+            "started_at": "2026-11-18T14:02:10Z",
+            "last_asked_at": "2026-11-18T14:05:37Z",
+            "current": False,
+        },
+    ],
+    "count": 2,
+}
+_FRESH_START = Annotated[
+    bool,
+    Query(
+        description=(
+            "Open on a new, empty conversation: a current conversation that "
+            "holds a question is left for a new one, as starting a new "
+            "conversation does, and an empty one is kept as it is. The model "
+            "choice stays."
+        )
+    ),
+]
 
 
 def _error(
@@ -179,7 +215,9 @@ class AssistantHelperChatUpdateRequest(BaseModel):
         "the caller's own in the assistant's space, whose tools reach only "
         "this assistant; send its questions to `assistant_id`. Each user has "
         "one chat per assistant; calling again returns it with its current "
-        "conversation and gives its assistant the current instructions (with "
+        "conversation, or with `fresh_start` on a new, empty one (an empty "
+        "current conversation is kept, so repeated opens leave no empty "
+        "conversation behind), and gives its assistant the current instructions (with "
         "the organisation's guidance for helper chats after the base persona) "
         "and the model in force: the caller's own choice, else the "
         "organisation's default for helper chats when the space allows it, "
@@ -208,10 +246,14 @@ class AssistantHelperChatUpdateRequest(BaseModel):
     reason=_ACCESS_REASON,
 )
 async def open_assistant_helper_chat(
-    id: _ASSISTANT_ID, request: Request, container: _Changing
+    id: _ASSISTANT_ID,
+    request: Request,
+    container: _Changing,
+    _user_for_creation: Annotated[None, Depends(require_user_for_creation)],
+    fresh_start: _FRESH_START = False,
 ) -> AssistantHelperChatPublic:
     return await get_or_create_assistant_chat(
-        container, assistant_id=id, request=request
+        container, assistant_id=id, request=request, fresh_start=fresh_start
     )
 
 
@@ -312,7 +354,8 @@ async def change_assistant_helper_chat(
     description=(
         "Leave the helper chat's current conversation and continue in a new, "
         "empty one with the same assistant and model. Earlier "
-        "conversations are kept for traceability but are never answered or "
+        "conversations are kept for traceability and listed for their person "
+        "(`GET .../helper-chat/conversations/`), but are never answered or "
         "sent to the model again: asking in one returns not found. The "
         "response carries the new `session_id`."
     ),
@@ -342,6 +385,50 @@ async def start_assistant_helper_chat_conversation(
 ) -> AssistantHelperChatPublic:
     return await start_assistant_conversation(
         container, assistant_id=id, session_id=session_id
+    )
+
+
+@router.get(
+    "/{id}/helper-chat/conversations/",
+    response_model=PaginatedResponse[HelperChatConversationPublic],
+    operation_id="list_assistant_helper_chat_conversations",
+    summary="List Assistant Helper Chat Conversations",
+    description=(
+        "The caller's conversations in their helper chat on this assistant "
+        "that hold a question, the latest question first, at most "
+        f"{CONVERSATION_LIST_LIMIT}. Each names its first question as its "
+        "title and says whether it is the chat's current conversation; read "
+        "one with `GET /api/v1/conversations/{session_id}/`. Only the current "
+        "conversation is ever answered. The checks are the open endpoint's, "
+        "and a caller without a chat on the assistant gets not found. Creates "
+        "and changes nothing."
+    ),
+    responses={
+        200: {"content": {"application/json": {"example": _CONVERSATIONS_EXAMPLE}}},
+        400: _response("The assistant is configured elsewhere.", _NOT_SUPPORTED),
+        403: _FORBIDDEN,
+        404: _response(
+            "The caller has no helper chat on the assistant.",
+            _error(
+                "not_found",
+                "Helper chat not found.",
+                eneo_error_code=ErrorCodes.NOT_FOUND,
+            ),
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_ACCESS_REASON,
+)
+async def list_assistant_helper_chat_conversations(
+    id: _ASSISTANT_ID, request: Request, container: _Reading
+) -> PaginatedResponse[HelperChatConversationPublic]:
+    return PaginatedResponse(
+        items=await list_assistant_conversations(
+            container, assistant_id=id, request=request
+        )
     )
 
 
