@@ -1,5 +1,14 @@
+import { useScrollableArea } from "@astryxdesign/core/hooks";
 import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
-import { useEffect, useEffectEvent, useRef, useState, type ReactNode, type RefObject } from "react";
+import {
+  Component,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject
+} from "react";
 import { useElementWidth } from "@/lib/hooks/use-element-width";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
@@ -25,7 +34,8 @@ function scrollerOf(element: HTMLElement | null): HTMLElement | null {
 /**
  * The height of the view the page scrolls in (its scroller's content box),
  * kept current; null until measured. The aside is that tall, so it stays in
- * view while the page scrolls beside or under it.
+ * view while the page scrolls beside or under it, and so is the row while the
+ * content scrolls on its own beside the aside.
  */
 function useViewHeight(ref: RefObject<HTMLElement | null>): number | null {
   const [height, setHeight] = useState<number | null>(null);
@@ -42,11 +52,104 @@ function useViewHeight(ref: RefObject<HTMLElement | null>): number | null {
   return height;
 }
 
+/** Where the person is reading: an element at the top of the view, and how far below that top it starts. */
+type ReadingPlace = { element: Element; offset: number };
+
+/**
+ * The top of what `scroller` shows of `content`, below what sticks there (a
+ * sticky header), and the person's place under it: the first element that
+ * reaches below that line, stepping into one that starts on or above it
+ * (where what sticks may be) until one starts below it or has nothing to
+ * step into, so a long section gives a place inside it. Sticky and
+ * positioned elements are no place: they stay where they are.
+ */
+function readingPlace(
+  scroller: HTMLElement,
+  content: HTMLElement
+): { line: number; place: ReadingPlace | null } {
+  const top = scroller.getBoundingClientRect().top;
+  let line = top;
+  let place: ReadingPlace | null = null;
+  let parent: Element | null = content;
+  while (parent) {
+    let crossing: Element | null = null;
+    for (const child of parent.children) {
+      const box = child.getBoundingClientRect();
+      if (box.height === 0) continue;
+      const { position } = getComputedStyle(child);
+      if (position === "sticky") {
+        // Resting against the top of the view, it hides what scrolls under it.
+        if (box.top <= top + 1 && box.bottom > line) line = box.bottom;
+        continue;
+      }
+      if (position === "fixed" || position === "absolute" || box.bottom <= line) continue;
+      place = { element: child, offset: box.top - line };
+      crossing = box.top <= line ? child : null;
+      break;
+    }
+    parent = crossing;
+  }
+  return { line, place };
+}
+
+/**
+ * Keeps the person's place in the content when the scroller that shows it
+ * changes (the content starts or stops scrolling on its own as the aside
+ * opens or closes beside it, or the window changes the aside's room): the
+ * element at the top of the view stays where it was, however the content's
+ * new width reflows it. The place is read before the change is drawn
+ * (`getSnapshotBeforeUpdate`, which no hook offers) and restored after it,
+ * before the change is painted.
+ */
+class ReadingPlaceKeeper extends Component<{
+  ownScroll: boolean;
+  row: RefObject<HTMLElement | null>;
+  /** The content's column; its one child is its own scroller while it has one. */
+  content: RefObject<HTMLElement | null>;
+}> {
+  private scroller(ownScroll: boolean): HTMLElement | null {
+    const own = this.props.content.current?.firstElementChild;
+    return ownScroll
+      ? own instanceof HTMLElement
+        ? own
+        : null
+      : scrollerOf(this.props.row.current);
+  }
+
+  override getSnapshotBeforeUpdate(previous: ReadingPlaceKeeper["props"]): ReadingPlace | null {
+    const content = this.props.content.current;
+    const scroller = this.scroller(previous.ownScroll);
+    if (previous.ownScroll === this.props.ownScroll || !content || !scroller) return null;
+    return readingPlace(scroller, content).place;
+  }
+
+  override componentDidUpdate(
+    _previous: ReadingPlaceKeeper["props"],
+    _state: unknown,
+    place: ReadingPlace | null
+  ) {
+    const content = this.props.content.current;
+    const scroller = this.scroller(this.props.ownScroll);
+    if (!place || !content || !scroller || !place.element.isConnected) return;
+    const { line } = readingPlace(scroller, content);
+    scroller.scrollTop += place.element.getBoundingClientRect().top - line - place.offset;
+  }
+
+  override render() {
+    return null;
+  }
+}
+
 /**
  * A page's content with an aside the person opens and closes (a helper
- * chat beside a settings editor). The page stays the scroller: the aside
- * is sticky in the content's row, as tall as the view, so the content keeps
- * its own sticky header and lists while it scrolls.
+ * chat beside a settings editor). The aside is sticky in the content's row,
+ * as tall as the view the page scrolls in. While it is open beside the
+ * content, the content scrolls on its own, its scrollbar at its own edge
+ * beside the aside, and the page holds still: a named region
+ * (`contentLabel`) whose keyboard entry goes to its first link or button,
+ * as a table's scroll box does. Otherwise the page is the scroller, as
+ * without the aside. Either way the content keeps its own sticky header and
+ * lists, and the person keeps their place when the scroller changes.
  *
  * Beside the content while the row leaves the content 480 px (decision 14,
  * measured on the row, the chat's rule), with a handle to resize it whose
@@ -65,6 +168,7 @@ function useViewHeight(ref: RefObject<HTMLElement | null>): number | null {
 export function CompanionLayout({
   open,
   label,
+  contentLabel,
   resizeLabel,
   widthStorageKey,
   returnFocus,
@@ -75,6 +179,8 @@ export function CompanionLayout({
   open: boolean;
   /** The aside's name as a region. */
   label: string;
+  /** The content's name as a region, while it scrolls on its own beside the aside. */
+  contentLabel: string;
   /** The resize handle's name. */
   resizeLabel: string;
   /** Where the width the person gave the aside is kept. */
@@ -110,6 +216,20 @@ export function CompanionLayout({
     autoSaveId: widthStorageKey
   });
   const covered = open && !beside;
+  // Beside the open aside, the content is its own scroller. Its sticky header
+  // and lists stick to it whatever its length, and the page's scroll does
+  // not carry on into it from its ends.
+  const ownScroll = open && beside;
+  const contentScroll = useScrollableArea({
+    axis: "block",
+    keyboardAccess: { owner: "contentOrViewport", label: contentLabel, role: "region" },
+    overscroll: "contain",
+    stickyContainment: "always"
+  });
+  // A tab stop only while it scrolls and its keyboard entry has no link or
+  // button to go to; its ring is drawn inside, where its edges do not clip it.
+  const viewportClassName =
+    "focus-visible:outline-ring flex min-h-0 min-w-0 flex-1 flex-col focus-visible:outline-2 focus-visible:-outline-offset-2";
 
   const returnFocusTo = useEffectEvent(() => returnFocus()?.focus());
   const wasOpen = useRef(open);
@@ -149,10 +269,26 @@ export function CompanionLayout({
   }, [closable]);
 
   return (
-    <div ref={row} data-companion-row="" className="relative flex min-w-0 flex-1 items-start">
+    <div
+      ref={row}
+      data-companion-row=""
+      // As tall as the view while the content scrolls on its own: the page has nothing to scroll.
+      style={ownScroll && viewHeight !== null ? { height: viewHeight } : undefined}
+      className="relative flex min-w-0 flex-1 items-start"
+    >
       <div ref={content} inert={covered} className="flex min-w-0 flex-1 flex-col self-stretch">
-        {children}
+        {/* The same elements in either state, so the content is never mounted again. */}
+        <div
+          {...(ownScroll
+            ? contentScroll.getViewportProps<HTMLDivElement>({ className: viewportClassName })
+            : { className: viewportClassName })}
+        >
+          <div {...contentScroll.getContentProps({ className: "flex min-w-0 shrink-0 flex-col" })}>
+            {children}
+          </div>
+        </div>
       </div>
+      <ReadingPlaceKeeper ownScroll={ownScroll} row={row} content={content} />
       {mounted ? (
         <div
           hidden={!open}

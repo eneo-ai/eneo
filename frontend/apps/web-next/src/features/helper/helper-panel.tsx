@@ -23,7 +23,9 @@ import { cn } from "@/lib/utils";
 import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
 import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
+import { composerField } from "@/features/chat/conversation-layout";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
+import type { SidePanelLayout } from "@/features/chat/side-panel/side-panel";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
 import { EarlierConversation } from "./earlier-conversation";
@@ -40,6 +42,13 @@ import {
   NewConversationButton,
   useConversationTime
 } from "./helper-controls";
+
+/**
+ * The helper is a narrow column beside the page it helps with: an answer's
+ * activity, a file or the overview that has no room beside the conversation
+ * covers the conversation in that column, not the whole window.
+ */
+const HELPER_PANEL_LAYOUT: SidePanelLayout = { inColumn: true };
 
 /** The mode switch of one chat: its saves run one after another in its own queue. */
 const modeSwitchId = (api: HelperChatApi) => `helper-mode:${hashKey(api.key)}`;
@@ -363,6 +372,7 @@ function HelperConversation({
         initialMessages={initialMessages}
         activity={activity}
         onActivityChange={setActivity}
+        layout={HELPER_PANEL_LAYOUT}
         startHeadingLevel={3}
         references={references}
         toolCards={adapter.toolCards}
@@ -420,14 +430,6 @@ function useForgetChatAfterVisit(chatHash: string, fresh: boolean) {
       if (read) cache.remove(read);
     };
   }, [chatHash, fresh, queryClient]);
-}
-
-/** The composer's text field in `root`: the last one, under the messages. */
-function composerField(root: HTMLElement | null): HTMLElement | null {
-  const fields = root?.querySelectorAll<HTMLElement>(
-    "textarea, [contenteditable]:not([contenteditable='false'])"
-  );
-  return fields && fields.length > 0 ? fields[fields.length - 1]! : null;
 }
 
 /**

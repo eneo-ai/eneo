@@ -97,6 +97,16 @@ describe("SectionedSettings", () => {
     expect(surface.style.getPropertyValue("--editor-header-h")).toBe("127px");
   });
 
+  it("leaves the scrolling to the page: it has no scroll box of its own", () => {
+    // The app, group-chat and space settings editors scroll in main#main-content; only a
+    // CompanionLayout around an editor gives it its own scroller, beside an open aside.
+    renderInApp(
+      <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />
+    );
+    expect(document.querySelector("[data-scroll-axis]")).toBeNull();
+    expect(screen.queryByRole("region")).toBeNull();
+  });
+
   it("lists the sections beside the form from 1024 px, the strip in the header below it", () => {
     renderInApp(
       <SectionedSettings navigationLabel="Avsnitt" header={<h1>Redigera</h1>} sections={sections} />

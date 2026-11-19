@@ -21,8 +21,10 @@ import { findAppCall } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { useElementWidth } from "@/lib/hooks/use-element-width";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useResizableSplit } from "@/lib/hooks/use-resizable-split";
 import { cn } from "@/lib/utils";
+import { composerField } from "../conversation-layout";
 import type { DocumentExport } from "./document-export";
 import type { DocumentSaver } from "./document-saver";
 import type { PanelContents } from "./panel-contents";
@@ -108,12 +110,23 @@ const HANDLE_WIDTH = 4;
 export const panelFitsBeside = (width: number) =>
   width - HANDLE_WIDTH - CONVERSATION_MIN_WIDTH >= PANEL_MIN_WIDTH;
 
-/** The row the panel shares with the conversation, measured as a whole. */
+/** Where the panel finds its room, and how it shows where there is none beside the conversation. */
 export type SidePanelLayout = {
-  row: RefObject<HTMLElement | null>;
+  /** The row the panel shares with the conversation, measured as a whole; else the panel's own region. */
+  row?: RefObject<HTMLElement | null>;
   /** The conversation is not on screen (another tab): nothing is laid over the page for it. */
   hidden?: boolean;
+  /**
+   * The chat is a narrow column of a wider page (a helper beside the page it
+   * helps with): where the panel cannot sit beside the conversation, it
+   * covers the conversation and its composer inside that column instead of
+   * rising as a sheet over the whole window. A phone keeps the sheet.
+   */
+  inColumn?: boolean;
 };
+
+/** How the panel is shown: beside the conversation, over it in its column, over the window, or as a sheet. */
+type Presentation = "beside" | "column" | "cover" | "sheet-over" | "sheet";
 
 /** The activity of an answer, shown by the chat view as the panel's occupant when nothing else is. */
 export type ActivityOccupant = {
@@ -152,7 +165,11 @@ export type SidePanelProps = {
  * with a handle to resize it and a maximise over the conversation; otherwise
  * a BottomSheet (non-modal for an answer's activity, decision 28), except a
  * view, whose frame stays mounted in the message and is laid out over a
- * cover. Until that region is measured it is not beside.
+ * cover. Until that region is measured it is not beside. A chat that is a
+ * column of a wider page (`layout.inColumn`) shows every occupant over the
+ * conversation in that column instead, except on a phone: a labelled region,
+ * not a dialog, with the conversation kept as it was underneath and out of
+ * reach until the panel closes.
  */
 export function SidePanel({
   panel,
@@ -190,6 +207,8 @@ export function SidePanel({
   );
 
   const region = useRef<HTMLDivElement>(null);
+  const conversation = useRef<HTMLDivElement>(null);
+  const phone = usePhoneScreen();
 
   const [FilePanel, setFilePanel] = useState(lazyFilePanel);
   useEffect(() => {
@@ -217,6 +236,29 @@ export function SidePanel({
   });
   const beside = fits === true;
   const maximised = beside && panel.maximised && (kind === "file" || kind === "view");
+  // Decision 28: where it cannot sit beside the conversation, an answer's
+  // activity is a sheet without a scrim over the lower part, so the answer
+  // stays readable above it; the chat view keeps what it covers inert
+  // (ConversationLayout's `sheetOver`). Files and views cover the chat. In a
+  // chat that is a column of a wider page, every occupant covers the
+  // conversation in that column, except on a phone.
+  const nonModal = kind === "activity";
+  const inColumn = layout?.inColumn === true && !phone;
+  const presentation: Presentation | null = !shown
+    ? null
+    : beside
+      ? "beside"
+      : inColumn
+        ? "column"
+        : kind === "view"
+          ? "cover"
+          : nonModal
+            ? "sheet-over"
+            : "sheet";
+  const offScreen = layout?.hidden === true;
+  // Covered in its column, the conversation is out of reach. Not under a view:
+  // the view's frame lives in a message there and is laid out over the panel.
+  const conversationCovered = presentation === "column" && !offScreen && kind !== "view";
 
   useEffect(() => {
     panel.setBesideConversation(beside);
@@ -231,23 +273,40 @@ export function SidePanel({
   // Focus moves into the panel when the reader opens a file or the overview,
   // so keyboard users land where the new content is; a panel that opened by
   // itself leaves the focus where the reader has it, and the activity body
-  // focuses its own tab. Closing hands focus back to the opener (the store
-  // does that for files), or to the panel button.
-  const wasShown = useRef(false);
+  // focuses its own tab. Over the conversation in its column the panel
+  // covers what it was opened from, so the focus goes into it whatever it
+  // shows, unless the occupant took it already (nothing opens by itself
+  // there). Closing hands focus back to the opener (the store does that for
+  // files, the chat view for an answer's activity), or else to the panel
+  // button; in the column, where the opener may have gone with the answer it
+  // was in, to the composer, unless the panel button opened the overview.
+  const shownBefore = useRef<{ presentation: Presentation; kind: typeof kind } | null>(null);
   useEffect(() => {
+    const before = shownBefore.current;
+    const element = aside.current;
     const landsHere = kind === "file" || kind === "overview";
-    if (shown && !wasShown.current && landsHere && !panel.openedByItself && beside) {
-      aside.current?.focus();
+    if (presentation === "beside" && !before && landsHere && !panel.openedByItself) {
+      element?.focus();
     }
-    if (!shown && wasShown.current) {
+    if (presentation === "column" && !before && !element?.contains(document.activeElement)) {
+      element?.focus();
+    }
+    if (!presentation && before) {
       // After the opener had its turn: a closed modal sheet lets it take focus
-      // only once it is gone (side-panel-store.ts, returnFocus).
+      // only once it is gone (side-panel-store.ts, returnFocus), and a covered
+      // conversation only once it is back in reach.
       requestAnimationFrame(() => {
-        if (document.activeElement === document.body) trigger.current?.focus();
+        if (document.activeElement !== document.body) return;
+        const back =
+          before.presentation === "column"
+            ? ((before.kind === "overview" ? trigger.current : null) ??
+              composerField(conversation.current))
+            : trigger.current;
+        back?.focus();
       });
     }
-    wasShown.current = shown;
-  }, [shown, kind, beside, panel.openedByItself]);
+    shownBefore.current = presentation ? { presentation, kind } : null;
+  }, [presentation, kind, panel.openedByItself]);
 
   // Focus is in the temporary frame from when it enters until it moves to
   // something outside the file's area or the reader presses outside it. A
@@ -276,13 +335,14 @@ export function SidePanel({
       area.removeEventListener("focusout", onFocusOut);
       document.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [kind, shown, beside]);
+  }, [kind, presentation]);
   // F7: a change of presentation (the region widened or narrowed) replaces
   // the panel's elements. Focus that was in the panel, and was lost with
   // them, goes along into the new one; focus elsewhere stays where it is; a
   // sheet is a dialog and takes the focus itself. A cover hides everything
-  // but the view laid over it, so focus anywhere else moves into it. Tracked
-  // with focusin, which removing an element never fires.
+  // but the view laid over it, so focus anywhere else moves into it; in the
+  // conversation's column it hides the conversation, so focus there moves
+  // into it. Tracked with focusin, which removing an element never fires.
   const focusInPanel = useRef(false);
   useEffect(() => {
     const onFocusIn = (event: FocusEvent) => {
@@ -294,20 +354,6 @@ export function SidePanel({
     document.addEventListener("focusin", onFocusIn);
     return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
-  // Decision 28: where it cannot sit beside the conversation, an answer's
-  // activity is a sheet without a scrim over the lower part, so the answer
-  // stays readable above it; the chat view keeps what it covers inert
-  // (ConversationLayout's `sheetOver`). Files and views cover the chat.
-  const nonModal = kind === "activity";
-  const presentation = !shown
-    ? null
-    : beside
-      ? "beside"
-      : kind === "view"
-        ? "cover"
-        : nonModal
-          ? "sheet-over"
-          : "sheet";
   const shownAs = useRef(presentation);
   useEffect(() => {
     const before = shownAs.current;
@@ -316,8 +362,11 @@ export function SidePanel({
     const target = presentation === "sheet-over" ? sheetPanel.current : aside.current;
     const active = document.activeElement;
     if (!target || target.contains(active)) return;
+    const covered =
+      presentation === "cover" ||
+      (presentation === "column" && active !== null && !!region.current?.contains(active));
     // The view's frame (an iframe in its message) is laid over the cover.
-    const hidden = presentation === "cover" && !(active instanceof HTMLIFrameElement);
+    const hidden = covered && !(active instanceof HTMLIFrameElement);
     const lost = focusInPanel.current && (active === null || active === document.body);
     if (hidden || lost) target.focus();
   }, [presentation]);
@@ -344,7 +393,7 @@ export function SidePanel({
     };
     element.addEventListener("keydown", onKeyDown);
     return () => element.removeEventListener("keydown", onKeyDown);
-  }, [shown, beside, kind]);
+  }, [shown, presentation, kind, offScreen]);
 
   const activityEntry: ActivityEntry | null = latestActivity
     ? {
@@ -503,14 +552,20 @@ export function SidePanel({
   return (
     <div ref={region} className="relative flex min-h-0 min-w-0 flex-1">
       {/* No stacking context of its own: a view's frame lives in a message here
-          and is laid out over the panel, so it must be able to paint above it. */}
-      <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
+          and is laid out over the panel, so it must be able to paint above it.
+          Kept mounted and laid out under a panel in its column, so its scroll
+          position, the composer's draft and an answer on its way stay. */}
+      <div
+        ref={conversation}
+        inert={conversationCovered}
+        className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      >
         {launcher}
         {typeof children === "function"
-          ? children({ sheetOver: presentation === "sheet-over" && !layout?.hidden })
+          ? children({ sheetOver: presentation === "sheet-over" && !offScreen })
           : children}
       </div>
-      {shown && beside && (
+      {presentation === "beside" && (
         <>
           <div
             {...separatorProps}
@@ -533,7 +588,21 @@ export function SidePanel({
           </aside>
         </>
       )}
-      {shown && !beside && !layout?.hidden && kind === "view" && (
+      {presentation === "column" && !offScreen && (
+        // Over the conversation and its composer in the chat's own column; the
+        // page around the column stays in reach, so this is a labelled region,
+        // not a dialog. A view's frame is laid over it as over the cover.
+        <section
+          ref={aside}
+          id={panelId}
+          aria-label={label}
+          tabIndex={-1}
+          className="bg-ax-surface absolute inset-0 z-20 flex min-h-0 min-w-0 flex-col focus-visible:outline-none"
+        >
+          {body(true)}
+        </section>
+      )}
+      {presentation === "cover" && !offScreen && (
         // The app remains mounted in the conversation, so this is a non-modal
         // cover: a dialog's focus trap would exclude the visually expanded iframe.
         <aside
@@ -546,7 +615,7 @@ export function SidePanel({
           {body(true)}
         </aside>
       )}
-      {shown && !beside && !layout?.hidden && kind !== "view" && (
+      {(presentation === "sheet" || presentation === "sheet-over") && !offScreen && (
         <BottomSheet
           // A modal and a non-modal sheet are different dialogs (showModal, show).
           key={nonModal ? "non-modal" : "modal"}

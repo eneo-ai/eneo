@@ -48,7 +48,8 @@ vi.mock("@/features/chat/chat-view", async () => {
     onToolCallFinished,
     onAnswerFinished,
     beforeSend,
-    references
+    references,
+    layout
   }: {
     footerActions?: unknown;
     placeholder?: string;
@@ -58,6 +59,7 @@ vi.mock("@/features/chat/chat-view", async () => {
     onAnswerFinished?: () => void;
     beforeSend?: () => Promise<boolean>;
     references?: { onComposer?: (input: unknown) => void };
+    layout?: { inColumn?: boolean };
   }) {
     const onComposer = references?.onComposer;
     useEffect(() => {
@@ -96,6 +98,7 @@ vi.mock("@/features/chat/chat-view", async () => {
           Filerna uppladdade
         </button>
         <p>{beforeSend ? "asks before sending" : "sends at once"}</p>
+        <p>side panel: {layout?.inColumn ? "in the column" : "over the window"}</p>
         <textarea aria-label="Meddelande" />
       </div>
     );
@@ -402,6 +405,13 @@ describe("HelperPanel's conversation", () => {
     expect(onAnswerFinished).toHaveBeenCalledTimes(1);
     // The turn's start may have left edit mode after a pause.
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+  });
+
+  it("asks for the side panel in the chat's own column, not over the page", async () => {
+    openChat(false);
+    renderPanel();
+
+    expect(await screen.findByText("side panel: in the column")).toBeTruthy();
   });
 
   it("tells the page the composer is gone when the conversation leaves", async () => {
