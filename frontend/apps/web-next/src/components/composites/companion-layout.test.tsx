@@ -29,6 +29,7 @@ function Page({
       <CompanionLayout
         open={open}
         label="Hjälpen"
+        contentLabel="Inställningarna"
         resizeLabel="Ändra hjälpens bredd"
         widthStorageKey="test:companion-width"
         returnFocus={() => toggle.current}
@@ -71,6 +72,8 @@ function Page({
 
 const row = () => document.querySelector<HTMLElement>("[data-companion-row]")!;
 const content = () => row().firstElementChild as HTMLElement;
+/** The box in the content that scrolls while the content has its own scroller. */
+const scrollBox = () => content().firstElementChild as HTMLElement;
 const frame = () => document.querySelector<HTMLElement>("[data-companion]");
 const region = () => screen.queryByRole("complementary", { name: "Hjälpen" });
 
@@ -174,6 +177,176 @@ describe("CompanionLayout", () => {
 
     measureRow(700);
     await expectNoAxeViolations(container);
+  });
+
+  describe("the content's own scroll beside the aside", () => {
+    const view = () => screen.getByTestId("scroller");
+    const contentRegion = () => screen.queryByRole("region", { name: "Inställningarna" });
+    /** The page's scroller is 640 px tall. */
+    const measureView = () => act(() => reportResize(view(), { width: 1200, height: 640 }));
+
+    it("scrolls the content on its own, the row as tall as the view, while the aside is open beside it", () => {
+      renderInApp(<Page />);
+      measureRow(1200);
+      measureView();
+      openAside();
+
+      expect(frame()?.dataset.companion).toBe("beside");
+      expect(row().style.height).toBe("640px");
+      expect(contentRegion()).toBe(scrollBox());
+      expect(scrollBox().dataset.scrollAxis).toBe("block");
+      expect(scrollBox().style.getPropertyValue("--x-overflowY")).toBe("auto");
+    });
+
+    it("leaves the page the scroller while the aside is closed, over the content or on a phone", () => {
+      renderInApp(<Page />);
+      measureRow(1200);
+      measureView();
+      const pageScrolls = () => {
+        expect(row().style.height).toBe("");
+        expect(contentRegion()).toBeNull();
+        expect(scrollBox().hasAttribute("data-scroll-axis")).toBe(false);
+        expect(scrollBox().style.getPropertyValue("--x-overflowY")).toBe("");
+      };
+      pageScrolls();
+
+      openAside();
+      fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      pageScrolls();
+
+      measureRow(700);
+      openAside();
+      expect(frame()?.dataset.companion).toBe("cover");
+      pageScrolls();
+
+      act(() => setViewport("phone"));
+      expect(frame()?.dataset.companion).toBe("phone");
+      pageScrolls();
+    });
+
+    it("keeps the content mounted as it starts and stops scrolling on its own", () => {
+      renderInApp(<Page />);
+      measureRow(1200);
+      measureView();
+      const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Namn" });
+      fireEvent.change(field, { target: { value: "Medborgarbrev" } });
+
+      openAside();
+      expect(contentRegion()).not.toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpen" }));
+
+      expect(screen.getByRole("textbox", { name: "Namn" })).toBe(field);
+      expect(field.value).toBe("Medborgarbrev");
+    });
+
+    it("has no axe violations while the content scrolls on its own", async () => {
+      const { container } = renderInApp(<Page />);
+      measureRow(1200);
+      measureView();
+      openAside();
+      expect(contentRegion()).not.toBeNull();
+      await expectNoAxeViolations(container);
+    });
+  });
+
+  describe("the person's place when the content's scroller changes", () => {
+    /**
+     * A settings page with a sticky header and three sections, laid out by
+     * hand (jsdom has no layout): the view's top is at 100 px, the header
+     * rests there 60 px tall, and the sections are taller once the aside
+     * narrows the content (B starts at 600 px on the page, at 900 px beside
+     * the aside). Each scroller's offset is kept here.
+     */
+    function layOutByHand() {
+      const scrolled = { page: 650, content: 0 };
+      const ownBox = scrollBox();
+      const ownScroll = () => ownBox.getAttribute("role") === "region";
+      const offset = () => (ownScroll() ? scrolled.content : scrolled.page);
+      const box = (top: number, height: number) =>
+        DOMRect.fromRect({ x: 0, y: top, width: 800, height });
+      const scrollable = (element: HTMLElement, key: keyof typeof scrolled) =>
+        Object.defineProperty(element, "scrollTop", {
+          configurable: true,
+          get: () => scrolled[key],
+          set: (value: number) => (scrolled[key] = value)
+        });
+      scrollable(screen.getByTestId("scroller"), "page");
+      scrollable(ownBox, "content");
+      screen.getByTestId("scroller").getBoundingClientRect = () => box(100, 640);
+      const sections = {
+        a: [0, 600, 0, 900],
+        b: [600, 1200, 900, 1700],
+        c: [1200, 1800, 1700, 2500]
+      };
+      // The scroll box is the view while it scrolls, and as tall as what it holds otherwise.
+      ownBox.getBoundingClientRect = () =>
+        ownScroll() ? box(100, 640) : box(100 - offset(), 1800);
+      (ownBox.firstElementChild as HTMLElement).getBoundingClientRect = () =>
+        box(100 - offset(), ownScroll() ? 2500 : 1800);
+      screen.getByTestId("sticky-header").getBoundingClientRect = () => box(100, 60);
+      for (const [id, [start, end, startBeside, endBeside]] of Object.entries(sections)) {
+        screen.getByTestId(`section-${id}`).getBoundingClientRect = () =>
+          ownScroll()
+            ? box(100 + startBeside! - offset(), endBeside! - startBeside!)
+            : box(100 + start! - offset(), end! - start!);
+      }
+      return {
+        scrolled,
+        sectionTop: () => screen.getByTestId("section-b").getBoundingClientRect().top
+      };
+    }
+
+    function SettingsPage() {
+      const [open, setOpen] = useState(false);
+      const toggle = useRef<HTMLButtonElement>(null);
+      return (
+        <div data-testid="scroller" style={{ overflowY: "auto" }}>
+          <CompanionLayout
+            open={open}
+            label="Hjälpen"
+            contentLabel="Inställningarna"
+            resizeLabel="Ändra hjälpens bredd"
+            widthStorageKey="test:companion-width"
+            returnFocus={() => toggle.current}
+            aside={() => (
+              <button type="button" onClick={() => setOpen(false)}>
+                Stäng hjälpen
+              </button>
+            )}
+          >
+            <header data-testid="sticky-header" style={{ position: "sticky" }}>
+              <button ref={toggle} type="button" onClick={() => setOpen(true)}>
+                Hjälp
+              </button>
+            </header>
+            <section data-testid="section-a">Allmänt</section>
+            <section data-testid="section-b">Funktioner</section>
+            <section data-testid="section-c">Säkerhet</section>
+          </CompanionLayout>
+        </div>
+      );
+    }
+
+    it("keeps the section being read where it was as the content starts scrolling on its own", () => {
+      renderInApp(<SettingsPage />);
+      measureRow(1200);
+      act(() => reportResize(screen.getByTestId("scroller"), { width: 1200, height: 640 }));
+      const { scrolled, sectionTop } = layOutByHand();
+      // Funktioner starts 50 px down the view, under the header.
+      expect(sectionTop()).toBe(50);
+
+      openAside();
+      expect(screen.getByRole("region", { name: "Inställningarna" })).toBe(scrollBox());
+      expect(sectionTop()).toBe(50);
+      expect(scrolled.content).toBe(950);
+      // The page had nothing left to scroll meanwhile.
+      scrolled.page = 0;
+
+      fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpen" }));
+      expect(screen.queryByRole("region", { name: "Inställningarna" })).toBeNull();
+      expect(sectionTop()).toBe(50);
+      expect(scrolled.page).toBe(650);
+    });
   });
 
   describe("Escape", () => {

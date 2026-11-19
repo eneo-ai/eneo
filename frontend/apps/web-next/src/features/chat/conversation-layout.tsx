@@ -106,6 +106,14 @@ export function ConversationLayout({
   );
 }
 
+/** The composer's text field in `root`: the last one, under the messages. */
+export function composerField(root: HTMLElement | null): HTMLElement | null {
+  const fields = root?.querySelectorAll<HTMLElement>(
+    "textarea, [contenteditable]:not([contenteditable='false'])"
+  );
+  return fields && fields.length > 0 ? fields[fields.length - 1]! : null;
+}
+
 /**
  * The composer's place under a conversation, and under the start state on
  * phones and touch screens, where it already stands before the first question

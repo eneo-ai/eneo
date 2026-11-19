@@ -444,6 +444,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
         <CompanionLayout
           open={helperOpen}
           label={t("helper_heading")}
+          contentLabel={t("helper_settings_region")}
           resizeLabel={t("helper_resize")}
           widthStorageKey="eneo:assistant-helper-width"
           returnFocus={returnFocus}

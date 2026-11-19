@@ -4767,6 +4767,7 @@
   "helper_close": "Stäng hjälpassistenten",
   "helper_back": "Tillbaka till inställningarna",
   "helper_resize": "Ändra hjälpassistentens bredd",
+  "helper_settings_region": "Assistentens inställningar",
   "helper_tool_server": "Assistentens inställningar",
   "helper_tool_read_assistant": "Läser assistentens inställningar",
   "helper_tool_read_assistant_done": "Läste assistentens inställningar",

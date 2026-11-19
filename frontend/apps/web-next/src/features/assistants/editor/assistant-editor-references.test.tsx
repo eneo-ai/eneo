@@ -341,6 +341,21 @@ describe("The helper beside the settings", () => {
     fireEvent.click(headerToggle());
     expect(chat.getAttribute("data-open")).toBe("true");
   });
+
+  it("has the settings scroll in their own region beside it, and in the page once it is put away", async () => {
+    renderEditor();
+    act(() => reportResize(document.querySelector("[data-companion-row]")!, { width: 1600 }));
+    const settings = () => screen.queryByRole("region", { name: "Assistentens inställningar" });
+    expect(settings()).toBeNull();
+
+    fireEvent.click(headerToggle());
+    await screen.findByTestId("helper-chat");
+    expect(settings()?.contains(document.getElementById("assistant-name"))).toBe(true);
+    expect(settings()?.contains(headerToggle())).toBe(true);
+
+    fireEvent.click(headerToggle());
+    expect(settings()).toBeNull();
+  });
 });
 
 describe("A pill in the helper chat", () => {

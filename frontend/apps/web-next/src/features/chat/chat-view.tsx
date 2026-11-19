@@ -278,7 +278,11 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-  /** The row the side panel measures, and whether the conversation is on screen. */
+  /**
+   * The row the side panel measures, whether the conversation is on screen,
+   * and whether the chat is a column of a wider page (the panel then covers
+   * the conversation in that column where it has no room beside it).
+   */
   layout?: SidePanelLayout;
   /**
    * A tool call of this visit reached its result or failed, once per call

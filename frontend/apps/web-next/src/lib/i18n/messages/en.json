@@ -10817,6 +10817,7 @@
   "helper_close": "Close the helper",
   "helper_back": "Back to the settings",
   "helper_resize": "Resize the helper",
+  "helper_settings_region": "Assistant settings",
   "helper_tool_server": "Assistant settings",
   "helper_tool_read_assistant": "Reading the assistant's settings",
   "helper_tool_read_assistant_done": "Read the assistant's settings",
