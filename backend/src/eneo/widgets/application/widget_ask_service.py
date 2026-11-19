@@ -4,6 +4,7 @@
 
 
 import contextlib
+import json
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import date, datetime, timezone
 from typing import TYPE_CHECKING, AsyncIterator, Optional, Protocol, runtime_checkable
@@ -27,6 +28,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import finalizing
+from eneo.observability.error_log import error_facts
 from eneo.sessions.session import SessionFeedback, SessionInDB
 from eneo.widgets.application.visitor_view import VisitorView
 from eneo.widgets.application.widget_limits import (
@@ -176,45 +178,28 @@ def widget_prompt_addendum(widget: Widget) -> str:
     )
 
 
-# A call is sent to its server once it is approved, which on a visitor turn
-# happens without asking anyone, and ends succeeded or failed. A denied call
-# never reached the server.
-DISPATCHED_STATUS = "approved"
+# Approval starts an attempt. The proxy can still refuse it locally.
+APPROVED_STATUS = "approved"
 ENDED_STATUSES = frozenset({"succeeded", "failed"})
 DENIED_STATUSES = frozenset({"denied", "timeout_denied"})
-# Recorded for an approved call whose end the turn never reported: the turn
-# ended first (the visitor left, or it failed), so whether the server received
-# the call, or acted on it, is not known.
 UNKNOWN_STATUS = "unknown"
 
 
 def is_external_tool_call(call: ToolCallMetadata) -> bool:
-    """Whether the call ran on a server outside Eneo.
+    """Whether this call targets an assistant's own MCP server outside Eneo.
 
-    Decided like the approval flow: by the server the call was routed to,
-    never by its display name. Eneo's own loopback servers are not external.
-    Neither is a capability provider (web search, the one capability visitors
-    get): the tenant chose it and it only reads. Everything else is one of
-    the assistant's own MCP servers, where a tool may write.
+    The widget acknowledgement and audit cover general MCP tools. Web search
+    uses the organisation's separately configured capability provider.
     """
     return call.is_internal is not True and call.purpose is None
 
 
 class ExternalToolCallAudit:
-    """One audit entry per external tool call a visitor turn made.
+    """Record each approved external tool attempt, even at zero retention.
 
-    Written whatever the widget's retention: the call's effect on the external
-    system outlives the conversation, and with retention 0 nothing else of
-    the turn is kept. The entry names the widget, the pseudonymous visitor,
-    the conversation and the tool. The arguments' values stay out: they are
-    the visitor's input and may carry personal data, and the external system
-    has its own record of what it received; their names go in.
-
-    Only an approved call is recorded, since approval is what sends it: once
-    it ends, or, when the turn ends first, with status ``unknown`` once the
-    answer has settled, since the server may have acted on it. A call the
-    round limit refused fails without ever being approved, and stays out. An
-    entry that cannot be written goes to the error log with its metadata.
+    The approval identifies the tool and its arguments. The result supplies
+    its final status. If the turn ends first, the outcome is unknown. Only
+    argument names may enter the audit trail or its fallback log.
     """
 
     def __init__(
@@ -233,7 +218,7 @@ class ExternalToolCallAudit:
         self.session_id = session_id
         self.question_id = question_id
         self.preview = preview
-        # Dispatched calls by id, oldest first: a provider may reuse an id in
+        # Approved calls by id, oldest first: a provider may reuse an id in
         # a later round, or even within one.
         self._in_flight: dict[str, list[ToolCallMetadata]] = {}
 
@@ -245,31 +230,27 @@ class ExternalToolCallAudit:
             return
         for call in chunk.tool_calls_metadata or []:
             call_id = call.tool_call_id
-            # A round with a call missing its id is refused before anything
-            # is sent, so every call a server received has one.
+            # The model adapter refuses a round with missing IDs before approval.
             if not call_id or not is_external_tool_call(call):
                 continue
             status = call.result_status
-            if status == DISPATCHED_STATUS:
+            if status == APPROVED_STATUS:
                 self._in_flight.setdefault(call_id, []).append(call)
             elif status in DENIED_STATUSES:
-                self._take_dispatched(call_id)
+                self._take_approved(call_id)
             elif status in ENDED_STATUSES:
-                # Pairing each end with its dispatch keeps out a call refused
-                # at the round limit (never dispatched) and a repeated report
-                # of one that already ended, while every call under a reused
-                # id still gets an entry of its own.
-                if self._take_dispatched(call_id):
-                    await self._record(call, status)
+                approved = self._take_approved(call_id)
+                if approved is not None:
+                    await self._record(approved, status)
 
-    def _take_dispatched(self, call_id: str) -> bool:
+    def _take_approved(self, call_id: str) -> ToolCallMetadata | None:
         waiting = self._in_flight.get(call_id)
         if not waiting:
-            return False
-        waiting.pop(0)
+            return None
+        approved = waiting.pop(0)
         if not waiting:
             del self._in_flight[call_id]
-        return True
+        return approved
 
     async def settle(self) -> None:
         unresolved = [call for calls in self._in_flight.values() for call in calls]
@@ -281,7 +262,7 @@ class ExternalToolCallAudit:
                 # Cut off, by the cleanup budget at the latest: the calls not
                 # yet recorded still reach the log.
                 for lost in unresolved[position + 1 :]:
-                    self._log_cut_off(self._metadata(lost, UNKNOWN_STATUS))
+                    self._log_missing("cut off", self._metadata(lost, UNKNOWN_STATUS))
                 raise
 
     def _metadata(self, call: ToolCallMetadata, status: str) -> dict[str, object]:
@@ -299,10 +280,15 @@ class ExternalToolCallAudit:
             "argument_names": sorted(call.arguments or {}),
         }
 
-    def _log_cut_off(self, metadata: dict[str, object]) -> None:
+    def _log_missing(self, reason: str, metadata: dict[str, object]) -> None:
+        fields = {"widget_id": str(self.widget.id), **metadata}
+        # Plain-text handlers only render the message. Structured handlers
+        # also expose these same fields individually for querying.
         logger.error(
-            "Widget external tool call audit cut off; the entry may be missing",
-            extra={"widget_id": str(self.widget.id), **metadata},
+            "Widget external tool audit %s: %s",
+            reason,
+            json.dumps(fields),
+            extra=fields,
         )
 
     async def _record(self, call: ToolCallMetadata, status: str) -> None:
@@ -317,7 +303,7 @@ class ExternalToolCallAudit:
                 entity_type=EntityType.WIDGET,
                 entity_id=self.widget.id,
                 description=(
-                    f"Widget '{self.widget.name}': a visitor's turn called tool"
+                    f"Widget '{self.widget.name}': a visitor's turn attempted to call tool"
                     f" '{call.tool_name}' on external server '{call.server_name}'"
                 ),
                 metadata=metadata,
@@ -325,22 +311,14 @@ class ExternalToolCallAudit:
                 # for every widget entry; the pseudonymous visitor id is the actor.
                 record_client=False,
             )
-        except Exception:
-            # The answer is already under way and the call has happened; the
-            # visitor is not the one to tell. The log keeps what the trail lost.
-            logger.exception(
-                "Widget external tool call audit failed",
-                extra={"widget_id": str(self.widget.id), **metadata},
-            )
+        except Exception as exc:
+            self._log_missing("write failed", {**metadata, **error_facts(exc)})
             return
         except BaseException:
-            self._log_cut_off(metadata)
+            self._log_missing("cut off", metadata)
             raise
         if job is None:
-            logger.error(
-                "Widget external tool call missing from the audit trail",
-                extra={"widget_id": str(self.widget.id), **metadata},
-            )
+            self._log_missing("not enqueued", metadata)
 
 
 class WidgetAskService:

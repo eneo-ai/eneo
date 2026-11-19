@@ -260,11 +260,10 @@ class WidgetService:
 
         The general-purpose servers attached to the assistant within the
         space's security classification, as AssistantService hands them to a
-        turn. Capability providers (web search) are left out: the tenant
-        chose them, they only read, and a visitor never gets any other
-        capability. Eneo's own loopback servers are not external, and a
-        server where the assistant has no tool switched on is left out, as
-        the turn leaves it out (WidgetVisitorContext.reachable_servers).
+        turn. The tenant selects and reviews the tools of its web search
+        provider separately from widget acknowledgement. Eneo's own loopback
+        servers are out of scope. As in WidgetVisitorContext.reachable_servers,
+        only servers with enabled tools are included.
         """
         if target is None:
             return []

@@ -1,5 +1,7 @@
 import asyncio
 import json
+import logging
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -30,6 +32,7 @@ from eneo.main.exceptions import (
     ProviderRejectedRequestException,
     UnauthorizedException,
 )
+from eneo.main.logging import OTELJSONFormatter, SimpleLogger
 from eneo.questions.question import (
     McpToolReferencePublic,
     Question,
@@ -54,6 +57,7 @@ from eneo.widgets.domain.exceptions import (
 from eneo.widgets.domain.visitor import VisitorClaims, WidgetPrincipal
 from eneo.widgets.domain.widget import Widget, WidgetLimits, WidgetPrivacy
 from tests.fixtures import TEST_MODEL_CHATGPT
+from tests.log_capture import SENTINEL, chained_error, emitted
 
 INTERNAL_MODEL = TEST_MODEL_CHATGPT.model_copy(
     update={
@@ -810,12 +814,9 @@ def _external_event(*calls: ToolCallMetadata) -> Completion:
 
 
 async def _external_turn():
-    # The model asks for the tool (pending), it is sent to the server
-    # (approved, without asking anyone on a visitor turn), the server runs it,
-    # the round is reported again, then the answer.
+    # Pending, automatic approval, result, repeated result, then the answer.
     yield _external_event(_external_call(result_status="pending"))
-    yield _external_event(_external_call(result_status="approved"))
-    yield _external_event(
+    tools = (
         _external_call(),
         _external_call(
             tool_call_id="call_k",
@@ -829,6 +830,10 @@ async def _external_turn():
             tool_name="search",
             purpose="web_search",
         ),
+    )
+    yield _external_event(*(replace(tool, result_status="approved") for tool in tools))
+    yield _external_event(
+        *tools,
         _external_call(tool_call_id="call_d", result_status="denied"),
     )
     yield _external_event(_external_call())
@@ -897,8 +902,7 @@ async def test_a_failed_external_tool_call_is_audited_too():
 
 
 async def test_a_call_refused_at_the_round_limit_is_not_audited():
-    # The last round's calls are refused without being sent, so they fail
-    # without ever being approved. Only the call that reached its server counts.
+    # The last round's calls are refused before approval. Only the approved attempt counts.
     async def turn():
         yield _external_event(_external_call(result_status="approved"))
         yield _external_event(_external_call())
@@ -948,15 +952,22 @@ async def test_a_call_id_reused_in_a_later_round_is_audited_per_call():
 
 
 async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
-    close_case = {"tool_name": "close_case", "mcp_tool_name": "casefiles__close_case"}
+    close_case = _external_call(
+        tool_name="close_case",
+        mcp_tool_name="casefiles__close_case",
+        result_status="approved",
+        arguments={"case_id": "case-123"},
+    )
 
     async def turn():
+        yield _external_event(_external_call(result_status="approved"), close_case)
+        # Only the approval is needed to attribute the original arguments.
+        yield _external_event(_external_call(arguments=None))
         yield _external_event(
-            _external_call(result_status="approved"),
-            _external_call(**close_case, result_status="approved"),
+            _external_call(
+                tool_name="close_case", result_status="failed", arguments=None
+            )
         )
-        yield _external_event(_external_call())
-        yield _external_event(_external_call(**close_case, result_status="failed"))
         yield Completion(text="Klart.", response_type=ResponseType.TEXT)
 
     widget = _widget()
@@ -965,10 +976,14 @@ async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
         _principal(widget), question="q", session_id=None, client_ip=None
     )
     await _drain(response)
+    entries = [call.kwargs["metadata"] for call in deps.audit.log_async.await_args_list]
     assert [
-        (call.kwargs["metadata"]["tool_name"], call.kwargs["metadata"]["result_status"])
-        for call in deps.audit.log_async.await_args_list
-    ] == [("create_case", "succeeded"), ("close_case", "failed")]
+        (entry["tool_name"], entry["argument_names"], entry["result_status"])
+        for entry in entries
+    ] == [
+        ("create_case", ["body", "title"], "succeeded"),
+        ("close_case", ["case_id"], "failed"),
+    ]
 
 
 async def test_a_call_the_turn_never_saw_end_is_audited_as_unknown():
@@ -996,35 +1011,51 @@ async def test_a_call_the_turn_never_saw_end_is_audited_as_unknown():
     assert metadata["preview"] is True
 
 
+def _assert_audit_fallback(
+    record: logging.LogRecord, widget: Widget, call_id: str, status: str
+) -> None:
+    text = logging.Formatter(SimpleLogger.FORMAT_STRING).format(record)
+    structured = OTELJSONFormatter().format(record)
+    fields = json.loads(structured)["attributes"]
+    assert fields["widget_id"] == str(widget.id)
+    assert fields["tool_call_id"] == call_id
+    assert fields["result_status"] == status
+    assert fields["argument_names"] == ["body", "title"]
+    for expected in (str(widget.id), call_id, status, "body", "title"):
+        assert expected in text
+    for value in ("Trasig lampa", "Gatlyktan vid torget", SENTINEL):
+        assert value not in text
+        assert value not in structured
+
+
 @pytest.mark.parametrize(
     "lost",
     [
-        pytest.param(AsyncMock(side_effect=RuntimeError("bug")), id="raised"),
+        pytest.param(AsyncMock(side_effect=chained_error()), id="raised"),
         pytest.param(AsyncMock(return_value=None), id="not enqueued"),
     ],
 )
-async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(
-    lost, monkeypatch
-):
+async def test_a_lost_audit_entry_is_logged_and_does_not_cut_the_answer(lost):
     widget = _widget()
     service, deps = _service(
         ask_result=_ask_result(_stored_session(0), _external_turn())
     )
     deps.audit.log_async = lost
-    logger = MagicMock()
-    monkeypatch.setattr(module, "logger", logger)
-    response = await service.ask(
-        _principal(widget), question="q", session_id=None, client_ip=None
-    )
-    assert [text for text in await _drain(response) if text] == [
-        "Ärendet är registrerat."
-    ]
+    with emitted(module.logger) as records:
+        response = await service.ask(
+            _principal(widget), question="q", session_id=None, client_ip=None
+        )
+        assert [text for text in await _drain(response) if text] == [
+            "Ärendet är registrerat."
+        ]
     deps.audit.log_async.assert_awaited_once()
     deps.budget.settle.assert_awaited_once()
-    # The log keeps what the trail lost, without the visitor's input.
-    (record,) = logger.exception.call_args_list + logger.error.call_args_list
-    assert record.kwargs["extra"]["tool_call_id"] == "call_9"
-    assert record.kwargs["extra"]["argument_names"] == ["body", "title"]
+    (record,) = [
+        r
+        for r in records
+        if r.name == module.logger.name and r.levelno == logging.ERROR
+    ]
+    _assert_audit_fallback(record, widget, "call_9", "succeeded")
 
 
 async def _left_with_a_stalled_audit_queue(
@@ -1059,8 +1090,6 @@ async def _left_with_a_stalled_audit_queue(
         return written
 
     monkeypatch.setattr(stream_lifecycle, "FINALIZATION_BUDGET_SECONDS", 0.2)
-    logger = MagicMock()
-    monkeypatch.setattr(module, "logger", logger)
     service, deps = _service(ask_result=_ask_result(_stored_session(0), turn()))
     deps.audit.log_async = AsyncMock(side_effect=stalled)
     deps.usage.delete_session = AsyncMock(side_effect=delete or write("delete"))
@@ -1074,20 +1103,20 @@ async def _left_with_a_stalled_audit_queue(
     )
     await anext(response.answer)
     await response.answer.aclose()
-    return deps, logger, done
+    return deps, done
 
 
 async def test_a_stalled_audit_queue_cannot_keep_a_zero_retention_conversation(
     monkeypatch,
 ):
     widget = _widget(privacy=WidgetPrivacy(retention_days=0))
-    _deps, _logger, done = await _left_with_a_stalled_audit_queue(monkeypatch, widget)
+    _deps, done = await _left_with_a_stalled_audit_queue(monkeypatch, widget)
     assert done == ["delete"]
 
 
 async def test_a_stalled_audit_queue_does_not_hold_the_conversation(monkeypatch):
     widget = _widget()
-    deps, _logger, done = await _left_with_a_stalled_audit_queue(
+    deps, done = await _left_with_a_stalled_audit_queue(
         monkeypatch, widget, follow_up=True
     )
     assert done == ["release"]
@@ -1102,15 +1131,19 @@ async def test_a_stalled_audit_queue_does_not_hide_a_failed_deletion(monkeypatch
         raise RuntimeError("delete failed")
 
     # The failure rolls back the chat write, so it must reach the caller.
-    with pytest.raises(RuntimeError, match="delete failed"):
+    with (
+        emitted(module.logger) as records,
+        pytest.raises(RuntimeError, match="delete failed"),
+    ):
         await _left_with_a_stalled_audit_queue(
             monkeypatch,
             _widget(privacy=WidgetPrivacy(retention_days=0)),
             delete=failed,
         )
     assert [
-        record.kwargs["extra"]["tool_call_id"]
-        for record in module.logger.error.call_args_list
+        getattr(record, "tool_call_id")
+        for record in records
+        if hasattr(record, "tool_call_id")
     ] == ["call_9", "call_10"]
 
 
@@ -1122,7 +1155,10 @@ async def test_a_stalled_audit_queue_does_not_hide_a_failed_close(monkeypatch):
         deleted.append(True)
 
     # The pipeline's own cleanup failed, which must reach the caller as well.
-    with pytest.raises(RuntimeError, match="close failed"):
+    with (
+        emitted(module.logger) as records,
+        pytest.raises(RuntimeError, match="close failed"),
+    ):
         await _left_with_a_stalled_audit_queue(
             monkeypatch,
             _widget(privacy=WidgetPrivacy(retention_days=0)),
@@ -1131,23 +1167,24 @@ async def test_a_stalled_audit_queue_does_not_hide_a_failed_close(monkeypatch):
         )
     assert deleted == [True]
     assert [
-        record.kwargs["extra"]["tool_call_id"]
-        for record in module.logger.error.call_args_list
+        getattr(record, "tool_call_id")
+        for record in records
+        if hasattr(record, "tool_call_id")
     ] == ["call_9", "call_10"]
 
 
 async def test_calls_a_stalled_audit_queue_never_recorded_reach_the_log(monkeypatch):
-    _deps, logger, _done = await _left_with_a_stalled_audit_queue(
-        monkeypatch, _widget()
-    )
-    extras = [record.kwargs["extra"] for record in logger.error.call_args_list]
-    assert [(extra["tool_call_id"], extra["result_status"]) for extra in extras] == [
-        ("call_9", "unknown"),
-        ("call_10", "unknown"),
+    widget = _widget()
+    with emitted(module.logger) as records:
+        await _left_with_a_stalled_audit_queue(monkeypatch, widget)
+    errors = [
+        r
+        for r in records
+        if r.name == module.logger.name and r.levelno == logging.ERROR
     ]
-    for extra in extras:
-        assert extra["argument_names"] == ["body", "title"]
-        assert "Trasig lampa" not in json.dumps(extra, ensure_ascii=False)
+    assert len(errors) == 2
+    for record, call_id in zip(errors, ["call_9", "call_10"], strict=True):
+        _assert_audit_fallback(record, widget, call_id, "unknown")
 
 
 async def test_a_turn_without_an_audit_service_still_answers():

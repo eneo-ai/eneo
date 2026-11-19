@@ -210,8 +210,8 @@ class ActionType(str, Enum):
     # A tenant admin let anonymous visitors make the assistant call these
     # tools on servers outside Eneo.
     WIDGET_EXTERNAL_TOOLS_ACKNOWLEDGED = "widget_external_tools_acknowledged"
-    # A visitor turn called a tool on a server outside Eneo. Logged whatever the
-    # widget's retention is: the external side effect outlives the conversation.
+    # A visitor turn was approved to attempt an external tool. The proxy
+    # may refuse it locally. Recorded regardless of widget retention.
     WIDGET_EXTERNAL_TOOL_CALLED = "widget_external_tool_called"
     WIDGET_TEMPLATE_CREATED = "widget_template_created"
     WIDGET_TEMPLATE_UPDATED = "widget_template_updated"

@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@24f8810c3092
+translationSource: guides/embed-widget.mdx@fbf419c4aacb
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -51,13 +51,13 @@ separat verktygsinställning per widget. En besökare får:
   konfigurerade. Besökaren är anonym: en server med _Vidarebefordra
   användaridentitet_ får inga identitetsrubriker, och inget verktygsanrop
   väntar på godkännande. På servrar utanför Eneo når besökarna bara de
-  verktyg som en organisationsadministratör har bekräftat för widgeten, varje
-  anrop som en besökares tur gör till ett sådant verktyg skrivs till
-  granskningsloggen, och organisationens policy kan förbjuda dem; se
+  verktyg som en organisationsadministratör har bekräftat för widgeten. Eneo
+  loggar varje godkänt försök att anropa dem, och organisationens policy kan
+  förbjuda verktygen. Se
   [MCP-servrar utanför Eneo](#external-mcp-servers).
 - **Webbsökning**, när både ytan och assistenten har den påslagen och modellen
-  kan anropa verktyg. Webbsökningen körs på organisationens externa sökserver
-  (se [Webbsökning och bildgenerering](/guides/capabilities)).
+  kan anropa verktyg. Sökningarna körs på organisationens valda sökserver. Se [MCP-servrar utanför Eneo](#external-mcp-servers)
+  och [Webbsökning och bildgenerering](/guides/capabilities).
 
 Aldrig tillgängligt för besökare, oavsett hur assistenten är konfigurerad:
 bildgenerering, filanalys, filskapande och diagram, filuppladdning, inbyggda
@@ -73,8 +73,8 @@ Publicera bara kunskap och verktyg som är lämpliga för anonyma besökare.
 
 <Callout type="warning">
   En ändring av assistentens MCP-servrar eller funktioner ändrar direkt vad en
-  aktiv widget exponerar, utan ny aktivering; bara ett verktyg på en MCP-server
-  utanför Eneo väntar på en organisationsadministratörs bekräftelse. Allt som en
+  aktiv widget exponerar, utan ny aktivering. Nya verktyg på assistentens egna
+  externa MCP-servrar kräver en organisationsadministratörs bekräftelse. Allt som en
   servers nåbara verktyg kan läsa eller göra kan en anonym besökare be
   assistenten att använda. Medan en aktiv widget publicerar assistenten visar
   redigeringssidan det överst i avsnittet **Verktyg** ("Publicerad som
@@ -161,7 +161,7 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
 5. När statusraden inte visar några hinder aktiverar en
    organisationsadministratör widgeten. Fram till dess är den ett utkast och
    visas inte på den externa webbplatsen. När assistenten använder verktyg på
-   MCP-servrar utanför Eneo listar aktiveringen först dem och ber
+   sina egna externa MCP-servrar listar aktiveringen först dem och ber
    administratören bekräfta att anonyma besökare kan få assistenten att anropa
    dem ([MCP-servrar utanför Eneo](#external-mcp-servers)).
 6. Kopiera installationskoden och lämna den till webbansvarig. Den läggs in en
@@ -481,8 +481,8 @@ att ladda om när mallen har ändrat deras widget.
 ### När assistenten ändras [#when-the-assistant-changes]
 
 - **Verktyg och funktioner.** En ändring av assistentens MCP-servrar eller
-  funktioner når besökarna direkt, utom att ett verktyg på en MCP-server
-  utanför Eneo väntar på en organisationsadministratörs bekräftelse; se
+  funktioner når besökarna direkt. Nya verktyg på assistentens egna externa
+  MCP-servrar kräver en organisationsadministratörs bekräftelse. Se
   [Vad besökare kommer åt](#what-visitors-can-reach) och
   [MCP-servrar utanför Eneo](#external-mcp-servers).
 - **Avpublicering** av assistenten tar en aktiv widget offline. Besökare ser
@@ -498,9 +498,8 @@ att ladda om när mallen har ändrat deras widget.
 
 ### MCP-servrar utanför Eneo [#external-mcp-servers]
 
-En widget publicerar assistenten med dess MCP-servrar
-([Vad besökare kommer åt](#what-visitors-can-reach)). För en server utanför
-Eneo innebär det:
+Följande regler gäller verktyg på assistentens egna externa MCP-servrar.
+Webbsökning godkänns separat enligt beskrivningen nedan.
 
 - **Besökare är anonyma och deras frågor är obetrodd indata.** En fråga kan
   bära instruktioner till assistenten (promptinjektion är trivial på en publik
@@ -530,18 +529,17 @@ Eneo innebär det:
 - **Översikten visar vilka widgetar som når utanför Eneo**, med servrarnas
   namn, så att organisationens publika yta kan granskas utan att öppna varje
   widget.
-- **Varje anrop som en besökares tur gör till ett verktyg på en sådan server
-  skrivs till granskningsloggen** (`widget_external_tool_called`), oavsett
-  widgetens lagringstid och organisationens granskningsinställningar. Posten
-  anger widgeten, det pseudonyma besökar-id:t, konversationen, servern och
-  verktyget, om anropet kom från förhandsvisningen, samt argumentens namn men
-  inte deras värden, som kan innehålla besökarens personuppgifter. Resultatet
-  är `succeeded` eller `failed`, eller `unknown` när turen avslutades innan
-  anropet var klart, till exempel för att besökaren lämnade; servern kan då
-  ändå ha utfört det. En skrivning i ett externt system som en anonym besökare
-  utlöst lämnar därmed ett spår även när konversationen i sig aldrig sparas.
-  Når posten inte granskningskön loggar backend den som ett fel med samma
-  uppgifter.
+- **Eneo loggar varje godkänt försök att anropa ett av dessa verktyg**
+  (`widget_external_tool_called`), oavsett lagringstid och granskningsinställningar.
+  Under en besökares tur godkänns försöket automatiskt. Posten anger widgeten,
+  det pseudonyma besökar-id:t, konversationen, servern, verktyget och om
+  försöket gjordes i förhandsvisningen. För argumenten sparas bara namnen.
+  `succeeded` betyder att verktyget rapporterade att anropet lyckades.
+  `failed` omfattar både verktygsfel och lokala avslag, till exempel när
+  MCP-proxyns kretsbrytare stoppar anropet innan det når servern. `unknown`
+  betyder att turen avslutades innan Eneo fick ett resultat. Kontrollera den
+  externa serverns egen logg för att bekräfta en ändring där. Om Eneo inte
+  kan köa granskningsposten skrivs uppgifterna till backendens fellogg.
 - **Policyreglaget "Tillåt widgetar med verktyg på MCP-servrar utanför Eneo"**
   (på som standard) låter en organisation avböja detta helt: avstängt kan en
   sådan widget inte aktiveras, och en aktiv svarar utan de verktygen och
@@ -551,10 +549,13 @@ Eneo innebär det:
   fungera som widget; bekräftelsen, flaggan och granskningsspåret är
   skyddsräckena för det valet.
 
-Webbsökleverantörer är inte externa servrar i den här meningen: organisationen
-valde leverantören för alla, och den läser bara. Det är inte heller Eneos egna
-kunskaps- och filservrar, och en server där assistenten inte har något verktyg
-påslaget kontaktas aldrig från en besökares tur.
+**Webbsökning är undantagen från både widgetens verktygsbekräftelse och
+`widget_external_tool_called`.** Organisationen väljer sökleverantören och
+godkänner dess aktiverade verktyg gemensamt för widgetarna. Eneo begränsar
+inte verktygen till läsning. Granska vad varje verktyg kan läsa eller ändra
+innan anonyma besökare får använda webbsökningen. Även Eneos egna kunskaps-
+och filservrar ligger utanför dessa widgetkontroller. En besökares tur
+kontaktar bara servrar med aktiverade verktyg.
 
 ### Säkerhet [#security-properties]
 
@@ -622,10 +623,10 @@ påslaget kontaktas aldrig från en besökares tur.
   dem genom att först pausa widgeten, vilket gör nästa aktivering till en ny
   granskning. Begränsningarna lämnas åt redaktörerna eftersom var och en har
   ett hårt tak och policyn begränsar den dagliga budgeten vid varje anrop.
-- **Externa verktyg hålls till bekräftelsen vid varje tur.** En besökares tur,
-  förhandsvisningen inräknad, når inget verktyg på en MCP-server utanför Eneo
-  som en organisationsadministratör inte har bekräftat för widgeten, och inget
-  alls medan policyn förbjuder dem, vad assistenten än har fått sedan dess.
+- **Externa verktyg hålls till bekräftelsen vid varje tur.** På assistentens egna
+  externa MCP-servrar når besökare och förhandsvisningar bara de verktyg som
+  en organisationsadministratör har bekräftat för widgeten. När policyn
+  stängs av blockeras alla dessa verktyg.
 
 - **Begränsningarna stänger vid fel som standard.** Redis skyddar
   anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
@@ -771,8 +772,8 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
 - granskningsloggning är påslagen: skapande, ändringar (med inställningarna
   före och efter), aktivering, bekräftelser av verktyg utanför Eneo (med de
   servrar och verktyg de gäller), paus, arkivering, förbrukad budget och varje
-  utfärdad förhandsgranskningstoken loggas. Varje anrop som en besökares tur
-  gör till ett verktyg på en MCP-server utanför Eneo loggas oavsett
+  utfärdad förhandsgranskningstoken loggas. Eneo loggar varje godkänt försök att
+  anropa ett verktyg på assistentens egna externa MCP-servrar oavsett
   granskningsinställningarna.
 
 ## Tillgänglighet [#accessibility]
