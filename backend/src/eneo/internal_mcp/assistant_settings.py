@@ -101,14 +101,102 @@ OptionsSection = Literal["model", "knowledge", "tools", "all"]
 # whole line.
 _LINE_CHARS = 1000
 
-_FUNCTIONS: dict[str, str] = {
-    "web_search": "search the web",
-    "image_generation": "make images",
-    "file_analysis": "read and analyse uploaded files and tables",
-    "file_creation": "make documents and spreadsheets",
-    "charts": "make charts",
-    "compute": "calculate with code",
+# The functions as the editor's "Funktioner" section shows them, in its
+# order: the key a change takes (the function's purpose), the name the editor
+# shows and the description under it, in the editor's English text. The
+# editor's frontend has the same three for each function (CAPABILITIES in
+# frontend/apps/web-next/src/features/capabilities/capabilities.ts, named and
+# described by its messages); a test on each side holds its table to the same
+# written-out one, so change both together.
+FUNCTIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "web_search",
+        "Webbsökning",
+        "Lets the assistant search the web via the organisation's search engine.",
+    ),
+    (
+        "image_generation",
+        "Bildgenerering",
+        "Lets the assistant generate images via the organisation's image generator.",
+    ),
+    (
+        "file_analysis",
+        "Fråga fil",
+        "Lets the assistant calculate totals, compare and join attached CSV and "
+        "Excel files instead of reading them as text.",
+    ),
+    (
+        "file_creation",
+        "Skapa fil",
+        "Lets the assistant create Word, PDF and Excel files that the user can "
+        "download from the conversation. A Word template attached in the chat or "
+        "to the assistant can be used as the base.",
+    ),
+    (
+        "charts",
+        "Diagram",
+        "Lets the assistant compare values and show trends with bar, line, pie "
+        "and scatter charts. Eneo’s provider shows interactive charts and can "
+        "export images when requested.",
+    ),
+    (
+        "compute",
+        "Beräkning",
+        "Lets the assistant run exact arithmetic, statistics, date and text "
+        "calculations in an isolated sandbox instead of estimating. Results can "
+        "be shown as a table and exported as CSV for charts, spreadsheets and "
+        "documents.",
+    ),
+)
+
+_FUNCTION_TEXTS: dict[str, tuple[str, str]] = {
+    key: (name, description) for key, name, description in FUNCTIONS
 }
+
+# Why the editor shows a function as one that cannot be turned on, for each
+# reason it gives (the messages ``readinessKey`` picks in the editor's
+# capabilities): its sentence, in the words the model reads, and who changes
+# that, where.
+_SOURCES_BY_AN_ADMINISTRATOR = (
+    'an administrator configures its sources under "Verktyg" > "Funktioner"'
+)
+_FUNCTION_BLOCKS: dict[str, tuple[str, str]] = {
+    "space_disabled": (
+        "turned off in the space's settings",
+        'someone who may edit the space turns it on there, under "Funktioner"',
+    ),
+    "model_no_tool_calling": (
+        "the chat model does not support tool calling",
+        'a chat model that does is chosen first, under "Chattmodell"',
+    ),
+    "permission": (
+        "the person does not have permission to use it",
+        "an administrator gives their role the permission",
+    ),
+    "no_active_provider": ("no source is active", _SOURCES_BY_AN_ADMINISTRATOR),
+    "classification": (
+        "no source meets the space's security classification",
+        _SOURCES_BY_AN_ADMINISTRATOR,
+    ),
+    "no_approved_tools": (
+        "no approved, enabled tools are available",
+        _SOURCES_BY_AN_ADMINISTRATOR,
+    ),
+    "model_missing": (
+        "the image model is missing or deleted",
+        _SOURCES_BY_AN_ADMINISTRATOR,
+    ),
+    "model_disabled": ("the image model is disabled", _SOURCES_BY_AN_ADMINISTRATOR),
+    "model_deprecated": (
+        "the image model is deprecated",
+        _SOURCES_BY_AN_ADMINISTRATOR,
+    ),
+    "model_provider_inactive": (
+        "the model provider is inactive",
+        _SOURCES_BY_AN_ADMINISTRATOR,
+    ),
+}
+_UNKNOWN_BLOCK = ("the source is unavailable", _SOURCES_BY_AN_ADMINISTRATOR)
 
 _SETTINGS: tuple[tuple[str, str], ...] = (
     ("temperature", "temperature"),
@@ -402,15 +490,77 @@ def _loaded_tools(server: Any) -> list[Any]:
     return list(server.tools) if getattr(server, "tools_loaded", True) else []
 
 
-def _function_line(purpose: str, availability: Iterable[Any]) -> str:
+def function_name(purpose: str) -> str:
+    """The name the editor shows for a function."""
+    return _FUNCTION_TEXTS.get(purpose, (purpose, ""))[0]
+
+
+def function_label(purpose: str) -> str:
+    """A function as the tools name it to the model: the name the editor
+    shows, in quotes, and the key a change takes."""
+    return f'"{function_name(purpose)}" [{purpose}]'
+
+
+def _function_description(purpose: str) -> str:
+    """The editor's description of a function, as part of a line."""
+    text = _FUNCTION_TEXTS.get(purpose, ("", ""))[1].rstrip(".")
+    return text[:1].lower() + text[1:]
+
+
+def function_block(
+    purpose: str, *, offered: bool, model: Any | None, availability: Iterable[Any]
+) -> str | None:
+    """Why the editor shows ``purpose`` as a function that cannot be turned
+    on, by its reasons in its order (``capabilityBlockReason``): the space has
+    turned it off (``offered`` false), the chat model ``model`` cannot use
+    tools, or no source is ready for it, with the source's own reason from
+    ``availability``. None when nothing stands in the way."""
+    if not offered:
+        return "space_disabled"
+    if _cannot_use_tools(model):
+        return "model_no_tool_calling"
     state = next((item for item in availability if item.purpose == purpose), None)
     if state is not None and state.available:
-        ready = "ready"
-    elif state is not None and state.reason:
-        ready = f"not ready ({state.reason})"
-    else:
-        ready = "not ready"
-    return f"- {purpose}: {_FUNCTIONS.get(purpose, purpose)}; {ready}"
+        return None
+    return (state.reason if state is not None else None) or "no_active_provider"
+
+
+def _block_words(block: str) -> tuple[str, str]:
+    """A reason ``function_block`` gives, as the editor's sentence and who
+    changes that, where."""
+    return _FUNCTION_BLOCKS.get(block, _UNKNOWN_BLOCK)
+
+
+def _function_line(purpose: str, block: str | None, *, on: bool = False) -> str:
+    """A function as a read lists it: by the editor's name, with its key and
+    the editor's description, and ready or why not (``block``), with who
+    changes that. ``on`` says it is one the assistant has turned on."""
+    line = f"- {function_label(purpose)}: {_function_description(purpose)}; "
+    if block is None:
+        return line + "ready"
+    why, where = _block_words(block)
+    state = "on, but not available" if on else "cannot be turned on"
+    return f"{line}{state}: {why} ({where})"
+
+
+def _function_mention(purpose: str, block: str | None) -> str:
+    """A function named in a short list: by the editor's name and its key,
+    and why it is not available, when it is not."""
+    if block is None:
+        return function_label(purpose)
+    return f"{function_label(purpose)} (not available: {_block_words(block)[0]})"
+
+
+def _assistant_function_block(assistant: Any, purpose: str) -> str | None:
+    """Why a function the assistant has is not available, as the person's
+    view of the space's functions has it (the space's own switch included);
+    the chat model's part is said by what the editor's rules hold back."""
+    return function_block(
+        purpose,
+        offered=True,
+        model=None,
+        availability=assistant.available_capabilities,
+    )
 
 
 # --- read_assistant ----------------------------------------------------------
@@ -491,7 +641,11 @@ async def _person_rights(container: Any, space_id: UUID) -> PersonRights:
 class AssistantReading:
     """What ``read_assistant`` reports on: the assistant as the person reads
     it, with the names its saved choices point at and, when known, what the
-    person's role lets them change."""
+    person's role lets them change and which of its saved choices its space
+    no longer offers: who no longer lets it use its chat model
+    (``_model_withdrawn_by``), whether the space may still use its ranking
+    model, and the embedding models the space has enabled (None when not
+    known, and then no source is marked)."""
 
     assistant: Any
     permissions: Sequence[Any]
@@ -500,6 +654,63 @@ class AssistantReading:
     rerank_model_name: str | None = None
     document_template_name: str | None = None
     rights: PersonRights | None = None
+    model_withdrawn_by: Literal["space", "policy"] | None = None
+    rerank_selectable: bool = True
+    enabled_embedding_models: frozenset[UUID] | None = None
+
+
+def _model_withdrawn_by(
+    space: Any, config: Any | None, model: Any | None
+) -> Literal["space", "policy"] | None:
+    """Who no longer lets the assistant answer with its saved chat model
+    ``model``, as the editor's "Chattmodell" sees it: it offers the space's
+    models as the space's public view lists them (enabled by the
+    organisation, neither replaced nor deleted, as
+    ``SpaceAssembler._completion_model_available`` keeps them), only those an
+    organisation's models policy allows, and shows a model a policy locks in
+    place of the saved one. "space" when the space no longer offers the
+    model, "policy" when the policy does not allow it, and None when it may
+    be used or a policy locks another."""
+    if model is None:
+        return None
+    enforced = config is not None and config.models_enforced
+    if enforced and config.locked_model is not None:
+        return None
+    listed = next(
+        (item for item in space.completion_models if item.id == model.id), None
+    )
+    if (
+        listed is None
+        or not listed.is_org_enabled
+        or listed.migrated_to_model_id is not None
+        or listed.deleted_at is not None
+    ):
+        return "space"
+    if enforced and model.id not in {item.id for item in config.available_models}:
+        return "policy"
+    return None
+
+
+# What the editor shows for a saved chat model the assistant may no longer
+# use, by who withholds it, and the models it needs one of instead.
+_WITHDRAWN_MODEL: dict[str, tuple[str, str]] = {
+    "space": ("the space no longer offers it", "the space's models"),
+    "policy": ("an organisation policy does not allow it", "the models it allows"),
+}
+
+
+def _model_note(reading: AssistantReading) -> str:
+    """What follows the saved chat model's name when the assistant may no
+    longer use it, as the editor shows it; nothing when it may."""
+    who = reading.model_withdrawn_by
+    if who is None:
+        return ""
+    why, instead = _WITHDRAWN_MODEL[who]
+    return (
+        f' ({why}, so the editor shows "Stöds ej vald modell" under '
+        f'"Chattmodell"; the assistant needs one of {instead}, which '
+        "read_options lists)"
+    )
 
 
 def policy_locks(config: Any | None) -> list[str]:
@@ -622,7 +833,11 @@ def _overview(reading: AssistantReading) -> list[str]:
         f"Description: {_short(assistant.description) or 'none'}",
         f"Published: {_yes(assistant.published)}",
         "Chat model: "
-        + (f"{_model_name(model)} [id {model.id}]" if model is not None else "none"),
+        + (
+            f"{_model_name(model)} [id {model.id}]{_model_note(reading)}"
+            if model is not None
+            else "none"
+        ),
         f"Instructions: {len(text):,} characters"
         if text
         else "Instructions: none saved",
@@ -634,7 +849,15 @@ def _overview(reading: AssistantReading) -> list[str]:
         ),
         (
             f"Tools: {len(assistant.mcp_servers)} MCP servers; functions: "
-            + (", ".join(assistant.enabled_capabilities) or "none")
+            + (
+                ", ".join(
+                    _function_mention(
+                        purpose, _assistant_function_block(assistant, purpose)
+                    )
+                    for purpose in assistant.enabled_capabilities
+                )
+                or "none"
+            )
         ),
     ]
     return (
@@ -682,7 +905,9 @@ def _model(reading: AssistantReading) -> list[str]:
         offered = None
     else:
         offered = model.get_supported_model_kwargs()
-        lines = [f"Chat model: {_model_name(model)} [id {model.id}]"] + [
+        lines = [
+            f"Chat model: {_model_name(model)} [id {model.id}]{_model_note(reading)}"
+        ] + [
             f"  {fact}"
             for fact in _model_facts(
                 model, show_pricing=reading.show_pricing, offered=offered
@@ -708,13 +933,26 @@ def _model(reading: AssistantReading) -> list[str]:
 def _knowledge(reading: AssistantReading) -> list[str]:
     assistant = reading.assistant
     mode = getattr(assistant.knowledge_mode, "value", assistant.knowledge_mode)
+    enabled = reading.enabled_embedding_models
 
     def origin(item: Any) -> str:
-        return (
-            " (organisation knowledge)"
-            if item.space_id is not None and item.space_id != assistant.space_id
-            else ""
-        )
+        # The editor marks a source whose embedding model the space has not
+        # enabled ("modell inaktiverad").
+        notes = [
+            note
+            for note, applies in (
+                (
+                    "organisation knowledge",
+                    item.space_id is not None and item.space_id != assistant.space_id,
+                ),
+                (
+                    "its embedding model is not enabled in the space",
+                    enabled is not None and item.embedding_model.id not in enabled,
+                ),
+            )
+            if applies
+        ]
+        return f" ({'; '.join(notes)})" if notes else ""
 
     lines = [
         "Knowledge mode: "
@@ -747,6 +985,13 @@ def _knowledge(reading: AssistantReading) -> list[str]:
                 if assistant.rerank_model_id
                 else "none"
             )
+        )
+        + (
+            ' (the space can no longer use it, so the editor shows "Otillgänglig '
+            'modell" under "Rankning av träffar", and the sources are searched '
+            "without it until another is chosen)"
+            if assistant.rerank_model_id and not reading.rerank_selectable
+            else ""
         )
     )
     inline = assistant.inline_file_text
@@ -783,8 +1028,11 @@ def _tools(reading: AssistantReading) -> list[str]:
     lines = [f"MCP servers ({len(assistant.mcp_servers)}):"]
     for server in assistant.mcp_servers:
         description = _short(server.description)
+        # The editor shows a server an administrator turned off as such.
+        off = not getattr(server, "is_enabled", True)
+        state = " (turned off by an administrator)" if off else ""
         lines.append(
-            f"- {server.name} [id {server.id}]"
+            f"- {server.name} [id {server.id}]{state}"
             + (f": {description}" if description else "")
         )
         tools = sorted(_loaded_tools(server), key=lambda tool: tool.name)
@@ -799,17 +1047,25 @@ def _tools(reading: AssistantReading) -> list[str]:
             )
     lines.append(f"Functions on ({len(assistant.enabled_capabilities)}):")
     lines += [
-        _function_line(purpose, assistant.available_capabilities)
+        _function_line(purpose, _assistant_function_block(assistant, purpose), on=True)
         for purpose in assistant.enabled_capabilities
     ]
     choice = assistant.document_template
+    name = reading.document_template_name
     if choice.mode == "default":
         template = "the organisation's default"
     elif choice.mode == "builtin":
         template = "Eneo's built-in look"
-    else:
-        name = reading.document_template_name or "a template"
+    elif name is not None:
         template = f"{name} [id {choice.template_id}]"
+    else:
+        # A chosen template that is gone falls back as the default does, and
+        # the editor shows the organisation's default.
+        template = (
+            "one that is no longer among the organisation's templates [id "
+            f"{choice.template_id}], so the documents use the organisation's "
+            "default, as the editor shows, until another is chosen"
+        )
     lines.append(f"Document template: {template}")
     return (
         lines
@@ -874,7 +1130,11 @@ async def _reading(container: Any, target_id: UUID) -> AssistantReading:
     ) = await container.assistant_service().get_assistant_with_effective_config(
         target_id
     )
+    # The space as the editor reads it: the person's rights in it, and what it
+    # still offers of the assistant's saved choices.
+    space = await container.space_service().get_space(assistant.space_id)
     rerank_name = None
+    rerank_selectable = True
     if assistant.rerank_model_id is not None:
         models = await container.rerank_model_crud_service().get_rerank_models()
         rerank_name = next(
@@ -884,6 +1144,11 @@ async def _reading(container: Any, target_id: UUID) -> AssistantReading:
                 if model.id == assistant.rerank_model_id
             ),
             None,
+        )
+        rerank_selectable = bool(
+            await container.rerank_service().selectable(
+                assistant.rerank_model_id, space.security_classification
+            )
         )
     template_name = None
     if assistant.document_template.template_id is not None:
@@ -902,7 +1167,16 @@ async def _reading(container: Any, target_id: UUID) -> AssistantReading:
         show_pricing=bool(getattr(container.user(), "can_view_model_pricing", False)),
         rerank_model_name=rerank_name,
         document_template_name=template_name,
-        rights=await _person_rights(container, assistant.space_id),
+        rights=PersonRights.of(
+            container.actor_manager().get_space_actor_from_space(space=space)
+        ),
+        model_withdrawn_by=_model_withdrawn_by(
+            space, config, assistant.completion_model
+        ),
+        rerank_selectable=rerank_selectable,
+        enabled_embedding_models=frozenset(
+            model.id for model in space.embedding_models if model.is_org_enabled
+        ),
     )
 
 
@@ -917,20 +1191,22 @@ async def read_assistant(
     ctx: Context, section: AssistantSection = "overview", offset: int = 0
 ) -> CallToolResult:
     """Read the assistant this chat is about, as saved, in plain text. The
-    overview (default) is short: name, description, published, chat model,
-    the length of the instructions, counts of knowledge and tools, what the
-    person may do, what their role does not let them change and what an
-    organisation policy locks (suggest neither), and what the editor's rules
-    hold back as the assistant is set up now (knowledge and MCP servers are
-    not combined, and tools need a chat model that can use them; explain
-    those instead of proposing around them). Section
+    overview (default) is short: name, description, published, chat model
+    (and whether the space still offers it), the length of the instructions,
+    counts of knowledge and tools, the functions by the names the editor
+    shows, what the person may do, what their role does not let them change
+    and what an organisation policy locks (suggest neither), and what the
+    editor's rules hold back as the assistant is set up now (knowledge and MCP
+    servers are not combined, and tools need a chat model that can use them;
+    explain those instead of proposing around them). Section
     "instructions" gives the instructions whole; "model" the chat model with
     what it can do and its settings; "knowledge" the knowledge mode, sources,
     result ranking, file handling and attachments; "tools" the MCP servers
-    with their tools, the functions and the document template; "access"
-    publishing, the person's rights, insights, logging and retention; "all"
-    everything. A long section comes in parts: when the text says more
-    follows, call again with the offset it gives."""
+    with their tools, the functions with the editor's names and descriptions
+    and the document template; "access" publishing, the person's rights,
+    insights, logging and retention; "all" everything. A long section comes
+    in parts: when the text says more follows, call again with the offset it
+    gives."""
 
     async def operation(container, chat):
         lines = assistant_lines(await _reading(container, chat.target_id), section)
@@ -951,7 +1227,10 @@ async def read_assistant(
 @dataclass(frozen=True)
 class SpaceOffer:
     """What ``read_options`` reports on: the assistant's space as the editor
-    reads it, the assistant's current choices and what a policy decides."""
+    reads it, the assistant's current choices and what a policy decides. The
+    editor's functions read the chat model the assistant answers with
+    (``answering_model``) and the person's view of the space's functions
+    (``function_availability``, else the space's own)."""
 
     space: Any
     below_classification: Sequence[Any]
@@ -961,14 +1240,21 @@ class SpaceOffer:
     show_pricing: bool
     rerank_models: Sequence[Any]
     document_templates: Sequence[Any]
+    current_model_name: str | None = None
+    answering_model: Any | None = None
+    function_availability: Sequence[Any] | None = None
 
 
 def _model_options(offer: SpaceOffer) -> list[str]:
     config = offer.effective_config
-    models = [model for model in offer.space.completion_models if model.can_access]
-    if config is not None and config.models_enforced:
+    # The models the editor's "Chattmodell" lists, and of them those the
+    # assistant may be given.
+    listed = list(offer.space.completion_models)
+    enforced = config is not None and config.models_enforced
+    if enforced:
         allowed = {model.id for model in config.available_models}
-        models = [model for model in models if model.id in allowed]
+        listed = [model for model in listed if model.id in allowed]
+    models = [model for model in listed if model.can_access]
     lines = [f"Chat models the space offers ({len(models)}):"]
     for model in models:
         marks = [
@@ -998,6 +1284,21 @@ def _model_options(offer: SpaceOffer) -> list[str]:
             "Linked to the space but below its security classification, so "
             "they cannot be chosen: "
             + ", ".join(_model_name(model) for model in offer.below_classification)
+        )
+    # A saved model the editor's list leaves out is one it shows as no longer
+    # offered; a model a policy locks is shown in its place instead.
+    current = offer.current_model_id
+    locked = enforced and config.locked_model is not None
+    if (
+        current is not None
+        and not locked
+        and current not in {model.id for model in listed}
+    ):
+        lines.append(
+            "The assistant's saved chat model, "
+            f"{offer.current_model_name or 'unnamed'}, is not among them, so the "
+            'editor shows "Stöds ej vald modell" under "Chattmodell": the '
+            "assistant needs one of these."
         )
     return lines + [
         f"- {lock}"
@@ -1086,12 +1387,37 @@ def _tool_options(offer: SpaceOffer) -> list[str]:
         )
         if server["tools"]:
             lines.append("  tools: " + ", ".join(server["tools"]))
-    offered = source.enabled_capabilities if source else space.enabled_capabilities
-    availability = (
-        source.available_capabilities if source else space.available_capabilities
-    )
-    lines.append(f"Functions the space offers ({len(offered)}):")
-    lines += [_function_line(purpose, availability) for purpose in offered]
+    # The editor lists every function, and the space's switch is the first
+    # reason one cannot be turned on; under a policy that sets them, only the
+    # policy's, with their sources' readiness.
+    if source:
+        listed = list(source.enabled_capabilities)
+        offered = set(listed)
+        availability = source.available_capabilities
+        lines.append(f"Functions the organisation's policy gives ({len(listed)}):")
+    else:
+        listed = [key for key, _, _ in FUNCTIONS]
+        offered = set(space.enabled_capabilities)
+        availability = (
+            offer.function_availability
+            if offer.function_availability is not None
+            else space.available_capabilities
+        )
+        lines.append(
+            f'Functions ({len(listed)}), as the editor lists them under "Funktioner":'
+        )
+    lines += [
+        _function_line(
+            purpose,
+            function_block(
+                purpose,
+                offered=purpose in offered,
+                model=offer.answering_model,
+                availability=availability,
+            ),
+        )
+        for purpose in listed
+    ]
     lines.append(
         "Document templates: the organisation's default, Eneo's built-in look"
         + ("" if offer.document_templates else ", and no others")
@@ -1173,6 +1499,7 @@ async def _offer(container: Any, chat: Any) -> SpaceOffer:
     usable = [model for model in space.completion_models if model.can_access]
     default = space.select_default_completion_model(usable)
     models = await get_models(container=container, space_id=chat.space_id)
+    saved = assistant.completion_model
     return SpaceOffer(
         space=container.space_assembler().from_space_to_model(space),
         below_classification=[
@@ -1181,15 +1508,15 @@ async def _offer(container: Any, chat: Any) -> SpaceOffer:
             if model.can_access
         ],
         default_model_id=default.id if default is not None else None,
-        current_model_id=(
-            assistant.completion_model.id
-            if assistant.completion_model is not None
-            else None
-        ),
+        current_model_id=saved.id if saved is not None else None,
         effective_config=config,
         show_pricing=bool(getattr(container.user(), "can_view_model_pricing", False)),
         rerank_models=models.rerank_models,
         document_templates=await _document_templates(container),
+        current_model_name=_model_name(saved) if saved is not None else None,
+        answering_model=answering_model(saved, config),
+        # The person's view of the space's functions, as the editor reads it.
+        function_availability=list(assistant.available_capabilities) or None,
     )
 
 
@@ -1201,14 +1528,16 @@ async def read_options(
     before suggesting a choice, with the ids a change takes. Section "model"
     gives the chat models the assistant may use, with what each can do
     (context window, tool calling, reasoning and its efforts, images, price
-    when shown), the space's default and the one in use, and those below the
-    space's security classification; "knowledge" the collections, websites
+    when shown), the space's default and the one in use, those below the
+    space's security classification, and whether the assistant's saved model
+    is one the space no longer offers; "knowledge" the collections, websites
     and integration sources of the space and the organisation, with their
     embedding models where they differ, and the result ranking models;
-    "tools" the MCP servers with their tools, the functions with whether a
-    provider is ready for each, and the document templates; "all" (default)
-    everything. When the text says more follows, call again with the offset
-    it gives."""
+    "tools" the MCP servers with their tools, every function the editor
+    lists under "Funktioner", by the name it shows there, its description and
+    the key a change takes, ready or why it cannot be turned on and who
+    changes that, and the document templates; "all" (default) everything.
+    When the text says more follows, call again with the offset it gives."""
 
     async def operation(container, chat):
         lines = option_lines(await _offer(container, chat), section)
@@ -1312,8 +1641,9 @@ _CHANGES_TAKE = (
     "knowledge, unless it has both already. MCP servers and functions are "
     "turned on, and single MCP tools switched, only while the chat model the "
     "assistant answers with can use tools. "
-    'enabled_capabilities (functions): {"add": ["web_search"], "remove": '
-    '["charts"]} in the same way, or the whole list of functions. mcp_tools '
+    "enabled_capabilities (functions, by the keys the reads give in brackets): "
+    '{"add": ["web_search"], "remove": ["charts"]} in the same way, or the '
+    "whole list of functions. mcp_tools "
     "(single tools of the assistant's MCP servers): "
     '{"add": [{"tool_id": ..., "is_enabled": false}], "remove": '
     '[{"tool_id": ...}]}, where add switches a tool on or off for this '
@@ -1496,23 +1826,20 @@ _MORE_SETTINGS: tuple[str, ...] = (
     "insight_enabled",
 )
 
-# A function as a change names it: its purpose in words.
-_FUNCTION_NAMES: dict[str, str] = {
-    purpose: purpose.replace("_", " ") for purpose in _FUNCTIONS
-}
-
 
 @dataclass(frozen=True)
 class ChangeFacts:
     """What a change is checked against and named with beyond the assistant,
     its space and the policy: the person's rights, the functions a provider
-    is ready for in the space, the result ranking models (the names of all,
-    and the one the change chooses when the space may use it) and the
+    is ready for in the space and, for the rest, the reason the editor gives
+    (``function_block``), the result ranking models (the names of all, and
+    the one the change chooses when the space may use it) and the
     organisation's document templates. Each offers nothing unless prepared
     (``_change_facts``), so a check that was not prepared refuses."""
 
     rights: PersonRights = NO_RIGHTS
     ready_functions: frozenset[str] = frozenset()
+    function_blocks: Mapping[str, str] = field(default_factory=dict[str, str])
     rerank_models: Mapping[UUID, str] = field(default_factory=dict[UUID, str])
     selectable_rerank_models: frozenset[UUID] = frozenset()
     document_templates: Mapping[UUID, str] = field(default_factory=dict[UUID, str])
@@ -1556,9 +1883,10 @@ def _tools_value(
 
 
 def _functions_value(purposes: Iterable[str]) -> list[dict[str, str]]:
+    """Functions as a change's values hold them: by key, with the name the
+    editor shows."""
     return _by_name(
-        {"id": purpose, "name": _FUNCTION_NAMES.get(purpose, purpose)}
-        for purpose in purposes
+        {"id": purpose, "name": function_name(purpose)} for purpose in purposes
     )
 
 
@@ -1717,6 +2045,20 @@ def _tools_refusal(model: Any, what: str) -> BadRequestException:
         "first, or in the same change; read_options says which can. Nothing was "
         "changed."
     )
+
+
+def _functions_refusal(blocks: Mapping[str, str]) -> BadRequestException:
+    """The refusal of functions that cannot be turned on, each by the
+    editor's name with the reason the editor gives (``blocks``, by key, from
+    ``function_block``) and who changes that, where."""
+    by_reason: dict[str, list[str]] = {}
+    for purpose, block in blocks.items():
+        by_reason.setdefault(block, []).append(function_label(purpose))
+    parts = []
+    for block, labels in by_reason.items():
+        why, where = _block_words(block)
+        parts.append(f"{_listing(labels)} cannot be turned on: {why} ({where})")
+    return BadRequestException(f"{'; '.join(parts)}. Nothing was changed.")
 
 
 def _merged_kwargs(stored: ModelKwargs, sent: ModelKwargs | None) -> ModelKwargs:
@@ -2094,8 +2436,9 @@ def _plan_functions(
     """The functions the change sets: none under a policy that sets them,
     and only functions the space offers, while the chat model the assistant
     would answer with (``answering``) can use tools, and a provider is ready
-    for are switched on, checked in the order the editor gives its reasons;
-    switching one off is always allowed."""
+    for are switched on, checked in the order the editor gives its reasons
+    and refused with the reason it gives; switching one off is always
+    allowed."""
     current = list(assistant.enabled_capabilities)
     edit = request.edits.enabled_capabilities
     purposes = _edited_list(
@@ -2109,23 +2452,19 @@ def _plan_functions(
         raise _policy_refusal("the MCP servers and functions")
     added = [purpose for purpose in purposes if purpose not in current]
 
-    def named(found: list[str]) -> str:
-        return _listing([_FUNCTION_NAMES.get(purpose, purpose) for purpose in found])
-
     not_offered = [p for p in added if p not in space.enabled_capabilities]
     if not_offered:
-        raise BadRequestException(
-            f"The space does not offer {named(not_offered)}; read_options lists "
-            "the functions it offers. Nothing was changed."
-        )
+        raise _functions_refusal(dict.fromkeys(not_offered, "space_disabled"))
     if added and _cannot_use_tools(answering):
-        raise _tools_refusal(answering, f"{named(added)} cannot be switched on")
+        named = _listing([function_label(purpose) for purpose in added])
+        raise _tools_refusal(answering, f"{named} cannot be switched on")
     not_ready = [p for p in added if p not in facts.ready_functions]
     if not_ready:
-        raise BadRequestException(
-            f"No provider is ready for {named(not_ready)}, so "
-            f"{'it' if len(not_ready) == 1 else 'they'} cannot be switched on. "
-            "Nothing was changed."
+        raise _functions_refusal(
+            {
+                purpose: facts.function_blocks.get(purpose) or "no_active_provider"
+                for purpose in not_ready
+            }
         )
     chosen = sorted(set(purposes))
     update["enabled_capabilities"] = chosen
@@ -2351,6 +2690,7 @@ async def _change_facts(
     )
 
     ready: frozenset[str] = frozenset()
+    blocks: dict[str, str] = {}
     if request.names("enabled_capabilities"):
         states = await capability_availability(
             container.session(),
@@ -2358,6 +2698,11 @@ async def _change_facts(
             space.security_classification,
         )
         ready = frozenset(state.purpose for state in states if state.available)
+        blocks = {
+            state.purpose: state.reason or "no_active_provider"
+            for state in states
+            if not state.available
+        }
     rerank_models: dict[UUID, str] = {}
     selectable: frozenset[UUID] = frozenset()
     if request.names("rerank_model_id"):
@@ -2378,6 +2723,7 @@ async def _change_facts(
             container.actor_manager().get_space_actor_from_space(space=space)
         ),
         ready_functions=ready,
+        function_blocks=blocks,
         rerank_models=rerank_models,
         selectable_rerank_models=selectable,
         document_templates=templates,
@@ -2426,19 +2772,30 @@ _LISTS: dict[str, str] = {
 
 
 def _list_line(
-    label: str, before: list[dict[str, Any]], after: list[dict[str, Any]]
+    label: str,
+    before: list[dict[str, Any]],
+    after: list[dict[str, Any]],
+    *,
+    keyed: bool = False,
 ) -> str:
+    """A change of a list setting: what it adds and removes, by name, and
+    with ``keyed`` (the functions) with the key a change takes."""
     old = {item["id"]: item["name"] for item in before}
     new = {item["id"]: item["name"] for item in after}
 
-    def names(found: Iterable[Any]) -> str:
-        return _listing([f'"{_short(name or "", 80)}"' for name in found])
+    def names(found: Iterable[tuple[Any, Any]]) -> str:
+        return _listing(
+            [
+                f'"{_short(name or "", 80)}"' + (f" [{key}]" if keyed else "")
+                for key, name in found
+            ]
+        )
 
     parts = [
         f"{verb} {names(found)}"
         for verb, found in (
-            ("added", [new[key] for key in new if key not in old]),
-            ("removed", [old[key] for key in old if key not in new]),
+            ("added", [(key, new[key]) for key in new if key not in old]),
+            ("removed", [(key, old[key]) for key in old if key not in new]),
         )
         if found
     ]
@@ -2486,8 +2843,9 @@ def _choice_line(key: str, before: Any, after: Any) -> str:
 
 def _change_line(change: dict[str, Any]) -> str:
     """One proposed change for the model: the setting as the editor calls
-    it, with its values when they are short. Never an id, and never the text
-    of the instructions or the description."""
+    it, with its values when they are short, and a function by the editor's
+    name with its key. Never an id, and never the text of the instructions
+    or the description."""
     key, before, after = change["field"], change["before"], change["after"]
     if key == "prompt":
         return f"instructions (new text of {len(after or ''):,} characters)"
@@ -2509,7 +2867,9 @@ def _change_line(change: dict[str, Any]) -> str:
             f"{_FILES[bool(after)]})"
         )
     if key in _LISTS:
-        return _list_line(_LISTS[key], before, after)
+        return _list_line(
+            _LISTS[key], before, after, keyed=key == "enabled_capabilities"
+        )
     if key == "mcp_tools":
         return _tools_line(before, after)
     if key in (

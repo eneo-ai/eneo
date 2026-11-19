@@ -42,7 +42,11 @@ from eneo.internal_mcp.foundation import ToolContext
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import ResourcePermission
 from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
-from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.domain.entities.mcp_server import (
+    CAPABILITY_PURPOSES,
+    MCPServer,
+    MCPServerTool,
+)
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     STRUCTURED_CONTENT_MAX_BYTES,
 )
@@ -206,7 +210,11 @@ def test_the_sections_say_what_the_editor_shows():
     assert "- mall.docx: always in the prompt" in knowledge
 
     tools = _text(assistant_lines(reading, "tools"))
-    assert "- file_creation: make documents and spreadsheets; ready" in tools
+    assert (
+        '- "Skapa fil" [file_creation]: lets the assistant create Word, PDF and '
+        "Excel files"
+    ) in tools
+    assert "can be used as the base; ready" in tools
     assert "Document template: the organisation's default" in tools
 
     access = _text(assistant_lines(reading, "access"))
@@ -338,7 +346,7 @@ def _offer(effective_config=None) -> SpaceOffer:
         enabled_capabilities=["charts"],
         available_capabilities=[
             CapabilityAvailability(
-                purpose="charts", available=False, reason="no_provider"
+                purpose="charts", available=False, reason="no_active_provider"
             )
         ],
     )
@@ -387,7 +395,11 @@ def test_the_options_say_what_the_space_offers():
 
     tools = _text(option_lines(offer, "tools"))
     assert "Ärendesystemet" in tools and "search_cases" in tools
-    assert "- charts: make charts; not ready (no_provider)" in tools
+    assert '- "Diagram" [charts]: lets the assistant compare values' in tools
+    assert (
+        "; cannot be turned on: no source is active (an administrator configures "
+        'its sources under "Verktyg" > "Funktioner")'
+    ) in tools
     assert "Kommunmall" in tools and "(the organisation's default)" in tools
     assert _URL_KEY not in _text(option_lines(offer, "all"))
     assert "cases.example.org" not in _text(option_lines(offer, "all"))
@@ -411,8 +423,241 @@ def test_options_a_policy_decides_are_the_policys():
     tools = _text(option_lines(offer, "tools"))
     assert "the organisation's policy gives (1)" in tools
     assert "Policyservern" in tools and "Ärendesystemet" not in tools
-    assert "- compute: calculate with code; ready" in tools
+    # Only the policy's functions, with their sources' readiness.
+    assert "Functions the organisation's policy gives (1):" in tools
+    assert '- "Beräkning" [compute]: lets the assistant run exact arithmetic' in tools
+    assert "spreadsheets and documents; ready" in tools
+    assert "[charts]" not in tools
     assert _SERVER_TOKEN not in tools and _URL_KEY not in tools
+
+
+# --- The editor's names ------------------------------------------------------
+
+# The same table, in the same order, as the editor's functions (CAPABILITIES in
+# frontend/apps/web-next/src/features/capabilities/capabilities.ts, named and
+# described by its messages), whose test in
+# frontend/apps/web-next/src/features/assistants/editor/setting-references.test.ts
+# holds the editor to this one: change both together.
+EDITOR_FUNCTIONS = (
+    (
+        "web_search",
+        "Webbsökning",
+        "Lets the assistant search the web via the organisation's search engine.",
+    ),
+    (
+        "image_generation",
+        "Bildgenerering",
+        "Lets the assistant generate images via the organisation's image generator.",
+    ),
+    (
+        "file_analysis",
+        "Fråga fil",
+        "Lets the assistant calculate totals, compare and join attached CSV and "
+        "Excel files instead of reading them as text.",
+    ),
+    (
+        "file_creation",
+        "Skapa fil",
+        "Lets the assistant create Word, PDF and Excel files that the user can "
+        "download from the conversation. A Word template attached in the chat or "
+        "to the assistant can be used as the base.",
+    ),
+    (
+        "charts",
+        "Diagram",
+        "Lets the assistant compare values and show trends with bar, line, pie "
+        "and scatter charts. Eneo’s provider shows interactive charts and can "
+        "export images when requested.",
+    ),
+    (
+        "compute",
+        "Beräkning",
+        "Lets the assistant run exact arithmetic, statistics, date and text "
+        "calculations in an isolated sandbox instead of estimating. Results can "
+        "be shown as a table and exported as CSV for charts, spreadsheets and "
+        "documents.",
+    ),
+)
+
+_FRAGA_FIL = (
+    '- "Fråga fil" [file_analysis]: lets the assistant calculate totals, compare '
+    "and join attached CSV and Excel files instead of reading them as text"
+)
+_WEB_SEARCH = (
+    '- "Webbsökning" [web_search]: lets the assistant search the web via the '
+    "organisation's search engine"
+)
+_TURNED_OFF = (
+    "turned off in the space's settings (someone who may edit the space turns "
+    'it on there, under "Funktioner")'
+)
+
+
+def test_the_tools_name_and_describe_every_function_as_the_editor_does():
+    assert assistant_settings.FUNCTIONS == EDITOR_FUNCTIONS
+    assert tuple(key for key, _, _ in EDITOR_FUNCTIONS) == CAPABILITY_PURPOSES
+
+
+def test_read_options_lists_every_function_and_why_one_cannot_be_turned_on():
+    offer = replace(
+        _offer(),
+        function_availability=[
+            CapabilityAvailability(purpose="file_analysis", available=True),
+            CapabilityAvailability(
+                purpose="charts", available=False, reason="permission"
+            ),
+        ],
+    )
+    offer.space.enabled_capabilities = ["file_analysis", "charts"]
+
+    tools = option_lines(offer, "tools")
+
+    assert 'Functions (6), as the editor lists them under "Funktioner":' in tools
+    assert f"{_FRAGA_FIL}; ready" in tools
+    # One the space has turned off is listed with the editor's reason and who
+    # changes it, where.
+    assert f"{_WEB_SEARCH}; cannot be turned on: {_TURNED_OFF}" in tools
+    # A source's readiness is the person's, as the editor reads it.
+    charts = next(line for line in tools if "[charts]" in line)
+    assert charts.endswith(
+        "; cannot be turned on: the person does not have permission to use it "
+        "(an administrator gives their role the permission)"
+    )
+    # A chat model that cannot use tools comes after the space's own switch.
+    without = option_lines(replace(offer, answering_model=_without_tools()), "tools")
+    assert f"{_WEB_SEARCH}; cannot be turned on: {_TURNED_OFF}" in without
+    assert (
+        f"{_FRAGA_FIL}; cannot be turned on: the chat model does not support tool "
+        'calling (a chat model that does is chosen first, under "Chattmodell")'
+    ) in without
+
+
+def test_read_assistant_names_the_functions_as_the_editor_does():
+    reading = _reading()
+    reading.assistant.enabled_capabilities = ["file_analysis", "web_search"]
+    reading.assistant.available_capabilities = [
+        CapabilityAvailability(purpose="file_analysis", available=True),
+        CapabilityAvailability(
+            purpose="web_search", available=False, reason="space_disabled"
+        ),
+    ]
+
+    overview = _text(assistant_lines(reading, "overview"))
+    tools = assistant_lines(reading, "tools")
+
+    assert (
+        'functions: "Fråga fil" [file_analysis], "Webbsökning" [web_search] '
+        "(not available: turned off in the space's settings)"
+    ) in overview
+    assert f"{_FRAGA_FIL}; ready" in tools
+    assert f"{_WEB_SEARCH}; on, but not available: {_TURNED_OFF}" in tools
+    for key in ("file_analysis", "web_search"):
+        assert f"- {key}:" not in _text(tools)
+
+
+def test_a_saved_chat_model_the_space_no_longer_offers_is_named_as_such():
+    note = (
+        ' (the space no longer offers it, so the editor shows "Stöds ej vald '
+        'modell" under "Chattmodell"; the assistant needs one of the space\'s '
+        "models, which read_options lists)"
+    )
+    reading = replace(_reading(), model_withdrawn_by="space")
+    line = f"Chat model: Stor modell [id {reading.assistant.completion_model.id}]"
+
+    assert line + note in assistant_lines(reading, "overview")
+    assert line + note in assistant_lines(reading, "model")
+    by_policy = _text(
+        assistant_lines(replace(reading, model_withdrawn_by="policy"), "overview")
+    )
+    assert (
+        "(an organisation policy does not allow it, so the editor shows "
+        '"Stöds ej vald modell" under "Chattmodell"; the assistant needs one of '
+        "the models it allows, which read_options lists)"
+    ) in by_policy
+    assert "Stöds ej" not in _text(assistant_lines(_reading(), "all"))
+
+    offer = replace(
+        _offer(), current_model_id=uuid4(), current_model_name="Gammal modell"
+    )
+    assert (
+        "The assistant's saved chat model, Gammal modell, is not among them, so "
+        'the editor shows "Stöds ej vald modell" under "Chattmodell": the '
+        "assistant needs one of these."
+    ) in option_lines(offer, "model")
+    assert "Stöds ej" not in _text(option_lines(_offer(), "model"))
+
+
+def test_who_withholds_a_saved_chat_model_is_read_as_the_editor_lists_models():
+    def listed(model, **overrides):
+        values = {
+            "id": model.id,
+            "is_org_enabled": True,
+            "migrated_to_model_id": None,
+            "deleted_at": None,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    saved, other = _model(), _model()
+    withdrawn_by = assistant_settings._model_withdrawn_by  # pyright: ignore[reportPrivateUsage]
+
+    def space(*models):
+        return SimpleNamespace(completion_models=list(models))
+
+    assert withdrawn_by(space(listed(saved)), None, saved) is None
+    assert withdrawn_by(space(listed(other)), None, saved) == "space"
+    for gone in ({"is_org_enabled": False}, {"deleted_at": datetime.now(UTC)}):
+        assert withdrawn_by(space(listed(saved, **gone)), None, saved) == "space"
+    allows_other = _policy(available_models=[other], locked_model=None)
+    assert withdrawn_by(space(listed(saved)), allows_other, saved) == "policy"
+    # A model a policy locks is shown in place of the saved one.
+    assert withdrawn_by(space(listed(other)), _policy(), saved) is None
+    assert withdrawn_by(space(), None, None) is None
+
+
+def test_saved_choices_the_space_no_longer_offers_are_named_as_the_editor_shows():
+    template_id = uuid4()
+    reading = replace(
+        _reading(),
+        assistant=_assistant(_server(is_enabled=False)),
+        rerank_model_name="Rankaren",
+        rerank_selectable=False,
+        enabled_embedding_models=frozenset({_EMBEDDING.id}),
+    )
+    assistant = reading.assistant
+    assistant.rerank_model_id = _RANKER
+    assistant.collections[0].embedding_model = _OTHER_EMBEDDING
+    assistant.websites[0].embedding_model = _EMBEDDING
+    assistant.document_template = DocumentTemplateChoice(
+        mode="selected", template_id=template_id
+    )
+
+    knowledge = assistant_lines(reading, "knowledge")
+    tools = assistant_lines(reading, "tools")
+
+    routines = assistant.collections[0]
+    assert (
+        f"- Rutiner [id {routines.id}] (its embedding model is not enabled in the "
+        "space)"
+    ) in knowledge
+    assert (
+        "Result ranking: Rankaren (the space can no longer use it, so the editor "
+        'shows "Otillgänglig modell" under "Rankning av träffar", and the sources '
+        "are searched without it until another is chosen)"
+    ) in knowledge
+    server = assistant.mcp_servers[0]
+    assert (
+        f"- Ärendesystemet [id {server.id}] (turned off by an administrator): "
+        "Läser och skapar ärenden."
+    ) in tools
+    assert (
+        "Document template: one that is no longer among the organisation's "
+        f"templates [id {template_id}], so the documents use the organisation's "
+        "default, as the editor shows, until another is chosen"
+    ) in tools
+    # The website's embedding model is enabled: only its origin is said.
+    website = next(line for line in knowledge if "intra.example.org" in line)
+    assert website.endswith("(organisation knowledge)")
 
 
 # --- The chat a call reaches -------------------------------------------------
@@ -1151,8 +1396,8 @@ def test_each_added_setting_is_planned_as_the_update_request_takes_it():
         ],
     )
     assert changed["enabled_capabilities"] == (
-        [{"id": "file_creation", "name": "file creation"}],
-        [{"id": "web_search", "name": "web search"}],
+        [{"id": "file_creation", "name": "Skapa fil"}],
+        [{"id": "web_search", "name": "Webbsökning"}],
     )
     assert changed["rerank_model_id"] == (
         None,
@@ -1304,8 +1549,14 @@ def test_what_the_space_does_not_offer_is_refused_without_naming_an_id():
             },
             "not a tool of the assistant's MCP servers",
         ),
-        ({"enabled_capabilities": {"add": ["compute"]}}, "does not offer compute"),
-        ({"enabled_capabilities": ["charts"]}, "No provider is ready for charts"),
+        (
+            {"enabled_capabilities": {"add": ["compute"]}},
+            '"Beräkning" [compute] cannot be turned on: turned off in the space',
+        ),
+        (
+            {"enabled_capabilities": ["charts"]},
+            '"Diagram" [charts] cannot be turned on: no source is active',
+        ),
         ({"rerank_model_id": stranger}, "cannot use that result ranking model"),
         (
             {"document_template": {"mode": "selected", "template_id": stranger}},
@@ -1319,6 +1570,31 @@ def test_what_the_space_does_not_offer_is_refused_without_naming_an_id():
         assert refusal in text, changes
         assert stranger not in text
         assert text.endswith("Nothing was changed.")
+
+
+def test_a_function_that_cannot_be_turned_on_is_refused_with_the_editors_reason():
+    world = _world()
+    sources = 'an administrator configures its sources under "Verktyg" > "Funktioner"'
+
+    with pytest.raises(BadRequestException) as turned_off:
+        _plan_in(world, {"enabled_capabilities": {"add": ["compute"]}})
+    assert str(turned_off.value) == (
+        f'"Beräkning" [compute] cannot be turned on: {_TURNED_OFF}. Nothing was '
+        "changed."
+    )
+
+    world.space.enabled_capabilities += ["compute"]
+    with pytest.raises(BadRequestException) as not_ready:
+        _plan_in(
+            world,
+            {"enabled_capabilities": {"add": ["charts", "compute"]}},
+            facts=_facts(function_blocks={"charts": "classification"}),
+        )
+    assert str(not_ready.value) == (
+        '"Diagram" [charts] cannot be turned on: no source meets the space\'s '
+        f'security classification ({sources}); "Beräkning" [compute] cannot be '
+        f"turned on: no source is active ({sources}). Nothing was changed."
+    )
 
 
 def test_a_source_the_space_no_longer_offers_must_go_with_the_change():
@@ -1407,7 +1683,8 @@ def test_the_model_is_told_what_was_added_and_removed_by_name():
         "result ranking (from none to Rankaren)",
         'MCP servers (added "Diariet")',
         "MCP tools (search_cases off, create_case back to its server's setting)",
-        'functions (added "web search"; removed "file creation")',
+        'functions (added "Webbsökning" [web_search]; removed "Skapa fil" '
+        "[file_creation])",
         "document template (from the organisation's default to Kommunmall)",
         "conversation retention (from following the space to 30 days)",
         "insights (from off to on)",
@@ -1498,6 +1775,7 @@ _NO_TOOLS = (
     "The chat model the assistant would answer with, Liten modell, cannot use "
     "tools, so "
 )
+_WEB_SEARCH_CANNOT = '"Webbsökning" [web_search] cannot be switched on'
 
 
 def _servers_only(world) -> SimpleNamespace:
@@ -1639,10 +1917,13 @@ def test_mcp_servers_tools_and_functions_need_a_model_that_can_use_tools():
         ),
         (
             {"enabled_capabilities": {"add": ["web_search"]}},
-            "web search cannot be switched on",
+            '"Webbsökning" [web_search] cannot be switched on',
         ),
         # The editor gives the space's reason first and the provider's last.
-        ({"enabled_capabilities": ["charts"]}, "charts cannot be switched on"),
+        (
+            {"enabled_capabilities": ["charts"]},
+            '"Diagram" [charts] cannot be switched on',
+        ),
         (
             {
                 "mcp_tools": {
@@ -1675,7 +1956,9 @@ def test_mcp_servers_tools_and_functions_need_a_model_that_can_use_tools():
 
     with pytest.raises(BadRequestException) as not_offered:
         _plan_in(world, {"enabled_capabilities": {"add": ["compute"]}})
-    assert "does not offer compute" in str(not_offered.value)
+    assert str(not_offered.value).startswith(
+        '"Beräkning" [compute] cannot be turned on: turned off in the space'
+    )
 
 
 def test_the_model_rule_follows_a_model_chosen_in_the_same_change():
@@ -1687,7 +1970,7 @@ def test_the_model_rule_follows_a_model_chosen_in_the_same_change():
 
     with pytest.raises(BadRequestException) as refused:
         _plan_in(world, {"completion_model": {"id": str(without.id)}, **web_search})
-    assert str(refused.value).startswith(_NO_TOOLS + "web search cannot be")
+    assert str(refused.value).startswith(_NO_TOOLS + _WEB_SEARCH_CANNOT)
     # The model alone may change: what is on stays on.
     alone = _plan_in(world, {"completion_model": {"id": str(without.id)}})
     assert alone.update == {"completion_model": {"id": str(without.id)}}
@@ -1726,7 +2009,7 @@ def test_the_model_rule_follows_the_model_a_models_policy_answers_with():
             world, {"enabled_capabilities": {"add": ["web_search"]}}, config=policy
         )
 
-    assert str(refused.value).startswith(_NO_TOOLS + "web search cannot be")
+    assert str(refused.value).startswith(_NO_TOOLS + _WEB_SEARCH_CANNOT)
 
 
 def test_read_assistant_says_what_the_editors_rules_hold_back():
@@ -1793,9 +2076,7 @@ async def test_the_editors_rules_are_refused_by_the_proposal_and_nothing_is_writ
     world.assistant.completion_model = _without_tools()
     without_tools = await propose(MagicMock(), changes=add_function)
     assert without_tools.isError
-    assert without_tools.content[0].text.startswith(
-        _NO_TOOLS + "web search cannot be switched on"
-    )
+    assert without_tools.content[0].text.startswith(_NO_TOOLS + _WEB_SEARCH_CANNOT)
     apply.assert_not_awaited()
     container.audit_service().log.assert_not_called()
     container.audit_service().log_async.assert_not_called()

@@ -1,5 +1,6 @@
 import { createFormatter } from "use-intl";
 import { describe, expect, it } from "vitest";
+import { CAPABILITIES } from "@/features/capabilities/capabilities";
 import { testTranslator } from "@/test/i18n";
 import {
   ASSISTANT_SECTION_IDS,
@@ -134,6 +135,59 @@ describe("The keys a setting reference can name", () => {
       })
     ).map((reference) => reference.key);
     expect(new Set(keys)).toEqual(new Set(SETTING_REFERENCE_KEYS));
+  });
+});
+
+describe("The functions the helper's tools name", () => {
+  /**
+   * The same table, in the same order, as `FUNCTIONS` in the helper's tools
+   * (backend/src/eneo/internal_mcp/assistant_settings.py): each function's
+   * key, the name "Funktioner" shows and the description under it in the
+   * English text. The tools' test holds its table to this one: change both
+   * together.
+   */
+  const TOOLS_FUNCTIONS = [
+    [
+      "web_search",
+      "Webbsökning",
+      "Lets the assistant search the web via the organisation's search engine."
+    ],
+    [
+      "image_generation",
+      "Bildgenerering",
+      "Lets the assistant generate images via the organisation's image generator."
+    ],
+    [
+      "file_analysis",
+      "Fråga fil",
+      "Lets the assistant calculate totals, compare and join attached CSV and Excel files instead of reading them as text."
+    ],
+    [
+      "file_creation",
+      "Skapa fil",
+      "Lets the assistant create Word, PDF and Excel files that the user can download from the conversation. A Word template attached in the chat or to the assistant can be used as the base."
+    ],
+    [
+      "charts",
+      "Diagram",
+      "Lets the assistant compare values and show trends with bar, line, pie and scatter charts. Eneo’s provider shows interactive charts and can export images when requested."
+    ],
+    [
+      "compute",
+      "Beräkning",
+      "Lets the assistant run exact arithmetic, statistics, date and text calculations in an isolated sandbox instead of estimating. Results can be shown as a table and exported as CSV for charts, spreadsheets and documents."
+    ]
+  ];
+
+  it("are the editor's, by name and description", () => {
+    const en = testTranslator("en");
+    expect(
+      CAPABILITIES.map((capability) => [
+        capability.purpose,
+        t(capability.purpose),
+        en(capability.assistantHint)
+      ])
+    ).toEqual(TOOLS_FUNCTIONS);
   });
 });
 

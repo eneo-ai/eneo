@@ -294,6 +294,32 @@ def test_publishing_and_unpublishing_ask_the_person_with_their_own_approval():
     assert "They can also publish or unpublish under Publicering." in fragment
 
 
+def test_the_assistant_fragment_matches_the_editors_names_before_denying_one():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    assert (
+        "the reads name each function as the editor does, in quotes, with its key "
+        "in brackets"
+    ) in fragment
+    assert (
+        "Before you say that a setting or function does not exist, match what the "
+        "person wrote against the names the reads give and the parts above, "
+        "allowing for case, spacing and near spellings"
+    ) in fragment
+    assert (
+        '"fråga fil" and "frågafil" are "Fråga fil", and "webbsök" is "Webbsökning"'
+    ) in fragment
+    # Two things it could mean are a choice between their names.
+    assert (
+        'such as the function "Fråga fil" and the setting "Dokument från användare '
+        'i chatten", ask which, with the two names as the choice'
+    ) in fragment
+    assert (
+        "call a setting or function by the name the editor shows, never by its key "
+        "or a translation of the key"
+    ) in fragment
+
+
 def test_earlier_versions_of_the_instructions_can_be_read():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 

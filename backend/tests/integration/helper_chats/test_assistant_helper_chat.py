@@ -37,6 +37,7 @@ from eneo.database.tables.mcp_server_table import (
 from eneo.database.tables.prompts_table import Prompts, PromptsAssistants
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.spaces_table import SpacesCompletionModels
 from eneo.database.tables.websites_table import Websites
 from eneo.helper_chats.personas.assistant import ASSISTANT_INSTRUCTIONS
 from eneo.helper_chats.personas.shared import PROPOSING
@@ -1164,6 +1165,43 @@ async def test_a_change_the_space_cannot_take_is_refused_without_naming_it(
     assert await _stored(db_container, setup.assistant_id) == stored
 
 
+async def test_a_saved_chat_model_the_space_no_longer_offers_is_read_as_such(
+    client, setup: Setup, db_container, admin_user
+):
+    chat = await _open(client, setup)
+    ctx = await _ctx(
+        db_container,
+        admin_user,
+        assistant_id=chat["assistant_id"],
+        session_id=chat["session_id"],
+    )
+    saved = (await _read(client, setup))["completion_model"]
+    async with db_container() as container:
+        await container.session().execute(
+            sa.delete(SpacesCompletionModels).where(
+                SpacesCompletionModels.space_id == UUID(setup.space_id),
+                SpacesCompletionModels.completion_model_id == UUID(saved["id"]),
+            )
+        )
+
+    read = await assistant_settings.read_assistant(ctx)
+    options = await assistant_settings.read_options(ctx, section="model")
+
+    assert not read.isError, read.content[0].text
+    model_line = next(
+        line
+        for line in read.content[0].text.splitlines()
+        if line.startswith("Chat model: ")
+    )
+    assert model_line.endswith(
+        '(the space no longer offers it, so the editor shows "Stöds ej vald '
+        'modell" under "Chattmodell"; the assistant needs one of the space\'s '
+        "models, which read_options lists)"
+    )
+    assert not options.isError, options.content[0].text
+    assert 'so the editor shows "Stöds ej vald modell"' in options.content[0].text
+
+
 async def test_instructions_a_policy_sets_are_not_proposed(
     client, setup: Setup, db_container, admin_user
 ):
@@ -1456,6 +1494,8 @@ async def test_the_added_settings_are_proposed_without_a_write_and_applied_as_a_
     assert queued == []
     _holds_no_secret(result, offered)
     assert _UUID.search(result.content[0].text) is None
+    # A function is named as the editor names it, with its key.
+    assert 'functions (added "Webbsökning" [web_search])' in result.content[0].text
     proposal = result.structuredContent["proposal"]
     assert {change["field"] for change in proposal["changes"]} == {
         "groups",
@@ -1508,6 +1548,18 @@ async def test_what_the_space_does_not_offer_is_refused_by_the_proposal(
     )
     stored = await _stored(db_container, setup.assistant_id)
     stranger = str(uuid4())
+    turned_off = "turned off in the space's settings"
+
+    # The function the space has turned off is listed, with the editor's
+    # reason, and its proposal is refused with the same.
+    options = await assistant_settings.read_options(ctx, section="tools")
+    assert not options.isError, options.content[0].text
+    web_search = next(
+        line
+        for line in options.content[0].text.splitlines()
+        if line.startswith('- "Webbsökning" [web_search]: ')
+    )
+    assert f"; cannot be turned on: {turned_off} (" in web_search
 
     for changes, refusal in (
         ({"groups": {"add": [{"id": stranger}]}}, "does not offer that collection"),
@@ -1520,7 +1572,10 @@ async def test_what_the_space_does_not_offer_is_refused_by_the_proposal(
             },
             "not a tool of the assistant's MCP servers",
         ),
-        ({"enabled_capabilities": {"add": ["web_search"]}}, "not offer web search"),
+        (
+            {"enabled_capabilities": {"add": ["web_search"]}},
+            f'"Webbsökning" [web_search] cannot be turned on: {turned_off}',
+        ),
         ({"rerank_model_id": stranger}, "cannot use that result ranking model"),
         (
             {"document_template": {"mode": "selected", "template_id": stranger}},
@@ -1588,7 +1643,7 @@ async def test_the_editors_rules_are_named_and_refused_by_the_proposal(
         ctx, changes={"enabled_capabilities": {"add": ["web_search"]}}
     )
     assert result.isError
-    assert "cannot use tools, so web search cannot be switched on" in (
+    assert 'cannot use tools, so "Webbsökning" [web_search] cannot be switched on' in (
         result.content[0].text
     )
 
