@@ -272,8 +272,10 @@ export function CompanionLayout({
     <div
       ref={row}
       data-companion-row=""
-      // As tall as the view while the content scrolls on its own: the page has nothing to scroll.
-      style={ownScroll && viewHeight !== null ? { height: viewHeight } : undefined}
+      // As tall as the view while the content scrolls on its own: the page has
+      // nothing to scroll. Not flexible then: in a frame that is as tall as
+      // its content, a flexible row takes the content's height instead.
+      style={ownScroll && viewHeight !== null ? { height: viewHeight, flex: "none" } : undefined}
       className="relative flex min-w-0 flex-1 items-start"
     >
       <div ref={content} inert={covered} className="flex min-w-0 flex-1 flex-col self-stretch">
