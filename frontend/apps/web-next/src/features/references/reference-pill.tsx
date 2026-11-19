@@ -33,7 +33,9 @@ export function ReferenceToken({
 
 /**
  * A pill the person presses: a native button around it, with the app's focus
- * ring. In running text give it `align-middle`, as the pill inside has.
+ * ring. It wraps the pill tightly (inline-flex), so it has no text line of its
+ * own to push the pill off the sentence's baseline or stretch the line. In
+ * running text give it `align-middle`, as the pill inside has.
  */
 export function PillButton({ className, children, ...props }: ComponentProps<"button">) {
   return (
@@ -41,7 +43,7 @@ export function PillButton({ className, children, ...props }: ComponentProps<"bu
       type="button"
       {...props}
       className={cn(
-        "focus-visible:outline-ring rounded-ax-inner inline-block focus-visible:outline-2 focus-visible:outline-offset-2",
+        "focus-visible:outline-ring rounded-ax-inner inline-flex focus-visible:outline-2 focus-visible:outline-offset-2",
         className
       )}
     >
