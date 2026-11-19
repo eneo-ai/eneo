@@ -481,7 +481,6 @@ it.each(["apps", "assistants", "group-chats"] as const)(
     replies.set("/api/v1/spaces/space-1/", makeSpace());
     for (const id of ["resource-1", "resource-2"])
       replies.set(`/api/v1/${kind}/${id}/`, { id, name: `Name ${id}` });
-    replies.set("/api/v1/help-assistants/availability", new Response(null, { status: 500 }));
     const base = `/spaces/space-1/${kind}`;
     const { router } = await renderRoute(
       `${base}/resource-1/edit`,
@@ -523,7 +522,6 @@ it.each([{ admin: true }, { admin: false }])(
     expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
     expect(requestedPaths()).toContain("/api/v1/assistants/help/");
     // Nothing is read for a page that is not there: no warm-up, no settings.
-    expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
     expect(requestedPaths()).not.toContain("/api/v1/assistants/help/helper-chat/availability");
     expect(
       requestedPaths().filter(

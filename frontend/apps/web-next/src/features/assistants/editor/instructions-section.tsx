@@ -1,4 +1,3 @@
-import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useState } from "react";
@@ -21,15 +20,8 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { browserApi } from "@/lib/api/browser";
 import { formatDateTime } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import {
-  promptGuideAvailabilityQueryOptions,
-  type HelperAvailability
-} from "@/features/help-assistants/prompt-guide/helper-runs";
-import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
 import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import { useSpace } from "@/features/spaces/use-space";
@@ -57,20 +49,22 @@ function PromptMeta({ text }: { text: string }) {
   );
 }
 
-/**
- * The prompt. Saving creates a new prompt version backend-side; Prompt Guide
- * only mutates local editor state and relies on this same save path.
- */
+/** The prompt. Saving creates a new prompt version backend-side. */
 export function InstructionsSection({
   assistant,
-  promptGuide = true,
   contextModel,
-  modelConfirmed = true
+  modelConfirmed = true,
+  onAskPrompt
 }: {
   assistant: Assistant;
-  promptGuide?: boolean;
   contextModel?: Pick<Schema<"CompletionModelPublic">, "id" | "token_limit"> | null;
   modelConfirmed?: boolean;
+  /**
+   * "Hjälp mig skriva instruktionerna" beside the prompt: opens the helper
+   * with a request about it in the composer. Absent, it is not offered (no
+   * helper, or a prompt the person may not change here).
+   */
+  onAskPrompt?: () => void;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -79,12 +73,7 @@ export function InstructionsSection({
   const promptLocked = isPromptLocked(assistant.effective_config);
   const savedDescription = assistant.prompt?.description ?? "";
   const [showHistory, setShowHistory] = useState(false);
-  const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [expanded, setExpanded] = useState(false);
-  const promptGuideAvailability = useQuery({
-    ...promptGuideAvailabilityQueryOptions(browserApi, assistant.id),
-    enabled: promptGuide
-  });
 
   // Each save creates a new prompt version, so commit on blur, after a pause,
   // or on an explicit apply rather than on every keystroke.
@@ -101,7 +90,6 @@ export function InstructionsSection({
     commitOnVisibilityChange: true
   });
   const prompt = promptField.value.text;
-  const dirty = promptField.dirty;
 
   function editPrompt(text: string) {
     promptField.setValue({ kind: "manual", text });
@@ -113,25 +101,6 @@ export function InstructionsSection({
       ? (space.completion_models.find((candidate) => candidate.id === effectiveModelId) ?? null)
       : contextModel;
 
-  function promptGuideDisabledTooltip(
-    reason: HelperAvailability["disabled_reason"] | null | undefined
-  ): string {
-    switch (reason) {
-      case "role_disabled":
-        return t("prompt_guide_disabled_role_disabled");
-      case "role_not_visible":
-        return t("prompt_guide_disabled_role_not_visible");
-      case "no_completion_model":
-        return t("prompt_guide_disabled_no_completion_model");
-      case "no_edit_rights":
-        return t("prompt_guide_disabled_no_edit_rights");
-      case "no_assignment":
-      default:
-        return t("prompt_guide_disabled_no_assignment");
-    }
-  }
-
-  const availability = promptGuideAvailability.data;
   const promptMark = useSettingsMark("assistant-prompt");
   const promptLabel = (
     <label htmlFor="assistant-prompt" className="text-sm font-medium">
@@ -158,29 +127,10 @@ export function InstructionsSection({
           {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled
               back so their icons start on the gutter with the label. */}
           <div className="phone:-ms-2.5 flex min-w-0 flex-wrap items-center gap-1">
-            {promptGuide && availability && !promptLocked && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  {/* Unavailable, its reason is only in the tooltip, which a finger cannot
-                      reach: a phone leaves the button out rather than show it disabled. */}
-                  <span className={cn("inline-flex", !availability.available && "phone:hidden")}>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      disabled={!availability.available}
-                      onClick={() => setShowPromptGuide(true)}
-                    >
-                      <Sparkles className="size-4" /> {t("prompt_guide_button")}
-                    </Button>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {availability.available
-                    ? t("prompt_guide_button_tooltip")
-                    : promptGuideDisabledTooltip(availability.disabled_reason)}
-                </TooltipContent>
-              </Tooltip>
+            {onAskPrompt && !promptLocked && (
+              <Button type="button" variant="ghost" size="sm" onClick={onAskPrompt}>
+                <Sparkles className="size-4" /> {t("helper_ask_prompt")}
+              </Button>
             )}
             {!promptLocked && (
               <Button type="button" variant="ghost" size="sm" onClick={() => setShowHistory(true)}>
@@ -229,22 +179,6 @@ export function InstructionsSection({
         </div>
       </div>
 
-      <PromptGuideDialog
-        open={showPromptGuide && !promptLocked}
-        onOpenChange={setShowPromptGuide}
-        targetId={assistant.id}
-        targetPrompt={prompt}
-        hasUnsavedPromptChanges={dirty}
-        onApply={(text) => {
-          if (promptLocked) return;
-          const description = t("prompt_guide_apply_description", {
-            date: formatDateTime(new Date().toISOString())
-          });
-          const value: PromptDraft = { kind: "annotated", text, description };
-          promptField.setValue(value);
-          void promptField.commit(value);
-        }}
-      />
       <PromptVersionDialog
         resource={{ type: "assistant", id: assistant.id }}
         open={showHistory && !promptLocked}

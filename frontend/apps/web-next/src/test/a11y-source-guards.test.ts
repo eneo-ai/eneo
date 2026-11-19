@@ -35,8 +35,6 @@ function occurrences(pattern: RegExp): string[] {
 const DIMMED_TEXT_ALLOWED: Record<string, string> = {
   "src/features/admin/storage/storage-admin-page.tsx opacity-60":
     "an unavailable storage target: its radio is disabled, and text of an inactive control is exempt (1.4.3)",
-  "src/features/help-assistants/prompt-guide/prompt-guide-dialog.tsx opacity-60":
-    "a submitted question card while it sends: its fieldset is disabled and the card aria-busy",
   "src/features/admin/audit/audit-page.tsx opacity-60":
     "a known 1.4.3 gap, not an exemption: the previous page of the audit log is dimmed while the next page loads",
   "src/components/ui/alert.tsx text-destructive/90":

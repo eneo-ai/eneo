@@ -2,7 +2,6 @@ import { createFileRoute, notFound } from "@tanstack/react-router";
 import { AssistantEditor } from "@/features/assistants/editor/assistant-editor";
 import { assistantHelperAvailabilityQueryOptions } from "@/features/assistants/editor/assistant-helper-api";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
-import { promptGuideAvailabilityQueryOptions } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { browserApi } from "@/lib/api/browser";
 import { readFresh, warmQuery } from "@/lib/api/query";
 import { spaceTitle } from "@/lib/route-head";
@@ -17,10 +16,6 @@ export const Route = createFileRoute("/_app/spaces/$spaceId/assistants/$assistan
       );
       // A help assistant has no page here, as in the chat pages.
       if (assistant.is_help_assistant) throw notFound();
-      warmQuery(
-        context.queryClient,
-        promptGuideAvailabilityQueryOptions(browserApi, params.assistantId)
-      );
       // The header's "Hjälpassistent" waits for it: started here, it lands with the page.
       warmQuery(
         context.queryClient,

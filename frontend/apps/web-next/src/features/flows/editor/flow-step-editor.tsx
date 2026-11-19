@@ -18,6 +18,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { SuccessMark } from "@/components/composites/success-mark";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useSecretMutation } from "@/lib/api/use-secret-mutation";
+import { stepMention } from "../chat/references";
 import { stepName } from "../flow-steps";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
@@ -87,8 +88,9 @@ type EditorProps = {
   onSaved: (flow: FlowPublic) => void;
   onCancel: () => void;
   /**
-   * Puts a prepared request about one of the step's suggestions in the flow
-   * chat's composer; absent while the chat is not available.
+   * Puts a prepared request about the step (one of its suggestions, its
+   * instruction) in the flow chat's composer; absent while the chat is not
+   * available.
    */
   onAskChat?: (text: string) => void;
   /** Makes a suggestion's patch; absent, no "Åtgärda" is offered. */
@@ -596,6 +598,12 @@ function StepEditorSession({
 
   const { draft, stepOrder, flow } = session;
   const usesModel = stepUsesModel(draft);
+  // "Hjälp mig skriva instruktionen": the request names the step as a pill,
+  // and the chat reads the step as saved.
+  const stepPill = stepMention({ id: stepId, user_description: session.saved.user_description });
+  const askInstruction = onAskChat
+    ? () => onAskChat(t("flow_step_editor_ask_instruction_request", { step: stepPill }))
+    : undefined;
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
   // Only the AI instruction runs once per section, so only it reads the section's number.
@@ -762,8 +770,8 @@ function StepEditorSession({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    // A dialog's own form (the Prompt Guide's answer box) submits up the React
-    // tree through its portal too; only this form saves the step.
+    // A dialog's own form submits up the React tree through its portal too;
+    // only this form saves the step.
     if (event.target !== event.currentTarget) return;
     if (!session || save.isPending || effectiveReadOnly) return;
     const problems = localProblems(session.draft);
@@ -966,6 +974,7 @@ function StepEditorSession({
                   problems={shownProblems}
                   groups={promptGroups}
                   classification={classification}
+                  onAskInstruction={askInstruction}
                 />
               )}
 

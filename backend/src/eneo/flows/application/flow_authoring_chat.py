@@ -381,6 +381,23 @@ structured step gets its example in add_step, written from the fields the
 work needs.
 """
 
+_STEP_INSTRUCTION = """When the person asks for help writing or improving the
+instruction of a step, read that step in full first. When its instruction
+already says what the step does, say in a sentence or two what works and what
+could be clearer, then work on what is missing. Ask only where the answer
+changes the instruction: what the step gets, what it should give back, what it
+must always or never do, and what it does when its input lacks something; the
+rest of the question rules above apply. Then write it thorough and specific:
+the task this one step performs on what it reads, not a persona, in the
+person's language, built from what the person said and what the step's
+settings show, never from invented facts. Keep the step's {{ ... }} reads as
+they are, and do not restate the fields its output_contract already enforces.
+Use a few short sections rather than one block, and let every line earn its
+place: the person reads and edits the result. In edit mode, write it into the
+step with update_step; otherwise, as the mode rules above say, show the
+instruction you would write.
+"""
+
 _COHERENT_CHANGES = """The tool calls of one round run at the same time on the same revision, so
 make at most one call that changes the draft per round, and the next change in
 the round after it; a change that reaches several steps goes in one
@@ -634,6 +651,7 @@ AUTHORING_INSTRUCTIONS = (
     + _QUESTIONS
     + _EXPECTED_RESULT
     + _FROM_EXAMPLE
+    + _STEP_INSTRUCTION
     + _COHERENT_CHANGES
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()
