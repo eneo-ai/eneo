@@ -27,35 +27,26 @@ _INDEXES = {
 
 def upgrade() -> None:
     with op.get_context().autocommit_block():
-        op.execute("SET lock_timeout = '5s'")
-        try:
-            for name, definition in _INDEXES.items():
-                valid = (
-                    op.get_bind()
-                    .execute(
-                        sa.text(
-                            "SELECT indisvalid FROM pg_index "
-                            "WHERE indexrelid = to_regclass(:name)"
-                        ),
-                        {"name": name},
-                    )
-                    .scalar()
+        # A concurrent build can wait for the transaction of an active app run.
+        for name, definition in _INDEXES.items():
+            valid = (
+                op.get_bind()
+                .execute(
+                    sa.text(
+                        "SELECT indisvalid FROM pg_index "
+                        "WHERE indexrelid = to_regclass(:name)"
+                    ),
+                    {"name": name},
                 )
-                # Interrupted concurrent builds can leave invalid indexes.
-                if valid is False:
-                    op.execute(f"DROP INDEX CONCURRENTLY {name}")
-                op.execute(
-                    f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} {definition}"
-                )
-        finally:
-            op.execute("RESET lock_timeout")
+                .scalar()
+            )
+            # Interrupted concurrent builds can leave invalid indexes.
+            if valid is False:
+                op.execute(f"DROP INDEX CONCURRENTLY {name}")
+            op.execute(f"CREATE INDEX CONCURRENTLY IF NOT EXISTS {name} {definition}")
 
 
 def downgrade() -> None:
     with op.get_context().autocommit_block():
-        op.execute("SET lock_timeout = '5s'")
-        try:
-            for name in _INDEXES:
-                op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
-        finally:
-            op.execute("RESET lock_timeout")
+        for name in _INDEXES:
+            op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")
