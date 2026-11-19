@@ -296,6 +296,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     )
     task_container = MagicMock()
     task_container.task_manager.return_value = task_manager
+    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
     recovery_container = MagicMock()
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
@@ -319,7 +320,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
     # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.PROCESSING_FAILED
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_active=True
     )
 
 
@@ -368,6 +369,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     )
     task_container = MagicMock()
     task_container.task_manager.return_value = task_manager
+    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
     recovery_container = MagicMock()
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
@@ -398,7 +400,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     assert tx_contexts[0].committed is False
     assert tx_contexts[1].committed is True
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.CANCELLED
+        job_id, failure_code=JobFailureCode.CANCELLED, only_if_active=True
     )
     assert published_when_recovery_committed[-1] is True
 
@@ -457,7 +459,9 @@ async def test_a_commit_failure_is_recorded_as_its_code_without_text(
 
     await worker._fail_job_after_commit_error(job_id, None, error)
 
-    job_service.fail_job.assert_awaited_once_with(job_id, failure_code=code)
+    job_service.fail_job.assert_awaited_once_with(
+        job_id, failure_code=code, only_if_active=True
+    )
 
 
 async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(

@@ -23,11 +23,11 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType, Status
+from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig
+from eneo.worker.task_manager import TaskManager, WorkerConfig, publish_task_status
 
 logger = get_logger(__name__)
 
@@ -428,6 +428,10 @@ class Worker:
                         container = await self._create_container(
                             session, user_id=user_id
                         )
+                        # Hold the job row until the task commits. A reaper skips
+                        # this lock, and late deliveries cannot restart a failed job.
+                        if not await container.job_repo().mark_job_started(job_id):
+                            return False
                         task_manager = container.task_manager(
                             job_id=job_id,
                             resource_id=params.id,
@@ -437,24 +441,31 @@ class Worker:
                             func, task_manager=task_manager
                         )
 
-                        async with task_manager.set_status_on_exception():
+                        async with task_manager.set_status_on_exception(
+                            status_already_set=True, publish_terminal=False
+                        ):
+                            await task_manager.publish_status(Status.IN_PROGRESS)
                             task_manager.result_location = await func(
                                 params, container=container, **optional_kwargs
                             )
 
                         success = task_manager.successful()
                 except (Exception, asyncio.CancelledError) as exc:
-                    # Task errors are already turned into a FAILED job inside the
-                    # transaction; what reaches here is either the commit itself
-                    # failing (e.g. a before_commit guard such as the storage
-                    # quota) or cancellation re-raised from
-                    # set_status_on_exception, both of which rolled that status
-                    # back together with the work.
-                    await self._fail_job_after_commit_error(
-                        job_id, user_id, exc, task_manager=task_manager
-                    )
+                    # The task transaction rolled back. Store the failure separately.
+                    if await self._fail_job_after_commit_error(job_id, user_id, exc):
+                        if task_manager is not None:
+                            await task_manager.publish_status(Status.FAILED)
+                        elif channel_type is not None and user_id is not None:
+                            await publish_task_status(
+                                Channel(type=channel_type, user_id=user_id),
+                                RedisMessage(id=params.id, status=Status.FAILED),
+                            )
                     raise
 
+                if success is not None:
+                    await task_manager.publish_status(
+                        Status.COMPLETE if success else Status.FAILED
+                    )
                 return success
 
             traced = _traced_job("job", wrapper)
@@ -472,9 +483,7 @@ class Worker:
         job_id: UUID,
         user_id: UUID | None,
         exc: BaseException,
-        *,
-        task_manager: TaskManager | None = None,
-    ) -> None:
+    ) -> bool:
         """Record the failure in a fresh session so the job is not left pending
         until the reaper finds it.
 
@@ -485,17 +494,19 @@ class Worker:
         try:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
-                await container.job_service().fail_job(job_id, failure_code=code)
-            if task_manager is not None:
-                await task_manager.publish_status(Status.FAILED)
+                failed = await container.job_service().fail_job(
+                    job_id, failure_code=code, only_if_active=True
+                )
+            return failed is not None
         except Exception as error:
             log_error(
                 logger,
                 logging.ERROR,
-                "Could not record job failure after a commit error",
+                "Could not record job failure after task rollback",
                 error=error,
                 extra={"job_id": str(job_id), "failure_code": code.value},
             )
+            return False
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
         """Register a cron job.

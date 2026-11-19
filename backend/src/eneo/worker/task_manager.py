@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from typing import Any, Callable
 from uuid import UUID
@@ -8,11 +10,25 @@ from eneo.jobs.job_models import JobFailureCode, failure_code_for_exception
 from eneo.jobs.job_service import JobService
 from eneo.main.logging import get_logger
 from eneo.main.models import Channel, ChannelType, RedisMessage, Status
-from eneo.observability.error_log import error_facts
+from eneo.observability.error_log import error_facts, log_error
 from eneo.users.user import UserInDB
 from eneo.worker.redis import r
 
 logger = get_logger(__name__)
+
+
+async def publish_task_status(channel: Channel, message: RedisMessage) -> None:
+    try:
+        redis_client: Any = r
+        await redis_client.publish(channel.channel_string, message.model_dump_json())
+    except Exception as exc:
+        log_error(
+            logger,
+            logging.WARNING,
+            "Task status notification failed",
+            error=exc,
+            extra={"id": str(message.id), "status": message.status.value},
+        )
 
 
 class WorkerConfig:
@@ -79,27 +95,28 @@ class TaskManager:
             message_id = (
                 self.resource_id if self.resource_id is not None else self.job_id
             )
-            redis_client: Any = r
-            await redis_client.publish(
-                channel.channel_string,
+            await publish_task_status(
+                channel,
                 RedisMessage(
                     id=message_id,
                     status=status,
                     additional_data=self.additional_data,
-                ).model_dump_json(),
+                ),
             )
 
     @asynccontextmanager
-    async def set_status_on_exception(self, *, status_already_set: bool = False):
+    async def set_status_on_exception(
+        self, *, status_already_set: bool = False, publish_terminal: bool = True
+    ):
         """Context manager that handles job status updates and exception handling.
 
         Args:
             status_already_set: If True, skip the initial IN_PROGRESS status update.
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
+            publish_terminal: Set False when the caller publishes the final status
+                after its transaction commits and records cancellation after rollback.
         """
-        import asyncio
-
         if not status_already_set:
             await self.set_status(Status.IN_PROGRESS)
 
@@ -112,7 +129,8 @@ class TaskManager:
                 "Job cancelled (worker shutdown or timeout)",
                 extra={"job_id": str(self.job_id)},
             )
-            await self.fail_job(JobFailureCode.CANCELLED)
+            if publish_terminal:
+                await self.fail_job(JobFailureCode.CANCELLED)
             self.success = False
             raise  # Re-raise to let ARQ know the job was cancelled
         except Exception as exc:
@@ -129,10 +147,10 @@ class TaskManager:
                 facts["error_at"],
                 extra={"job_id": str(self.job_id), "failure_code": code.value, **facts},
             )
-            await self.fail_job(code)
+            await self.fail_job(code, publish=publish_terminal)
             self.success = False
         else:
-            await self.complete_job()
+            await self.complete_job(publish=publish_terminal)
             self.success = True
         finally:
             if self._cleanup_func is not None:
@@ -150,10 +168,11 @@ class TaskManager:
         if self.job_service is not None:
             await self.job_service.set_status(self.job_id, status)
 
-    async def complete_job(self):
+    async def complete_job(self, *, publish: bool = True):
         if self._job_already_handled:
             return
-        await self.publish_status(status=Status.COMPLETE)
+        if publish:
+            await self.publish_status(status=Status.COMPLETE)
         if self.job_service is not None:
             try:
                 await self.job_service.complete_job(self.job_id, self._result_location)
@@ -163,10 +182,11 @@ class TaskManager:
                     extra={"job_id": str(self.job_id), **error_facts(exc)},
                 )
 
-    async def fail_job(self, failure_code: JobFailureCode):
+    async def fail_job(self, failure_code: JobFailureCode, *, publish: bool = True):
         if self._job_already_handled:
             return
-        await self.publish_status(status=Status.FAILED)
+        if publish:
+            await self.publish_status(status=Status.FAILED)
 
         if self.job_service is not None:
             try:
