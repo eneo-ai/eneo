@@ -10,8 +10,15 @@ import { HelperPanel } from "./helper-panel";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PATCH: vi.fn() }));
 const announce = vi.hoisted(() => vi.fn());
-/** What the conversation's own send decided: true where the page let the message go. */
-const conversation = vi.hoisted(() => ({ sent: [] as boolean[] }));
+/**
+ * What the conversation's own send decided: true where the page let the
+ * message go. A message with files waits for them with the callbacks of the
+ * render it was sent from.
+ */
+const conversation = vi.hoisted(() => ({
+  sent: [] as boolean[],
+  waiting: undefined as (() => Promise<boolean>) | undefined
+}));
 
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -68,6 +75,15 @@ vi.mock("@/features/chat/chat-view", () => ({
         onClick={() => void beforeSend?.().then((go) => conversation.sent.push(go))}
       >
         Skicka
+      </button>
+      <button type="button" onClick={() => (conversation.waiting = beforeSend)}>
+        Skicka med filer
+      </button>
+      <button
+        type="button"
+        onClick={() => void conversation.waiting?.().then((go) => conversation.sent.push(go))}
+      >
+        Filerna uppladdade
       </button>
       <button type="button" onClick={() => onSendingChange?.(true)}>
         Tur börjar
@@ -143,6 +159,7 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   conversation.sent = [];
+  conversation.waiting = undefined;
 });
 
 describe("HelperPanel when the chat cannot open", () => {
@@ -408,6 +425,47 @@ describe("HelperPanel while a message is on its way", () => {
     fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
     await waitFor(() => expect(conversation.sent).toEqual([false, true]));
     expect(screen.queryByText("Inställningarna kunde inte sparas.")).toBeNull();
+  });
+
+  it("holds every message while the page's standing reason stands, without asking the page, and says why only while it stands", async () => {
+    openChat(true);
+    const beforeSend = vi.fn(async () => null);
+    const panel = (sendHold: string | null) => (
+      <HelperPanel adapter={adapter({ sendHold, beforeSend })} />
+    );
+    const { rerender } = renderInApp(panel("Spara ändringarna först."));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false]));
+    expect(beforeSend).not.toHaveBeenCalled();
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.map((alert) => alert.textContent).join(" ")).toContain(
+      "Spara ändringarna först."
+    );
+    expect(screen.getByText(messages.helper_send_held)).toBeTruthy();
+
+    // Saved: the notice goes before the next message, and new edits do not bring it back.
+    rerender(panel(null));
+    expect(screen.queryByText("Spara ändringarna först.")).toBeNull();
+    rerender(panel("Spara ändringarna först."));
+    expect(screen.queryByText("Spara ändringarna först.")).toBeNull();
+
+    rerender(panel(null));
+    fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false, true]));
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the standing reason when a message goes, once its files are uploaded", async () => {
+    openChat(false);
+    const panel = (sendHold: string | null) => <HelperPanel adapter={adapter({ sendHold })} />;
+    const { rerender } = renderInApp(panel(null));
+    fireEvent.click(await screen.findByRole("button", { name: "Skicka med filer" }));
+
+    rerender(panel("Spara ändringarna först."));
+    fireEvent.click(screen.getByRole("button", { name: "Filerna uppladdade" }));
+    await waitFor(() => expect(conversation.sent).toEqual([false]));
+    expect(await screen.findByText("Spara ändringarna först.")).toBeTruthy();
   });
 
   it("sends at once for a page with nothing to do first", async () => {

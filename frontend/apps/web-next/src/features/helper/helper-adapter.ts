@@ -130,6 +130,14 @@ export type HelperAdapter = {
   /** An answer ended: the target may have changed. */
   onAnswerFinished?: () => void;
   /**
+   * Why a message cannot go right now, in the target's words (edits on
+   * screen that are not saved, which the chat cannot read); null when it
+   * can. Read when a message goes, once its files are uploaded and before
+   * `beforeSend`: while it is set the message is held, back in the
+   * composer, and the panel shows the sentence for as long as it stands.
+   */
+  sendHold?: string | null;
+  /**
    * Runs before each message goes, once its files are uploaded: null lets it
    * go; a sentence holds it, back in the composer, and the panel shows the
    * sentence. A page that saves as the person types saves what is pending

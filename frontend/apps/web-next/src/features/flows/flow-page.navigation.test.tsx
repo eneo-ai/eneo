@@ -29,6 +29,21 @@ vi.mock("@/lib/api/browser", async () => {
   api.stub = apiStub(new Proxy({}, { get: (_target, key: string) => api.routes[key] }));
   return { browserApi: api.stub.client };
 });
+/** Whether the page let each message sent in the chat go. */
+const chat = vi.hoisted(() => ({ sent: [] as boolean[] }));
+// The conversation is the chat feature's; the page decides whether a message may go.
+vi.mock("@/features/chat/chat-view", () => ({
+  ChatView: ({ beforeSend }: { beforeSend?: () => Promise<boolean> }) => (
+    <button
+      type="button"
+      onClick={() =>
+        void (beforeSend?.() ?? Promise.resolve(true)).then((go) => chat.sent.push(go))
+      }
+    >
+      Skicka meddelandet
+    </button>
+  )
+}));
 
 const BASE = "/spaces/space-1/flows/flow-1";
 let flow: FlowPublic;
@@ -55,7 +70,26 @@ afterEach(() => {
   cleanup();
   history.destroy();
   api.stub.calls.length = 0;
+  chat.sent = [];
 });
+
+/** The flow's chat opens, in Fråga, with its assistant and an empty conversation. */
+function routeChat() {
+  api.routes["POST /api/v1/flows/{id}/authoring-chat/"] = () => ({
+    body: {
+      flow_id: "flow-1",
+      assistant_id: "assistant-chat",
+      session_id: "session-1",
+      editing: false
+    }
+  });
+  api.routes["GET /api/v1/assistants/{id}/"] = () => ({
+    body: { id: "assistant-chat", name: "Medborgarbrev", mcp_servers: [] }
+  });
+  api.routes["GET /api/v1/conversations/{session_id}/"] = () => ({
+    body: { id: "session-1", name: "", messages: [] }
+  });
+}
 
 async function renderPage(search = "") {
   window.history.replaceState(null, "", "/outside");
@@ -276,6 +310,51 @@ it("publishes only what is saved: unsaved step edits hold Publicera back and say
   await waitFor(() => expect(screen.queryByText(messages.flows_publish_unsaved)).toBeNull());
   await click(messages.publish);
   await waitFor(() => expect(publishes()).toHaveLength(1));
+});
+
+it("holds a chat message while the open step has unsaved edits, and lets it go once they are saved", async () => {
+  routeChat();
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => {
+    flow = makeFlow({
+      draft_revision: 5,
+      steps: flow.steps.map((step, index) =>
+        index === 0 ? { ...step, user_description: "Eget utkast" } : step
+      )
+    });
+    return { body: flow };
+  };
+  await renderPage();
+  await openFirst();
+  await changeName();
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([false]));
+  const reason = await screen.findByText(messages.flows_chat_send_held_unsaved);
+  expect(reason.closest('[role="alert"]')?.textContent).toContain(messages.helper_send_held);
+  // Nothing is saved for the person: the draft stays as typed, with the editor open.
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Eget utkast");
+
+  await click(messages.flow_step_editor_save);
+  // Saved: the reason has gone, and the notice with it, before another message.
+  await waitFor(() => expect(screen.queryByText(messages.flows_chat_send_held_unsaved)).toBeNull());
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([false, true]));
+});
+
+it("lets a chat message go while the settings form is merely open, and holds it once it differs", async () => {
+  routeChat();
+  await renderPage();
+  await click(messages.flows_settings_edit);
+  await screen.findByRole("button", { name: messages.flows_settings_save });
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([true]));
+
+  fireEvent.change(await screen.findByRole("textbox", { name: /^Namn/ }), {
+    target: { value: "Nytt namn" }
+  });
+  await screen.findByText(messages.flow_page_settings_unsaved);
+  await click("Skicka meddelandet");
+  await waitFor(() => expect(chat.sent).toEqual([true, false]));
+  expect(await screen.findByText(messages.flows_chat_send_held_unsaved)).toBeTruthy();
 });
 
 it("releases a pending navigation after the current draft is saved", async () => {

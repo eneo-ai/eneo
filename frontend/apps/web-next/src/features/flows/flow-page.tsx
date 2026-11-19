@@ -259,6 +259,17 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     // Saved or dropped: "save or cancel first" is no longer true.
     if (!unsaved) setNotice((last) => (last?.cause === "unsaved" ? null : last));
   }, []);
+  // The open step's unsaved edits alone. The chat reads the saved flow, so a
+  // message waits while they stand, or while the settings form holds changes
+  // (`settingsDirty`, below): a form that is merely open holds nothing back.
+  const [stepUnsaved, setStepUnsaved] = useState(false);
+  const onStepUnsavedChange = useCallback(
+    (unsaved: boolean) => {
+      setStepUnsaved(unsaved);
+      onUnsavedChange(unsaved);
+    },
+    [onUnsavedChange]
+  );
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The last ask to bring the settings up, whether their form holds changes
@@ -619,7 +630,8 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     references: chatReferences,
     onAskChat: askChat,
     onRefused: (error, title) => refused(error, title, steps),
-    onFlowMayHaveChanged: () => void refreshFromChat()
+    onFlowMayHaveChanged: () => void refreshFromChat(),
+    unsaved: stepUnsaved || settingsDirty
   });
 
   /**
@@ -1118,7 +1130,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}
                     onCancel={closeStep}
-                    onUnsavedChange={onUnsavedChange}
+                    onUnsavedChange={onStepUnsavedChange}
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,
