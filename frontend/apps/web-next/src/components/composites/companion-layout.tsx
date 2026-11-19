@@ -228,8 +228,12 @@ export function CompanionLayout({
   });
   // A tab stop only while it scrolls and its keyboard entry has no link or
   // button to go to; its ring is drawn inside, where its edges do not clip it.
+  // Positioned, so what is absolutely positioned in the content (text for
+  // screen readers, a field's floating label) scrolls with it and is clipped
+  // by it; placed against the row instead, it would give the page its own
+  // height to scroll.
   const viewportClassName =
-    "focus-visible:outline-ring flex min-h-0 min-w-0 flex-1 flex-col focus-visible:outline-2 focus-visible:-outline-offset-2";
+    "focus-visible:outline-ring relative flex min-h-0 min-w-0 flex-1 flex-col focus-visible:outline-2 focus-visible:-outline-offset-2";
 
   const returnFocusTo = useEffectEvent(() => returnFocus()?.focus());
   const wasOpen = useRef(open);
