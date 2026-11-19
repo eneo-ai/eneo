@@ -58,7 +58,6 @@ _CHAT_EXAMPLE = {
     "target_id": "00000000-0000-0000-0000-000000000001",
     "assistant_id": "00000000-0000-0000-0000-000000000201",
     "session_id": "00000000-0000-0000-0000-000000000301",
-    "editing": False,
     "completion_model_id": None,
     "reasoning_effort": None,
     "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
@@ -169,13 +168,6 @@ class AssistantHelperChatUpdateRequest(BaseModel):
             }
         },
     )
-    editing: bool | None = Field(
-        default=None,
-        description=(
-            "Not taken: the chat on an assistant has one mode, so a request "
-            "that sends this is refused (`helper_chat_no_modes`)."
-        ),
-    )
     completion_model_id: UUID | None = Field(
         default=None,
         description=(
@@ -195,12 +187,8 @@ class AssistantHelperChatUpdateRequest(BaseModel):
 
     @model_validator(mode="after")
     def _one_change(self) -> "AssistantHelperChatUpdateRequest":
-        sent = self.model_fields_set
-        # ``editing`` passes here so that the chat refuses it with its own code.
-        if not sent & {"editing", "completion_model_id", "reasoning_effort"}:
+        if not self.model_fields_set & {"completion_model_id", "reasoning_effort"}:
             raise ValueError("Send completion_model_id or reasoning_effort.")
-        if "editing" in sent and self.editing is None:
-            raise ValueError("editing must be true or false.")
         return self
 
 
@@ -267,8 +255,7 @@ async def open_assistant_helper_chat(
         "checked like an assistant's model (enabled in the space and meeting "
         "its classification) and must support tools; null returns to the "
         "default. The chat's assistant follows the change before the "
-        "response. The chat has one mode, so a request that sends `editing` "
-        "is refused (`helper_chat_no_modes`)."
+        "response."
     ),
     responses={
         200: {
@@ -283,13 +270,7 @@ async def open_assistant_helper_chat(
             }
         },
         400: _response(
-            "The model or reasoning effort cannot be used by this chat, or the "
-            "request sends a mode.",
-            _error(
-                AssistantHelperChatErrorCode.NO_MODES,
-                "The helper chat on an assistant has one mode, so its mode cannot "
-                "be changed: it proposes each change, and the person applies it.",
-            ),
+            "The model or reasoning effort cannot be used by this chat.",
             _error(
                 AssistantHelperChatErrorCode.MODEL_NOT_IN_SPACE,
                 "The model is not enabled in the assistant's space.",
@@ -336,7 +317,6 @@ async def change_assistant_helper_chat(
         container,
         assistant_id=id,
         session_id=session_id,
-        editing=body.editing,
         completion_model_id=(
             body.completion_model_id if "completion_model_id" in sent else NOT_PROVIDED
         ),

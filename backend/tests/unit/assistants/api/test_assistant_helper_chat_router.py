@@ -53,8 +53,8 @@ def test_opening_the_chat_refuses_a_service_key_as_any_creation_does():
     "body",
     [
         pytest.param({}, id="nothing"),
-        pytest.param({"editing": None}, id="editing-null"),
-        pytest.param({"expected_revision": 3, "editing": True}, id="a-revision"),
+        pytest.param({"editing": False}, id="a-mode"),
+        pytest.param({"expected_revision": 3}, id="a-revision"),
     ],
 )
 def test_a_change_request_that_says_nothing_it_may_change_is_refused(body):
@@ -67,9 +67,8 @@ def test_a_null_model_is_sent_and_an_omitted_one_is_not():
         {"completion_model_id": None}
     )
     choosing = AssistantHelperChatUpdateRequest.model_validate(
-        {"completion_model_id": str(uuid4()), "editing": True}
+        {"completion_model_id": str(uuid4())}
     )
 
     assert returning.model_fields_set == {"completion_model_id"}
     assert "reasoning_effort" not in choosing.model_fields_set
-    assert choosing.editing is True

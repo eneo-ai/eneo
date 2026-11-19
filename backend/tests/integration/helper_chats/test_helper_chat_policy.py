@@ -373,7 +373,7 @@ async def test_turned_off_no_chat_is_opened_or_continued_until_it_is_on_again(
     refused = {
         "open": await client.post(setup.url, headers=setup.headers),
         "change": await client.patch(
-            url, headers=setup.headers, json={"editing": True}
+            url, headers=setup.headers, json={"completion_model_id": None}
         ),
         "new conversation": await client.post(
             url + "conversations/", headers=setup.headers

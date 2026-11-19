@@ -53,8 +53,7 @@ const ok = (data: unknown) => ({ data, response: new Response(null, { status: 20
 const CHAT = {
   target_id: ID,
   assistant_id: "helper-assistant",
-  session_id: "session-1",
-  editing: false
+  session_id: "session-1"
 };
 
 afterEach(() => {
@@ -372,8 +371,8 @@ describe("The helper panel on an assistant", () => {
     expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
   });
 
-  it("has one mode: no picker and the same words, even for a chat the core holds in edit mode", async () => {
-    openChat({ ...CHAT, editing: true });
+  it("has one mode: no picker and the same words", async () => {
+    openChat(CHAT);
     const { result } = renderHookInApp(() =>
       useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } })
     );

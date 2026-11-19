@@ -18,7 +18,6 @@ from eneo.helper_chats.personas.shared import (
     ASKING_NOW,
     EDITING_NOW,
     HELPER_BASICS,
-    HELPER_MODES,
     PROMPT_WRITING,
     PROPOSING,
     WITHOUT_TOOLS,
@@ -43,8 +42,6 @@ def test_the_assistant_persona_is_the_basics_its_fragment_and_prompt_writing():
         PROMPT_WRITING,
     ):
         assert part in ASSISTANT_INSTRUCTIONS
-    # The assistant's chat has one mode, so its persona describes none.
-    assert HELPER_MODES not in ASSISTANT_INSTRUCTIONS
 
 
 def test_the_personas_use_no_long_dashes():
@@ -53,7 +50,6 @@ def test_the_personas_use_no_long_dashes():
         ASSISTANT_FRAGMENT,
         SETTING_REFERENCE_PARAGRAPH,
         PROMPT_WRITING,
-        HELPER_MODES,
         EDITING_NOW,
         ASKING_NOW,
         WITHOUT_TOOLS_NOW,
@@ -87,24 +83,6 @@ def test_the_basics_say_nothing_about_modes():
     assert not _names_a_mode(basics)
     assert '"Fråga"' not in basics
     assert '"Redigera"' not in basics
-
-
-def test_the_modes_section_goes_by_the_note_on_the_mode_the_chat_is_in_now():
-    modes = _unwrapped(HELPER_MODES)
-
-    assert 'In "Fråga" you read, explain and suggest, and change nothing' in modes
-    assert "a proposal that the person applies with a click" in modes
-    assert (
-        "a note after these instructions says which mode the chat is in now, "
-        "and you go by that note"
-    ) in modes
-    # A refusal for edit mode is the one case the note does not foresee.
-    assert (
-        "When a change is refused because edit mode is off, the chat has left "
-        '"Redigera" since the message was sent'
-    ) in modes
-    assert 'switches "Fråga" to "Redigera"' in modes
-    assert "as a proposal where you can show one" in modes
 
 
 def test_in_redigera_the_note_says_so_and_that_the_change_is_made():
@@ -142,15 +120,23 @@ def test_without_tools_the_note_never_sends_the_person_to_another_mode(
 
 
 @pytest.mark.parametrize("editing", [True, False])
-def test_on_a_target_without_modes_the_note_reminds_that_a_change_is_a_proposal(
+def test_on_a_target_without_modes_the_note_has_each_change_proposed_with_the_tool(
     editing: bool,
 ):
     note = turn_note(has_modes=False, editing=editing, can_call_tools=True)
 
     assert note == PROPOSING
-    assert note.startswith("Show every change as a proposal")
-    assert "nothing is saved until the person approves it" in note
-    assert "never that you changed it" in note
+    assert "propose_changes" in note
+    assert "nothing is saved before they press it" in note
+    # A change put in words is no proposal: only the tool's call gives one.
+    assert "A change you only describe in words gives them nothing to approve" in (note)
+    assert "never announce or describe a proposal you have not made with the tool" in (
+        note
+    )
+    assert "never say that you changed something" in note
+    # The last thing the turn's instructions say is to call the tool.
+    last = note.rstrip(".").rsplit(". ", 1)[-1]
+    assert last.startswith("When the person asks for a change, call propose_changes")
 
 
 @pytest.mark.parametrize("editing", [True, False])
@@ -169,10 +155,12 @@ def test_a_note_on_a_target_without_modes_names_no_mode():
         assert '"Redigera"' not in note
 
 
-def test_each_note_is_one_plain_paragraph_that_names_no_tool():
+def test_each_note_is_one_paragraph_and_only_the_proposal_note_names_a_tool():
     for note in (EDITING_NOW, ASKING_NOW, WITHOUT_TOOLS_NOW, PROPOSING, WITHOUT_TOOLS):
         assert "\n" not in note
+    for note in (EDITING_NOW, ASKING_NOW, WITHOUT_TOOLS_NOW, WITHOUT_TOOLS):
         assert "_" not in note
+    assert set(re.findall(r"\b\w*_\w*\b", PROPOSING)) == {"propose_changes"}
 
 
 def test_prompt_writing_has_no_protocol_of_its_own():
@@ -190,13 +178,25 @@ def test_the_assistant_fragment_shows_every_change_as_a_proposal_to_approve():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
     assert (
-        "When the person wants one of these changed, show the change as a "
-        "proposal with propose_changes."
+        "When the person wants one of these changed, call propose_changes with "
+        "the change."
     ) in fragment
+    # Words are no proposal: only the call gives the person one to approve.
     assert (
-        "The person approves it with the button on the proposal, and nothing is "
-        "saved before that: say what you propose, never that you changed something."
+        "a change you describe in words is not a proposal and gives them nothing "
+        "to approve, so never write that you propose a change you have not made "
+        "with the tool"
     ) in fragment
+    assert "Nothing is saved until the person applies the proposal" in fragment
+    assert "never say that you changed something" in fragment
+    # What it says of the proposal follows the call.
+    assert (
+        "Once the call has returned, say in a sentence or two what the proposal "
+        "changes and why"
+    ) in fragment
+    assert "say what you propose" not in fragment
+    # A change that does not build on the current value needs no read first.
+    assert "such as a new name, needs no read first" in fragment
     assert "do not also paste them into your answer" in fragment
     assert (
         "When a proposal changes the instructions, give it a short description in "
@@ -214,7 +214,6 @@ def test_the_assistant_persona_names_no_mode_and_no_direct_change():
 
     assert '"Fråga"' not in instructions
     assert '"Redigera"' not in instructions
-    assert "update_assistant" not in instructions
     assert "edit mode" not in instructions
     assert "never tell the person to switch to another mode or name one" in (
         instructions

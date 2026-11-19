@@ -4226,7 +4226,7 @@ class AssistantService:
                 for part in (
                     prompt_addendum,
                     turn_note(
-                        has_modes=helper_target.has_modes,
+                        has_modes=helper_target.modes is not None,
                         editing=prepared.helper_chat.editing,
                         can_call_tools=can_call_tools,
                     ),

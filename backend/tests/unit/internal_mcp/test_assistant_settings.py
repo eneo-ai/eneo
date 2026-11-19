@@ -499,11 +499,10 @@ async def test_a_chat_that_is_not_the_persons_is_refused_as_text(monkeypatch):
 def test_no_tool_takes_an_assistant_from_the_model():
     for tool in (assistant_settings.read_assistant, assistant_settings.read_options):
         assert set(inspect.signature(tool).parameters) == {"ctx", "section", "offset"}
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        assert set(inspect.signature(tool).parameters) == {"ctx", "changes"}
+    assert set(inspect.signature(assistant_settings.propose_changes).parameters) == {
+        "ctx",
+        "changes",
+    }
 
 
 async def test_a_turn_reads_proposes_and_publishes_but_never_changes_directly():
@@ -518,7 +517,6 @@ async def test_a_turn_reads_proposes_and_publishes_but_never_changes_directly():
         "propose_changes",
         "publish_assistant",
     }
-    assert assistant_settings.EDIT_MODE_TOOLS == {"update_assistant"}
     for tool in server.tools:
         if tool.name == "publish_assistant":
             # The chat asks the person before each call.
@@ -526,6 +524,27 @@ async def test_a_turn_reads_proposes_and_publishes_but_never_changes_directly():
         else:
             assert tool.annotations == {"readOnlyHint": True}
     assert server.name == "assistant"
+
+
+async def test_the_proposal_tool_says_first_when_to_call_it():
+    server = await assistant_settings.build_assistant_settings_mcp_server(
+        token="t", tenant_id=uuid4()
+    )
+    tool = next(tool for tool in server.tools if tool.name == "propose_changes")
+    description = " ".join((tool.description or "").split())
+
+    # When to call it comes before what it takes.
+    when, takes = description.split("changes holds only these fields", 1)
+    assert "Call it whenever the person asks for a setting to be changed" in when
+    assert "even a one-word change such as a new name" in when
+    # The call is the only thing the person can approve; words are not.
+    assert "the only thing the person can approve" in when
+    assert "a change described in words gives them nothing to apply" in when
+    # Only a change that builds on the current value reads first.
+    assert "such as a new name, needs no read first" in when
+    assert "such as rewriting the instructions, needs read_assistant first" in when
+    assert "Nothing is saved" in when
+    assert "A refusal says why and proposes nothing." in takes
 
 
 # --- Changes -----------------------------------------------------------------
@@ -798,43 +817,6 @@ def test_only_the_allowed_settings_can_be_named():
     assert "Nothing was changed." in text
 
 
-def test_the_undo_request_gives_the_changed_settings_their_earlier_values():
-    model = {"id": str(uuid4()), "name": "Stor modell"}
-    changes = [
-        {"field": "name", "before": "Ärendehjälpen", "after": "Ärendestöd"},
-        {"field": "description", "before": None, "after": "Ny."},
-        {"field": "prompt", "before": _INSTRUCTIONS, "after": "Ny text."},
-        {"field": "completion_model", "before": model, "after": {"id": "x"}},
-        {"field": "completion_model_kwargs.temperature", "before": 0.7, "after": 0.2},
-        {"field": "inline_file_text", "before": False, "after": True},
-    ]
-
-    undo = assistant_settings.undo_update(
-        changes, ModelKwargs(temperature=0.7, reasoning_effort="medium")
-    )
-
-    assert undo == {
-        "name": "Ärendehjälpen",
-        "description": None,
-        "prompt": {
-            "text": _INSTRUCTIONS,
-            "description": (
-                "Restored the instructions from before a change made with the "
-                "helper assistant."
-            ),
-        },
-        "completion_model": {"id": model["id"]},
-        "completion_model_kwargs": {"temperature": 0.7, "reasoning_effort": "medium"},
-        "inline_file_text": False,
-    }
-    AssistantUpdatePublic.model_validate(undo)
-    no_model_before = assistant_settings.undo_update(
-        [{"field": "completion_model", "before": None, "after": model}],
-        ModelKwargs(),
-    )
-    assert no_model_before == {}
-
-
 def test_the_model_is_told_what_changed_without_ids_or_long_texts():
     assistant = _changeable(published=True)
     small = _chat_model("Liten modell", _offering(temperature=_TEMPERATURE))
@@ -850,26 +832,21 @@ def test_the_model_is_told_what_changed_without_ids_or_long_texts():
         space=_space(assistant.completion_model, small),
     )
 
-    for saved in (True, False):
-        text = assistant_settings.change_text(
-            planned.changes, saved=saved, published=True
-        )
-        for hidden in (
-            str(small.id),
-            str(assistant.completion_model.id),
-            "Svara alltid på svenska",
-            _INSTRUCTIONS.split("\n")[1],
-            "En ny och längre beskrivning",
-        ):
-            assert hidden not in text
-        assert 'name (from "Ärendehjälpen" to "Ärendestöd")' in text
-        assert "chat model (from Stor modell to Liten modell)" in text
-        assert "temperature (from 0.7 to 0.2)" in text
-        assert "reasoning effort (from medium to the model's default)" in text
-        assert "published" in text
-    proposed = assistant_settings.change_text(
-        planned.changes, saved=False, published=False
-    )
+    text = assistant_settings.change_text(planned.changes, published=True)
+    for hidden in (
+        str(small.id),
+        str(assistant.completion_model.id),
+        "Svara alltid på svenska",
+        _INSTRUCTIONS.split("\n")[1],
+        "En ny och längre beskrivning",
+    ):
+        assert hidden not in text
+    assert 'name (from "Ärendehjälpen" to "Ärendestöd")' in text
+    assert "chat model (from Stor modell to Liten modell)" in text
+    assert "temperature (from 0.7 to 0.2)" in text
+    assert "reasoning effort (from medium to the model's default)" in text
+    assert "published" in text
+    proposed = assistant_settings.change_text(planned.changes, published=False)
     assert proposed.startswith("Proposed, nothing saved:")
     assert "do not paste them" in proposed
 
@@ -893,23 +870,29 @@ def test_instructions_too_long_to_keep_leave_their_text_out_but_not_the_request(
     long_text = "x" * (STRUCTURED_CONTENT_MAX_BYTES // 2)
     content = {
         "target_id": str(uuid4()),
-        "changes": [
-            {"field": "prompt", "before": long_text, "after": long_text + "y"},
-            {"field": "name", "before": "A", "after": "B"},
-        ],
-        "undo": {"prompt": {"text": long_text}, "name": "A"},
+        "proposal": {
+            "changes": [
+                {"field": "prompt", "before": long_text, "after": long_text + "y"},
+                {"field": "name", "before": "A", "after": "B"},
+            ],
+            "update": {"prompt": {"text": long_text + "y"}, "name": "B"},
+        },
     }
 
     kept = assistant_settings._within_cap(content)  # pyright: ignore[reportPrivateUsage]
 
-    assert kept["changes"][0] == {
+    assert kept["proposal"]["changes"][0] == {
         "field": "prompt",
         "before": None,
         "after": None,
         "too_long": True,
     }
-    assert kept["changes"][1] == {"field": "name", "before": "A", "after": "B"}
-    assert kept["undo"]["prompt"]["text"] == long_text
+    assert kept["proposal"]["changes"][1] == {
+        "field": "name",
+        "before": "A",
+        "after": "B",
+    }
+    assert kept["proposal"]["update"]["prompt"]["text"] == long_text + "y"
 
 
 async def test_a_change_saves_its_audit_entries_in_its_own_transaction():
@@ -934,15 +917,10 @@ async def test_a_change_saves_its_audit_entries_in_its_own_transaction():
     service.log_async.assert_not_awaited()
 
 
-_REAL_REQUIRE_EDIT_MODE = helper_chat_service.require_edit_mode
-
-
-def _chat_calls(monkeypatch, *, editing: bool):
-    """A call's context as a chat in ``editing`` mode gives it, with the
-    assistant's update and the audit service watched."""
-    chat = SimpleNamespace(
-        target_id=uuid4(), space_id=uuid4(), session_id=uuid4(), editing=editing
-    )
+def _chat_calls(monkeypatch):
+    """A call's context as the chat gives it, with the assistant's update and
+    the audit service watched."""
+    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4(), session_id=uuid4())
     container = MagicMock()
     monkeypatch.setattr(
         assistant_settings,
@@ -950,49 +928,25 @@ def _chat_calls(monkeypatch, *, editing: bool):
         _tool_context(container, chat.session_id, uuid4()),
     )
     monkeypatch.setattr(helper_chat_service, "load_chat", AsyncMock(return_value=chat))
-
-    async def require_edit_mode(_container, _target, loaded, *, change=False):
-        if not loaded.editing:
-            raise ASSISTANT_TARGET.refusals.not_editing()
-
-    monkeypatch.setattr(helper_chat_service, "require_edit_mode", require_edit_mode)
     monkeypatch.setattr(ASSISTANT_TARGET, "require_edit", AsyncMock())
     apply = AsyncMock()
     monkeypatch.setattr(assistant_update_operation, "apply_assistant_update", apply)
     return container, apply
 
 
-async def test_a_change_outside_edit_mode_is_refused_before_anything_is_read(
+async def test_a_setting_the_chat_may_not_change_is_refused_by_the_proposal(
     monkeypatch,
 ):
-    container, apply = _chat_calls(monkeypatch, editing=False)
-
-    result = await assistant_settings.update_assistant(
-        MagicMock(), changes={"name": "Ärendestöd"}
-    )
-
-    assert result.isError
-    assert "Turn on edit mode" in result.content[0].text
-    apply.assert_not_awaited()
-    container.assistant_service.assert_not_called()
-    container.audit_service.assert_not_called()
-
-
-async def test_a_setting_the_chat_may_not_change_is_refused_by_both_tools(monkeypatch):
-    container, apply = _chat_calls(monkeypatch, editing=True)
+    container, apply = _chat_calls(monkeypatch)
     changes = {"name": "Ärendestöd", "skill_bindings": []}
 
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        result = await tool(MagicMock(), changes=changes)
+    result = await assistant_settings.propose_changes(MagicMock(), changes=changes)
 
-        assert result.isError
-        assert result.content[0].text.startswith(
-            "Skills cannot be changed through the chat"
-        )
-        assert "skill_bindings" not in result.content[0].text
+    assert result.isError
+    assert result.content[0].text.startswith(
+        "Skills cannot be changed through the chat"
+    )
+    assert "skill_bindings" not in result.content[0].text
     apply.assert_not_awaited()
     container.assistant_service.assert_not_called()
     container.audit_service().log.assert_not_called()
@@ -1002,7 +956,7 @@ async def test_a_setting_the_chat_may_not_change_is_refused_by_both_tools(monkey
 async def test_a_proposal_that_changes_nothing_says_so_and_proposes_nothing(
     monkeypatch,
 ):
-    container, apply = _chat_calls(monkeypatch, editing=False)
+    container, apply = _chat_calls(monkeypatch)
     assistant = _changeable()
     container.assistant_service.return_value.get_assistant_with_effective_config = (
         AsyncMock(return_value=(assistant, [], None))
@@ -1271,32 +1225,6 @@ def test_a_server_that_goes_takes_its_tool_settings_along():
         },
         {"field": "mcp_tools", "before": [tool], "after": []},
     ]
-    assert assistant_settings.undo_update(planned.changes, ModelKwargs()) == {
-        "mcp_servers": [{"id": str(world.cases.id)}],
-        "mcp_tools": [{"tool_id": tool["id"], "is_enabled": False}],
-    }
-
-
-def test_the_undo_request_gives_every_added_setting_its_earlier_value():
-    world = _world()
-    planned = _plan_in(world, _everything(world))
-
-    undo = assistant_settings.undo_update(planned.changes, planned.kwargs)
-
-    assert undo == {
-        "groups": [{"id": str(world.routines.id)}],
-        "websites": [{"id": str(world.site.id)}],
-        "integration_knowledge_list": [{"id": str(world.folder.id)}],
-        "rerank_model_id": None,
-        "mcp_servers": [{"id": str(world.cases.id)}],
-        "mcp_tools": [{"tool_id": str(world.cases.tools[1].id), "is_enabled": False}],
-        "enabled_capabilities": ["file_creation"],
-        "document_template": {"mode": "default", "template_id": None},
-        "data_retention_days": None,
-        "insight_enabled": False,
-    }
-    request = AssistantUpdatePublic.model_validate(undo)
-    assert {"rerank_model_id", "data_retention_days"} <= request.model_fields_set
 
 
 def test_retention_and_insights_are_refused_without_the_right_for_them():
@@ -1454,17 +1382,9 @@ def test_no_credential_reaches_a_change_or_what_the_model_is_told():
             },
         },
     )
-    told = " ".join(
-        assistant_settings.change_text(planned.changes, saved=saved, published=False)
-        for saved in (True, False)
-    )
+    told = assistant_settings.change_text(planned.changes, published=False)
     content = json.dumps(
-        {
-            "changes": planned.changes,
-            "update": planned.update,
-            "undo": assistant_settings.undo_update(planned.changes, planned.kwargs),
-        },
-        default=str,
+        {"changes": planned.changes, "update": planned.update}, default=str
     )
 
     for secret in (_SERVER_TOKEN, _URL_KEY, _SITE_PASSWORD, "sig=abc", "reader"):
@@ -1478,7 +1398,7 @@ def test_the_model_is_told_what_was_added_and_removed_by_name():
     world = _world()
     planned = _plan_in(world, _everything(world))
 
-    text = assistant_settings.change_text(planned.changes, saved=True, published=False)
+    text = assistant_settings.change_text(planned.changes, published=False)
 
     for line in (
         'collections (added "Gamla rutiner")',
@@ -1849,10 +1769,10 @@ def test_read_assistant_says_what_the_editors_rules_hold_back():
     assert servers_line not in tools and model_line not in tools
 
 
-async def test_the_editors_rules_are_refused_by_both_tools_and_nothing_is_written(
+async def test_the_editors_rules_are_refused_by_the_proposal_and_nothing_is_written(
     monkeypatch,
 ):
-    container, apply = _chat_calls(monkeypatch, editing=True)
+    container, apply = _chat_calls(monkeypatch)
     world = _knowledge_only(_world())
     container.assistant_service.return_value.get_assistant_with_effective_config = (
         AsyncMock(return_value=(world.assistant, [], None))
@@ -1864,21 +1784,18 @@ async def test_the_editors_rules_are_refused_by_both_tools_and_nothing_is_writte
     add_server = {"mcp_servers": {"add": [{"id": str(world.archive.id)}]}}
     add_function = {"enabled_capabilities": {"add": ["web_search"]}}
 
-    for tool in (
-        assistant_settings.propose_changes,
-        assistant_settings.update_assistant,
-    ):
-        world.assistant.completion_model = _chat_model("Stor modell", _offering())
-        combined = await tool(MagicMock(), changes=add_server)
-        assert combined.isError
-        assert combined.content[0].text == _HAS_KNOWLEDGE
+    propose = assistant_settings.propose_changes
+    world.assistant.completion_model = _chat_model("Stor modell", _offering())
+    combined = await propose(MagicMock(), changes=add_server)
+    assert combined.isError
+    assert combined.content[0].text == _HAS_KNOWLEDGE
 
-        world.assistant.completion_model = _without_tools()
-        without_tools = await tool(MagicMock(), changes=add_function)
-        assert without_tools.isError
-        assert without_tools.content[0].text.startswith(
-            _NO_TOOLS + "web search cannot be switched on"
-        )
+    world.assistant.completion_model = _without_tools()
+    without_tools = await propose(MagicMock(), changes=add_function)
+    assert without_tools.isError
+    assert without_tools.content[0].text.startswith(
+        _NO_TOOLS + "web search cannot be switched on"
+    )
     apply.assert_not_awaited()
     container.audit_service().log.assert_not_called()
     container.audit_service().log_async.assert_not_called()
@@ -1951,7 +1868,7 @@ def test_one_version_is_read_whole_by_its_number_in_the_list():
 async def test_the_history_is_read_through_the_editors_permission_check_in_pages(
     monkeypatch,
 ):
-    container, _ = _chat_calls(monkeypatch, editing=False)
+    container, _ = _chat_calls(monkeypatch)
     chat = helper_chat_service.load_chat.return_value  # pyright: ignore[reportFunctionMemberAccess]
     versions = _versions()
     versions[0].text = "\n".join(f"rad {number}: " + "x" * 120 for number in range(40))
@@ -1977,8 +1894,8 @@ async def test_the_history_is_read_through_the_editors_permission_check_in_pages
 # --- publish_assistant -------------------------------------------------------
 
 
-def _publishing(monkeypatch, *, editing: bool, published: bool, rights):
-    container, _ = _chat_calls(monkeypatch, editing=editing)
+def _publishing(monkeypatch, *, published: bool, rights):
+    container, _ = _chat_calls(monkeypatch)
     chat = helper_chat_service.load_chat.return_value  # pyright: ignore[reportFunctionMemberAccess]
     container.assistant_service.return_value.get_assistant = AsyncMock(
         return_value=(SimpleNamespace(published=published), [])
@@ -1995,10 +1912,8 @@ def _publishing(monkeypatch, *, editing: bool, published: bool, rights):
     return chat, publish
 
 
-async def test_publishing_needs_no_mode_but_the_persons_edit_access(monkeypatch):
-    chat, publish = _publishing(
-        monkeypatch, editing=False, published=False, rights=_ALL_RIGHTS
-    )
+async def test_publishing_needs_the_persons_edit_access(monkeypatch):
+    chat, publish = _publishing(monkeypatch, published=False, rights=_ALL_RIGHTS)
 
     result = await assistant_settings.publish_assistant(MagicMock(), published=True)
 
@@ -2013,9 +1928,7 @@ async def test_publishing_needs_no_mode_but_the_persons_edit_access(monkeypatch)
 async def test_publishing_is_refused_without_edit_access_before_anything_is_read(
     monkeypatch,
 ):
-    _, publish = _publishing(
-        monkeypatch, editing=False, published=False, rights=_ALL_RIGHTS
-    )
+    _, publish = _publishing(monkeypatch, published=False, rights=_ALL_RIGHTS)
     monkeypatch.setattr(
         ASSISTANT_TARGET,
         "require_edit",
@@ -2032,31 +1945,11 @@ async def test_publishing_is_refused_without_edit_access_before_anything_is_read
     publish.assert_not_awaited()
 
 
-async def test_a_direct_change_is_refused_however_the_row_holds_the_mode(
-    monkeypatch,
-):
-    container, apply = _chat_calls(monkeypatch, editing=True)
-    # The gate as it is: the chat on an assistant is never in edit mode.
-    monkeypatch.setattr(
-        helper_chat_service, "require_edit_mode", _REAL_REQUIRE_EDIT_MODE
-    )
-
-    result = await assistant_settings.update_assistant(
-        MagicMock(), changes={"name": "Ärendestöd"}
-    )
-
-    assert result.isError
-    assert result.content[0].text.startswith("Turn on edit mode")
-    apply.assert_not_awaited()
-    ASSISTANT_TARGET.require_edit.assert_not_awaited()  # pyright: ignore[reportFunctionMemberAccess]
-    container.assistant_service.assert_not_called()
-
-
 async def test_publishing_is_refused_without_the_right_or_when_nothing_would_change(
     monkeypatch,
 ):
     _, publish = _publishing(
-        monkeypatch, editing=True, published=False, rights=assistant_settings.NO_RIGHTS
+        monkeypatch, published=False, rights=assistant_settings.NO_RIGHTS
     )
     refused = await assistant_settings.publish_assistant(MagicMock(), published=True)
     assert refused.isError
@@ -2067,7 +1960,6 @@ async def test_publishing_is_refused_without_the_right_or_when_nothing_would_cha
 
     _, publish_personal = _publishing(
         monkeypatch,
-        editing=True,
         published=False,
         rights=assistant_settings.PersonRights(
             edit_retention=True,
@@ -2082,9 +1974,7 @@ async def test_publishing_is_refused_without_the_right_or_when_nothing_would_cha
         "An assistant in a personal space is not published. Nothing was changed."
     )
 
-    _, publish_again = _publishing(
-        monkeypatch, editing=True, published=True, rights=_ALL_RIGHTS
-    )
+    _, publish_again = _publishing(monkeypatch, published=True, rights=_ALL_RIGHTS)
     already = await assistant_settings.publish_assistant(MagicMock(), published=True)
     assert already.isError
     assert already.content[0].text == (
@@ -2098,9 +1988,7 @@ async def test_publishing_is_refused_without_the_right_or_when_nothing_would_cha
 async def test_publishing_goes_through_the_shared_operation_in_the_persons_name(
     monkeypatch,
 ):
-    chat, publish = _publishing(
-        monkeypatch, editing=True, published=False, rights=_ALL_RIGHTS
-    )
+    chat, publish = _publishing(monkeypatch, published=False, rights=_ALL_RIGHTS)
 
     result = await assistant_settings.publish_assistant(MagicMock(), published=True)
 

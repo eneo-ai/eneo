@@ -7,7 +7,7 @@ import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-cal
 /**
  * A person's helper chat about one target, as every target's endpoints
  * return it: the assistant that answers, the conversation on screen, the
- * mode and the person's model choice for this chat.
+ * mode (on a target with modes) and the person's model choice for this chat.
  */
 export type HelperChat = {
   /** The chat's own assistant, hidden from lists, which answers its questions. */
@@ -19,10 +19,10 @@ export type HelperChat = {
    */
   session_id: string;
   /**
-   * Redigera (the chat's tools may change the target) rather than Fråga;
-   * always false for a target without modes.
+   * Redigera (the chat's tools may change the target) rather than Fråga.
+   * A target without modes returns none: its chat is never in Redigera.
    */
-  editing: boolean;
+  editing?: boolean;
   /** The person's model for this chat; null follows the default. */
   completion_model_id?: string | null;
   /** The person's reasoning effort; null uses the model's own default. */
@@ -152,8 +152,7 @@ export type HelperAdapter = {
   /**
    * The target's modes; null for a target with one, whose chat proposes
    * each change for the person to apply and never changes the target
-   * itself: the panel shows no picker, announces no mode and never reports
-   * a writing turn.
+   * itself: the panel shows no picker and announces no mode.
    */
   modes: HelperModes | null;
   /** Set while the target cannot be changed. */
@@ -203,11 +202,4 @@ export type HelperAdapter = {
    * here, so the chat reads what is on screen.
    */
   beforeSend?: () => Promise<string | null>;
-  /**
-   * A message sent in Redigera left the composer, so the chat may change the
-   * target from now on (true), until its answer has ended (false): finished,
-   * failed or stopped, or the message came back. Never true in Fråga, nor
-   * for a target without modes.
-   */
-  onWritingChange?: (writing: boolean) => void;
 };

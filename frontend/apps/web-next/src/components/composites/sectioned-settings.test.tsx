@@ -724,7 +724,7 @@ describe("SectionedSettings: a section's own control, and showing a setting", ()
   });
 });
 
-describe("SectionedSettings: what just happened to a section, and a lock", () => {
+describe("SectionedSettings: what just happened to a section", () => {
   const markedSections = phoneSections.map((section) =>
     section.id === "general" ? { ...section, mark: "2 ändrade" } : section
   );
@@ -751,67 +751,6 @@ describe("SectionedSettings: what just happened to a section, and a lock", () =>
     ).toBeTruthy();
     // A section without a mark is named as before.
     expect(within(rail()).getByRole("link", { name: "AI-inställningar" })).toBeTruthy();
-  });
-
-  const lockable: SettingsSection[] = [
-    {
-      id: "general",
-      label: "Allmänt",
-      icon: SlidersHorizontal,
-      node: (
-        <SettingsGroup title="Allmänt">
-          <label htmlFor="name">Namn</label>
-          <input id="name" />
-        </SettingsGroup>
-      )
-    },
-    { id: "ai", label: "AI", icon: Sparkles, node: <SettingsGroup title="AI">AI</SettingsGroup> }
-  ];
-  const editor = (lock: React.ReactNode) => (
-    <>
-      <button type="button">I chatten</button>
-      <SectionedSettings
-        navigationLabel="Avsnitt"
-        header={<h1>Redigera</h1>}
-        sections={lockable}
-        contentLock={lock}
-      />
-    </>
-  );
-  const notice = () => document.querySelector<HTMLElement>("[data-editor-lock]");
-  const sectionsInert = () =>
-    lockable.map((section) => document.getElementById(section.id)!.hasAttribute("inert"));
-
-  it("makes the sections inert under a notice while locked, and moves the focus a section had to it and back", () => {
-    const { rerender } = renderInApp(editor(null));
-    expect(notice()).toBeNull();
-    expect(sectionsInert()).toEqual([false, false]);
-    const field = screen.getByRole("textbox", { name: "Namn" });
-    field.focus();
-
-    rerender(editor(<p>Låst medan hjälpen arbetar.</p>));
-    expect(sectionsInert()).toEqual([true, true]);
-    expect(notice()?.textContent).toBe("Låst medan hjälpen arbetar.");
-    // Above the sections, and the section links stay usable.
-    expect(notice()!.nextElementSibling?.id).toBe("general");
-    expect(header().hasAttribute("inert")).toBe(false);
-    expect(document.activeElement).toBe(notice());
-
-    rerender(editor(null));
-    expect(notice()).toBeNull();
-    expect(sectionsInert()).toEqual([false, false]);
-    expect(document.activeElement).toBe(field);
-  });
-
-  it("leaves focus outside the sections where it is, when the lock starts and when it ends", () => {
-    const { rerender } = renderInApp(editor(null));
-    const chat = screen.getByRole("button", { name: "I chatten" });
-    chat.focus();
-
-    rerender(editor(<p>Låst</p>));
-    expect(document.activeElement).toBe(chat);
-    rerender(editor(null));
-    expect(document.activeElement).toBe(chat);
   });
 
   it("puts a section bar's own actions after its save state on a phone, and only there", () => {

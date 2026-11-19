@@ -1,10 +1,10 @@
 """What a helper chat's persona says whatever the chat is about.
 
 A target's persona is ``HELPER_BASICS``, its own fragment and the sections it
-needs, such as ``PROMPT_WRITING`` for a target with instructions to write and
-``HELPER_MODES`` for a target with modes (the flow's chat has a persona of its
-own and uses none of these). Each turn's instructions end with ``turn_note``:
-for a target with modes, the mode the chat is in for that turn.
+needs, such as ``PROMPT_WRITING`` for a target with instructions to write (the
+flow's chat has a persona of its own and uses none of these). Each turn's
+instructions end with ``turn_note``: for a target with modes, the mode the
+chat is in for that turn.
 """
 
 HELPER_BASICS = """You help one person with the one thing this chat is about, beside its editor
@@ -32,21 +32,6 @@ words what you chose, so the person can correct it.
 
 Never ask for a password, key, token or other secret, and never repeat one.
 When something needs one, say where in the editor the person enters it.
-"""
-
-# The section a target with modes adds after the basics. The basics' rule
-# for a refusal stands; this one covers the refusal for edit mode.
-HELPER_MODES = """The chat has two modes, chosen with the button beside the send button. In
-"Fråga" you read, explain and suggest, and change nothing: where it is said
-below, you show a change as a proposal that the person applies with a click.
-In "Redigera" you may also change what your tools let you change, and the
-person sees each change and can undo it. What each mode lets you do here is
-said below; a note after these instructions says which mode the chat is in
-now, and you go by that note. When a change is refused because edit mode is
-off, the chat has left "Redigera" since the message was sent: say so in the
-first sentence, say that the person switches "Fråga" to "Redigera" and sends
-the request again, then say what you would change, as a proposal where you
-can show one.
 """
 
 PROMPT_WRITING = """Writing instructions. Instructions tell an assistant who it is and how to
@@ -116,9 +101,13 @@ WITHOUT_TOOLS_NOW = (
 )
 
 PROPOSING = (
-    "Show every change as a proposal: nothing is saved until the person "
-    "approves it with the button on the proposal, so say what you propose, "
-    "never that you changed it."
+    "A change reaches the person only as a proposal made with propose_changes: "
+    "its button applies it, and nothing is saved before they press it. A "
+    "change you only describe in words gives them nothing to approve, so never "
+    "announce or describe a proposal you have not made with the tool, and "
+    "never say that you changed something. When the person asks for a change, "
+    "call propose_changes with it first; once it has returned, say in one "
+    "sentence what the proposal changes."
 )
 
 WITHOUT_TOOLS = (
@@ -133,8 +122,9 @@ def turn_note(*, has_modes: bool, editing: bool, can_call_tools: bool) -> str:
     """The note that ends a turn's instructions. On a target with modes it
     says the mode the turn's tools are chosen by (``editing``), so the note
     and the tools agree. On a target without modes it names no mode and
-    reminds the model that a change is a proposal; ``editing`` is not read.
-    A model that cannot call tools gets none and is told so instead."""
+    tells the model to make each change it is asked for with the proposal
+    tool; ``editing`` is not read. A model that cannot call tools gets none
+    and is told so instead."""
     if not has_modes:
         return PROPOSING if can_call_tools else WITHOUT_TOOLS
     if not can_call_tools:

@@ -10,7 +10,6 @@ and keeps the assistant's own entry points.
 
 from __future__ import annotations
 
-from datetime import timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal, cast
 from uuid import UUID
@@ -45,7 +44,6 @@ from eneo.helper_chats.targets import (
     HelperChatAuditEvent,
     HelperChatTargetType,
 )
-from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import (
     BadRequestException,
@@ -64,8 +62,6 @@ class AssistantHelperChatErrorCode(StrEnum):
 
     NO_EDIT_RIGHTS = "helper_chat_no_edit_rights"
     NOT_SUPPORTED = "helper_chat_not_supported"
-    NOT_EDITING = "helper_chat_not_editing"
-    NO_MODES = "helper_chat_no_modes"
     NO_MODEL = "helper_chat_no_model"
     MODEL_WITHOUT_TOOLS = "helper_chat_model_without_tools"
     MODEL_BELOW_CLASSIFICATION = "helper_chat_model_below_classification"
@@ -95,13 +91,6 @@ class AssistantHelperChatPublic(BaseModel):
             "The chat's current conversation. Starting a new conversation, or "
             "opening with `fresh_start`, replaces it; earlier conversations "
             "are kept and listed for their person but never answered again."
-        )
-    )
-    editing: bool = Field(
-        description=(
-            "Always false: the chat on an assistant has one mode. It proposes "
-            "each change for the person to apply and never changes the "
-            "assistant itself."
         )
     )
     completion_model_id: UUID | None = Field(
@@ -237,19 +226,6 @@ class _AssistantChatRefusals:
             code=AssistantHelperChatErrorCode.DISABLED,
         )
 
-    def not_editing(self) -> Exception:
-        return BadRequestException(
-            "Turn on edit mode in the helper chat before changing this assistant.",
-            code=AssistantHelperChatErrorCode.NOT_EDITING,
-        )
-
-    def no_modes(self) -> Exception:
-        return BadRequestException(
-            "The helper chat on an assistant has one mode, so its mode cannot be "
-            "changed: it proposes each change, and the person applies it.",
-            code=AssistantHelperChatErrorCode.NO_MODES,
-        )
-
     def no_model(self) -> Exception:
         return BadRequestException(
             "The space has no model that supports tools for the helper chat.",
@@ -305,15 +281,11 @@ class _AssistantTarget:
     chat off and add their guidance to its persona."""
 
     target_type = HelperChatTargetType.ASSISTANT
-    has_modes = False
+    modes = None
     audit = HelperChatAudit(
         entity_type=EntityType.ASSISTANT,
         chat_created=HelperChatAuditEvent(
             ActionType.HELPER_CHAT_CREATED, "Created a helper chat on an assistant."
-        ),
-        mode_changed=HelperChatAuditEvent(
-            ActionType.HELPER_CHAT_MODE_CHANGED,
-            "Changed edit mode in a helper chat on an assistant.",
         ),
         conversation_started=HelperChatAuditEvent(
             ActionType.HELPER_CHAT_CONVERSATION_STARTED,
@@ -380,23 +352,11 @@ class _AssistantTarget:
     async def lock(self, container: Container, target_id: UUID) -> bool:
         return await container.assistant_service().lock_assistant(target_id)
 
-    async def fence_mode_change(
-        self, container: Container, target_id: UUID, expected_revision: int | None
-    ) -> None:
-        return None
-
     def changeable(self, record: Assistant) -> bool:
         return True
 
     def require_changeable(self, record: Assistant) -> None:
         return None
-
-    def starts_in_edit_mode(self, record: Assistant) -> bool:
-        # The chat has no edit mode.
-        return False
-
-    def idle_after(self) -> timedelta:
-        return timedelta(minutes=get_settings().flow_authoring_chat_idle_minutes)
 
     def organisation_default_model_id(self, container: Container) -> UUID | None:
         # One organisation default serves every helper chat.
@@ -430,8 +390,6 @@ def _public(opened: OpenedChat) -> AssistantHelperChatPublic:
         target_id=chat.target_id,
         assistant_id=chat.assistant_id,
         session_id=chat.session_id,
-        # False whatever the row holds: the chat has no edit mode.
-        editing=helper_chat_service.in_edit_mode(ASSISTANT_TARGET, chat),
         completion_model_id=chat.completion_model_id,
         reasoning_effort=chat.reasoning_effort,
         default_completion_model_id=opened.default_completion_model_id,
@@ -473,20 +431,17 @@ async def update_assistant_chat(
     *,
     assistant_id: UUID,
     session_id: UUID,
-    editing: bool | None = None,
     completion_model_id: UUID | None | NotProvided = NOT_PROVIDED,
     reasoning_effort: str | None | NotProvided = NOT_PROVIDED,
 ) -> AssistantHelperChatPublic:
     """Change the chat's model or reasoning effort, then bring its assistant
-    in line. The chat has one mode, so a request that sends ``editing`` is
-    refused (``helper_chat_no_modes``)."""
+    in line."""
     return _public(
         await helper_chat_service.update_chat(
             container,
             ASSISTANT_TARGET,
             target_id=assistant_id,
             session_id=session_id,
-            editing=editing,
             completion_model_id=completion_model_id,
             reasoning_effort=reasoning_effort,
         )

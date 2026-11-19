@@ -68,7 +68,6 @@ async def test_an_event_is_recorded_with_the_person_as_actor_and_the_target_as_e
         HelperChatAudit(
             entity_type=EntityType.ASSISTANT,
             chat_created=event,
-            mode_changed=None,
             conversation_started=None,
             model_changed=None,
         )
@@ -100,7 +99,6 @@ async def test_an_event_the_target_has_no_action_for_is_not_recorded():
         HelperChatAudit(
             entity_type=EntityType.ASSISTANT,
             chat_created=None,
-            mode_changed=None,
             conversation_started=None,
             model_changed=None,
         )
@@ -115,29 +113,6 @@ async def test_an_event_the_target_has_no_action_for_is_not_recorded():
         extra={},
     )
 
-    container.audit_service.return_value.log_async.assert_not_awaited()
-
-
-async def test_a_mode_change_without_an_action_neither_loads_nor_records(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    container = _container(_person())
-    target = _target(
-        HelperChatAudit(
-            entity_type=EntityType.ASSISTANT,
-            chat_created=None,
-            mode_changed=None,
-            conversation_started=None,
-            model_changed=None,
-        )
-    )
-    monkeypatch.setattr(helper_chat_service, "target_for", lambda _type: target)
-
-    await helper_chat_service._audit_mode_change(  # pyright: ignore[reportPrivateUsage]
-        container, _chat("assistant"), reason="requested"
-    )
-
-    target.load.assert_not_awaited()
     container.audit_service.return_value.log_async.assert_not_awaited()
 
 
@@ -197,8 +172,8 @@ def test_a_chat_is_in_edit_mode_only_on_a_target_with_modes():
     flow = target_for(HelperChatTargetType.FLOW)
     assistant = target_for(HelperChatTargetType.ASSISTANT)
 
-    assert flow.has_modes is True
-    assert assistant.has_modes is False
+    assert flow.modes is not None
+    assert assistant.modes is None
     assert helper_chat_service.in_edit_mode(flow, _row("flow", editing=True))
     assert not helper_chat_service.in_edit_mode(flow, _row("flow", editing=False))
     # A row on an assistant that holds edit mode is not in it.
@@ -266,15 +241,13 @@ async def test_a_pause_leaves_a_chat_without_modes_as_it_is(
 
 
 def _modeless_target() -> MagicMock:
-    target = MagicMock(has_modes=False)
-    target.refusals.no_modes.return_value = BadRequestException("One mode.")
-    target.fence_mode_change = AsyncMock()
+    target = MagicMock(modes=None, target_type=HelperChatTargetType.ASSISTANT)
     target.require_edit = AsyncMock(return_value=SimpleNamespace())
     return target
 
 
 @pytest.mark.parametrize("editing", [True, False])
-async def test_a_mode_change_on_a_target_without_modes_is_refused_before_anything(
+async def test_a_mode_change_on_a_target_without_modes_changes_nothing(
     monkeypatch: pytest.MonkeyPatch, editing: bool
 ):
     container = _container(_person())
@@ -282,7 +255,7 @@ async def test_a_mode_change_on_a_target_without_modes_is_refused_before_anythin
     monkeypatch.setattr(helper_chat_service, "load_chat", AsyncMock(return_value=chat))
     target = _modeless_target()
 
-    with pytest.raises(BadRequestException, match="One mode."):
+    with pytest.raises(TypeError, match="has no modes"):
         await helper_chat_service.update_chat(
             container,
             target,
@@ -291,7 +264,6 @@ async def test_a_mode_change_on_a_target_without_modes_is_refused_before_anythin
             editing=editing,
         )
 
-    target.fence_mode_change.assert_not_awaited()
     target.require_edit.assert_not_awaited()
     assert chat.editing is False
     container.audit_service.return_value.log_async.assert_not_awaited()
@@ -308,13 +280,12 @@ async def test_an_approved_change_needs_edit_access_but_no_mode_without_modes():
     target.require_edit.assert_awaited_once()
     assert target.require_edit.await_args.args[2] == chat.target_id
     target.require_changeable.assert_called_once_with(record)
-    target.refusals.not_editing.assert_not_called()
 
 
 async def test_an_approved_change_on_a_target_with_modes_needs_edit_mode():
     container = _container(_person())
-    target = MagicMock(has_modes=True)
-    target.refusals.not_editing.return_value = BadRequestException("Edit mode.")
+    target = MagicMock()
+    target.modes.not_editing.return_value = BadRequestException("Edit mode.")
     target.require_edit = AsyncMock()
 
     with pytest.raises(BadRequestException, match="Edit mode."):
@@ -324,12 +295,13 @@ async def test_an_approved_change_on_a_target_with_modes_needs_edit_mode():
     target.require_edit.assert_not_awaited()
 
 
-async def test_a_change_the_chat_makes_itself_is_refused_on_a_target_without_modes():
+async def test_a_chat_on_a_target_without_modes_never_passes_as_in_edit_mode():
+    """A row on such a target that holds edit mode still has no edit mode to
+    write in."""
     container = _container(_person())
     target = _modeless_target()
-    target.refusals.not_editing.return_value = BadRequestException("Edit mode.")
 
-    with pytest.raises(BadRequestException, match="Edit mode."):
+    with pytest.raises(TypeError, match="has no modes"):
         await helper_chat_service.require_edit_mode(
             container, target, _row("assistant", editing=True), change=True
         )

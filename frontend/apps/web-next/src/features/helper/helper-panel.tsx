@@ -11,7 +11,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -92,7 +92,7 @@ function ModePicker({
   const restarted = useRef(false);
   const [savedEditing, setEditing] = useSettingSwitch(
     modeSwitchId(api),
-    chat.editing,
+    chat.editing === true,
     async (enabled) => {
       // A press queued behind a save that started a new conversation uses it.
       const current = queryClient.getQueryData<HelperChat>(api.key) ?? chat;
@@ -174,26 +174,6 @@ function ModePicker({
 }
 
 /**
- * Whether the chat may change the target now: from the moment a message sent
- * in Redigera (or one whose mode was switched to Redigera while it runs)
- * leaves the composer until its answer ends, reported to the page through
- * `onWritingChange`. A conversation left for another, or the panel gone,
- * ends it: the old turn's answer is no longer followed. `editing` is never
- * true for a target without modes, so its chat never writes.
- */
-function useWritingTurn(chat: HelperChat, editing: boolean, adapter: HelperAdapter) {
-  const [turn, setTurn] = useState<{ session: string; editing: boolean } | null>(null);
-  const writing = turn !== null && turn.session === chat.session_id && (turn.editing || editing);
-  const report = useEffectEvent((value: boolean) => adapter.onWritingChange?.(value));
-  useEffect(() => {
-    if (!writing) return;
-    report(true);
-    return () => report(false);
-  }, [writing]);
-  return (sending: boolean) => setTurn(sending ? { session: chat.session_id, editing } : null);
-}
-
-/**
  * What the page is told of the conversation's composer: the composer while
  * the conversation is on screen. While an earlier conversation is read in
  * its place, a stand-in: what the page puts in (a prepared question, a
@@ -265,8 +245,7 @@ function HelperConversation({
   // konversation"), and its composer takes the focus the dialog left behind.
   const [firstSession] = useState(chat.session_id);
   // Only a target with modes is ever in Redigera.
-  const editing = modes !== null && chat.editing && !lock;
-  const onSendingChange = useWritingTurn(chat, editing, adapter);
+  const editing = modes !== null && chat.editing === true && !lock;
   // Why the page held the last message back: what `beforeSend` said, until
   // the next message goes, or the page's standing reason, while it stands.
   const [held, setHeld] = useState<{ reason: string; standing: boolean } | null>(null);
@@ -402,7 +381,6 @@ function HelperConversation({
           // The turn's start may have left edit mode after a pause: show the mode the server holds.
           void queryClient.invalidateQueries({ queryKey: api.key });
         }}
-        onSendingChange={onSendingChange}
         beforeSend={
           asksFirst
             ? async () => {

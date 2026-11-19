@@ -739,15 +739,6 @@ class _FlowChatRefusals:
     def target_not_found(self) -> Exception:
         return NotFoundException("Flow not found.")
 
-    def not_editing(self) -> Exception:
-        return BadRequestException(
-            "Enter edit mode in the flow editor before changing this flow."
-        )
-
-    def no_modes(self) -> Exception:
-        # Not given: a flow's chat has modes.
-        return BadRequestException("The flow chat's mode cannot be changed.")
-
     def no_model(self) -> Exception:
         return FlowBadRequestException(
             "Choose a default model that supports tools for this space.",
@@ -788,21 +779,51 @@ class _FlowChatRefusals:
         )
 
 
+class _FlowModes:
+    """A flow's chat has "Fråga" and "Redigera". A new chat on a draft
+    without steps starts in "Redigera"; a mode change is fenced on the draft
+    revision the caller last read."""
+
+    mode_changed = HelperChatAuditEvent(
+        ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        "Changed flow authoring edit mode.",
+    )
+
+    def not_editing(self) -> Exception:
+        return BadRequestException(
+            "Enter edit mode in the flow editor before changing this flow."
+        )
+
+    def starts_in_edit_mode(self, record: Flow) -> bool:
+        return starts_in_edit_mode(record)
+
+    def idle_after(self) -> timedelta:
+        return timedelta(minutes=get_settings().flow_authoring_chat_idle_minutes)
+
+    async def fence_mode_change(
+        self, container: Container, target_id: UUID, expected_revision: int | None
+    ) -> None:
+        if expected_revision is None:
+            raise BadRequestException(
+                "Send expected_revision with editing: a mode change is fenced "
+                "on the draft revision the caller last read."
+            )
+        await container.flow_service().reserve_draft_revision(
+            flow_id=target_id, expected_revision=expected_revision
+        )
+
+
 class _FlowTarget:
     """A flow's chat: it reads the flow while the flow feature is on and the
     person may read the flow's current definition, and changes the draft in
     edit mode while the person may edit it and the flow is not published."""
 
     target_type = HelperChatTargetType.FLOW
-    has_modes = True
+    modes = _FlowModes()
     audit = HelperChatAudit(
         entity_type=EntityType.FLOW,
         chat_created=HelperChatAuditEvent(
             ActionType.FLOW_AUTHORING_CHAT_CREATED, "Created a flow authoring chat."
-        ),
-        mode_changed=HelperChatAuditEvent(
-            ActionType.FLOW_AUTHORING_MODE_CHANGED,
-            "Changed flow authoring edit mode.",
         ),
         conversation_started=HelperChatAuditEvent(
             ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
@@ -869,18 +890,6 @@ class _FlowTarget:
         )
         return bool(alive)
 
-    async def fence_mode_change(
-        self, container: Container, target_id: UUID, expected_revision: int | None
-    ) -> None:
-        if expected_revision is None:
-            raise BadRequestException(
-                "Send expected_revision with editing: a mode change is fenced "
-                "on the draft revision the caller last read."
-            )
-        await container.flow_service().reserve_draft_revision(
-            flow_id=target_id, expected_revision=expected_revision
-        )
-
     def changeable(self, record: Flow) -> bool:
         # The chat has no way to unpublish a flow.
         return record.published_version is None
@@ -888,12 +897,6 @@ class _FlowTarget:
     def require_changeable(self, record: Flow) -> None:
         if not self.changeable(record):
             raise BadRequestException(PUBLISHED_FLOW_MESSAGE, code="flow_published")
-
-    def starts_in_edit_mode(self, record: Flow) -> bool:
-        return starts_in_edit_mode(record)
-
-    def idle_after(self) -> timedelta:
-        return timedelta(minutes=get_settings().flow_authoring_chat_idle_minutes)
 
     def organisation_default_model_id(self, container: Container) -> UUID | None:
         tenant = getattr(container.user(), "tenant", None)

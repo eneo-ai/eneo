@@ -12,20 +12,17 @@ import {
 } from "@/lib/navigation";
 import {
   useEffect,
-  useEffectEvent,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
-  type Ref,
-  type RefObject
+  type Ref
 } from "react";
 import { NAV_ITEM_CLASSES } from "@/components/shell/nav-styles";
 import { PageBar } from "@/components/shell/page-bar";
 import { MEDIA } from "@/lib/breakpoints";
-import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { IndexGroup, IndexRow } from "./index-rows";
@@ -86,13 +83,6 @@ type SectionedSettingsProps = {
   sectionAction?: (section: SettingsSection) => ReactNode;
   /** A way for the page to show a section or a control in it. */
   handleRef?: Ref<SectionedSettingsHandle>;
-  /**
-   * While set, the sections cannot be used (they are inert) and this notice
-   * says why, above them and in view while the page scrolls. Focus in a
-   * section when the lock starts moves to the notice; focus on the notice
-   * when it ends goes back to where it was.
-   */
-  contentLock?: ReactNode;
 };
 
 /** What a page can ask of its settings editor. */
@@ -395,85 +385,6 @@ function SectionMark({ text }: { text: string }) {
   );
 }
 
-/**
- * The notice above locked sections. It takes the focus a section had when
- * the lock started; `onLeftFocused` says it still had it as it goes, while
- * it is still in the page (its cleanup runs before its element is removed).
- */
-function LockNotice({
-  noticeRef,
-  onLeftFocused,
-  children
-}: {
-  noticeRef: RefObject<HTMLDivElement | null>;
-  onLeftFocused: () => void;
-  children: ReactNode;
-}) {
-  const leftFocused = useEffectEvent(onLeftFocused);
-  useLayoutEffect(() => {
-    const element = noticeRef.current;
-    return () => {
-      if (element !== null && element === document.activeElement) leftFocused();
-    };
-  }, [noticeRef]);
-  return (
-    <div
-      ref={noticeRef}
-      tabIndex={-1}
-      data-editor-lock=""
-      className="bg-ax-surface rounded-ax-container focus-visible:outline-ring phone:top-16 sticky top-[calc(var(--editor-header-h,9.5rem)+0.5rem)] z-20 focus-visible:outline-2 focus-visible:outline-offset-2"
-    >
-      {children}
-    </div>
-  );
-}
-
-/**
- * Focus across a content lock: a section that had it hands it to the notice
- * (focus elsewhere, such as in a chat beside the form, stays there), and the
- * notice that still has it when the lock ends hands it back to that control,
- * else to the heading of the section in view.
- */
-function useLockFocus(
-  locked: boolean,
-  column: RefObject<HTMLDivElement | null>,
-  notice: RefObject<HTMLDivElement | null>
-) {
-  const lockedFrom = useRef<HTMLElement | null>(null);
-  const noticeHadFocus = useRef(false);
-  const wasLocked = useRef(locked);
-  useLayoutEffect(() => {
-    if (wasLocked.current === locked) return;
-    wasLocked.current = locked;
-    if (locked) {
-      const active = document.activeElement;
-      const inSection = active instanceof HTMLElement && column.current?.contains(active) === true;
-      lockedFrom.current = inSection ? active : null;
-      if (inSection || active === null || active === document.body) {
-        notice.current?.focus({ preventScroll: true });
-      }
-      return;
-    }
-    const back = lockedFrom.current;
-    lockedFrom.current = null;
-    if (!noticeHadFocus.current) return;
-    noticeHadFocus.current = false;
-    if (back?.isConnected && column.current?.contains(back)) {
-      back.focus({ preventScroll: true });
-      return;
-    }
-    focusHeadingOf(
-      column.current?.querySelector<HTMLElement>("[data-current]") ??
-        column.current?.querySelector<HTMLElement>(":scope > [id]") ??
-        null,
-      { preventScroll: true }
-    );
-  }, [locked, column, notice]);
-  return () => {
-    noticeHadFocus.current = true;
-  };
-}
-
 function SettingsLayout({
   header,
   navigationLabel,
@@ -481,7 +392,6 @@ function SettingsLayout({
   isFramed = false,
   sectionAction,
   handleRef,
-  contentLock,
   views
 }: Omit<SectionedSettingsProps, "phone"> & { views?: PhoneViews }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? "");
@@ -544,12 +454,6 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
-  const columnRef = useRef<HTMLDivElement>(null);
-  const noticeRef = useRef<HTMLDivElement>(null);
-  const locked = contentLock !== undefined && contentLock !== null;
-  const noticeLeftFocused = useLockFocus(locked, columnRef, noticeRef);
-  const rescue = useFocusRescue();
-
   const ownRootRef = useRef<HTMLDivElement>(null);
   const rootRef = views?.rootRef ?? ownRootRef;
   useImperativeHandle(
@@ -559,9 +463,6 @@ function SettingsLayout({
         const root = rootRef.current;
         const element = document.getElementById(section);
         if (!root || !element || !root.contains(element)) return false;
-        // A locked section takes no focus: what lost it (a control that went
-        // with a covering panel) hands it to the notice that says why.
-        if (locked) rescue(() => noticeRef.current);
         const target = control ? document.getElementById(control) : null;
         const focus = target && root.contains(target) ? controlIn(target) : null;
         if (views && window.matchMedia(PHONE_SCREEN_QUERY).matches) {
@@ -584,7 +485,7 @@ function SettingsLayout({
         return true;
       }
     }),
-    [rootRef, views, locked, rescue]
+    [rootRef, views]
   );
 
   const PhoneTitle = views?.phone.parent ? "h1" : "h2";
@@ -754,17 +655,11 @@ function SettingsLayout({
             );
           })}
         </nav>
-        <div ref={columnRef} className="flex max-w-4xl min-w-0 flex-col gap-8">
-          {locked ? (
-            <LockNotice noticeRef={noticeRef} onLeftFocused={noticeLeftFocused}>
-              {contentLock}
-            </LockNotice>
-          ) : null}
+        <div className="flex max-w-4xl min-w-0 flex-col gap-8">
           {sections.map((section) => (
             <div
               key={section.id}
               id={section.id}
-              inert={locked || undefined}
               data-editor-section={views ? section.id : undefined}
               data-current={views && section === shown ? "" : undefined}
               className={cn(views && section !== shown && "phone:hidden")}
