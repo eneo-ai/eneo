@@ -417,63 +417,15 @@ describe("Before a message goes to the helper", () => {
   });
 });
 
-describe("While the helper may write", () => {
-  const notice = () => document.querySelector<HTMLElement>("[data-editor-lock]");
-  const generalInert = () => document.getElementById("general")!.hasAttribute("inert");
-
-  it("locks the form under a notice, says so as it starts and ends, and takes focus from the form and back", () => {
+describe("The helper's one mode", () => {
+  it("leaves the form open: the helper proposes and never writes it by itself", () => {
     renderEditor();
     openHelperBeside();
-    const name = screen.getByRole("textbox", { name: "Namn" });
-    name.focus();
 
-    act(() => state.adapter!.onWritingChange!(true));
-    expect(generalInert()).toBe(true);
-    expect(notice()?.textContent).toContain("Hjälpassistenten arbetar");
-    expect(notice()?.textContent).toContain("Inställningarna är låsta tills den är klar.");
-    expect(document.activeElement).toBe(notice());
-    expect(announced("Hjälpassistenten arbetar. Inställningarna är låsta tills den är klar.")).toBe(
-      1
-    );
-    // The way to the helper and the section links are not locked.
-    expect(headerToggle().closest("[inert]")).toBeNull();
-    expect(rail().closest("[inert]")).toBeNull();
-
-    act(() => state.adapter!.onWritingChange!(false));
-    expect(notice()).toBeNull();
-    expect(generalInert()).toBe(false);
-    expect(document.activeElement).toBe(name);
-    expect(announced("Hjälpassistenten är klar. Inställningarna går att ändra igen.")).toBe(1);
-  });
-
-  it("leaves focus in the chat as the lock starts and ends", () => {
-    renderEditor();
-    openHelperBeside();
-    const composer = screen.getByRole("textbox", { name: "Meddelande" });
-    composer.focus();
-
-    act(() => state.adapter!.onWritingChange!(true));
-    expect(document.activeElement).toBe(composer);
-    act(() => state.adapter!.onWritingChange!(false));
-    expect(document.activeElement).toBe(composer);
-  });
-
-  it("stays locked while the helper is closed during the answer", () => {
-    renderEditor();
-    openHelperBeside();
-    act(() => state.adapter!.onWritingChange!(true));
-
-    fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpassistenten" }));
-    expect(aside()).toBeNull();
-    expect(generalInert()).toBe(true);
-    expect(notice()).not.toBeNull();
-  });
-
-  it("is not there before the helper says it may write", () => {
-    renderEditor();
-    openHelperBeside();
-    expect(notice()).toBeNull();
-    expect(generalInert()).toBe(false);
+    expect(state.adapter!.modes).toBeNull();
+    expect(state.adapter!.onWritingChange).toBeUndefined();
+    expect(document.querySelector("[data-editor-lock]")).toBeNull();
+    expect(document.getElementById("general")!.hasAttribute("inert")).toBe(false);
   });
 });
 

@@ -33,6 +33,8 @@ from eneo.helper_chats.binding import HelperChatBinding
 from eneo.helper_chats.personas.shared import (
     ASKING_NOW,
     EDITING_NOW,
+    PROPOSING,
+    WITHOUT_TOOLS,
     WITHOUT_TOOLS_NOW,
 )
 from eneo.internal_mcp.assistant_settings import (
@@ -359,22 +361,17 @@ def _bind_helper_chat(turn: TurnFixture, *, target_type: str, editing: bool) -> 
 
 
 @pytest.mark.parametrize(
-    ("target_type", "edit_tools"),
-    [("assistant", ASSISTANT_EDIT_MODE_TOOLS), ("flow", FLOW_EDIT_MODE_TOOLS)],
-)
-@pytest.mark.parametrize(
     ("editing", "note", "other_note"),
     [(True, EDITING_NOW, ASKING_NOW), (False, ASKING_NOW, EDITING_NOW)],
 )
-async def test_a_helper_chat_turn_is_told_the_mode_its_tools_are_chosen_by(
+async def test_a_flow_chat_turn_is_told_the_mode_its_tools_are_chosen_by(
     turn: TurnFixture,
-    target_type: str,
-    edit_tools: frozenset[str],
     editing: bool,
     note: str,
     other_note: str,
 ):
-    _bind_helper_chat(turn, target_type=target_type, editing=editing)
+    edit_tools = FLOW_EDIT_MODE_TOOLS
+    _bind_helper_chat(turn, target_type="flow", editing=editing)
 
     await turn.service.ask(
         question="Rename it",
@@ -398,14 +395,13 @@ async def test_a_helper_chat_turn_is_told_the_mode_its_tools_are_chosen_by(
     assert turn.assistant.get_prompt_text() == "Use the procurement policy."
 
 
+# A binding that says edit mode stands for a row that holds it: the turn of a
+# target without modes reads neither the column nor the binding's mode.
 @pytest.mark.parametrize("editing", [True, False])
-async def test_a_helper_chat_turn_without_tool_calling_is_told_it_has_no_tools(
+async def test_an_assistant_chat_turn_proposes_and_publishes_and_names_no_mode(
     turn: TurnFixture,
     editing: bool,
 ):
-    model = turn.assistant.completion_model
-    assert model is not None
-    model.supports_tool_calling = False
     _bind_helper_chat(turn, target_type="assistant", editing=editing)
 
     await turn.service.ask(
@@ -416,9 +412,46 @@ async def test_a_helper_chat_turn_without_tool_calling_is_told_it_has_no_tools(
 
     request = turn.requests[0]
     instructions = _instructions(request)
-    assert instructions.startswith(
-        "Use the procurement policy.\n\n" + WITHOUT_TOOLS_NOW
+    assert instructions.startswith("Use the procurement policy.\n\n" + PROPOSING)
+    for note in (EDITING_NOW, ASKING_NOW, WITHOUT_TOOLS_NOW, WITHOUT_TOOLS):
+        assert note not in instructions
+    offered = _offered_tools(request)
+    assert {"propose_changes", "publish_assistant", "read_assistant"} <= offered
+    assert not ASSISTANT_EDIT_MODE_TOOLS & offered
+    assert "update_assistant" not in offered
+
+
+@pytest.mark.parametrize(
+    ("target_type", "note", "other_notes"),
+    [
+        ("assistant", WITHOUT_TOOLS, (WITHOUT_TOOLS_NOW, PROPOSING)),
+        ("flow", WITHOUT_TOOLS_NOW, (WITHOUT_TOOLS, EDITING_NOW, ASKING_NOW)),
+    ],
+)
+@pytest.mark.parametrize("editing", [True, False])
+async def test_a_helper_chat_turn_without_tool_calling_is_told_it_has_no_tools(
+    turn: TurnFixture,
+    target_type: str,
+    note: str,
+    other_notes: tuple[str, ...],
+    editing: bool,
+):
+    model = turn.assistant.completion_model
+    assert model is not None
+    model.supports_tool_calling = False
+    _bind_helper_chat(turn, target_type=target_type, editing=editing)
+
+    await turn.service.ask(
+        question="Rename it",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
     )
+
+    request = turn.requests[0]
+    instructions = _instructions(request)
+    assert instructions.startswith("Use the procurement policy.\n\n" + note)
+    for other in other_notes:
+        assert other not in instructions
     assert EDITING_NOW not in instructions
     assert ASKING_NOW not in instructions
     assert _offered_tools(request) == set()

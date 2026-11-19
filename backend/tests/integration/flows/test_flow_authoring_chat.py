@@ -31,7 +31,9 @@ from eneo.flows.application.flow_authoring_chat import (
     load_authoring_chat,
 )
 from eneo.flows.domain.step_kinds import FlowStepKind, StepKindValues
+from eneo.helper_chats.personas.shared import ASKING_NOW, EDITING_NOW
 from eneo.internal_mcp import flows
+from eneo.internal_mcp.constants import FLOWS_SERVER_NAME
 from eneo.main.exceptions import NotFoundException
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
@@ -403,6 +405,83 @@ async def test_flow_tools_act_on_the_chats_flow_only_in_edit_mode(
     )
     assert stale.isError
     assert _page(stale)["code"] == "stale_revision"
+
+
+async def test_a_published_flows_turn_runs_in_fraga_and_keeps_the_chats_mode(
+    client, enabled_flow, db_container, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    chat = (await client.post(base + "/authoring-chat/", headers=headers)).json()
+    # An empty draft is there to be built: its new chat starts in Redigera.
+    assert chat["editing"] is True
+    saved = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                {
+                    "name": "Read the source",
+                    "configuration": {
+                        "input_source": "flow_input",
+                        "input_type": "text",
+                        "output_mode": "pass_through",
+                        "output_type": "text",
+                        "input_config": {
+                            "runtime_input": {
+                                "enabled": True,
+                                "required": True,
+                                "input_format": "document",
+                            }
+                        },
+                    },
+                }
+            ],
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    published = await client.post(base + "/publish/", headers=headers)
+    assert published.status_code == 200, published.text
+    turns: list[tuple[str, set[str]]] = []
+
+    async def ask(self, question, completion_service, references_service, **kwargs):
+        turns.extend(
+            (kwargs.get("prompt_addendum") or "", {tool.name for tool in server.tools})
+            for server in kwargs.get("internal_mcp_servers") or []
+            if server.name == FLOWS_SERVER_NAME
+        )
+        model = kwargs.get("completion_model_override") or self.completion_model
+        return (
+            CompletionModelResponse(
+                completion=Completion(text="Svar."), model=model, total_token_count=1
+            ),
+            DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[]),
+        )
+
+    monkeypatch.setattr(Assistant, "ask", ask)
+
+    asked = await client.post(
+        f"/api/v1/assistants/{chat['assistant_id']}/sessions/{chat['session_id']}/",
+        headers=headers,
+        json={"question": "Lägg till ett steg.", "stream": False},
+    )
+
+    assert asked.status_code == 200, asked.text
+    [(note, tools)] = turns
+    assert note.endswith(ASKING_NOW)
+    assert EDITING_NOW not in note
+    assert not tools & flows.EDIT_MODE_TOOLS
+    assert {"read_flow", "run_flow"} <= tools
+    # The chat keeps the mode it was in, for when the flow is a draft again.
+    async with db_container() as container:
+        mode = await container.session().scalar(
+            sa.select(HelperChats.editing).where(
+                HelperChats.session_id == UUID(chat["session_id"])
+            )
+        )
+    assert mode is True
 
 
 async def test_run_tools_reach_the_chats_flow(

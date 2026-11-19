@@ -8,7 +8,7 @@ import {
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { hashKey, useQuery, useQueryClient } from "@tanstack/react-query";
+import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { ArrowLeft, MessageSquare, Pencil, X } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
@@ -19,13 +19,39 @@ import { EneoApiError, getErrorMessageForCode, unwrap } from "@/lib/api/errors";
 import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
-import { useSettingSwitch } from "@/features/admin/use-setting-switch";
+import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/space-display-name";
-import type { HelperAdapter, HelperChat } from "./helper-adapter";
+import type { HelperAdapter, HelperChat, HelperChatApi, HelperModes } from "./helper-adapter";
 import { HelperChatSettings, NewConversationButton } from "./helper-controls";
+
+/** The mode switch of one chat: its saves run one after another in its own queue. */
+const modeSwitchId = (api: HelperChatApi) => `helper-mode:${hashKey(api.key)}`;
+
+/**
+ * Resolves once the chat's mode saves in flight now have settled: true when
+ * each was saved. The picker shows a new mode at once and saves it
+ * meanwhile, so a message sent before the save lands waits for it and runs
+ * in the mode on screen; a save that failed holds the message.
+ */
+function modeSaved(queryClient: QueryClient, api: HelperChatApi): Promise<boolean> {
+  const scope = settingSwitchScope(modeSwitchId(api)).id;
+  const cache = queryClient.getMutationCache();
+  const saves = cache.findAll({
+    status: "pending",
+    predicate: (mutation) => mutation.options.scope?.id === scope
+  });
+  if (saves.length === 0) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const unsubscribe = cache.subscribe(() => {
+      if (saves.some((save) => save.state.status === "pending")) return;
+      unsubscribe();
+      resolve(saves.every((save) => save.state.status === "success"));
+    });
+  });
+}
 
 /**
  * The mode a message is sent in, picked beside the send button: Fråga (the
@@ -35,15 +61,23 @@ import { HelperChatSettings, NewConversationButton } from "./helper-controls";
  * start a new conversation: the panel then switches to it and says so. In
  * Redigera the button is in the warning colour and says so in words.
  */
-function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
+function ModePicker({
+  chat,
+  adapter,
+  modes
+}: {
+  chat: HelperChat;
+  adapter: HelperAdapter;
+  modes: HelperModes;
+}) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
-  const { api, lock, revision, texts, onRefused } = adapter;
+  const { api, lock, revision, onRefused } = adapter;
   // Whether the last saved switch started a new conversation.
   const restarted = useRef(false);
   const [savedEditing, setEditing] = useSettingSwitch(
-    `helper-mode:${hashKey(api.key)}`,
+    modeSwitchId(api),
     chat.editing,
     async (enabled) => {
       // A press queued behind a save that started a new conversation uses it.
@@ -66,8 +100,8 @@ function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapte
           restarted.current
             ? t("flows_chat_new_conversation_after_pause")
             : enabled
-              ? texts.editingOn
-              : texts.editingOff
+              ? modes.editingOn
+              : modes.editingOff
         );
       },
       onError: (error) => onRefused(error, t("flows_notice_mode_not_changed"))
@@ -110,13 +144,13 @@ function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapte
         <DropdownMenuRadioItem
           value="ask"
           label={t("flows_chat_mode_ask")}
-          description={texts.modeDescription.ask}
+          description={modes.description.ask}
           icon={<MessageSquare aria-hidden="true" />}
         />
         <DropdownMenuRadioItem
           value="edit"
           label={t("flows_chat_mode_edit")}
-          description={lock ? lock.reason : texts.modeDescription.edit}
+          description={lock ? lock.reason : modes.description.edit}
           isDisabled={!!lock}
           icon={<Pencil aria-hidden="true" />}
         />
@@ -130,7 +164,8 @@ function ModePicker({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapte
  * in Redigera (or one whose mode was switched to Redigera while it runs)
  * leaves the composer until its answer ends, reported to the page through
  * `onWritingChange`. A conversation left for another, or the panel gone,
- * ends it: the old turn's answer is no longer followed.
+ * ends it: the old turn's answer is no longer followed. `editing` is never
+ * true for a target without modes, so its chat never writes.
  */
 function useWritingTurn(chat: HelperChat, editing: boolean, adapter: HelperAdapter) {
   const [turn, setTurn] = useState<{ session: string; editing: boolean } | null>(null);
@@ -148,7 +183,7 @@ function useWritingTurn(chat: HelperChat, editing: boolean, adapter: HelperAdapt
 function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: HelperAdapter }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const { api, lock, texts, references } = adapter;
+  const { api, lock, texts, modes, references } = adapter;
   // The composer leaves with the conversation: what the page puts into it
   // has nowhere to go until a composer reports itself again.
   const onComposer = references?.onComposer;
@@ -159,7 +194,8 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   // The conversation shown first; a later one was started here ("Ny
   // konversation"), and its composer takes the focus the dialog left behind.
   const [firstSession] = useState(chat.session_id);
-  const editing = chat.editing && !lock;
+  // Only a target with modes is ever in Redigera.
+  const editing = modes !== null && chat.editing && !lock;
   const onSendingChange = useWritingTurn(chat, editing, adapter);
   // Why the page held the last message back: what `beforeSend` said, until
   // the next message goes, or the page's standing reason, while it stands.
@@ -175,7 +211,8 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
   useEffect(() => {
     sendHoldNow.current = sendHold;
   }, [sendHold]);
-  const asksFirst = beforeSend !== undefined || adapter.sendHold !== undefined;
+  // A target with modes asks first too: a message waits for a mode save in flight.
+  const asksFirst = modes !== null || beforeSend !== undefined || adapter.sendHold !== undefined;
   // Where the standing reason can be settled, as the page offers it now.
   const heldAction = held?.standing ? (adapter.sendHoldAction ?? null) : null;
 
@@ -231,9 +268,9 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
     name: texts.partnerName,
     description: lock
       ? lock.partnerDescription
-      : editing
-        ? texts.partnerDescription.edit
-        : texts.partnerDescription.ask,
+      : editing && modes
+        ? modes.edit.partnerDescription
+        : texts.partnerDescription,
     allowedAttachments: model.allowed_attachments,
     insightEnabled: false,
     iconId: null,
@@ -283,12 +320,12 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
         footerActions={
           <>
             {adapter.footerActions}
-            <ModePicker chat={chat} adapter={adapter} />
+            {modes ? <ModePicker chat={chat} adapter={adapter} modes={modes} /> : null}
           </>
         }
-        placeholder={editing ? texts.placeholder.edit : texts.placeholder.ask}
+        placeholder={editing && modes ? modes.edit.placeholder : texts.placeholder}
         // Named by what a message does in the mode it is sent in.
-        composerLabel={editing ? texts.composerLabelEdit : undefined}
+        composerLabel={editing && modes ? modes.edit.composerLabel : undefined}
         onToolCallFinished={adapter.onToolCallFinished}
         onAnswerFinished={() => {
           adapter.onAnswerFinished?.();
@@ -304,6 +341,11 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
                   setHeld({ reason: standing, standing: true });
                   return false;
                 }
+                // A mode save that failed holds the message; the picker shows its refusal.
+                if (modes && !(await modeSaved(queryClient, api))) {
+                  setHeld(null);
+                  return false;
+                }
                 const reason = beforeSend ? await beforeSend() : null;
                 setHeld(reason === null ? null : { reason, standing: false });
                 return reason === null;
@@ -316,16 +358,18 @@ function HelperConversation({ chat, adapter }: { chat: HelperChat; adapter: Help
 }
 
 /**
- * Says so when a read of the chat (after an answer, on the window's focus)
- * finds that the server left edit mode after a pause, politely and without
- * moving focus. The person's own changes are written into the cache, not
- * read, and announce themselves; a locked target shows Fråga either way.
+ * Says `text` when a read of the chat (after an answer, on the window's
+ * focus) finds that the server left edit mode after a pause, politely and
+ * without moving focus. The person's own changes are written into the
+ * cache, not read, and announce themselves. Null says nothing: a locked
+ * target shows Fråga either way, and a target without modes has no mode to
+ * leave.
  */
-function useAnnounceModeFallback(chatHash: string, locked: boolean, text: string) {
+function useAnnounceModeFallback(chatHash: string, text: string | null) {
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   useEffect(() => {
-    if (locked) return;
+    if (text === null) return;
     const cache = queryClient.getQueryCache();
     let shown = cache.get<HelperChat>(chatHash)?.state.data;
     return cache.subscribe((event) => {
@@ -340,7 +384,7 @@ function useAnnounceModeFallback(chatHash: string, locked: boolean, text: string
       shown = read;
       if (fellBack) announce(text);
     });
-  }, [announce, chatHash, locked, queryClient, text]);
+  }, [announce, chatHash, queryClient, text]);
 }
 
 type Unavailable = { status: "info" | "warning"; text: string };
@@ -384,11 +428,13 @@ export type HelperPanelClose = {
 
 /**
  * A helper chat beside a page: an ordinary conversation with an assistant
- * whose tools reach only the page's target. It opens in Fråga; the picker
- * beside the send button lets the chat change the target, and the page
- * shows each change as the chat's tools make it. The adapter says what the
- * target is; everything else is the same on every page. A page that shows
- * the panel only on request passes `close`.
+ * whose tools reach only the page's target. On a target with modes it opens
+ * in Fråga; the picker beside the send button lets the chat change the
+ * target, and the page shows each change as the chat's tools make it. A
+ * target without modes has no picker: its chat proposes each change for the
+ * person to apply. The adapter says what the target is; everything else is
+ * the same on every page. A page that shows the panel only on request
+ * passes `close`.
  */
 export function HelperPanel({
   adapter,
@@ -398,7 +444,7 @@ export function HelperPanel({
   close?: HelperPanelClose;
 }) {
   const t = useTranslations();
-  const { api, lock, texts } = adapter;
+  const { api, lock, modes, texts } = adapter;
   const canUse = adapter.unavailable === null;
   // The person's chat for the target, created on first use. Reading it
   // again returns the same chat, but the server turns edit mode off when
@@ -415,7 +461,7 @@ export function HelperPanel({
     // (a 403 still says so, should the page's reading be out of date).
     enabled: canUse
   });
-  useAnnounceModeFallback(hashKey(api.key), !!lock, texts.askAfterPause);
+  useAnnounceModeFallback(hashKey(api.key), lock || !modes ? null : modes.askAfterPause);
   const unavailable: Unavailable | null =
     adapter.unavailable !== null
       ? { status: "info", text: adapter.unavailable }

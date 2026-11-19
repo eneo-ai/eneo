@@ -86,24 +86,24 @@ export function useFlowHelper({
     texts: {
       heading: t("flows_chat_heading"),
       partnerName: t("flows_chat_partner_name"),
-      partnerDescription: {
-        ask: t("flows_chat_partner_description_ask"),
-        edit: t("flows_chat_partner_description")
-      },
-      placeholder: {
-        ask: t("flows_chat_placeholder_ask"),
-        edit: t("flows_chat_placeholder_edit")
-      },
-      composerLabelEdit: t("flows_chat_composer_label_edit"),
-      modeDescription: {
+      partnerDescription: t("flows_chat_partner_description_ask"),
+      placeholder: t("flows_chat_placeholder_ask"),
+      noAccess: t("flows_chat_no_access"),
+      newConversationDescription: t("flows_chat_new_conversation_description")
+    },
+    modes: {
+      description: {
         ask: t("flows_chat_mode_ask_description"),
         edit: t("flows_chat_mode_edit_description")
       },
+      edit: {
+        partnerDescription: t("flows_chat_partner_description"),
+        placeholder: t("flows_chat_placeholder_edit"),
+        composerLabel: t("flows_chat_composer_label_edit")
+      },
       editingOn: t("flows_chat_editing_on"),
       editingOff: t("flows_chat_editing_off"),
-      askAfterPause: t("flows_chat_mode_ask_after_pause"),
-      noAccess: t("flows_chat_no_access"),
-      newConversationDescription: t("flows_chat_new_conversation_description")
+      askAfterPause: t("flows_chat_mode_ask_after_pause")
     },
     lock:
       flow.published_version != null

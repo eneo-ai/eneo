@@ -3832,7 +3832,7 @@ export interface paths {
     put?: never;
     /**
      * Open Assistant Helper Chat
-     * @description Open the caller's helper chat on this assistant, creating it on first use. The chat is an ordinary conversation with a hidden assistant of the caller's own in the assistant's space, whose tools reach only this assistant; send its questions to `assistant_id`. Each user has one chat per assistant; calling again returns it with its current conversation and gives its assistant the current instructions (with the organisation's guidance for helper chats after the base persona) and the model in force: the caller's own choice, else the organisation's default for helper chats when the space allows it, else the space's default among models that support tools. A new chat starts in view mode. Refused while the organisation has turned the helper chat off, for an assistant the caller may not edit and for one configured elsewhere (a helper chat's own, a help assistant, a flow step's).
+     * @description Open the caller's helper chat on this assistant, creating it on first use. The chat is an ordinary conversation with a hidden assistant of the caller's own in the assistant's space, whose tools reach only this assistant; send its questions to `assistant_id`. Each user has one chat per assistant; calling again returns it with its current conversation and gives its assistant the current instructions (with the organisation's guidance for helper chats after the base persona) and the model in force: the caller's own choice, else the organisation's default for helper chats when the space allows it, else the space's default among models that support tools. The chat has one mode: it proposes each change for the person to apply, and publishes or unpublishes the assistant only once the person approves. Refused while the organisation has turned the helper chat off, for an assistant the caller may not edit and for one configured elsewhere (a helper chat's own, a help assistant, a flow step's).
      */
     post: operations["get_or_create_assistant_helper_chat"];
     delete?: never;
@@ -3876,7 +3876,7 @@ export interface paths {
     head?: never;
     /**
      * Update Assistant Helper Chat
-     * @description Turn the helper chat's edit mode on or off, or choose its model or reasoning effort. Turning edit mode on needs edit access to the assistant. Turning it on after the configured pause without a question or mode change starts a new conversation: the response then carries the new `session_id`. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response.
+     * @description Choose the helper chat's model or reasoning effort. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response. The chat has one mode, so a request that sends `editing` is refused (`helper_chat_no_modes`).
      */
     patch: operations["update_assistant_helper_chat"];
     trace?: never;
@@ -3892,7 +3892,7 @@ export interface paths {
     put?: never;
     /**
      * Start a New Assistant Helper Chat Conversation
-     * @description Leave the helper chat's current conversation and continue in a new, empty one with the same assistant, edit mode and model. Earlier conversations are kept for traceability but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`.
+     * @description Leave the helper chat's current conversation and continue in a new, empty one with the same assistant and model. Earlier conversations are kept for traceability but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`.
      */
     post: operations["start_assistant_helper_chat_conversation"];
     delete?: never;
@@ -15147,7 +15147,7 @@ export interface components {
       default_completion_model_id?: string | null;
       /**
        * Editing
-       * @description Whether the chat is in edit mode. A new chat starts in view mode.
+       * @description Always false: the chat on an assistant has one mode. It proposes each change for the person to apply and never changes the assistant itself.
        */
       editing: boolean;
       /**
@@ -15158,7 +15158,7 @@ export interface components {
       /**
        * Session Id
        * Format: uuid
-       * @description The chat's current conversation. Starting a new conversation (explicitly, or by entering edit mode after a pause) replaces it; earlier conversations are kept but never answered again.
+       * @description The chat's current conversation. Starting a new conversation replaces it; earlier conversations are kept but never answered again.
        */
       session_id: string;
       /**
@@ -15183,7 +15183,7 @@ export interface components {
       completion_model_id?: string | null;
       /**
        * Editing
-       * @description Turn edit mode on (true) or off (false).
+       * @description Not taken: the chat on an assistant has one mode, so a request that sends this is refused (`helper_chat_no_modes`).
        */
       editing?: boolean | null;
       /**
@@ -59475,7 +59475,7 @@ export interface operations {
            *       "assistant_id": "00000000-0000-0000-0000-000000000201",
            *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
            *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
-           *       "editing": true,
+           *       "editing": false,
            *       "reasoning_effort": "high",
            *       "session_id": "00000000-0000-0000-0000-000000000301",
            *       "target_id": "00000000-0000-0000-0000-000000000001"
@@ -59484,7 +59484,7 @@ export interface operations {
           "application/json": components["schemas"]["AssistantHelperChatPublic"];
         };
       };
-      /** @description The model or reasoning effort cannot be used by this chat. */
+      /** @description The model or reasoning effort cannot be used by this chat, or the request sends a mode. */
       400: {
         headers: {
           [name: string]: unknown;

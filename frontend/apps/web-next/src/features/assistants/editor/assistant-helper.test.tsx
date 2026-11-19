@@ -6,6 +6,7 @@ import { API_KEYS_KEY, API_KEY_SUBSCRIPTIONS_KEY } from "@/features/api-keys/api
 import { HelperPanel } from "@/features/helper/helper-panel";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import messages from "@/lib/i18n/messages/sv.json";
 import { renderHookInApp, renderInApp, testQueryClient } from "@/test/render";
 import {
   assistantHelperApi,
@@ -26,11 +27,21 @@ vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
   return { useSpace: () => useSpaceFromQuery(() => makeSpace()) };
 });
-// The conversation is the chat feature's: the panel decides its welcome and placeholder.
+// The conversation is the chat feature's: the panel decides its welcome, footer and placeholder.
 vi.mock("@/features/chat/chat-view", () => ({
-  ChatView: ({ placeholder, partner }: { placeholder?: string; partner?: { name?: string } }) => (
+  ChatView: ({
+    placeholder,
+    partner,
+    footerActions
+  }: {
+    placeholder?: string;
+    partner?: { name?: string; description?: string };
+    footerActions?: unknown;
+  }) => (
     <div>
       <p>partner: {partner?.name}</p>
+      <p>{partner?.description}</p>
+      {footerActions as React.ReactNode}
       <p>{placeholder}</p>
     </div>
   )
@@ -54,17 +65,17 @@ afterEach(() => {
 describe("The assistant's helper chat endpoints", () => {
   it("opens the chat, changes it and starts a conversation on the assistant's own routes", async () => {
     api.POST.mockResolvedValue(ok(CHAT));
-    api.PATCH.mockResolvedValue(ok({ ...CHAT, editing: true }));
+    api.PATCH.mockResolvedValue(ok({ ...CHAT, completion_model_id: null }));
     const chat = assistantHelperApi(ID);
 
     expect(await chat.open()).toEqual(CHAT);
     expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
       params: { path: { id: ID } }
     });
-    await chat.update("session-1", { editing: true, reasoning_effort: null });
+    await chat.update("session-1", { completion_model_id: null, reasoning_effort: null });
     expect(api.PATCH).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/{session_id}/", {
       params: { path: { id: ID, session_id: "session-1" } },
-      body: { editing: true, reasoning_effort: null }
+      body: { completion_model_id: null, reasoning_effort: null }
     });
     await chat.startConversation("session-1");
     expect(api.POST).toHaveBeenLastCalledWith(
@@ -200,9 +211,6 @@ describe("The assistant's helper adapter", () => {
     expect(refusalText?.("helper_chat_model_without_tools")).toBe(
       "Modellen kan inte använda verktyg. Välj en annan modell för hjälpassistenten."
     );
-    expect(refusalText?.("helper_chat_not_editing")).toBe(
-      "Välj Redigera innan hjälpassistenten ändrar assistenten."
-    );
     expect(refusalText?.("something_else")).toBeNull();
 
     onRefused(
@@ -297,21 +305,40 @@ describe("The helper panel on an assistant", () => {
     return <HelperPanel adapter={useAssistantHelper({ assistant: ASSISTANT, availability })} />;
   }
 
-  it("opens the assistant's chat, in its own words, where it is available", async () => {
-    api.POST.mockResolvedValue(ok(CHAT));
+  function openChat(chat: typeof CHAT) {
+    api.POST.mockResolvedValue(ok(chat));
     api.GET.mockImplementation(async (path: string) =>
       path === "/api/v1/assistants/{id}/"
         ? ok({ id: "helper-assistant", name: "Skolhjälpen", mcp_servers: [] })
         : ok({ id: "session-1", name: "", messages: [] })
     );
+  }
+
+  it("opens the assistant's chat, in its own words, where it is available", async () => {
+    openChat(CHAT);
     renderInApp(<Panel availability={{ available: true }} />);
 
     expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
     expect(screen.getByRole("heading", { level: 2, name: "Hjälpassistent" })).toBeTruthy();
-    expect(screen.getByText("Fråga om assistenten…")).toBeTruthy();
+    expect(screen.getByText(messages.helper_placeholder)).toBeTruthy();
+    expect(screen.getByText(messages.helper_partner_description)).toBeTruthy();
     expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/", {
       params: { path: { id: ID } }
     });
+  });
+
+  it("has one mode: no picker and the same words, even for a chat the core holds in edit mode", async () => {
+    openChat({ ...CHAT, editing: true });
+    const { result } = renderHookInApp(() =>
+      useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } })
+    );
+    expect(result.current.modes).toBeNull();
+    renderInApp(<Panel availability={{ available: true }} />);
+
+    expect(await screen.findByText(messages.helper_placeholder)).toBeTruthy();
+    expect(screen.getByText(messages.helper_partner_description)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Läge:/ })).toBeNull();
+    expect(api.PATCH).not.toHaveBeenCalled();
   });
 
   it("does not ask for the chat where it is unavailable, and says why", async () => {

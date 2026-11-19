@@ -18,9 +18,9 @@ export const assistantHelperKeys = {
 };
 
 /**
- * The assistant's helper chat endpoints. A mode change is not fenced (an
- * assistant has no revision); turning Redigera on after a pause may start a
- * new conversation, and the answer then names another `session_id`.
+ * The assistant's helper chat endpoints. The chat has one mode, so a change
+ * of it is its model or reasoning effort; the panel never sends a mode,
+ * which the core would refuse.
  */
 export function assistantHelperApi(assistantId: string): HelperChatApi {
   const path = { id: assistantId };

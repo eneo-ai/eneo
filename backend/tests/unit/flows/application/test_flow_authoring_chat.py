@@ -641,6 +641,25 @@ async def test_a_change_to_a_published_flow_is_refused_before_anything_happens(
     await flow_authoring_chat.require_authoring_edit(MagicMock(), chat)
 
 
+async def test_the_flow_chat_has_modes_and_a_published_flow_cannot_change(
+    monkeypatch,
+) -> None:
+    target = flow_authoring_chat.FLOW_TARGET
+    published = SimpleNamespace(published_version=2)
+    access = SimpleNamespace(flow=published)
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "require_flow_current_definition_access",
+        AsyncMock(return_value=access),
+    )
+
+    assert target.has_modes is True
+    assert target.changeable(SimpleNamespace(published_version=None)) is True
+    assert target.changeable(published) is False
+    # The read check hands on the flow it loaded, so a turn asks no more.
+    assert await target.require_read(MagicMock(), MagicMock(), uuid4()) is published
+
+
 # --- Edit mode after a pause -------------------------------------------------
 
 
