@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import (
     datetime,
     timezone,
@@ -12,7 +13,7 @@ from unittest.mock import (
 from uuid import uuid4
 
 import pytest
-from fastapi import BackgroundTasks
+from fastapi import BackgroundTasks, Response
 
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.actor_types import ActorType
@@ -20,7 +21,11 @@ from eneo.authentication.auth_dependencies import ScopeFilter
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api import flow_access_context as flow_access_context_module
 from eneo.flows.api import flow_run_lifecycle_router as lifecycle_router_module
+from eneo.flows.api import flow_run_retry_router as retry_router_module
 from eneo.flows.api import flow_run_review_router as review_router_module
+from eneo.flows.api import (
+    flow_transcript_regeneration_router as regeneration_router_module,
+)
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowFinalOutputContractPublic,
@@ -42,6 +47,9 @@ from eneo.flows.api.flow_run_steps_router import (
     get_flow_graph,
     list_flow_run_steps,
 )
+from eneo.flows.api.flow_transcript_regeneration_router import (
+    FlowTranscriptRegenerationRequest,
+)
 from eneo.flows.application.flow_dispatch import (
     FlowRunDispatchAccepted,
     FlowRunDispatchExhaustionGenerationConflictError,
@@ -50,6 +58,7 @@ from eneo.flows.application.flow_dispatch import (
     dispatch_flow_run_recoverably_after_commit,
 )
 from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
+from eneo.flows.application.flow_run_retry_service import FlowRunRetryResult
 from eneo.flows.application.flow_run_service import (
     CreateRunResult,
     FlowRunDetailView,
@@ -72,6 +81,7 @@ from eneo.flows.enums import (
     FlowStepResultStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_input_envelope import TRANSCRIPT_REGENERATION_KEY
 from eneo.flows.infrastructure.flow_provider_call_repo import FlowRunUsage
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
@@ -100,6 +110,7 @@ from tests.unittests.flows.test_flow_router import (
     _run,
     _service_key,
 )
+from tests.unittests.flows.test_flow_run_concurrency_response import _no_commit
 from tests.unittests.spaces.test_space_transcription_services import (
     _connection,
     _space,
@@ -707,6 +718,158 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
     )
 
 
+def _completed_document_run_view(
+    *, flow_id, tenant_id
+) -> FlowRunWithResultFilesAndUsage:
+    """A completed run whose last step rendered a PDF."""
+    run = _run(flow_id=flow_id, tenant_id=tenant_id).model_copy(
+        update={"output_payload_json": {"text": "Rendered report"}}
+    )
+    document = _result_file(run=run)
+    return FlowRunWithResultFilesAndUsage(
+        run=run,
+        result_files=(document,),
+        token_usage=FlowRunTokenUsage(
+            num_tokens_input=20,
+            num_tokens_output=8,
+            num_tokens_total=28,
+            input_completeness="complete",
+            output_completeness="complete",
+        ),
+        transcription_usage=FlowRunTranscriptionUsage(
+            audio_seconds=51.25, completeness="complete"
+        ),
+        final_output=FlowFinalOutputContractPublic(
+            step_id=document.step_id,
+            step_order=document.step_order,
+            output_type=FlowOutputType.PDF,
+            output_mode=FlowOutputMode.RENDER_VERBATIM,
+            delivery=FlowOutputDelivery.ARTIFACT,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_retry_replay_of_a_completed_run_returns_its_document(monkeypatch):
+    container = MagicMock()
+    _stub_run_starters(container)
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.user.return_value = user
+    flow_id = uuid4()
+    view = _completed_document_run_view(flow_id=flow_id, tenant_id=user.tenant_id)
+    container.flow_run_service.return_value.enrich_run_with_result_files_and_usage = (
+        AsyncMock(return_value=view)
+    )
+    retry_service = MagicMock()
+    retry_service.return_value.retry_from_failed_step = AsyncMock(
+        return_value=FlowRunRetryResult(
+            run_result=CreateRunResult(run=view.run, created=False),
+            source_run_id=uuid4(),
+            first_executed_step_order=2,
+            reused_step_orders=(1,),
+        )
+    )
+    monkeypatch.setattr(retry_router_module, "FlowRunRetryService", retry_service)
+    monkeypatch.setattr(
+        retry_router_module.flow_access_context, "enforce_flow_scope", AsyncMock()
+    )
+    monkeypatch.setattr(
+        retry_router_module, "commit_flow_runtime_write_before_response", _no_commit
+    )
+    response = Response()
+    tasks = BackgroundTasks()
+
+    public = await retry_router_module.retry_flow_run_from_failed_step(
+        id=flow_id,
+        run_id=uuid4(),
+        request=SimpleNamespace(state=SimpleNamespace()),
+        response=response,
+        background_tasks=tasks,
+        idempotency_key="retry-replay",
+        container=container,
+    )
+
+    assert response.status_code == 200
+    assert tasks.tasks == []
+    assert public.run.result is not None
+    assert public.run.result.kind == "artifact"
+    assert public.run.result.files == list(view.result_files)
+    assert public.run.result_files == list(view.result_files)
+    assert public.run.token_usage is not None
+    assert public.run.token_usage.num_tokens_total == 28
+    assert public.run.transcription_usage is not None
+    assert public.run.transcription_usage.audio_seconds == 51.25
+
+
+@pytest.mark.asyncio
+async def test_regeneration_replay_of_a_completed_run_returns_its_document(
+    monkeypatch,
+):
+    container = MagicMock()
+    _stub_run_starters(container)
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.user.return_value = user
+    flow_id = uuid4()
+    view = _completed_document_run_view(flow_id=flow_id, tenant_id=user.tenant_id)
+    run = view.run.model_copy(
+        update={
+            "input_payload_json": {
+                TRANSCRIPT_REGENERATION_KEY: {
+                    "source_run_id": str(uuid4()),
+                    "correction_revision": 1,
+                    "first_regenerated_step_id": str(uuid4()),
+                }
+            }
+        }
+    )
+    view = replace(view, run=run)
+    container.flow_run_service.return_value.enrich_run_with_result_files_and_usage = (
+        AsyncMock(return_value=view)
+    )
+    container.flow_transcript_regeneration_service.return_value.regenerate = AsyncMock(
+        return_value=CreateRunResult(run=run, created=False)
+    )
+    monkeypatch.setattr(
+        regeneration_router_module.flow_access_context,
+        "enforce_flow_scope",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        regeneration_router_module,
+        "commit_flow_runtime_write_before_response",
+        _no_commit,
+    )
+    response = Response()
+    tasks = BackgroundTasks()
+
+    public = await regeneration_router_module.regenerate_flow_run_transcript(
+        id=flow_id,
+        run_id=uuid4(),
+        step_id=uuid4(),
+        body=FlowTranscriptRegenerationRequest(
+            expected_run_revision=1,
+            expected_correction_revision=None,
+            segments_hash="0" * 64,
+        ),
+        request=SimpleNamespace(state=SimpleNamespace()),
+        response=response,
+        background_tasks=tasks,
+        idempotency_key="regeneration-replay",
+        container=container,
+    )
+
+    assert response.status_code == 200
+    assert tasks.tasks == []
+    assert public.run.result is not None
+    assert public.run.result.kind == "artifact"
+    assert public.run.result.files == list(view.result_files)
+    assert public.run.result_files == list(view.result_files)
+    assert public.run.token_usage is not None
+    assert public.run.token_usage.num_tokens_total == 28
+    assert public.run.transcription_usage is not None
+    assert public.run.transcription_usage.audio_seconds == 51.25
+
+
 @pytest.mark.asyncio
 async def test_create_flow_run_forwards_idempotency_key():
     container = MagicMock()
@@ -820,6 +983,9 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
             run=run,
             result_files=(result_file,),
             token_usage=None,
+            transcription_usage=FlowRunTranscriptionUsage(
+                audio_seconds=51.25, completeness="complete"
+            ),
             webhook_deliveries=(webhook_delivery,),
         )
     )
@@ -892,6 +1058,8 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     run_service.usage_for_listed_runs.assert_awaited_once_with(runs=[run])
     assert get_response.id == run.id
     assert get_response.result_files == [result_file]
+    assert get_response.transcription_usage is not None
+    assert get_response.transcription_usage.audio_seconds == 51.25
     assert len(get_response.webhook_deliveries) == 1
     assert status_response.id == run.id
     assert "input_payload_json" not in status_response.model_dump()
