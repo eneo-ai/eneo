@@ -319,9 +319,9 @@ async def test_retention_deletes_derived_files_with_their_root(
             FileRetentionReason.FAMILY_EXCEEDS_BUDGET,
             id="kills-partial-family-cap-delete",
         ),
-        # The first run spends 2 discovery + 5 on the smaller run's unit, so a
-        # 14-row chunk leaves 7: the proof (1 row) and the root DELETE fit,
-        # the two-member family does not.
+        # The first run spends 3 discovery (1 owner, 2 roots) + 5 on the smaller
+        # run's unit, so a 14-row chunk leaves 6: the proof (1 row) and the root
+        # DELETE fit, the two-member family does not.
         pytest.param(
             22, 20, 12, 14, 12, None, None, id="kills-row-shortage-cursor-skip"
         ),
@@ -370,6 +370,8 @@ async def test_conversation_file_refusal_is_atomic_and_resumable(
             "retention_chunk_rows": chunk,
             "retention_max_family_rows": family,
             "retention_chunk_lock_timeout_ms": 200,
+            # Which roots share a chunk follows from rows, not the runner's speed.
+            "retention_chunk_gather_seconds": 60.0,
         }
     )
     root = await _create_file(retention_session, admin_user)

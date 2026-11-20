@@ -173,15 +173,16 @@ the first step reads the run; the others read earlier steps, an http_get
 request or a tool. add_step sets what a new step reads for its place: a step
 put first takes the run over from the step that was first, which then reads
 the new step. read_step_kinds says which kinds may stand at a place and why
-the others may not. A first step that takes an upload says so with upload;
+the others may not. A first step that takes an upload says so with upload,
+for example ${runtime_input};
 an audio upload is a transcribe step. When the flow cannot run without the
 upload it is required. When the person may type the material instead of
 uploading it, also add a text field to the run form and make the upload not
-required. A first step that is already saved gets an upload with update_step:
-input_config.runtime_input with its input_type (document or file) as
-input_format, for example ${runtime_input}.
-An AI step whose input may exceed its model's window can set, with update_step
-once the step is added, input_config.long_material to ${long_material}: such input is read in parts
+required. A saved first step gets the same value with update_step as
+input_config.runtime_input, its input_format (document or file) also as
+input_type.
+An AI step whose input may exceed its model's window gets long_material
+${long_material} in add_step (on a saved step: input_config.long_material): such input is read in parts
 with the step's own model and the answer is written over the notes; the step's
 result records the coverage, and partial coverage fails the step unless it has
 a review. A change to input_config or output_config replaces it whole, so send
@@ -369,17 +370,18 @@ the chat. An answer already given is settled; the next question asks only for
 what is still missing.
 """
 
-_EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
-flow delivers, say in a few lines what its result will look like: its headings
-or fields, its format, what a run needs as input and where a person reviews.
+_EXPECTED_RESULT = """After building a flow or changing what it delivers, and in the same
+answer, say in a few lines what its result will look like: its headings or
+fields, its format, what a run needs as input and where a person reviews.
+In "Fråga" or on a published flow, say it with what you would change.
 Derive it from the steps' results and contracts as saved, and mark what is not
 saved yet as a proposal. Use placeholders for content ("sammanfattning skapas
 vid körning"), never text that could pass for a real result. Describing the
-shape of the result this way is part of building and is always allowed;
-filling it with content is doing the work the flow is for, which you never do.
+result's shape this way is always allowed; filling it with content is doing
+the work the flow is for, which you never do.
 Explaining a run the person asks about (why a step failed, what it cost, what
-it gave) is also allowed: read the run and say what it shows, in plain words,
-without producing the run's result anew.
+it gave) is also allowed: read the run and say what it shows, without
+producing its result anew.
 """
 
 _FROM_EXAMPLE = """When the person shows an example of what a step should give, as JSON,

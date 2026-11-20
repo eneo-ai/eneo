@@ -86,6 +86,23 @@ const paraglideHandle: Handle = ({ event, resolve }) =>
     });
   });
 
+/**
+ * Answer 400 to a request whose path is not valid percent-encoding (`/%ZZ`).
+ * SvelteKit's own decoding fails on such a path, and the request then reaches
+ * `handle` outside SvelteKit's error handling. SvelteKit decodes with
+ * `decodeURI` too, so exactly the paths it cannot decode are rejected.
+ */
+export const malformedPathHandle: Handle = ({ event, resolve }) => {
+  try {
+    decodeURI(event.url.pathname);
+  } catch {
+    return new Response("Bad Request: the URL path is not valid percent-encoding", {
+      status: 400
+    });
+  }
+  return resolve(event);
+};
+
 export const headerFilterHandle: Handle = async ({ event, resolve }) => {
   const response = await resolve(event, {
     // SvelteKit's default predicate: preload the page's JS and CSS so the
@@ -140,7 +157,16 @@ export const framePolicyHandle: Handle = async ({ event, resolve }) => {
   return response;
 };
 
-export const handle = sequence(paraglideHandle, authHandle, framePolicyHandle, headerFilterHandle);
+// malformedPathHandle must stay first. For a path SvelteKit cannot decode, an
+// error thrown by any later hook (the login redirect, for one) is not caught
+// and ends the server process; the app then stops answering until restarted.
+export const handle = sequence(
+  malformedPathHandle,
+  paraglideHandle,
+  authHandle,
+  framePolicyHandle,
+  headerFilterHandle
+);
 
 export const handleError: HandleServerError = async ({ error, event, status, message }) => {
   const appError = toAppError(error, { status, message });

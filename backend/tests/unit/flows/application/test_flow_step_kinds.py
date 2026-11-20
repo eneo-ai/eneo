@@ -589,6 +589,75 @@ async def test_a_speaker_step_is_saved_with_its_choices_and_a_review(
     assert step.review_policy is not None
 
 
+_MODEL_KINDS = [
+    (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+    (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [*_MODEL_KINDS, (FlowStepKind.REVIEW, {})],
+    ids=["ai", "structured", "review"],
+)
+@pytest.mark.parametrize(
+    "review", [{}, True, {"enabled": True}], ids=["empty", "true", "enabled"]
+)
+async def test_a_review_asked_for_without_a_mode_is_the_default_review(
+    kind: FlowStepKind,
+    needs: dict[str, Any],
+    review: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step = await _added(
+        _flow([_step(1)]), kind, {**needs, "review": review}, monkeypatch
+    )
+
+    assert step.model_dump(mode="json")["review_policy"] == {
+        "mode": "edit",
+        "expires_after_seconds": None,
+    }
+
+
+@pytest.mark.parametrize(("kind", "needs"), _MODEL_KINDS, ids=["ai", "structured"])
+async def test_a_step_given_no_review_has_none(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step = await _added(_flow([_step(1)]), kind, needs, monkeypatch)
+
+    assert step.review_policy is None
+
+
+@pytest.mark.parametrize(
+    "review",
+    ["edit", "", False, {"enabled": False}, {"enabled": True, "note": "kort"}],
+    ids=["text", "empty text", "false", "turned off", "another key"],
+)
+def test_a_review_of_another_shape_is_refused_with_the_shape_it_takes(
+    review: object,
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": review})
+
+    (error,) = refused.value.errors()
+    assert error["loc"] == ("review",)
+    assert '{"mode": "edit"}' in error["msg"]
+    assert '{"mode": "view"}' in error["msg"]
+
+
+def test_a_review_with_a_mode_is_judged_by_the_review_policy_itself() -> None:
+    from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": {"mode": "ändra"}})
+
+    assert [error["loc"] for error in refused.value.errors()] == [("review", "mode")]
+    # The default is the kinds' own: the policy a saved step has still needs
+    # its mode.
+    with pytest.raises(ValidationError):
+        FlowStepReviewPolicy.model_validate({})
+
+
 async def test_a_first_step_reads_an_upload_only_when_asked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -598,7 +667,10 @@ async def test_a_first_step_reads_an_upload_only_when_asked(
     upload = await _added(
         empty,
         FlowStepKind.AI,
-        {"instruction": "Läs.", "upload": {"format": "document", "required": False}},
+        {
+            "instruction": "Läs.",
+            "upload": {"input_format": "document", "required": False},
+        },
         monkeypatch,
     )
 
@@ -611,6 +683,78 @@ async def test_a_first_step_reads_an_upload_only_when_asked(
             "input_format": "document",
         }
     }
+
+
+async def test_an_upload_is_given_in_the_words_its_saved_configuration_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What a saved step's input_config.runtime_input reads as is what
+    # upload takes: the value is saved as it was given.
+    step = await _added(
+        _flow([]),
+        FlowStepKind.AI,
+        {"instruction": "Läs.", "upload": _DOCUMENT_UPLOADS["runtime_input"]},
+        monkeypatch,
+    )
+
+    assert step.input_type == "document"
+    assert step.input_config == _DOCUMENT_UPLOADS
+
+
+@pytest.mark.parametrize(
+    ("upload", "where", "told"),
+    [
+        # The format has one name, the saved one.
+        ({"format": "document"}, ("upload", "input_format"), "Field required"),
+        (
+            {"input_format": "document", "enabled": False},
+            ("upload", "enabled"),
+            "leave upload out for a step without an upload",
+        ),
+        ({"input_format": "audio"}, ("upload", "input_format"), "'document' or 'file'"),
+    ],
+    ids=["another name", "turned off", "audio"],
+)
+def test_an_upload_of_another_shape_is_refused_with_what_it_takes(
+    upload: dict[str, Any], where: tuple[str, ...], told: str
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"upload": upload})
+
+    messages = {error["loc"]: error["msg"] for error in refused.value.errors()}
+    assert told in messages[where]
+
+
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [
+        (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+        (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+    ],
+    ids=["ai", "structured"],
+)
+async def test_long_material_is_saved_beside_the_upload_it_is_given_with(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digest = {"long_material": {"mode": "digest"}}
+
+    first = await _added(
+        _flow([]),
+        kind,
+        {**needs, "upload": {"input_format": "document"}, **digest},
+        monkeypatch,
+    )
+    later = await _added(_flow([_step(1)]), kind, {**needs, **digest}, monkeypatch)
+
+    # One input_config carries both values: neither replaces the other.
+    assert first.input_type == "document"
+    assert first.input_config == {**_DOCUMENT_UPLOADS, **digest}
+    assert later.input_config == digest
+
+
+def test_long_material_takes_only_the_modes_a_saved_step_takes() -> None:
+    with pytest.raises(ValidationError):
+        StepKindValues.model_validate({"long_material": {"mode": "summary"}})
 
 
 def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
@@ -638,6 +782,11 @@ def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
             "not use url",
         ),
         (FlowStepKind.COMPOSE, {"review": {"mode": "edit"}}, "not use review"),
+        (
+            FlowStepKind.COMPOSE,
+            {"long_material": {"mode": "digest"}},
+            "not use long_material",
+        ),
         (FlowStepKind.DOCUMENT, {"instruction": "Skriv."}, "not use instruction"),
         (FlowStepKind.TEMPLATE, {"instruction": "Fyll i."}, "not use instruction"),
         (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),
@@ -684,7 +833,7 @@ async def test_an_upload_on_a_later_step_is_refused_by_the_save(
     values = StepKindValues.model_validate(
         {
             "instruction": "Läs.",
-            "upload": {"format": "document"},
+            "upload": {"input_format": "document"},
             **({"input_bindings": reads} if reads else {}),
         }
     )

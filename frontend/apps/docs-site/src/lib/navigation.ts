@@ -1,5 +1,5 @@
 import type { PageMapItem } from "nextra";
-import { type DocsLanguage, languagePath } from "./languages";
+import { type DocsLanguage, languagePath, localizeDocsHref } from "./languages";
 
 const swedishTitles: Readonly<Record<string, string>> = {
   "/": "Start",
@@ -40,6 +40,7 @@ const swedishTitles: Readonly<Record<string, string>> = {
   "/guides/upgrade-1-7-0": "Uppgradera till 1.7.0",
   "/contributing/project-roadmap": "Projektets planering",
   "/contributing/security": "Säkerhet",
+  "/security": "Säkerhet",
   "/about/release-notes": "Versionsnyheter",
 };
 
@@ -62,13 +63,21 @@ export function languagePageMap(
                 name === "index" ? parent || "/" : `${parent}/${name}`;
               const title =
                 name === "index" && parent ? "Översikt" : swedishTitles[route];
+              // A navbar entry that links to a page keeps the reader's language.
+              const entry =
+                typeof meta === "object" &&
+                meta !== null &&
+                "href" in meta &&
+                typeof meta.href === "string"
+                  ? { ...meta, href: localizeDocsHref(meta.href, language) }
+                  : meta;
               return [
                 name,
                 language === "sv" && title
-                  ? typeof meta === "string"
+                  ? typeof entry === "string"
                     ? title
-                    : { ...meta, title }
-                  : meta,
+                    : { ...entry, title }
+                  : entry,
               ];
             }),
         );

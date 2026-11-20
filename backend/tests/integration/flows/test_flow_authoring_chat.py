@@ -716,11 +716,9 @@ async def test_chat_renames_carry_reads_and_a_refused_edit_audits_nothing(
     assert _page(removed)["code"] == "flow_form_field_still_read"
 
 
-async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
-    client, enabled_flow, db_container, admin_user
-):
-    flow, headers = enabled_flow
-    base = f"/api/v1/flows/{flow['id']}"
+async def _two_steps_sharing_an_assistant(client, flow, headers, base):
+    """Collect and Check, with Check on Collect's assistant; the draft
+    revision after the change."""
     created = await client.patch(
         base + "/editor/",
         headers=headers,
@@ -760,15 +758,25 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
         },
     )
     assert sharing.status_code == 200, sharing.text
-    revision = sharing.json()["draft_revision"]
+    return collect, check, sharing.json()["draft_revision"]
+
+
+async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    collect, check, revision = await _two_steps_sharing_an_assistant(
+        client, flow, headers, base
+    )
     ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
 
+    # Only the instruction changes: the call names no step fields.
     result = await flows.update_step(
         ctx,
         revision,
         UUID(check["id"]),
-        {},
-        {"prompt": {"text": "Only for Check."}},
+        assistant_changes={"prompt": {"text": "Only for Check."}},
     )
 
     assert not result.isError, result.content[0].text
@@ -784,6 +792,109 @@ async def test_chat_edit_of_a_shared_assistant_gives_the_step_its_own_copy(
     assert await _prompt(client, base, headers, current["steps"][1]) == (
         "Only for Check."
     )
+
+
+async def test_an_empty_assistant_change_leaves_a_shared_assistant_shared(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    collect, check, revision = await _two_steps_sharing_an_assistant(
+        client, flow, headers, base
+    )
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    # An empty assistant change is no change: refused, with nothing saved.
+    nothing = await flows.update_step(
+        ctx, revision, UUID(check["id"]), assistant_changes={}
+    )
+    assert nothing.isError
+    assert "changes nothing" in nothing.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert current["steps"][1]["assistant_id"] == collect["assistant_id"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+    # Beside a step change it gives the step no copy of the assistant.
+    renamed = await flows.update_step(
+        ctx,
+        revision,
+        UUID(check["id"]),
+        {"user_description": "Verify"},
+        assistant_changes={},
+    )
+
+    assert not renamed.isError, renamed.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    assert current["steps"][1]["user_description"] == "Verify"
+    assert [step["assistant_id"] for step in current["steps"]] == [
+        collect["assistant_id"],
+        collect["assistant_id"],
+    ]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+
+
+async def test_an_instruction_changed_alone_is_one_revision_and_a_refusal_leaves_no_trace(
+    client, enabled_flow, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    created = await client.patch(
+        base + "/editor/",
+        headers=headers,
+        json={
+            "expected_revision": flow["draft_revision"],
+            "definition": {},
+            "new_steps": [
+                _new_step("Collect", "Collect the facts.", input_source="flow_input")
+            ],
+        },
+    )
+    assert created.status_code == 200, created.text
+    (collect,) = created.json()["steps"]
+    revision = created.json()["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+    assistants = await _flow_assistant_count(db_container, flow["id"])
+    audited = _record_audit(monkeypatch)
+
+    # Neither part is given: refused as update_steps refuses such an edit.
+    nothing = await flows.update_step(ctx, revision, UUID(collect["id"]))
+    assert nothing.isError
+    assert "changes nothing" in nothing.content[0].text
+    # The draft was read before another change: refused, with nothing saved.
+    stale = await flows.update_step(
+        ctx,
+        revision - 1,
+        UUID(collect["id"]),
+        assistant_changes={"prompt": {"text": "Never saved."}},
+    )
+    assert stale.isError
+    assert _page(stale)["code"] == "stale_revision"
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision
+    assert await _prompt(client, base, headers, collect) == "Collect the facts."
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert audited == []
+
+    saved = await flows.update_step(
+        ctx,
+        revision,
+        UUID(collect["id"]),
+        assistant_changes={"prompt": {"text": "Collect the dates."}},
+    )
+
+    assert not saved.isError, saved.content[0].text
+    current = (await client.get(base + "/", headers=headers)).json()
+    assert current["draft_revision"] == revision + 1
+    # The step's own assistant is changed where it is: no copy is made.
+    assert current["steps"][0]["assistant_id"] == collect["assistant_id"]
+    assert await _flow_assistant_count(db_container, flow["id"]) == assistants
+    assert await _prompt(client, base, headers, collect) == "Collect the dates."
+    assert audited != []
 
 
 # --- The chat's model -------------------------------------------------------
@@ -1983,7 +2094,12 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
             {
                 "instruction": "Ta fram beslutet och datumet.",
                 "example": '{"beslut": "Bifall", "datum": "2026-11-11"}',
-                "upload": {"format": "document"},
+                # The words a saved step's runtime_input has.
+                "upload": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "document",
+                },
             },
         ),
         (
@@ -2019,7 +2135,11 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
     facts, text, word = steps
     assert facts["output_contract"]["required"] == ["beslut", "datum"]
     assert facts["input_type"] == "document"
-    assert facts["input_config"]["runtime_input"]["required"] is True
+    assert facts["input_config"]["runtime_input"] == {
+        "enabled": True,
+        "required": True,
+        "input_format": "document",
+    }
     assert await _prompt(client, base, headers, facts) == (
         "Ta fram beslutet och datumet."
     )
@@ -2028,6 +2148,40 @@ async def test_a_flow_is_built_by_kinds_with_the_values_each_takes(
         "Beslut {{ step_1.output.structured.beslut }}"
     )
     assert (word["output_mode"], word["output_type"]) == ("template_fill", "docx")
+
+
+async def test_a_step_added_with_an_upload_and_long_material_is_saved_with_both(
+    client, enabled_flow, db_container, admin_user
+):
+    flow, headers = enabled_flow
+    base = f"/api/v1/flows/{flow['id']}"
+    revision = flow["draft_revision"]
+    ctx = await _editing_chat(client, db_container, admin_user, base, headers, revision)
+
+    added = await flows.add_step(
+        ctx,
+        revision,
+        "Sammanfatta",
+        FlowStepKind.AI,
+        values={
+            "instruction": "Sammanfatta underlaget.",
+            "upload": {"input_format": "document"},
+            "long_material": {"mode": "digest"},
+        },
+    )
+
+    assert not added.isError, added.content[0].text
+    (step,) = (await client.get(base + "/", headers=headers)).json()["steps"]
+    assert step["input_type"] == "document"
+    # The upload and the long material stand in one input_config.
+    assert step["input_config"] == {
+        "runtime_input": {
+            "enabled": True,
+            "required": True,
+            "input_format": "document",
+        },
+        "long_material": {"mode": "digest"},
+    }
 
 
 async def test_a_speaker_step_is_added_with_the_run_form_field_it_reads(
@@ -2295,7 +2449,7 @@ async def test_a_step_the_save_refuses_after_its_assistant_is_made_leaves_none(
         revision,
         "Läs bilaga",
         FlowStepKind.AI,
-        values={"instruction": "Läs.", "upload": {"format": "document"}},
+        values={"instruction": "Läs.", "upload": {"input_format": "document"}},
     )
 
     assert refused.isError, refused.content[0].text

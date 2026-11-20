@@ -4,7 +4,12 @@ ARG APP_REVISION=unknown
 # Svelte E2E) passes no-web-app and skips that build.
 ARG WEB_APP_STAGE=web-build
 
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
+
+# uv is copied in at a pinned version, on the same base as the final stage. The
+# uv images that bundle Debian bookworm stopped at 0.9.30, so their floating tag
+# no longer follows uv releases.
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 # Build dependencies for packages that may compile from source on some
 # architectures, for example psutil on the current builder image.

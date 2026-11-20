@@ -18289,6 +18289,7 @@ export interface components {
       | 9081
       | 9082
       | 9085
+      | 9086
       | 9090;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {

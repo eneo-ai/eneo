@@ -260,6 +260,8 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Removed content
   9085: "eneo_error_9085", // DERIVED_SOURCE_REMOVED
+  // Retention periods
+  9086: "eneo_error_9086", // RETENTION_EXCEEDS_SPACE
   // Skill lifecycle
   9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
   9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT
