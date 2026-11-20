@@ -3791,7 +3791,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 232 actions with their enabled status for the modal UI.
+     * @description Retrieve all 234 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -6395,6 +6395,36 @@ export interface paths {
     get: operations["list_flow_run_transcript_correction_revisions"];
     put?: never;
     post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Send a run's result again
+     * @description Send a completed run's result again after its delivery ended in dead letter.
+     *         The delivery gets a fresh attempt budget and is sent as before: the same
+     *         receiver and the same `Idempotency-Key`, so a receiver that already stored
+     *         the result can recognise it. Only a `run_result` delivery can be sent again.
+     *
+     *         Send the delivery's observed `dead_lettered_at` as `expected_dead_lettered_at`.
+     *         Only that dead letter is reset, so a retried request cannot reset a later one.
+     *         The audit record and the reset commit together; disabled or failed auditing
+     *         prevents the redelivery.
+     *
+     *         Requires the right to edit the flow. Service keys cannot send a result again.
+     */
+    post: operations["redeliver_flow_run_webhook_delivery"];
     delete?: never;
     options?: never;
     head?: never;
@@ -12986,6 +13016,8 @@ export interface components {
       | "flow_run_completed"
       | "flow_run_failed"
       | "flow_run_redispatched"
+      | "flow_run_webhook_redelivered"
+      | "flow_run_result_sending"
       | "flow_run_cancelled"
       | "flow_run_audit_delivery_redriven"
       | "flow_classification_override"
@@ -15216,7 +15248,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 93,
+     *           "action_count": 95,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -19192,6 +19224,8 @@ export interface components {
       | "flow_run_concurrency_limit_reached"
       | "flow_run_redispatch_conflict"
       | "flow_run_redispatch_audit_unavailable"
+      | "flow_run_webhook_redelivery_conflict"
+      | "flow_run_webhook_redelivery_audit_unavailable"
       | "flow_run_invalid_step_inputs"
       | "flow_run_unknown_step_input"
       | "flow_run_step_input_max_files_exceeded"
@@ -27362,6 +27396,20 @@ export interface components {
        */
       updated_at: string;
     };
+    /**
+     * FlowRunWebhookRedeliveryRequest
+     * @example {
+     *       "expected_dead_lettered_at": "2026-07-22T08:30:00Z"
+     *     }
+     */
+    FlowRunWebhookRedeliveryRequest: {
+      /**
+       * Expected Dead Lettered At
+       * Format: date-time
+       * @description The delivery's `dead_lettered_at` as read from the run. Only that dead letter is reset, so a retried request cannot reset a later one.
+       */
+      expected_dead_lettered_at: string;
+    };
     /** FlowRuntimeAuditOutboxSummary */
     FlowRuntimeAuditOutboxSummary: {
       /**
@@ -31384,7 +31432,7 @@ export interface components {
      * HttpBodyMode
      * @enum {string}
      */
-    HttpBodyMode: "auto" | "json_template" | "text_template" | "none";
+    HttpBodyMode: "auto" | "json_template" | "text_template" | "none" | "run_result";
     /** HttpRequestPreview */
     HttpRequestPreview: {
       /** Body Preview */
@@ -31512,7 +31560,12 @@ export interface components {
       | "HTTP_RESPONSE_TOO_LARGE"
       | "HTTP_STATUS_ERROR"
       | "HTTP_CREDENTIALS_REQUIRE_HTTPS"
-      | "HTTP_INVALID_HEADER_NAME";
+      | "HTTP_INVALID_HEADER_NAME"
+      | "HTTP_RUN_RESULT_REQUIRES_HTTP_POST"
+      | "HTTP_RUN_RESULT_TAKES_NO_TEMPLATE"
+      | "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL"
+      | "HTTP_CONTENT_TYPE_SET_BY_BODY"
+      | "HTTP_RUN_RESULT_NOT_TESTABLE";
     /** IconPublic */
     IconPublic: {
       /** Created At */
@@ -68462,6 +68515,99 @@ export interface operations {
            *       "message": "Evidence audit logging is unavailable."
            *     }
            */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  redeliver_flow_run_webhook_delivery: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the flow that owns the run. */
+        id: string;
+        /** @description Identifier of the completed run. */
+        run_id: string;
+        /** @description Identifier of the dead-lettered delivery to send again. */
+        delivery_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["FlowRunWebhookRedeliveryRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["FlowRunWebhookDeliveryPublic"];
+        };
+      };
+      /** @description Caller lacks permission to edit this flow. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_scope",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The run or the delivery was not found for this flow and tenant. A deleted flow cannot be run or changed, so it is not found. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow run webhook delivery not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The delivery cannot be sent again. `context.reason` says why: `not_run_result`, `run_not_completed`, `not_dead_lettered` or `dead_lettered_at_changed`. Refresh the run before retrying. */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Required audit logging is unavailable, so the delivery was not reset. */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
