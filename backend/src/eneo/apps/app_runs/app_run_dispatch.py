@@ -32,16 +32,25 @@ async def claim_app_job(repo: JobRepository, job_id: UUID) -> bool:
 
 
 def stale_app_submissions(now: datetime):
+    deadline = now - APP_RUN_QUEUE_TIMEOUT
     return (
         sa.select(Jobs)
         .where(
             Jobs.task == Task.RUN_APP,
             Jobs.status.in_((_QUEUED, _RUNNING)),
-            Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
             sa.or_(
-                Jobs.status == _RUNNING,
-                Jobs.dispatch_envelope.is_not(None),
-                Jobs.updated_at < now - APP_RUN_QUEUE_TIMEOUT,
+                Jobs.updated_at < deadline,
+                sa.and_(
+                    Jobs.status == _QUEUED,
+                    Jobs.dispatch_envelope.is_not(None),
+                    Jobs.created_at <= deadline,
+                ),
+                sa.and_(
+                    Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
+                    sa.or_(
+                        Jobs.status == _RUNNING, Jobs.dispatch_envelope.is_not(None)
+                    ),
+                ),
             ),
         )
         .order_by(Jobs.updated_at, Jobs.id)
