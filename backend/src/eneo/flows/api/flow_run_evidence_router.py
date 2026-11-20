@@ -15,12 +15,16 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
 )
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api import flow_access_context
 from eneo.flows.api.flow_api_common import (
     RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
-from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_assembler import (
+    FlowAssembler,
+    final_step_delivery_status,
+)
 from eneo.flows.api.flow_models import (
     FlowEvidenceExportTooLargeError,
     FlowRunEvidenceExportResponse,
@@ -225,6 +229,16 @@ async def get_flow_run_evidence(
                         FlowRunStepResultFile.model_validate(item)
                         for item in evidence.result_files
                     ],
+                    final_delivery_status=final_step_delivery_status(
+                        evidence.outputs,
+                        [
+                            (
+                                UUID(item["step_id"]),
+                                FlowOutboxDeliveryStatus(item["delivery_status"]),
+                            )
+                            for item in evidence.webhook_deliveries
+                        ],
+                    ),
                 )[0]
                 if evidence.outputs is not None
                 else None

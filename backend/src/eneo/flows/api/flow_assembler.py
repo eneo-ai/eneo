@@ -256,16 +256,12 @@ class FlowAssembler:
         started_by: FlowRunStartedByPublic | None = None,
         evidence_access: FlowRunEvidenceAccess,
     ) -> FlowRunDetailPublic:
-        final_output = outputs.final_output if outputs is not None else None
-        # The deliveries are in step and attempt order: the last one of the
-        # final step is where its result stands.
-        final_delivery_status = next(
-            (
-                delivery.delivery_status
-                for delivery in reversed(webhook_deliveries)
-                if final_output is not None and delivery.step_id == final_output.step_id
-            ),
-            None,
+        final_delivery_status = final_step_delivery_status(
+            outputs,
+            [
+                (delivery.step_id, delivery.delivery_status)
+                for delivery in webhook_deliveries
+            ],
         )
         run_payload = self.to_run_public(
             run,
@@ -399,6 +395,26 @@ class FlowAssembler:
 
 class FlowRunResultProjectionError(RuntimeError):
     """Persisted completed-run data does not satisfy its published result contract."""
+
+
+def final_step_delivery_status(
+    outputs: FlowRunOutputContract | None,
+    deliveries: Sequence[tuple[UUID, FlowOutboxDeliveryStatus]],
+) -> FlowOutboxDeliveryStatus | None:
+    """Where the final step's delivery stands, from a run's ``(step_id,
+    status)`` deliveries in step and attempt order: the last one of the
+    final step. The run's detail and its evidence both read it here."""
+    final_output = outputs.final_output if outputs is not None else None
+    if final_output is None:
+        return None
+    return next(
+        (
+            delivery_status
+            for step_id, delivery_status in reversed(deliveries)
+            if step_id == final_output.step_id
+        ),
+        None,
+    )
 
 
 def _project_run_result(

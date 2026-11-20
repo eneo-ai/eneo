@@ -122,6 +122,15 @@ async def _redeliver(run, delivery_id: UUID, expected: datetime):
     )
 
 
+async def _evidence_delivery_status(client, run, headers) -> str:
+    """Where the run's evidence export says the result's delivery stands."""
+    evidence = await client.get(
+        f"/api/v1/flows/{run.flow_id}/runs/{run.id}/evidence/", headers=headers
+    )
+    assert evidence.status_code == 200, evidence.text
+    return evidence.json()["run"]["result"]["delivery_status"]
+
+
 @pytest.fixture
 def dead_lettered_run(completed_run_result_run, admin_user):  # noqa: F811
     async def seed(at: datetime | None = None):
@@ -158,6 +167,8 @@ async def test_a_dead_lettered_result_is_sent_again_with_the_same_key(
     assert detail.status_code == 200, detail.text
     [seen] = detail.json()["webhook_deliveries"]
     assert seen["delivery_status"] == "dead_lettered"
+    assert detail.json()["result"]["delivery_status"] == "dead_lettered"
+    assert await _evidence_delivery_status(client, run, headers) == "dead_lettered"
 
     response = await client.post(
         _path(run, delivery_id),
@@ -171,6 +182,7 @@ async def test_a_dead_lettered_result_is_sent_again_with_the_same_key(
     assert body["delivery_status"] == "pending"
     assert body["delivery_attempts"] == 0
     assert body["dead_lettered_at"] is None
+    assert await _evidence_delivery_status(client, run, headers) == "pending"
     audit = await _read_one(
         sa.select(AuditLog.log_metadata).where(
             AuditLog.action == "flow_run_webhook_redelivered",
