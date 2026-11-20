@@ -249,6 +249,74 @@ async def test_app_worker_loss_before_completion_does_not_replay_started_work(
     start_app.assert_awaited_once_with(params.app_id)
 
 
+@pytest.mark.parametrize(
+    "failure_point", ["before_update", "other_worker", "after_commit"]
+)
+async def test_claim_error_fails_only_an_unstarted_app_run(
+    app_run_fixture, db_session, client, admin_user_api_key, monkeypatch, failure_point
+):
+    job_id, params, _ = await app_run_fixture()
+    claim = JobRepository.mark_job_started
+
+    async def interrupted_claim(repo, id):
+        if failure_point == "after_commit":
+            dialect = repo.delegate.session.get_bind().dialect
+            commit = dialect.do_commit
+
+            def lose_ack(connection):
+                monkeypatch.setattr(dialect, "do_commit", commit)
+                commit(connection)
+                raise ConnectionError("lost commit acknowledgement")
+
+            monkeypatch.setattr(dialect, "do_commit", lose_ack)
+            return await claim(repo, id)
+        if failure_point == "other_worker":
+            async with db_session() as other_worker:
+                assert await claim(JobRepository(other_worker), id)
+        raise ConnectionError("database connection interrupted")
+
+    monkeypatch.setattr(JobRepository, "mark_job_started", interrupted_claim)
+    start_app = AsyncMock()
+    monkeypatch.setattr(AppService, "get_app", start_app)
+    publish = AsyncMock()
+    monkeypatch.setattr("eneo.worker.worker.publish_task_status", publish)
+
+    with pytest.raises(ConnectionError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    response = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert response.status_code == 200, response.text
+    start_app.assert_not_awaited()
+    if failure_point != "before_update":
+        assert response.json()["status"] == Status.IN_PROGRESS.value
+        publish.assert_not_awaited()
+    else:
+        assert response.json()["status"] == Status.FAILED.value
+        publish.assert_awaited_once_with(
+            Channel(type=ChannelType.APP_RUN_UPDATES, user_id=params.user_id),
+            RedisMessage(id=params.id, status=Status.FAILED),
+        )
+
+
+async def test_cancelled_app_run_fails_after_its_start_is_committed(
+    app_run_fixture, db_session, client, monkeypatch
+):
+    job_id, params, _ = await app_run_fixture()
+    monkeypatch.setattr(
+        AppService, "get_app", AsyncMock(side_effect=asyncio.CancelledError)
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    async with db_session() as observer:
+        job = await observer.get(Jobs, job_id)
+        assert job is not None and job.status == Status.FAILED.value
+        assert job.failure_code == JobFailureCode.CANCELLED.value
+
+
 async def test_app_worker_stops_if_recovery_wins_between_claim_and_execution(
     app_run_fixture, db_session, monkeypatch
 ):
