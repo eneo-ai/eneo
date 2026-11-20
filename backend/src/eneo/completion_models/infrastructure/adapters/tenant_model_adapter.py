@@ -735,20 +735,25 @@ def _unasked_round(
     ]
 
 
+def _tool_names(
+    mcp_proxy: "MCPProxySession | None", name: str
+) -> tuple[str, str, str | None]:
+    info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
+    if info:
+        return info
+    if "__" in name:
+        server, tool = name.split("__", 1)
+        return server, tool, None
+    return "", name, None
+
+
 def _unasked_call_metadata(
     mcp_proxy: "MCPProxySession",
     call: ProviderToolCall,
     arguments: dict[str, Any] | None,
 ) -> ToolCallMetadata:
     """The record of a call refused with CONFIRMATION_UNAVAILABLE_RESULT."""
-    info = mcp_proxy.get_tool_info(call.name)
-    if info:
-        server_name, tool_name, title = info
-    elif "__" in call.name:
-        server_name, tool_name = call.name.split("__", 1)
-        title = None
-    else:
-        server_name, tool_name, title = "", call.name, None
+    server_name, tool_name, title = _tool_names(mcp_proxy, call.name)
     return ToolCallMetadata(
         server_name=server_name,
         tool_name=tool_name,
@@ -800,14 +805,7 @@ def _answer_calls_not_run(
                 "content": json.dumps(denial_payload),
             }
         )
-        tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-        if tool_info:
-            server_name, tool_name, title = tool_info
-        elif "__" in tc["function"]["name"]:
-            server_name, tool_name = tc["function"]["name"].split("__", 1)
-            title = None
-        else:
-            server_name, tool_name, title = "", tc["function"]["name"], None
+        server_name, tool_name, title = _tool_names(mcp_proxy, tc["function"]["name"])
         denied_metadata.append(
             ToolCallMetadata(
                 server_name=server_name,
@@ -966,9 +964,14 @@ class _ToolCallBudget:
         granted = self.take(len(calls))
         return calls[:granted], calls[granted:]
 
+    @property
+    def available(self) -> int:
+        """Maximum calls that can still be executed in a fresh response."""
+        return min(self._per_round, self.per_turn - self._run)
+
     def take(self, wanted: int) -> int:
         """How many of a response's ``wanted`` calls run; the rest are refused."""
-        granted = max(0, min(wanted, self._per_round, self.per_turn - self._run))
+        granted = max(0, min(wanted, self.available))
         self._run += granted
         if granted < wanted:
             logger.warning(
@@ -1006,6 +1009,14 @@ class _TurnLimits:
     max_rounds: int
     call_budget: _ToolCallBudget
     result_budget: _ToolResultBudget
+
+    def follow_up_kwargs(
+        self, tool_round: int, kwargs: dict[str, object]
+    ) -> dict[str, object]:
+        """Request a final answer as soon as the turn has spent its budget."""
+        if self.reached(tool_round) is not None:
+            return {**kwargs, "tool_choice": "none"}
+        return kwargs
 
     def reached(self, tool_round: int) -> _TurnLimit | None:
         """The limit the turn has reached after ``tool_round`` rounds, if any."""
@@ -1374,43 +1385,6 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
         return metadata
 
-    def _refused_calls_metadata(
-        self,
-        calls: list[_AccumulatedToolCall],
-        *,
-        refusal: str,
-        resolve_tool_names: Callable[[str], tuple[str, str, str | None]],
-        tool_purpose: Callable[[str], str | None],
-        tool_is_internal: Callable[[str], bool],
-        tool_is_bundled: Callable[[str], bool],
-    ) -> list[ToolCallMetadata]:
-        """The records of a streamed turn's pending calls, refused at a limit."""
-        refusal_payload = json.dumps({"error": refusal})
-        refused_metadata: list[ToolCallMetadata] = []
-        for tool_call in calls:
-            name = tool_call["function"]["name"]
-            try:
-                args = self._parse_tool_arguments(tool_call["function"]["arguments"])
-            except OpenAIException:
-                args = None
-            server_name, tool_name, title = resolve_tool_names(name)
-            refused_metadata.append(
-                ToolCallMetadata(
-                    server_name=server_name,
-                    tool_name=tool_name,
-                    title=title,
-                    arguments=args,
-                    tool_call_id=tool_call["id"],
-                    result_status="failed",
-                    result=refusal_payload,
-                    mcp_tool_name=name,
-                    purpose=tool_purpose(name),
-                    is_internal=tool_is_internal(name),
-                    is_bundled=tool_is_bundled(name),
-                )
-            )
-        return refused_metadata
-
     def _close_internal_tool_calls(
         self,
         *,
@@ -1725,18 +1699,20 @@ class TenantModelAdapter(CompletionModelAdapter):
         refusal: str,
         assistant_content: str | None,
         calls: list[ProviderToolCall],
-    ) -> bool:
+        mcp_proxy: "MCPProxySession | None",
+    ) -> list[ToolCallMetadata]:
         """Refuse pending tool calls once a turn limit is reached.
 
         Appends the assistant's pending tool-call message and one refusal
         result per call so the transcript stays well-formed for the forced
-        toolless follow-up. Returns False without touching ``messages`` when
+        toolless follow-up. Return the same refusals for conversation history.
+        Leave the transcript and history untouched when
         any call lacks an id or name — an incomplete exchange would be
         rejected by the provider, and the follow-up works from the prior
         messages alone.
         """
         if not calls or any(not call.call_id or not call.name for call in calls):
-            return False
+            return []
         messages.append(
             {
                 "role": "assistant",
@@ -1755,6 +1731,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             }
         )
         refusal_payload = json.dumps({"error": refusal})
+        refused: list[ToolCallMetadata] = []
         for call in calls:
             messages.append(
                 {
@@ -1763,7 +1740,33 @@ class TenantModelAdapter(CompletionModelAdapter):
                     "content": refusal_payload,
                 }
             )
-        return True
+            try:
+                arguments = self._parse_tool_arguments(call.arguments)
+            except OpenAIException:
+                arguments = None
+            server, tool, title = _tool_names(mcp_proxy, call.name)
+            refused.append(
+                ToolCallMetadata(
+                    server_name=server,
+                    tool_name=tool,
+                    title=title,
+                    arguments=arguments,
+                    tool_call_id=call.call_id,
+                    result_status="failed",
+                    result=refusal_payload,
+                    mcp_tool_name=call.name,
+                    purpose=mcp_proxy.get_tool_purpose(call.name)
+                    if mcp_proxy
+                    else None,
+                    is_internal=mcp_proxy.is_internal_tool(call.name)
+                    if mcp_proxy
+                    else False,
+                    is_bundled=mcp_proxy.is_bundled_tool(call.name)
+                    if mcp_proxy
+                    else False,
+                )
+            )
+        return refused
 
     def _resolve_request_input_tokens(
         self,
@@ -2355,6 +2358,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     litellm_model=self.litellm_model,
                 )
                 call_budget = _ToolCallBudget.from_settings()
+                turn_limits = _TurnLimits(max_rounds, call_budget, result_budget)
                 activation_available = (
                     skill_runtime is not None
                     and skill_runtime.tool_definition is not None
@@ -2392,7 +2396,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     nonlocal context_output_token_estimate
                     response = await self._observed_provider_call(
                         messages=messages,
-                        litellm_kwargs=litellm_kwargs,
+                        litellm_kwargs=turn_limits.follow_up_kwargs(
+                            tool_round, litellm_kwargs
+                        ),
                         observer=provider_call_observer,
                         reason="tool_round",
                         retry_without_capability_safe=False,
@@ -2436,11 +2442,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     and choice.finish_reason != "length"
                     and (mcp_proxy or activation_available)
                 ):
-                    turn_limit = _TurnLimits(
-                        max_rounds=max_rounds,
-                        call_budget=call_budget,
-                        result_budget=result_budget,
-                    ).reached(tool_round)
+                    turn_limit = turn_limits.reached(tool_round)
                     if turn_limit is not None:
                         if forced_final:
                             logger.warning(
@@ -2457,10 +2459,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             f"[MCP] Reached {turn_limit.reached}; forcing a "
                             "final answer without tools"
                         )
-                        self._append_tool_round_limit_refusal(
+                        refused = self._append_tool_round_limit_refusal(
                             messages,
                             refusal=turn_limit.refusal,
                             assistant_content=msg.content,
+                            mcp_proxy=mcp_proxy,
                             calls=[
                                 ProviderToolCall(
                                     call_id=tc.id,
@@ -2470,7 +2473,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 for tc in msg.tool_calls
                             ],
                         )
-                        litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
+                        collected_tool_metadata.extend(refused)
                         if not await _follow_up_completion():
                             break
                         continue
@@ -2603,14 +2606,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             }
                         )
                         assert mcp_proxy is not None
-                        tool_info = mcp_proxy.get_tool_info(call.name)
-                        if tool_info:
-                            server_name, tool_name, title = tool_info
-                        elif "__" in call.name:
-                            server_name, tool_name = call.name.split("__", 1)
-                            title = None
-                        else:
-                            server_name, tool_name, title = "", call.name, None
+                        server_name, tool_name, title = _tool_names(
+                            mcp_proxy, call.name
+                        )
                         collected_tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=server_name,
@@ -3095,13 +3093,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 return mcp_proxy.get_allowed_tool_names() if mcp_proxy else set()
 
             def _resolve_tool_names(name: str) -> tuple[str, str, str | None]:
-                info = mcp_proxy.get_tool_info(name) if mcp_proxy else None
-                if info:
-                    return info
-                if "__" in name:
-                    server_name, tool_name = name.split("__", 1)
-                    return server_name, tool_name, None
-                return "", name, None
+                return _tool_names(mcp_proxy, name)
 
             def _tool_purpose(name: str) -> str | None:
                 return mcp_proxy.get_tool_purpose(name) if mcp_proxy else None
@@ -3424,6 +3416,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                     result_budget=result_budget,
                 )
 
+                async def next_tool_response() -> AsyncIterator[_LiteLLMStreamChunk]:
+                    request_kwargs = turn_limits.follow_up_kwargs(
+                        tool_round, litellm_kwargs
+                    )
+                    return cast(
+                        AsyncIterator[_LiteLLMStreamChunk],
+                        await self._request_completion(
+                            phase="stream_iteration",
+                            model=self.litellm_model,
+                            messages=messages,
+                            stream=True,
+                            drop_params=True,
+                            stream_options={"include_usage": True},
+                            **self._prepare_dispatch_kwargs(messages, request_kwargs),
+                        ),
+                    )
+
                 while result.has_tool_calls and not turn_limits.reached(tool_round):
                     tool_round += 1
                     logger.info(f"[MCP] Tool round {tool_round}")
@@ -3502,20 +3511,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 response_type=ResponseType.TOOL_CALL,
                                 tool_calls_metadata=deferred_metadata,
                             )
-                        follow_up = cast(
-                            AsyncIterator[_LiteLLMStreamChunk],
-                            await self._request_completion(
-                                phase="stream_iteration",
-                                model=self.litellm_model,
-                                messages=messages,
-                                stream=True,
-                                drop_params=True,
-                                stream_options={"include_usage": True},
-                                **self._prepare_dispatch_kwargs(
-                                    messages, litellm_kwargs
-                                ),
-                            ),
-                        )
+                        follow_up = await next_tool_response()
                         active_provider_stream = follow_up
                         async for comp in _drain_stream(
                             follow_up,
@@ -3550,14 +3546,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         except OpenAIException:
                             args = None
-                        info = mcp_proxy.get_tool_info(name)
-                        if info:
-                            sname, tname, title = info
-                        elif "__" in name:
-                            sname, tname = name.split("__", 1)
-                            title = None
-                        else:
-                            sname, tname, title = "", name, None
+                        sname, tname, title = _tool_names(mcp_proxy, name)
                         tool_metadata.append(
                             ToolCallMetadata(
                                 server_name=sname,
@@ -3578,6 +3567,23 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 _tool_metadata_arguments(tm)
                             )
 
+                    # Offer only calls that could all run if the person approves.
+                    # Unattended turns remove calls requiring confirmation before
+                    # applying the limit, so those denials leave capacity available.
+                    round_approval_manager = (
+                        approval_manager
+                        if require_tool_approval or approval_context is not None
+                        else None
+                    )
+                    window = (
+                        call_budget.available
+                        if round_approval_manager is not None
+                        else len(tool_calls)
+                    )
+                    decision_calls = tool_calls[:window]
+                    over_limit_tcs = tool_calls[window:]
+                    tool_metadata = tool_metadata[:window]
+
                     # Approval flow: who decides each call (_approval_round).
                     auto_approved_ids, confirmation_call_ids, approval_metadata = (
                         _approval_round(
@@ -3592,11 +3598,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     timed_out = False
                     # Calls refused because nobody can be asked in this turn.
                     unasked_call_ids: set[str] = set()
-                    if (
-                        approval_manager
-                        and approval_metadata
-                        and (require_tool_approval or approval_context is not None)
-                    ):
+                    if round_approval_manager is not None and approval_metadata:
                         if approval_context is None:
                             raise OpenAIException(
                                 "Missing approval context for tool approval flow"
@@ -3611,7 +3613,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         if pending_approval_ids is not None:
                             pending_approval_ids.add(approval_id)
 
-                        await approval_manager.request_approval(
+                        await round_approval_manager.request_approval(
                             approval_id=approval_id,
                             tool_call_ids=tool_call_ids,
                             tenant_id=approval_context["tenant_id"],
@@ -3626,7 +3628,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             approval_id=approval_id,
                         )
 
-                        wait_result = await approval_manager.wait_for_approval(
+                        wait_result = await round_approval_manager.wait_for_approval(
                             approval_id
                         )
                         if pending_approval_ids is not None:
@@ -3691,16 +3693,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             ],
                         )
 
-                        approved_tcs: list[_AccumulatedToolCall] = [
-                            tc
-                            for tc in tool_calls
-                            if decision_map.get(tc["id"] or "", (False, None))[0]
-                        ]
-                        denied_tcs: list[_AccumulatedToolCall] = [
-                            tc
-                            for tc in tool_calls
-                            if not decision_map.get(tc["id"] or "", (False, None))[0]
-                        ]
+                        approved_ids = {
+                            call_id
+                            for call_id, (approved, _) in decision_map.items()
+                            if approved
+                        }
                     else:
                         # Nobody can be asked in this turn: a call that needs
                         # the person's decision is refused and never runs.
@@ -3711,14 +3708,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 tool_metadata, unasked_call_ids
                             ),
                         )
-                        approved_tcs = [
-                            tc for tc in tool_calls if tc["id"] not in unasked_call_ids
-                        ]
-                        denied_tcs: list[_AccumulatedToolCall] = [
-                            tc for tc in tool_calls if tc["id"] in unasked_call_ids
-                        ]
+                        approved_ids = {
+                            tc["id"]
+                            for tc in decision_calls
+                            if tc["id"] is not None and tc["id"] not in unasked_call_ids
+                        }
 
-                    approved_tcs, over_limit_tcs = call_budget.split(approved_tcs)
+                    approved_tcs = [
+                        tc for tc in decision_calls if tc["id"] in approved_ids
+                    ]
+                    denied_tcs = [
+                        tc for tc in decision_calls if tc["id"] not in approved_ids
+                    ]
+                    approved_tcs, excess = call_budget.split(approved_tcs)
+                    over_limit_tcs.extend(excess)
 
                     # Add assistant message with tool calls to conversation
                     if not activation or not activation.assistant_message_appended:
@@ -3803,20 +3806,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "content": result_budget.admit(llm_text),
                                 }
                             )
-                            tool_info = mcp_proxy.get_tool_info(tc["function"]["name"])
-                            if tool_info:
-                                server_name, tool_name, title = tool_info
-                            elif "__" in tc["function"]["name"]:
-                                server_name, tool_name = tc["function"]["name"].split(
-                                    "__", 1
-                                )
-                                title = None
-                            else:
-                                server_name, tool_name, title = (
-                                    "",
-                                    tc["function"]["name"],
-                                    None,
-                                )
+                            server_name, tool_name, title = _tool_names(
+                                mcp_proxy, tc["function"]["name"]
+                            )
                             execution_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
@@ -3889,21 +3881,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self._note_tool_rounds_left(
                         messages, rounds_left=max_rounds - tool_round
                     )
-                    # Follow-up streaming request (keep tools for next round)
-                    follow_up = cast(
-                        AsyncIterator[_LiteLLMStreamChunk],
-                        await self._request_completion(
-                            phase="stream_iteration",
-                            model=self.litellm_model,
-                            messages=messages,
-                            stream=True,
-                            drop_params=True,
-                            stream_options={"include_usage": True},
-                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
-                        ),
-                    )
-
-                    # Drain follow-up stream
+                    follow_up = await next_tool_response()
                     active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,
@@ -3933,6 +3911,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                         messages,
                         refusal=turn_limit.refusal,
                         assistant_content="".join(result.assistant_content) or None,
+                        mcp_proxy=mcp_proxy,
                         calls=[
                             ProviderToolCall(
                                 call_id=tool_call["id"] or "",
@@ -3945,28 +3924,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     if refused:
                         yield Completion(
                             response_type=ResponseType.TOOL_CALL,
-                            tool_calls_metadata=self._refused_calls_metadata(
-                                pending_calls,
-                                refusal=turn_limit.refusal,
-                                resolve_tool_names=_resolve_tool_names,
-                                tool_purpose=_tool_purpose,
-                                tool_is_internal=_tool_is_internal,
-                                tool_is_bundled=_tool_is_bundled,
-                            ),
+                            tool_calls_metadata=refused,
                         )
-                    litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
-                    follow_up = cast(
-                        AsyncIterator[_LiteLLMStreamChunk],
-                        await self._request_completion(
-                            phase="stream_iteration",
-                            model=self.litellm_model,
-                            messages=messages,
-                            stream=True,
-                            drop_params=True,
-                            stream_options={"include_usage": True},
-                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
-                        ),
-                    )
+                    follow_up = await next_tool_response()
                     active_provider_stream = follow_up
                     async for comp in _drain_stream(
                         follow_up,

@@ -300,9 +300,10 @@ The knowledge tools are deliberately paged and capped:
   turn failing.
 - one model response may run at most `MAX_TOOL_CALLS_PER_ROUND` tool calls
   (10 by default) and a turn at most `MAX_TOOL_CALLS_PER_TURN` (60 by default).
-  Calls beyond the first limit are refused with a message the model can act
-  on; reaching the second ends tool use for the turn the same way the round
-  limit does.
+  Eneo asks for approval only for calls that fit in the current response.
+  The model receives the available results and can request a skipped call
+  again if it still needs it. Once the turn reaches its total, the next
+  model request asks for a final answer with tools disabled.
 
 When the aggregate budget is exhausted, later results are replaced with an
 explicit instruction to stop calling tools and answer from the information
@@ -650,8 +651,7 @@ Eneo contains failures at the smallest useful boundary where possible.
 | A tool result is too large | The proxy keeps bounded text and adds a truncation notice; built-in readers offer offset-based continuation. |
 | The turn-wide tool-result budget is exhausted | Results after the one that used it up are withheld. No further tools run: pending calls are refused and one final request without tools asks the model to answer from material already gathered. |
 | One model response asks for more than `MAX_TOOL_CALLS_PER_ROUND` tool calls | The first calls up to the limit run. The rest are refused, each with a result telling the model to work with what it has and ask again later if still needed. |
-| The turn reaches `MAX_TOOL_CALLS_PER_TURN` | Pending calls are refused and one final request without tools asks the model to answer and name anything left unfinished. |
-| The turn reaches `MAX_TOOL_ROUNDS` | Pending calls are refused and one final request without tools asks the model to answer and name anything left unfinished. |
+| The turn reaches `MAX_TOOL_CALLS_PER_TURN` or `MAX_TOOL_ROUNDS` | The next request asks the model to answer with tools disabled. Any further tool call is refused. |
 | A provider stops responding | The request fails after `COMPLETION_REQUEST_TIMEOUT_SECONDS` without a response or, while streaming, without a new chunk, and the turn reports the provider as unavailable. |
 | An external live definition is unknown or changed | It is staged for admin approval and omitted or kept at its prior approved version. |
 | A knowledge document ID is missing or outside scope | The same not-found response is returned in both cases. |

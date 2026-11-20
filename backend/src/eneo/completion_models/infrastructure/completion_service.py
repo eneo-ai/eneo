@@ -1089,6 +1089,11 @@ class CompletionService:
             dispatch_options["useful_output_reserve_tokens"] = (
                 useful_output_reserve_tokens
             )
+        first_request_input_estimate = (
+            prepared_request.input_reserve.tokens
+            if prepared_request is not None
+            else context.token_count
+        )
         if not stream:
             try:
                 completion = await model_adapter.get_response(
@@ -1267,11 +1272,7 @@ class CompletionService:
         total_token_count = (
             adapter_input_estimate
             if adapter_input_estimate is not None
-            else (
-                prepared_request.input_reserve.tokens
-                if prepared_request is not None
-                else context.token_count
-            )
+            else first_request_input_estimate
             + max(
                 final_skill_tokens - initial_skill_tokens,
                 0,
@@ -1282,7 +1283,7 @@ class CompletionService:
             # every request a tool-using turn made.
             log_token_count_drift(
                 model_name=model_adapter.get_model_route(),
-                predicted=total_token_count,
+                predicted=first_request_input_estimate,
                 actual=usage.first_request_prompt_tokens,
             )
 
