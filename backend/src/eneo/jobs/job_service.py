@@ -3,8 +3,15 @@ from uuid import UUID, uuid4
 
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import KNOWLEDGE_TASKS, Job, JobInDb, JobUpdate, Task
-from eneo.jobs.job_repo import JobRepository
+from eneo.jobs.job_models import (
+    KNOWLEDGE_TASKS,
+    Job,
+    JobFailureCode,
+    JobInDb,
+    JobUpdate,
+    Task,
+)
+from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     TaskParams,
@@ -31,14 +38,38 @@ class JobService:
         self.job_repo = job_repo
 
     async def queue_job(
-        self, task: Task, *, name: str, task_params: TaskParams, enqueue: bool = True
+        self,
+        task: Task,
+        *,
+        name: str,
+        task_params: TaskParams,
+        enqueue: bool = True,
+        after_commit: bool = False,
     ) -> JobInDb:
         if task in KNOWLEDGE_TASKS:
             raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
         job_in_db = await self.job_repo.add_job(job=job)
 
-        if enqueue:
+        if not enqueue:
+            return job_in_db
+
+        if after_commit:
+
+            async def enqueue_committed_job() -> None:
+                try:
+                    await job_manager.enqueue(task, job_in_db.id, task_params)
+                except Exception:
+                    logger.exception(
+                        "Committed job could not be queued",
+                        extra={"job_id": str(job_in_db.id), "task": task.value},
+                    )
+
+            after_outer_transaction(
+                self.job_repo.delegate.session.sync_session,
+                on_commit=enqueue_committed_job,
+            )
+        else:
             await job_manager.enqueue(task, job_in_db.id, task_params)
 
         return job_in_db
@@ -108,14 +139,22 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(self, job_id: UUID, error_message: str | None = None):
+    async def fail_job(
+        self,
+        job_id: UUID,
+        error_message: str | None = None,
+        *,
+        failure_code: JobFailureCode | None = None,
+    ):
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
             result_location=error_message,
+            failure_code=failure_code,
         )
-
-        return await self.job_repo.update_job(job_id, job_update)
+        return await self.job_repo.update_job(
+            job_id, job_update, from_statuses=ACTIVE_JOB_STATUSES
+        )
 
     async def get_running_jobs(self):
         return await self.job_repo.get_running_jobs(self.user.id)

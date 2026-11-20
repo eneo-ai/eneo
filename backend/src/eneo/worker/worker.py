@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from functools import wraps
@@ -14,16 +15,17 @@ from dependency_injector import providers
 from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
+from eneo.jobs.job_models import failure_code_for_exception
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType
+from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig
+from eneo.worker.task_manager import TaskManager, WorkerConfig, publish_task_status
 
 logger = get_logger(__name__)
 
@@ -398,38 +400,114 @@ class Worker:
         self,
         with_user: bool = True,
         channel_type: ChannelType | None = None,
+        *,
+        keep_result: int | None = None,
+        max_tries: int | None = None,
+        after_commit: bool = False,
     ):
+        """Claim a job before running it only if its producer dispatches after commit."""
+
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
-                async with sessionmanager.session() as session, session.begin():
-                    user_id = params.user_id if with_user else None
-                    container = await self._create_container(session, user_id=user_id)
+                job_id = _job_id_from_ctx(ctx)
+                assert job_id is not None
+                user_id = params.user_id if with_user else None
 
-                    job_id = _job_id_from_ctx(ctx)
-                    assert job_id is not None
-                    task_manager = container.task_manager(
-                        job_id=job_id,
-                        resource_id=params.id,
-                        channel_type=channel_type,
-                    )
-                    optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
-
-                    async with task_manager.set_status_on_exception():
-                        task_manager.result_location = await func(
-                            params, container=container, **optional_kwargs
+                task_manager: TaskManager | None = None
+                try:
+                    async with sessionmanager.session() as session, session.begin():
+                        container = await self._create_container(
+                            session, user_id=user_id
+                        )
+                        # Hold the job row until the task commits. A reaper skips
+                        # this lock, and late deliveries cannot restart a failed job.
+                        if (
+                            after_commit
+                            and not await container.job_repo().mark_job_started(job_id)
+                        ):
+                            return False
+                        task_manager = container.task_manager(
+                            job_id=job_id,
+                            resource_id=params.id,
+                            channel_type=channel_type,
+                        )
+                        optional_kwargs = self._get_kwargs(
+                            func, task_manager=task_manager
                         )
 
-                    return task_manager.successful()
+                        async with task_manager.set_status_on_exception(
+                            status_already_set=after_commit, transactional=after_commit
+                        ):
+                            if after_commit:
+                                await task_manager.publish_status(Status.IN_PROGRESS)
+                            task_manager.result_location = await func(
+                                params, container=container, **optional_kwargs
+                            )
 
-            self.functions.append(_traced_job("job", wrapper))
+                        success = task_manager.successful()
+                except (Exception, asyncio.CancelledError) as exc:
+                    # The task transaction rolled back. Store the failure separately.
+                    if after_commit and await self._fail_job_after_commit_error(
+                        job_id, user_id, exc
+                    ):
+                        if task_manager is not None:
+                            await task_manager.publish_status(Status.FAILED)
+                        elif channel_type is not None and user_id is not None:
+                            await publish_task_status(
+                                Channel(type=channel_type, user_id=user_id),
+                                RedisMessage(id=params.id, status=Status.FAILED),
+                            )
+                    raise
+
+                assert success is not None
+                if after_commit:
+                    await task_manager.publish_status(
+                        Status.COMPLETE if success else Status.FAILED
+                    )
+                return success
+
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result, max_tries=max_tries)
+                if keep_result is not None or max_tries is not None
+                else traced
+            )
             return wrapper
 
         return decorator
+
+    async def _fail_job_after_commit_error(
+        self,
+        job_id: UUID,
+        user_id: UUID | None,
+        exc: BaseException,
+    ) -> bool:
+        """Record the failure in a fresh session so the job is not left pending
+        until the reaper finds it.
+
+        Like a task's own failure it is stored as its code: a commit error
+        carries SQL with bound values.
+        """
+        code = failure_code_for_exception(exc)
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                container = await self._create_container(session, user_id=user_id)
+                failed = await container.job_service().fail_job(
+                    job_id, failure_code=code
+                )
+            return failed is not None
+        except Exception:
+            logger.error(
+                "Could not record job failure after task rollback",
+                extra={"job_id": str(job_id), "failure_code": code.value},
+            )
+            return False
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
         """Register a cron job.
