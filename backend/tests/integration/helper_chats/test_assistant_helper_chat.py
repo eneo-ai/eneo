@@ -205,6 +205,14 @@ async def test_a_chat_is_opened_once_with_the_assistants_persona_and_no_mode(
         )
     assert hidden is True
     assert persona == ASSISTANT_INSTRUCTIONS
+    # The chat has the assistant's tools only: none of the tool runtime's
+    # functions, and an uploaded file's text is read with the question.
+    own = await client.get(
+        f"/api/v1/assistants/{chat['assistant_id']}/", headers=setup.headers
+    )
+    assert own.status_code == 200, own.text
+    assert own.json()["enabled_capabilities"] == []
+    assert own.json()["inline_file_text"] is True
 
 
 async def test_the_person_changes_model_and_conversation_of_their_chat_but_no_mode(
