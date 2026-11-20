@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   argumentValue,
+  contentTypeHeaderPart,
   longMaterialEligibility,
   newSourceRef,
   readHttpConfig,
@@ -9,6 +10,7 @@ import {
   readRuntimeInput,
   readDeliverable,
   readTemplateFill,
+  runResultUrlFixed,
   stepDeliversArtifact,
   toolArguments,
   withDeliverable,
@@ -131,6 +133,47 @@ describe("HTTP", () => {
       ...stored,
       timeout_seconds: 45
     });
+  });
+
+  it("writes no template for a body that sends the run's result", () => {
+    const stored = {
+      url: "https://hook.example.org",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "json_template", template: '{"a": 1}' },
+      custom_headers: [],
+      response_format: null
+    };
+    const config = readHttpConfig(stored, "output");
+    expect(
+      withHttpConfig(stored, { ...config, body: { ...config.body, mode: "run_result" } }).body
+    ).toEqual({ mode: "run_result" });
+  });
+
+  it("holds a body that sends the run's result to the core's address and header rules", () => {
+    expect(runResultUrlFixed("https://receiver.example.org/eneo/results")).toBe(true);
+    expect(runResultUrlFixed("https://receiver.example.org/{{ flow_input.path }}")).toBe(false);
+    expect(runResultUrlFixed("http://receiver.example.org/eneo/results")).toBe(false);
+    const config = readHttpConfig(
+      { url: "https://receiver.example.org", auth: { mode: "none" }, body: { mode: "run_result" } },
+      "output"
+    );
+    expect(contentTypeHeaderPart(config)).toBeNull();
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        custom_headers: [
+          { name: "X-Trace", value: "1", secret: false },
+          { name: "content-type", value: "text/plain", secret: false }
+        ]
+      })
+    ).toBe("more");
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        auth: { mode: "api_key", header_name: "Content-Type", key: "k" }
+      })
+    ).toBe("auth");
   });
 
   it("round-trips a stored secret as its sentinel and never as a value", () => {

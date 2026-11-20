@@ -165,6 +165,33 @@ describe("describeSaveError", () => {
     ).toBe("input_config.http");
   });
 
+  it("shows a refused body that sends the run's result at the field the core names", () => {
+    const sending = {
+      stepId: "step-3",
+      stepOrder: 3,
+      config: { input_source: "previous_step", output_mode: "http_post" } as const
+    };
+    // The contexts the core raises (`test_validator.py`, the run result body's field and advice).
+    const at = (field: string, httpError: string) =>
+      describeSaveError(
+        refusal("typed_io_http_invalid_config", { field, http_error: httpError }),
+        sending,
+        t
+      );
+    const url = at("output_config.url", "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL");
+    expect(url.anchor).toBe("output_config.http");
+    expect(url.message).toBe(messages.flow_step_editor_http_run_result_url_fixed);
+    const header = at("output_config.custom_headers[1]", "HTTP_CONTENT_TYPE_SET_BY_BODY");
+    expect(header.anchor).toBe("output_config.http.more");
+    expect(header.message).toBe(messages.flow_step_editor_http_run_result_content_type);
+    expect(at("output_config.auth.header_name", "HTTP_CONTENT_TYPE_SET_BY_BODY").anchor).toBe(
+      "output_config.http.auth"
+    );
+    const template = at("output_config.body.template", "HTTP_RUN_RESULT_TAKES_NO_TEMPLATE");
+    expect(template.anchor).toBe("output_config.http.body");
+    expect(template.message).toBe(messages.flow_step_editor_http_run_result_no_template);
+  });
+
   it("names the field of a code without a field in its context", () => {
     expect(
       describeSaveError(refusal("flow_step_security_classification_mismatch"), step, t).anchor

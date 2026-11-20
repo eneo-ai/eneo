@@ -243,7 +243,10 @@ export const HTTP_ERROR_KEYS: Record<string, string> = {
   HTTP_BLOCKED_URL: "http_test_blocked",
   HTTP_RESPONSE_TOO_LARGE: "http_test_response_too_large",
   HTTP_CREDENTIALS_REQUIRE_HTTPS: "flow_step_editor_http_credentials_need_https",
-  HTTP_INVALID_HEADER_NAME: "flow_step_editor_http_header_name_invalid"
+  HTTP_INVALID_HEADER_NAME: "flow_step_editor_http_header_name_invalid",
+  HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL: "flow_step_editor_http_run_result_url_fixed",
+  HTTP_RUN_RESULT_TAKES_NO_TEMPLATE: "flow_step_editor_http_run_result_no_template",
+  HTTP_CONTENT_TYPE_SET_BY_BODY: "flow_step_editor_http_run_result_content_type"
 };
 
 export type Translator = ((key: string, values?: Record<string, string | number>) => string) & {

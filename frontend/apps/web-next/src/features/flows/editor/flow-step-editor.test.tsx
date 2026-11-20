@@ -2504,6 +2504,200 @@ describe("FlowStepEditor deliverables", () => {
     expect(JSON.stringify(changes)).not.toContain("deliverable");
   }, 20_000);
 
+  /** A marked document, then a step that sends its call last. */
+  function resultFlow(
+    http: Record<string, unknown>,
+    deliverable: unknown = { label: "Till Startsidan" }
+  ) {
+    return makeFlow({
+      steps: [
+        makeStep({
+          user_description: "Protokoll",
+          output_mode: "render_verbatim",
+          output_type: "docx",
+          output_config: deliverable ? { deliverable } : null
+        }),
+        makeStep({
+          id: "step-2",
+          step_order: 2,
+          user_description: "Skicka till Startsidan",
+          input_source: "previous_step",
+          output_mode: "http_post",
+          output_config: {
+            url: "https://receiver.example.org/eneo/results",
+            auth: { mode: "none" },
+            timeout_seconds: 30,
+            body: { mode: "auto" },
+            custom_headers: [],
+            response_format: null,
+            ...http
+          }
+        })
+      ]
+    });
+  }
+
+  const bodyChoice = () =>
+    screen.findByRole("combobox", { name: new RegExp(`^${messages.flow_step_editor_http_body}`) });
+
+  async function chooseBody(label: string) {
+    fireEvent.click(await bodyChoice());
+    fireEvent.click(
+      within(
+        await screen.findByRole("listbox", {
+          name: new RegExp(`^${messages.flow_step_editor_http_body}`)
+        })
+      ).getByRole("option", { name: label })
+    );
+  }
+
+  const outputConfigOf = (index: number) =>
+    (
+      patchBodies()[index] as {
+        step_edits: { changes: { output_config: Record<string, unknown> } }[];
+      }
+    ).step_edits[0]!.changes.output_config;
+
+  it("sends the run's result when chosen, keeps it when reopened, and goes back to the step's own result", async () => {
+    const current = storeEdits(
+      resultFlow({ body: { mode: "json_template", template: '{"text": "{{text}}"}' } })
+    );
+    let view = renderEditor(current(), { stepId: "step-2" });
+    expect(
+      await screen.findByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_http_body_template}`)
+      })
+    ).toBeTruthy();
+    await chooseBody(messages.flow_step_editor_http_body_run_result);
+    // The template does not apply: Eneo builds the body.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_http_body_template}`)
+        })
+      ).toBeNull()
+    );
+    expect(
+      screen.getByText(messages.flow_step_editor_http_body_run_result_description)
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        messages.flow_step_editor_http_body_run_result_deliverables.replace(
+          "{labels}",
+          "Till Startsidan"
+        )
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: messages.http_test_button }).getAttribute("aria-disabled")
+    ).toBe("true");
+    await expectNoAxeViolations(view.container);
+    await saveStep();
+    expect(outputConfigOf(0).body).toEqual({ mode: "run_result" });
+    view.unmount();
+
+    view = renderEditor(current(), { stepId: "step-2" });
+    expect((await bodyChoice()).textContent).toContain(
+      messages.flow_step_editor_http_body_run_result
+    );
+    await chooseBody(messages.flow_step_editor_http_body_auto);
+    expect(
+      screen.queryByText(messages.flow_step_editor_http_body_run_result_description)
+    ).toBeNull();
+    await saveStep();
+    expect(outputConfigOf(1).body).toEqual({ mode: "auto" });
+  }, 30_000);
+
+  it("says only the text is sent when no document is marked", async () => {
+    renderEditor(resultFlow({ body: { mode: "run_result" } }, null), { stepId: "step-2" });
+    expect(
+      await screen.findByText(messages.flow_step_editor_http_body_run_result_text_only)
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("holds the run's result to a fixed https address and its own Content-Type before saving", async () => {
+    let view = renderEditor(
+      resultFlow({
+        url: "https://receiver.example.org/{{flow_input.team}}",
+        body: { mode: "run_result" }
+      }),
+      { stepId: "step-2" }
+    );
+    fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_http_run_result_url_fixed)
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_http_url_post}`)
+      })
+    );
+    view.unmount();
+
+    view = renderEditor(
+      resultFlow({
+        body: { mode: "run_result" },
+        custom_headers: [{ name: "content-type", value: "text/plain", secret: false }]
+      }),
+      { stepId: "step-2" }
+    );
+    fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_http_run_result_content_type)
+    ).toBeTruthy();
+    expect(patchBodies()).toHaveLength(0);
+  }, 20_000);
+
+  it.each([
+    {
+      field: "output_config.url",
+      httpError: "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL",
+      message: messages.flow_step_editor_http_run_result_url_fixed,
+      focused: () =>
+        screen.getByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_http_url_post}`)
+        })
+    },
+    {
+      field: "output_config.custom_headers[0]",
+      httpError: "HTTP_CONTENT_TYPE_SET_BY_BODY",
+      message: messages.flow_step_editor_http_run_result_content_type,
+      // The headers' fold opens with focus on its button, as for a refused header name.
+      focused: () =>
+        screen.getByRole("button", {
+          name: new RegExp(messages.flow_step_editor_http_more_title)
+        })
+    }
+  ])(
+    "puts the core's refusal of a body that sends the run's result at its field ($field)",
+    async ({ field, httpError, message, focused }) => {
+      // The context the core raises (`flow_validators_http.py`, `test_validator.py`).
+      api.routes[EDITOR] = () => ({
+        status: 400,
+        body: {
+          message: "Step 2: output_config validation failed",
+          code: "typed_io_http_invalid_config",
+          context: { field, http_error: httpError },
+          eneo_error_code: 9000
+        }
+      });
+      renderEditor(
+        resultFlow({
+          body: { mode: "run_result" },
+          custom_headers: [{ name: "X-Trace", value: "1", secret: false }]
+        }),
+        { stepId: "step-2" }
+      );
+      fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      await waitFor(() => expect(document.activeElement).toBe(focused()));
+      expect(screen.getAllByText(message).length).toBeGreaterThan(0);
+    },
+    20_000
+  );
+
   it("shows a deliverable's label and file name when the step is read only", async () => {
     renderEditor(
       makeFlow({

@@ -33,6 +33,7 @@ import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
 import {
   describeSaveError,
   FIELD_ANCHORS,
+  httpAnchor,
   isStaleRevision,
   type FieldAnchor,
   type FieldProblems
@@ -40,6 +41,7 @@ import {
 import { StepAdvancedSection, parseContract, type ContractDrafts } from "./step-advanced-section";
 import { StepAiSection } from "./step-ai-section";
 import {
+  contentTypeHeaderPart,
   DELIVERABLE_FILE_NAME_MAX,
   DELIVERABLE_LABEL_MAX,
   httpUrlProblem,
@@ -47,6 +49,7 @@ import {
   readHttpConfig,
   readTextProcessingMode,
   readToolConfig,
+  runResultUrlFixed,
   stepDeliversArtifact
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
@@ -739,12 +742,25 @@ function StepEditorSession({
       }
     }
     if (current.output_mode === "http_post") {
-      const problem = httpUrlProblem(readHttpConfig(current.output_config, "output").url);
+      const http = readHttpConfig(current.output_config, "output");
+      const problem = httpUrlProblem(http.url);
       if (problem) {
         problems["output_config.http"] =
           problem === "missing"
             ? t("flow_step_editor_http_url_missing")
             : t("flow_step_editor_http_url_invalid");
+      }
+      // The core's rules for a body that sends the run's result.
+      if (http.body.mode === "run_result") {
+        if (!problem && !runResultUrlFixed(http.url)) {
+          problems["output_config.http"] = t("flow_step_editor_http_run_result_url_fixed");
+        }
+        const part = contentTypeHeaderPart(http);
+        if (part) {
+          problems[httpAnchor("output_config.http", part)] = t(
+            "flow_step_editor_http_run_result_content_type"
+          );
+        }
       }
     }
     // A stale value on a step that delivers no file is not shown, and the core drops it.

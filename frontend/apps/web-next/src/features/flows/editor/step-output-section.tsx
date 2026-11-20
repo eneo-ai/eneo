@@ -140,6 +140,19 @@ function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGrou
   });
 }
 
+/** The labels of the other steps marked as deliverables, in step order. */
+function deliverableLabels(flow: FlowPublic, stepId: string): string[] {
+  return [...flow.steps]
+    .sort((left, right) => left.step_order - right.step_order)
+    .flatMap((step) => {
+      const deliverable =
+        step.id !== stepId && stepDeliversArtifact(step)
+          ? readDeliverable(step.output_config)
+          : null;
+      return deliverable?.label.trim() ? [deliverable.label] : [];
+    });
+}
+
 /**
  * Whether the document is one of the run's results, under which label and
  * file name. The last document always is: it stays unmarked (the core names
@@ -394,6 +407,7 @@ export function StepOutputSection({
                 inputConfig: draft.input_config
               })}
               problems={problems}
+              deliverableLabels={deliverableLabels(flow, stepId)}
             />
           </TemplateScope>
         </Anchor>

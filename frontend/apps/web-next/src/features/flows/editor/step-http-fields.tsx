@@ -20,6 +20,7 @@ import { TemplateTextArea } from "./reference-text-area";
 import { describeSaveError, HTTP_ERROR_KEYS, type FieldProblems } from "./field-problems";
 import {
   headerSent,
+  httpsHostFixed,
   httpUrlProblem,
   isSecretSentinel,
   type HttpBodyMode,
@@ -28,7 +29,6 @@ import {
   type SecretValue
 } from "./step-configs";
 import { httpAuthModeLabel, httpBodyModeLabel } from "./step-labels";
-import { httpBodyModeOptions } from "./step-rules";
 import { insertToken, type VariableGroup } from "./step-variables";
 
 /**
@@ -223,6 +223,14 @@ type TestOutcome = {
   preview: string | null;
 };
 
+const BODY_MODES: readonly HttpBodyMode[] = [
+  "auto",
+  "json_template",
+  "text_template",
+  "none",
+  "run_result"
+];
+
 type TestConfig = Parameters<typeof testHttp>[1]["config"];
 
 /**
@@ -350,7 +358,7 @@ function HttpTest({
       >
         {t(direction === "input" ? "http_test_desc_input" : "http_test_desc_output")}
       </Text>
-      {templated && (
+      {templated && testable && (
         <TextArea
           label={t("http_test_variables_label")}
           description={t("http_test_variables_help")}
@@ -429,7 +437,8 @@ export function HttpFields({
   config,
   onChange,
   groups,
-  problems
+  problems,
+  deliverableLabels = []
 }: {
   formId: string;
   flowId: string;
@@ -439,6 +448,8 @@ export function HttpFields({
   onChange: (config: HttpConfig) => void;
   groups: VariableGroup[];
   problems: FieldProblems;
+  /** The labels of the flow's marked documents, which a body that sends the run's result carries. */
+  deliverableLabels?: readonly string[];
 }) {
   const t = useTranslations();
   // A refused save lands at the part it is about (`field-problems.ts`).
@@ -453,6 +464,7 @@ export function HttpFields({
     config.custom_headers.some((header) => headerSent(header) && !HEADER_NAME.test(header.name));
   const bodyTemplated =
     config.body.mode === "json_template" || config.body.mode === "text_template";
+  const sendsRunResult = config.body.mode === "run_result";
   const urlId = useId();
   const moreId = useId();
   const [showUrlProblem, setShowUrlProblem] = useState(false);
@@ -469,7 +481,7 @@ export function HttpFields({
     (auth.mode !== "none" ||
       config.custom_headers.some((header) => header.secret && headerSent(header))) &&
     url !== "" &&
-    !/^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url);
+    !httpsHostFixed(url);
   const localUrlProblem = !showUrlProblem
     ? null
     : urlProblem === "missing"
@@ -527,14 +539,17 @@ export function HttpFields({
                 : undefined
           }
         />
-        <div>
-          <VariablePicker
-            groups={groups}
-            onInsert={(token) =>
-              onChange({ ...config, url: insertToken(config.url, token, null).text })
-            }
-          />
-        </div>
+        {/* Run data may not choose where the run's result goes. */}
+        {!sendsRunResult && (
+          <div>
+            <VariablePicker
+              groups={groups}
+              onInsert={(token) =>
+                onChange({ ...config, url: insertToken(config.url, token, null).text })
+              }
+            />
+          </div>
+        )}
       </div>
 
       <Anchor formId={formId} anchor={`${base}.auth`} className="flex flex-col gap-4">
@@ -613,11 +628,7 @@ export function HttpFields({
           <Selector
             label={t("flow_step_editor_http_body")}
             description={t("flow_step_editor_http_body_description")}
-            options={httpBodyModeOptions(config.body.mode).map(({ value, disabled }) => ({
-              value,
-              label: httpBodyModeLabel(value, t),
-              disabled
-            }))}
+            options={BODY_MODES.map((mode) => ({ value: mode, label: httpBodyModeLabel(mode, t) }))}
             value={config.body.mode}
             onChange={(value) =>
               onChange({ ...config, body: { ...config.body, mode: value as HttpBodyMode } })
@@ -636,6 +647,20 @@ export function HttpFields({
               code
               status={problemStatus(bodyProblem)}
             />
+          )}
+          {sendsRunResult && (
+            <div className="flex max-w-prose flex-col gap-1">
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {t("flow_step_editor_http_body_run_result_description")}
+              </Text>
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {deliverableLabels.length > 0
+                  ? t("flow_step_editor_http_body_run_result_deliverables", {
+                      labels: deliverableLabels.join(", ")
+                    })
+                  : t("flow_step_editor_http_body_run_result_text_only")}
+              </Text>
+            </div>
           )}
         </Anchor>
       )}
