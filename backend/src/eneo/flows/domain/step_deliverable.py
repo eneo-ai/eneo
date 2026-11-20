@@ -73,6 +73,15 @@ class FlowStepDeliverable(BaseModel):
         return _as_written_one_line(value, max_chars=DELIVERABLE_FILE_NAME_MAX_CHARS)
 
 
+class FlowStepDeliverableError(ValueError):
+    """A deliverable of the wrong form, with the path of its first wrong
+    field (`output_config.deliverable.label`), where an editor shows it."""
+
+    def __init__(self, message: str, *, field: str) -> None:
+        super().__init__(message)
+        self.field = field
+
+
 def parse_flow_step_deliverable(output_config: object) -> FlowStepDeliverable | None:
     """The deliverable ``output_config`` marks, or None when it has no
     ``deliverable`` key. Only its form is checked: whether the step can
@@ -92,7 +101,14 @@ def parse_flow_step_deliverable(output_config: object) -> FlowStepDeliverable | 
             f"{'.'.join(str(part) for part in error['loc']) or 'value'}: {error['msg']}"
             for error in exc.errors()
         )
-        raise ValueError(f"output_config.deliverable is invalid: {reasons}") from exc
+        first_loc = exc.errors()[0]["loc"]
+        raise FlowStepDeliverableError(
+            f"output_config.deliverable is invalid: {reasons}",
+            field=".".join(
+                ["output_config", FLOW_STEP_DELIVERABLE_KEY]
+                + [str(part) for part in first_loc]
+            ),
+        ) from exc
 
 
 def file_name_expressions(file_name: str) -> list[str] | None:

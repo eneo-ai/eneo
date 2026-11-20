@@ -37,6 +37,7 @@ from eneo.flows.domain.speaker_mapping_config import (
 )
 from eneo.flows.domain.step_deliverable import (
     FLOW_STEP_DELIVERABLE_KEY,
+    FlowStepDeliverableError,
     file_name_expressions,
     form_field_read_by,
     parse_flow_step_deliverable,
@@ -1068,11 +1069,11 @@ def _validate_deliverable(
 
     try:
         deliverable = parse_flow_step_deliverable(step.output_config)
-    except ValueError as exc:
+    except FlowStepDeliverableError as exc:
         raise FlowStepValidationError(
             f"Step {step.step_order}: {exc}",
             step_order=step.step_order,
-            context={"field": _DELIVERABLE_PATH},
+            context={"field": exc.field},
         ) from exc
     if deliverable is None:
         return

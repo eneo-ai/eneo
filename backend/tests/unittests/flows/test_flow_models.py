@@ -1487,3 +1487,71 @@ def test_a_sparse_step_patch_may_carry_only_a_deliverable() -> None:
         FlowEditorStepPatch.model_validate(
             {"output_config": {"deliverable": {"label": "Plan", "kind": "x"}}}
         )
+
+
+@pytest.mark.parametrize(
+    ("deliverable", "field", "error_type"),
+    [
+        ({"label": " Standup"}, "label", "value_error"),
+        ({"label": "Standup\nEneo"}, "label", "value_error"),
+        ({"label": "x" * 121}, "label", "value_error"),
+        ({}, "label", "missing"),
+        (
+            {"label": "Standup", "file_name": "Standup  Eneo"},
+            "file_name",
+            "value_error",
+        ),
+        ({"label": "Standup", "file_name": "a\r\nb"}, "file_name", "value_error"),
+        ({"label": "Standup", "file_name": "x" * 201}, "file_name", "value_error"),
+    ],
+)
+def test_a_malformed_deliverable_is_reported_at_its_field(
+    deliverable: dict[str, object], field: str, error_type: str
+) -> None:
+    # The editor places an error by its location: one ending on
+    # `output_config` would land on the step's other output settings.
+    from eneo.flows.api.flow_models import FlowEditorStepChange
+
+    output_config = {"deliverable": deliverable}
+    with pytest.raises(ValidationError) as full:
+        FlowUpdateRequest.model_validate(
+            {
+                "steps": [
+                    _payload(
+                        output_mode="render_verbatim",
+                        output_type="docx",
+                        output_config=output_config,
+                    )
+                ]
+            }
+        )
+    with pytest.raises(ValidationError) as sparse:
+        FlowEditorStepChange.model_validate(
+            {"step_id": str(uuid4()), "changes": {"output_config": output_config}}
+        )
+
+    for caught in (full, sparse):
+        errors = caught.value.errors()
+        assert [(error["loc"][-3:], error["type"]) for error in errors] == [
+            (("output_config", "deliverable", field), error_type)
+        ]
+
+
+def test_a_step_request_with_a_deliverable_dumps_as_it_was_sent() -> None:
+    import warnings
+
+    output_config = {"deliverable": {"label": "Plan"}, "citation_mode": "off"}
+    request = FlowStepCreateRequest.model_validate(
+        _payload(
+            output_mode="render_verbatim",
+            output_type="docx",
+            output_config=output_config,
+        )
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dumped = request.model_dump(mode="json")
+        request.model_dump()
+
+    assert dumped["output_config"] == output_config

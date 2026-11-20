@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date, datetime
-from typing import Annotated, Any, Literal, Self, TypeAlias, cast
+from typing import Annotated, Any, Literal, NotRequired, Self, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import (
@@ -12,14 +12,20 @@ from pydantic import (
     BeforeValidator,
     ConfigDict,
     Field,
+    GetPydanticSchema,
+    PlainSerializer,
     StrictInt,
     StringConstraints,
+    ValidatorFunctionWrapHandler,
     WithJsonSchema,
+    WrapValidator,
     computed_field,
     field_validator,
     model_validator,
+    with_config,
 )
 from pydantic.config import JsonDict
+from typing_extensions import TypedDict
 
 from eneo.ai_models.completion_models.completion_model import (
     CompletionModelSparse,
@@ -112,7 +118,6 @@ from eneo.flows.domain.runtime import StepDiagnosticSeverity
 from eneo.flows.domain.step_deliverable import (
     FLOW_STEP_DELIVERABLE_KEY,
     FlowStepDeliverable,
-    parse_flow_step_deliverable,
 )
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
@@ -221,12 +226,29 @@ class FlowEvidenceExportTooLargeError(BaseModel):
 
 def _validate_flow_step_output_config(value: object) -> object:
     parse_flow_step_retrieval_policy(value)
-    parse_flow_step_deliverable(value)
     return value
 
 
+@with_config(ConfigDict(extra="allow"))
+class _FlowStepOutputConfigShape(TypedDict):
+    deliverable: NotRequired[FlowStepDeliverable]
+
+
+def _keep_as_sent(value: object, check: ValidatorFunctionWrapHandler) -> object:
+    check(value)
+    return value
+
+
+# The deliverable is checked as a model, so an error is placed at its field
+# (`output_config.deliverable.label`), where an editor shows it; the dict is
+# kept, and dumped, as sent, so the stored config is unchanged.
 FlowStepOutputConfigRequest: TypeAlias = Annotated[
     dict[str, Any],
+    GetPydanticSchema(
+        lambda _source, handler: handler.generate_schema(_FlowStepOutputConfigShape)
+    ),
+    WrapValidator(_keep_as_sent),
+    PlainSerializer(lambda value: value, return_type=dict[str, Any]),
     BeforeValidator(_validate_flow_step_output_config),
     WithJsonSchema(
         {
@@ -774,7 +796,11 @@ class FlowStepCreateRequest(BaseModel):
     input_bindings: dict[str, Any] | None = None
     output_classification_override: int | None = None
     input_config: FlowStepInputConfigValue | None = None
-    output_config: FlowStepOutputConfigRequest | None = None
+    # Set: pydantic leaves a field's title out when its schema checks a typed
+    # dict, and the published schema keeps the title it had.
+    output_config: FlowStepOutputConfigRequest | None = Field(
+        default=None, title="Output Config"
+    )
     review_policy: FlowStepReviewPolicy | None = Field(
         default=None,
         description=FLOW_STEP_REVIEW_POLICY_DESCRIPTION,

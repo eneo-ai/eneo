@@ -4515,3 +4515,23 @@ def test_deliverable_file_name_needs_a_form_that_has_the_field(
 
     with pytest.raises(BadRequestException, match="not a field of the form"):
         _publish(step, metadata_json=metadata_json)
+
+
+@pytest.mark.parametrize(
+    ("deliverable", "field"),
+    [
+        ({"label": " Standup"}, "label"),
+        ({}, "label"),
+        ({"label": "Standup", "file_name": "a\nb"}, "file_name"),
+        ({"label": "Standup", "file_name": "x" * 201}, "file_name"),
+    ],
+)
+def test_a_malformed_deliverable_is_refused_at_its_field(
+    deliverable: dict[str, object], field: str
+) -> None:
+    # A step copied without validation (as a rewrite of its references makes
+    # it) reaches publish unchecked.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step(deliverable))
+
+    assert caught.value.context["field"] == f"output_config.deliverable.{field}"
