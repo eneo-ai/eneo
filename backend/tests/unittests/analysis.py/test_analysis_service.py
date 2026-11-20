@@ -175,19 +175,17 @@ async def test_insight_job_poll_rechecks_access_after_revocation(
         await get_conversation_insight_job(job_id=job_id, container=container)
 
 
-@pytest.mark.parametrize("invalid_target", ["missing", "other_tenant"])
-async def test_insight_job_poll_rejects_invalid_persisted_access_target(
+async def test_insight_job_poll_rejects_a_job_from_another_tenant(
     service: AnalysisService,
     mock_actor: SpaceActor,
-    invalid_target: str,
 ):
     now = datetime.now(timezone.utc)
     job = AnalysisJob(
         job_id=uuid4(),
-        tenant_id=uuid4() if invalid_target == "other_tenant" else TEST_UUID,
+        tenant_id=uuid4(),
         status=AnalysisJobStatus.COMPLETED,
         question="What happened?",
-        assistant_id=None if invalid_target == "missing" else uuid4(),
+        assistant_id=uuid4(),
         answer="Private insight answer",
         created_at=now,
         updated_at=now,

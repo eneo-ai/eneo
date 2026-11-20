@@ -583,8 +583,6 @@ class AnalysisService:
         """Recheck access to the resource behind a persisted insight result."""
         if job.tenant_id != self.user.tenant_id:
             raise NotFoundException("Insights analysis job not found")
-        if job.assistant_id is None:
-            raise NotFoundException("Insights analysis job not found")
         await self._check_insight_access(assistant_id=job.assistant_id)
 
     async def get_questions_since(

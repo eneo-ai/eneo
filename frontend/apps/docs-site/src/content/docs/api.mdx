@@ -52,6 +52,8 @@ Polling `GET /api/v1/analysis/conversation-insights/jobs/{job_id}/` checks the
 caller's current insight access to the job's assistant. A caller
 whose access was revoked after starting the job receives `403`; a missing job
 returns `404`. Knowing the job ID alone does not grant access to its answer.
+An insights job queued for a group chat before the upgrade keeps its job ID
+and uses the assistant created from that group. Poll its result at the same URL.
 
 The assistant question-history endpoints under `/api/v1/analysis/assistants/{assistant_id}/`
 also check insight access before reading questions. In shared and organization
