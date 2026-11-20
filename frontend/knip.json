@@ -15,6 +15,7 @@
       "entry": [
         "scripts/audit-dependencies.mjs",
         "scripts/audit-dependencies.test.mjs",
+        "scripts/remote-functions-off.test.mjs",
         "scripts/security-patches.test.mjs"
       ]
     },

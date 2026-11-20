@@ -105,3 +105,32 @@ test("malformed reports fail instead of reporting a clean audit", () => {
     assert.throws(() => evaluate(report, NOW));
   }
 });
+
+const remoteFormDos = advisory("high", {
+  url: "https://github.com/advisories/GHSA-3r8g-jcqq-3p5j",
+  vulnerable_versions: ">=2.42.0 <=3.1.0",
+});
+const remoteFunctionsCheck = "scripts/remote-functions-off.test.mjs";
+
+test("the remote functions form advisory is accepted only while its check passes", () => {
+  const report = { "@sveltejs/kit": [remoteFormDos] };
+  assert.equal(evaluate(report, NOW).accepted.length, 1);
+  const failed = evaluate(report, NOW, [remoteFunctionsCheck]);
+  assert.equal(failed.accepted.length, 0);
+  assert.match(failed.errors.join("\n"), /@sveltejs\/kit: high .*GHSA-3r8g/);
+  assert.match(
+    failed.errors.join("\n"),
+    /GHSA-3r8g.*remote-functions-off\.test\.mjs failed/,
+  );
+  assert.equal(
+    evaluate(
+      {
+        "@sveltejs/kit": [
+          { ...remoteFormDos, vulnerable_versions: ">=2.42.0 <=3.2.0" },
+        ],
+      },
+      NOW,
+    ).errors.length,
+    1,
+  );
+});

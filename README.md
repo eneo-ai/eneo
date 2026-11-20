@@ -112,7 +112,7 @@ cd eneo && code .
 Modern microservices architecture with clean separation of concerns:
 
 - **Frontend**: SvelteKit, TypeScript, Tailwind CSS
-- **Backend**: FastAPI (Python 3.11+), SQLAlchemy
+- **Backend**: FastAPI (Python 3.11.5 or later in the 3.11 series), SQLAlchemy
 - **Database**: PostgreSQL with pgvector
 - **Cache/Queue**: Redis with ARQ workers
 - **Deployment**: Docker Compose with Traefik
