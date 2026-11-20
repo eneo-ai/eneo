@@ -258,7 +258,7 @@ describe("CompanionLayout", () => {
      * the aside). Each scroller's offset is kept here.
      */
     function layOutByHand() {
-      const scrolled = { page: 650, content: 0 };
+      const scrolled = { page: 690, content: 0 };
       const ownBox = scrollBox();
       const ownScroll = () => ownBox.getAttribute("role") === "region";
       const offset = () => (ownScroll() ? scrolled.content : scrolled.page);
@@ -327,25 +327,26 @@ describe("CompanionLayout", () => {
       );
     }
 
-    it("keeps the section being read where it was as the content starts scrolling on its own", () => {
+    it("keeps the part being read at the top of the view as the content starts and stops scrolling on its own", () => {
       renderInApp(<SettingsPage />);
       measureRow(1200);
       act(() => reportResize(screen.getByTestId("scroller"), { width: 1200, height: 640 }));
       const { scrolled, sectionTop } = layOutByHand();
-      // Funktioner starts 50 px down the view, under the header.
-      expect(sectionTop()).toBe(50);
+      // The header's edge (160 px) crosses Funktioner a quarter of the way down.
+      expect(sectionTop()).toBe(10);
 
       openAside();
       expect(screen.getByRole("region", { name: "Inställningarna" })).toBe(scrollBox());
-      expect(sectionTop()).toBe(50);
-      expect(scrolled.content).toBe(950);
+      // Taller beside the aside, it is still crossed a quarter of the way down.
+      expect(sectionTop()).toBe(160 - 800 / 4);
+      expect(scrolled.content).toBe(1040);
       // The page had nothing left to scroll meanwhile.
       scrolled.page = 0;
 
       fireEvent.click(screen.getByRole("button", { name: "Stäng hjälpen" }));
       expect(screen.queryByRole("region", { name: "Inställningarna" })).toBeNull();
-      expect(sectionTop()).toBe(50);
-      expect(scrolled.page).toBe(650);
+      expect(sectionTop()).toBe(10);
+      expect(scrolled.page).toBe(690);
     });
   });
 

@@ -52,14 +52,25 @@ function useViewHeight(ref: RefObject<HTMLElement | null>): number | null {
   return height;
 }
 
-/** Where the person is reading: an element at the top of the view, and how far below that top it starts. */
-type ReadingPlace = { element: Element; offset: number };
+/**
+ * Where the person is reading: an element at the top of the view, and where
+ * it is against that top. One that starts below it keeps how far below
+ * (`offset`). One the top crosses keeps the share of it above the top
+ * (`share`): where it reflows (a description that wraps onto one more line),
+ * the same part of it stays at the top, and what follows it moves only by
+ * what it grew below the top.
+ */
+type ReadingPlace = { element: Element; offset: number } | { element: Element; share: number };
+
+/** A child of the content as `readingPlace` reads it. */
+type Laid = { child: Element; box: DOMRect; position: string };
 
 /**
  * The top of what `scroller` shows of `content`, below what sticks there (a
- * sticky header), and the person's place under it: the first element that
- * reaches below that line, stepping into one that starts on or above it
- * (where what sticks may be) until one starts below it or has nothing to
+ * sticky header), and the person's place under it: the element that reaches
+ * below that line and starts highest (in a row, the item that starts with
+ * the row, not one centred in it), stepping into one that starts on or above
+ * it (where what sticks may be) until one starts below it or has nothing to
  * step into, so a long section gives a place inside it. Sticky and
  * positioned elements are no place: they stay where they are.
  */
@@ -72,22 +83,29 @@ function readingPlace(
   let place: ReadingPlace | null = null;
   let parent: Element | null = content;
   while (parent) {
-    let crossing: Element | null = null;
-    for (const child of parent.children) {
+    const children: Laid[] = [...parent.children].flatMap((child): Laid[] => {
       const box = child.getBoundingClientRect();
-      if (box.height === 0) continue;
-      const { position } = getComputedStyle(child);
-      if (position === "sticky") {
-        // Resting against the top of the view, it hides what scrolls under it.
-        if (box.top <= top + 1 && box.bottom > line) line = box.bottom;
-        continue;
-      }
-      if (position === "fixed" || position === "absolute" || box.bottom <= line) continue;
-      place = { element: child, offset: box.top - line };
-      crossing = box.top <= line ? child : null;
-      break;
+      // Above the view, or no box: neither a place nor what sticks at its top.
+      if (box.height === 0 || box.bottom <= top) return [];
+      return [{ child, box, position: getComputedStyle(child).position }];
+    });
+    for (const { box, position } of children) {
+      // Resting against the top of the view, it hides what scrolls under it.
+      if (position === "sticky" && box.top <= top + 1 && box.bottom > line) line = box.bottom;
     }
-    parent = crossing;
+    let next: Laid | null = null;
+    for (const candidate of children) {
+      if (["sticky", "fixed", "absolute"].includes(candidate.position)) continue;
+      if (candidate.box.bottom <= line) continue;
+      if (!next || candidate.box.top < next.box.top) next = candidate;
+    }
+    if (!next) break;
+    const { child, box } = next;
+    place =
+      box.top <= line
+        ? { element: child, share: (line - box.top) / box.height }
+        : { element: child, offset: box.top - line };
+    parent = box.top <= line ? child : null;
   }
   return { line, place };
 }
@@ -95,9 +113,9 @@ function readingPlace(
 /**
  * Keeps the person's place in the content when the scroller that shows it
  * changes (the content starts or stops scrolling on its own as the aside
- * opens or closes beside it, or the window changes the aside's room): the
- * element at the top of the view stays where it was, however the content's
- * new width reflows it. The place is read before the change is drawn
+ * opens or closes beside it, or the window changes the aside's room): what
+ * is at the top of the view stays there, however the content's new width
+ * reflows it (`ReadingPlace`). The place is read before the change is drawn
  * (`getSnapshotBeforeUpdate`, which no hook offers) and restored after it,
  * before the change is painted.
  */
@@ -132,7 +150,9 @@ class ReadingPlaceKeeper extends Component<{
     const scroller = this.scroller(this.props.ownScroll);
     if (!place || !content || !scroller || !place.element.isConnected) return;
     const { line } = readingPlace(scroller, content);
-    scroller.scrollTop += place.element.getBoundingClientRect().top - line - place.offset;
+    const box = place.element.getBoundingClientRect();
+    const top = "share" in place ? line - place.share * box.height : line + place.offset;
+    scroller.scrollTop += box.top - top;
   }
 
   override render() {

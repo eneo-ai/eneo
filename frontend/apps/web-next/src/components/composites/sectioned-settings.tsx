@@ -91,7 +91,9 @@ export type SectionedSettingsHandle = {
    * Shows a section, or a control in it (`control`: the element's id, the
    * control itself or a container whose first usable control is meant), and
    * moves focus there, clear of the sticky header: on a phone's index its
-   * section opens first. A section, or a control that cannot take focus (a
+   * section opens first. A control's whole row or card is shown where it
+   * fits, clear of the view's bottom edge too, and nothing scrolls while it
+   * is in view already. A section, or a control that cannot take focus (a
    * disabled field), puts focus on the section's heading. False when the
    * section is not in the editor.
    */
@@ -196,6 +198,43 @@ function controlIn(element: HTMLElement): HTMLElement | null {
   const checked = element.querySelector<HTMLElement>('input[type="radio"]:checked');
   if (checked && usable(checked)) return checked;
   return [...element.querySelectorAll<HTMLElement>(FOCUSABLE)].find(usable) ?? null;
+}
+
+/** The nearest ancestor that scrolls up and down (the page's, or the editor's own), else the document's. */
+function scrollerOf(element: HTMLElement): Element | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return node;
+  }
+  return document.scrollingElement;
+}
+
+/** The bottom edge of what the window shows of `element`: the highest of the boxes that clip it. */
+function visibleBottom(element: HTMLElement): number {
+  let bottom = window.innerHeight;
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (getComputedStyle(node).overflowY !== "visible") {
+      bottom = Math.min(bottom, node.getBoundingClientRect().bottom);
+    }
+  }
+  return bottom;
+}
+
+/** The room a setting the editor shows keeps from the bottom edge of the view, in px. */
+const ROOM_BELOW = 24;
+
+/**
+ * Scrolls `element` into the view between `top` (the sticky header's edge)
+ * and `bottom`: below the header by its scroll margin, or `ROOM_BELOW` clear
+ * of the bottom edge. Nothing moves while it is in view already.
+ */
+function scrollIntoRoom(element: HTMLElement, top: number, bottom: number) {
+  const box = element.getBoundingClientRect();
+  if (box.top >= top && box.bottom <= bottom) return;
+  const margin = element.style.scrollMarginBottom;
+  element.style.scrollMarginBottom = `${ROOM_BELOW}px`;
+  element.scrollIntoView({ block: "nearest" });
+  element.style.scrollMarginBottom = margin;
 }
 
 /**
@@ -399,24 +438,8 @@ function SettingsLayout({
   const visibleActiveId = sections.some((section) => section.id === activeId)
     ? activeId
     : (sections[0]?.id ?? "");
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActiveId(visible[0].target.id);
-      },
-      { rootMargin: "-128px 0px -55% 0px" }
-    );
-    for (const id of sectionIds.split(",")) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
-    return () => observer.disconnect();
-  }, [sectionIds]);
+  const ownRootRef = useRef<HTMLDivElement>(null);
+  const rootRef = views?.rootRef ?? ownRootRef;
 
   // The header's height, for the anchors' scroll margin and the list's sticky
   // offset: taller with the strip below 1024 px than without it. A phone hides
@@ -433,6 +456,64 @@ function SettingsLayout({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  // The link marked is the section under the sticky header at the top of the
+  // view, and the last section once the view has reached the end, unless the
+  // person chose the link of one that could not come any higher. It follows
+  // whichever scroller shows the editor, the page's or its own beside an
+  // aside: scroll events do not bubble, but they pass the document on their
+  // way to their scroller.
+  const chosenRef = useRef<string | null>(null);
+  const choose = (id: string) => {
+    chosenRef.current = id;
+    setActiveId(id);
+  };
+  useEffect(() => {
+    const root = rootRef.current;
+    const header = headerRef.current;
+    if (!root || !header) return;
+    const ids = sectionIds.split(",");
+    let frame = 0;
+    const mark = () => {
+      frame = 0;
+      // A phone's index and its sections hide the header, and the links with it.
+      if (header.getClientRects().length === 0) return;
+      const shown = ids.flatMap((id) => {
+        const section = document.getElementById(id);
+        return section && section.getClientRects().length > 0 ? [section] : [];
+      });
+      const last = shown.at(-1);
+      if (!last) return;
+      const scroller = scrollerOf(root);
+      const end = scroller ? scroller.scrollHeight - scroller.clientHeight : 0;
+      // At the end, or with nothing to scroll: the view can come no further.
+      const atEnd = scroller !== null && scroller.scrollTop >= end - 1;
+      const chosen = atEnd ? shown.find((section) => section.id === chosenRef.current) : undefined;
+      if (!atEnd) chosenRef.current = null;
+      // The first section that still reaches below the header's edge.
+      const line = header.getBoundingClientRect().bottom + 1;
+      const under = shown.find((section) => section.getBoundingClientRect().bottom > line) ?? last;
+      setActiveId((chosen ?? (atEnd && end > 1 ? last : under)).id);
+    };
+    const schedule = (event?: Event) => {
+      // Another scroller (the aside's, a list's own) moved nothing of the editor.
+      if (event?.target instanceof Element && !event.target.contains(root)) return;
+      frame ||= requestAnimationFrame(mark);
+    };
+    const resized =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => schedule());
+    resized?.observe(root);
+    document.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      resized?.disconnect();
+      document.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [rootRef, sectionIds]);
+
   // Centred on its own page; under a frame's header, the pages' column (72rem) with this
   // layout's own px-6 on each side, so its text starts on the header's line.
   const width = isFramed ? "mx-auto max-w-[75rem]" : "mx-auto max-w-4xl lg:max-w-[74rem]";
@@ -454,8 +535,6 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
-  const ownRootRef = useRef<HTMLDivElement>(null);
-  const rootRef = views?.rootRef ?? ownRootRef;
   useImperativeHandle(
     handleRef,
     () => ({
@@ -475,9 +554,17 @@ function SettingsLayout({
         // The scroll margin under the sticky header keeps both in view below it.
         if (target && focus) {
           focus.focus({ preventScroll: true });
-          // The setting's row, then its control within it where the row is taller than the view.
-          target.scrollIntoView({ block: "nearest" });
-          if (focus !== target) focus.scrollIntoView({ block: "nearest" });
+          // The setting's whole row or card where it fits in the view, else the
+          // setting itself; then its control, where that is still out of view.
+          const top = headerRef.current?.getBoundingClientRect().bottom ?? 0;
+          const bottom = visibleBottom(target);
+          const row = target.closest<HTMLElement>("[data-settings-group-body] > *");
+          const whole =
+            row && row.getBoundingClientRect().height <= bottom - top - 2 * ROOM_BELOW
+              ? row
+              : target;
+          scrollIntoRoom(whole, top, bottom);
+          if (focus !== whole) scrollIntoRoom(focus, top, bottom);
         } else {
           focusHeadingOf(element, { preventScroll: true });
           element.scrollIntoView({ block: "start" });
@@ -588,7 +675,7 @@ function SettingsLayout({
           {header}
           <TabList
             value={visibleActiveId}
-            onChange={setActiveId}
+            onChange={choose}
             overflow="scroll"
             aria-label={navigationLabel}
             className="-mb-px lg:hidden"
@@ -640,7 +727,7 @@ function SettingsLayout({
                 icon={section.icon}
                 href={`#${section.id}`}
                 isSelected={section.id === visibleActiveId}
-                onClick={() => setActiveId(section.id)}
+                onClick={() => choose(section.id)}
                 endContent={section.mark ? <SectionMark text={section.mark} /> : undefined}
               />
             ));

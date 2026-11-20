@@ -109,6 +109,30 @@ export function SettingsGroup({
   children: React.ReactNode;
 }) {
   const action = useContext(GroupActionContext);
+  // A lone title sits on its action's centre line (a 44 px touch button would leave
+  // it 10 px high); beside a title and a description the action stays at the top.
+  const align = description ? "items-start" : "items-center";
+  const heading = (
+    <div
+      className={cn(
+        "flex flex-wrap justify-between gap-3",
+        align,
+        // Beside the page's action it takes the rest of the row, never less than
+        // 10 rem or the widest thing in it that cannot wrap (a header button).
+        action ? "min-w-min grow basis-40" : undefined
+      )}
+    >
+      <div className="min-w-0">
+        <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
+        {description ? <p className="text-muted-foreground mt-0.5 text-sm">{description}</p> : null}
+      </div>
+      {headerEnd ? (
+        <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
+          {headerEnd}
+        </div>
+      ) : null}
+    </div>
+  );
   return (
     <section
       id={id}
@@ -116,29 +140,25 @@ export function SettingsGroup({
       className={cn("bg-card scroll-mt-32 rounded-xl border", IN_PHONE_SECTION.card)}
     >
       <div className={cn("border-b px-5 py-4", IN_PHONE_SECTION.header)}>
-        {/* A lone title sits on its action's centre line (a 44 px touch button would leave
-            it 10 px high); beside a title and a description the action stays at the top. */}
-        <div
-          className={cn(
-            "flex flex-wrap justify-between gap-3",
-            description ? "items-start" : "items-center"
-          )}
-        >
-          <div className="min-w-0">
-            <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
-            {description ? (
-              <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
-            ) : null}
-          </div>
-          {headerEnd || action ? (
-            <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
-              {headerEnd}
+        {action ? (
+          // The page's action keeps the end of the title's row: the description and the
+          // header's own actions wrap beside it. It goes under them only where they
+          // would not fit beside it.
+          <div className={cn("flex flex-wrap justify-between gap-3", align)}>
+            {heading}
+            <div data-settings-group-end="" className="flex shrink-0">
               {action}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          heading
+        )}
       </div>
-      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>
+      {/* Each child is a setting's row or card: what the editor shows whole for the setting. */}
+      <div
+        data-settings-group-body=""
+        className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}
+      >
         <GroupActionContext.Provider value={null}>{children}</GroupActionContext.Provider>
       </div>
     </section>

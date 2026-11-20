@@ -670,7 +670,20 @@ describe("SectionedSettings: a section's own control, and showing a setting", ()
     const ends = [...document.querySelectorAll("[data-settings-group-end]")];
     expect(
       ends.map((end) => [...end.querySelectorAll("button")].map((b) => b.textContent))
-    ).toEqual([["Historik", "Fråga om Allmänt"], ["Fråga om AI"]]);
+    ).toEqual([["Historik"], ["Fråga om Allmänt"], ["Fråga om AI"]]);
+    // It ends the row its title starts; the group's own actions wrap with the
+    // title and its description beside it, so they never take it off that row.
+    for (const name of ["Allmänt", "AI"]) {
+      const end = screen
+        .getByRole("button", { name: `Fråga om ${name}` })
+        .closest("[data-settings-group-end]")!;
+      const row = end.parentElement!;
+      expect(row.lastElementChild).toBe(end);
+      expect(row.firstElementChild!.contains(screen.getByRole("heading", { name }))).toBe(true);
+    }
+    expect(screen.getByRole("heading", { name: "Allmänt" }).parentElement!.nextElementSibling).toBe(
+      screen.getByRole("button", { name: "Historik" }).parentElement
+    );
   });
 
   it("leaves the heading rows as they were without one", () => {
