@@ -42,6 +42,23 @@ describe("anchorForPath", () => {
   });
 });
 
+describe("anchorForPath for a deliverable", () => {
+  it("puts a refused label or file name at its own field, also on a Word template step", () => {
+    for (const output_mode of ["template_fill", "render_verbatim"] as const) {
+      const config = { input_source: "previous_step", output_mode } as const;
+      expect(anchorForPath("output_config.deliverable.file_name", config)).toBe(
+        "output_config.deliverable.file_name"
+      );
+      expect(anchorForPath("output_config.deliverable.label", config)).toBe(
+        "output_config.deliverable.label"
+      );
+      expect(anchorForPath("output_config.deliverable", config)).toBe(
+        "output_config.deliverable.label"
+      );
+    }
+  });
+});
+
 describe("refusalAnchor", () => {
   it("opens a publish refusal where the editor shows its field, then its code's field", () => {
     expect(refusalAnchor({ field: "prompt", reference: "datun" }, "x", step.config)).toBe("prompt");

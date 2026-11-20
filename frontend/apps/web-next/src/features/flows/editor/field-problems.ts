@@ -39,6 +39,8 @@ export const FIELD_ANCHORS = [
   // The first of the template's fields that needs a value.
   "output_config.template.fields",
   "output_config.speaker_mapping",
+  "output_config.deliverable.label",
+  "output_config.deliverable.file_name",
   "output_config.citation_mode",
   "output_config.retrieval_policy",
   "review_policy",
@@ -85,7 +87,7 @@ export function anchorForPath(
   path: string,
   step: Pick<StepConfig, "input_source" | "output_mode">
 ): FieldAnchor | null {
-  const [head = "", second = ""] = path.split(".");
+  const [head = "", second = "", third = ""] = path.split(".");
   if (head === "input_config") {
     if (second === "tool") return "input_config.tool";
     if (second === "runtime_input") return "input_config.runtime_input";
@@ -99,6 +101,12 @@ export function anchorForPath(
     if (second === "speaker_mapping") return "output_config.speaker_mapping";
     if (second === "citation_mode") return "output_config.citation_mode";
     if (second === "retrieval_policy") return "output_config.retrieval_policy";
+    // Before the template's catch-all: a Word template step is a deliverable too.
+    if (second === "deliverable") {
+      return third === "file_name"
+        ? "output_config.deliverable.file_name"
+        : "output_config.deliverable.label";
+    }
     if (step.output_mode === "template_fill") return "output_config.template";
     if (
       step.output_mode === "http_post" &&

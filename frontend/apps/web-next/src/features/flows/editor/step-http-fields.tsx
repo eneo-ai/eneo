@@ -28,6 +28,7 @@ import {
   type SecretValue
 } from "./step-configs";
 import { httpAuthModeLabel, httpBodyModeLabel } from "./step-labels";
+import { httpBodyModeOptions } from "./step-rules";
 import { insertToken, type VariableGroup } from "./step-variables";
 
 /**
@@ -222,6 +223,17 @@ type TestOutcome = {
   preview: string | null;
 };
 
+type TestConfig = Parameters<typeof testHttp>[1]["config"];
+
+/**
+ * The settings as the test takes them, or null for a body that sends the
+ * run's result: the test has no run to send.
+ */
+function testableConfig(config: HttpConfig): TestConfig | null {
+  const { mode } = config.body;
+  return mode === "run_result" ? null : { ...config, body: { ...config.body, mode } };
+}
+
 /**
  * One test request with the step's settings as they stand in the form. The
  * core resolves a stored credential from the saved step, so a step that has
@@ -242,6 +254,8 @@ function HttpTest({
   const t = useTranslations();
   const announce = useAnnounce();
   const previewId = useId();
+  const untestableId = useId();
+  const testable = testableConfig(config);
   // Follows the call's references until the author edits it.
   const [editedVariables, setVariables] = useState<string | null>(null);
   const variables = editedVariables ?? sampleTestVariables(config);
@@ -255,10 +269,16 @@ function HttpTest({
   }
 
   const test = useMutation({
-    mutationFn: (testVariables: Record<string, unknown>) =>
+    mutationFn: ({
+      testConfig,
+      testVariables
+    }: {
+      testConfig: TestConfig;
+      testVariables: Record<string, unknown>;
+    }) =>
       testHttp(flowId, {
         step_id: stepId,
-        config,
+        config: testConfig,
         direction,
         method: direction === "input" ? "GET" : "POST",
         test_variables: testVariables
@@ -299,7 +319,7 @@ function HttpTest({
   });
 
   function run() {
-    if (test.isPending) return;
+    if (test.isPending || !testable) return;
     if (!config.url.trim()) {
       report({ ok: false, title: t("http_test_needs_url"), detail: null, preview: null });
       return;
@@ -316,7 +336,7 @@ function HttpTest({
       }
     }
     setVariablesProblem(null);
-    test.mutate(testVariables);
+    test.mutate({ testConfig: testable, testVariables });
   }
 
   return (
@@ -350,9 +370,16 @@ function HttpTest({
           size="sm"
           isLoading={test.isPending}
           isInterruptible
+          isDisabled={!testable}
+          aria-describedby={testable ? undefined : untestableId}
           onClick={run}
         />
       </div>
+      {!testable && (
+        <Text id={untestableId} type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flow_step_editor_http_test_run_result")}
+        </Text>
+      )}
       {outcome && (
         <div className="flex flex-col gap-2">
           <p
@@ -586,9 +613,10 @@ export function HttpFields({
           <Selector
             label={t("flow_step_editor_http_body")}
             description={t("flow_step_editor_http_body_description")}
-            options={(["auto", "json_template", "text_template", "none"] as const).map((mode) => ({
-              value: mode,
-              label: httpBodyModeLabel(mode, t)
+            options={httpBodyModeOptions(config.body.mode).map(({ value, disabled }) => ({
+              value,
+              label: httpBodyModeLabel(value, t),
+              disabled
             }))}
             value={config.body.mode}
             onChange={(value) =>

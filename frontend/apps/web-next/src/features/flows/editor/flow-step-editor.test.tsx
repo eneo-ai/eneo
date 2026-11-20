@@ -88,6 +88,7 @@ function renderEditor(
     navigation?: StepNavigation;
     /** The step assistant as the step list already read it. */
     cachedAssistant?: ReturnType<typeof makeAssistant>;
+    stepId?: string;
   } = {}
 ) {
   const queryClient = testQueryClient();
@@ -103,7 +104,7 @@ function renderEditor(
   const view = renderInApp(
     <FlowStepEditor
       flow={flow}
-      stepId="step-1"
+      stepId={overrides.stepId ?? "step-1"}
       readOnly={overrides.readOnly ?? false}
       onSaved={onSaved}
       onCancel={onCancel}
@@ -268,6 +269,63 @@ describe("FlowStepEditor", () => {
     fireEvent.change(field, { target: { value: "240" } });
     expect(field.value).toBe("240");
   });
+
+  it("keeps a webhook that sends the run's result when its time limit changes", async () => {
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const output_config = {
+      url: "https://hook.example.org/",
+      auth: { mode: "none" },
+      timeout_seconds: 45,
+      body: { mode: "run_result" },
+      custom_headers: [],
+      response_format: null
+    };
+    renderEditor(makeFlow({ steps: [makeStep({ output_mode: "http_post", output_config })] }));
+    const field = (await screen.findByLabelText(
+      new RegExp(`^${messages.flow_step_editor_http_timeout}`)
+    )) as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "60" } });
+    fireEvent.blur(field);
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_saved);
+    expect(patchBodies()[0]).toMatchObject({
+      step_edits: [
+        {
+          step_id: "step-1",
+          changes: { output_config: { ...output_config, timeout_seconds: 60 } }
+        }
+      ]
+    });
+  });
+
+  it("shows a body that sends the run's result by name, and does not test it", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      })
+    );
+    const body = await screen.findByRole("combobox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_body}`)
+    });
+    expect(body.textContent).toContain(messages.flow_step_editor_http_body_run_result);
+    const test = screen.getByRole("button", { name: messages.http_test_button });
+    expect(test.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText(messages.flow_step_editor_http_test_run_result)).toBeTruthy();
+    fireEvent.click(test);
+    expect(api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/http-test")).toBe(false);
+  }, 20_000);
 
   it("shows an AI step's task, input, result and control as labelled sections", async () => {
     const { container } = renderEditor(makeFlow());
@@ -1954,5 +2012,518 @@ describe("FlowStepEditor", () => {
       screen.queryByRole("button", { name: messages.flow_step_editor_conflict_take_theirs })
     ).toBeNull();
     expect((await nameField()).value).toBe("Mitt namn");
+  });
+});
+
+describe("FlowStepEditor deliverables", () => {
+  const TEMPLATE_CONFIG = {
+    template_asset_id: "asset-1",
+    template_name: "Standup.docx",
+    placeholders: ["namn"],
+    bindings: { namn: "{{flow_input.team}}" },
+    future: { kept: true }
+  };
+
+  /** Two documents, then a text step last; the form has a team and the run's day. */
+  function deliveryFlow() {
+    return makeFlow({
+      metadata_json: {
+        form_schema: {
+          fields: [
+            { name: "team", label: "Team", type: "text" },
+            { name: "motesdag", label: "Mötesdag", type: "date", role: "run_date" }
+          ]
+        }
+      },
+      steps: [
+        makeStep({
+          user_description: "Standup för Eneo",
+          output_mode: "render_verbatim",
+          output_type: "docx"
+        }),
+        makeStep({
+          id: "step-2",
+          step_order: 2,
+          user_description: "Standup för Startsidan",
+          input_source: "previous_step",
+          output_mode: "template_fill",
+          output_type: "docx",
+          output_config: TEMPLATE_CONFIG
+        }),
+        makeStep({
+          id: "step-3",
+          step_order: 3,
+          user_description: "Sammanfatta",
+          input_source: "previous_step"
+        })
+      ]
+    });
+  }
+
+  function routeTemplate() {
+    api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+      body: [
+        {
+          id: "asset-1",
+          flow_id: "flow-1",
+          file_id: "file-1",
+          name: "Standup.docx",
+          checksum: "abc",
+          status: "ready",
+          placeholders: ["namn"]
+        }
+      ]
+    });
+    api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+      body: {
+        asset_id: "asset-1",
+        file_id: "file-1",
+        file_name: "Standup.docx",
+        placeholders: [{ name: "namn", label: "Namn", kind: "text", location: "body" }]
+      }
+    });
+  }
+
+  /** The editor PATCH applied to the step it names; the flow as stored after each save. */
+  function storeEdits(start: FlowPublic) {
+    let stored = start;
+    api.routes[EDITOR] = (init) => {
+      const body = (
+        init as { body: { step_edits?: { step_id: string; changes: Record<string, unknown> }[] } }
+      ).body;
+      const edit = body.step_edits?.[0];
+      stored = {
+        ...stored,
+        draft_revision: stored.draft_revision + 1,
+        steps: stored.steps.map((step) =>
+          edit && step.id === edit.step_id ? { ...step, ...edit.changes } : step
+        )
+      };
+      return { body: stored };
+    };
+    return () => stored;
+  }
+
+  const deliverySwitch = () =>
+    screen.findByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    });
+  const labelField = () =>
+    screen.findByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+    }) as Promise<HTMLInputElement>;
+  const fileNameField = () =>
+    screen.getByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_file_name}`)
+    }) as HTMLInputElement;
+  const isOn = (toggle: HTMLElement) =>
+    toggle.getAttribute("aria-checked") === "true" || (toggle as HTMLInputElement).checked;
+
+  async function saveStep() {
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await screen.findByText(messages.flow_step_editor_saved);
+  }
+
+  it("marks two documents, keeps them when reopened, and turns one off with its template kept", async () => {
+    routeTemplate();
+    const current = storeEdits(deliveryFlow());
+
+    let view = renderEditor(current(), { stepId: "step-1" });
+    const first = await deliverySwitch();
+    expect(isOn(first)).toBe(false);
+    fireEvent.click(first);
+    fireEvent.change(await labelField(), { target: { value: "Till Eneo" } });
+    fireEvent.change(fileNameField(), { target: { value: "Standup " } });
+    const insert = screen.getByRole("button", {
+      name: messages.flow_step_editor_deliverable_insert_field
+    });
+    fireEvent.click(insert);
+    const menu = await screen.findByRole("menu", { name: insert.textContent ?? "" });
+    const offered = within(menu).getAllByRole("menuitem");
+    const texts = offered.map((item) => item.textContent).join(" ");
+    // Only form fields; the run's day is added to every name already.
+    expect(texts).toContain("{{flow_input.team}}");
+    expect(texts).not.toContain("motesdag");
+    expect(texts).not.toContain("{{datum}}");
+    fireEvent.click(offered.find((item) => item.textContent?.includes("{{flow_input.team}}"))!);
+    expect(fileNameField().value).toBe("Standup {{flow_input.team}}");
+    await expectNoAxeViolations(view.container);
+    await saveStep();
+    expect(patchBodies()[0]).toMatchObject({
+      expected_revision: 4,
+      step_edits: [
+        {
+          step_id: "step-1",
+          changes: {
+            output_config: {
+              deliverable: { label: "Till Eneo", file_name: "Standup {{flow_input.team}}" }
+            }
+          }
+        }
+      ]
+    });
+    view.unmount();
+
+    view = renderEditor(current(), { stepId: "step-2" });
+    fireEvent.click(await deliverySwitch());
+    fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+    await saveStep();
+    expect(patchBodies()[1]).toMatchObject({
+      expected_revision: 5,
+      step_edits: [
+        {
+          step_id: "step-2",
+          changes: {
+            output_config: { ...TEMPLATE_CONFIG, deliverable: { label: "Till Startsidan" } }
+          }
+        }
+      ]
+    });
+    view.unmount();
+
+    // Reopened, both read as saved.
+    view = renderEditor(current(), { stepId: "step-1" });
+    expect(isOn(await deliverySwitch())).toBe(true);
+    expect((await labelField()).value).toBe("Till Eneo");
+    expect(fileNameField().value).toBe("Standup {{flow_input.team}}");
+    // An edit changed back sends nothing.
+    fireEvent.change(await labelField(), { target: { value: "Till Eneo och fler" } });
+    fireEvent.change(await labelField(), { target: { value: "Till Eneo" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(await screen.findByText(messages.flow_step_editor_no_changes)).toBeTruthy();
+    expect(patchBodies()).toHaveLength(2);
+    view.unmount();
+
+    view = renderEditor(current(), { stepId: "step-2" });
+    const second = await deliverySwitch();
+    expect((await labelField()).value).toBe("Till Startsidan");
+    fireEvent.click(second);
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+        })
+      ).toBeNull()
+    );
+    await saveStep();
+    const off = patchBodies()[2] as {
+      step_edits: { changes: { output_config: Record<string, unknown> } }[];
+    };
+    expect(off.step_edits[0]!.changes.output_config).toEqual(TEMPLATE_CONFIG);
+    expect(current().steps[0]!.output_config).toEqual({
+      deliverable: { label: "Till Eneo", file_name: "Standup {{flow_input.team}}" }
+    });
+  }, 30_000);
+
+  it("keeps an untouched last document unmarked, and a customisation can be removed", async () => {
+    const current = storeEdits(
+      makeFlow({
+        steps: [makeStep({ output_mode: "render_verbatim", output_type: "pdf" })]
+      })
+    );
+    const view = renderEditor(current());
+    expect(await screen.findByText(messages.flow_step_editor_deliverable_always)).toBeTruthy();
+    expect(
+      screen.queryByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      })
+    ).toBeNull();
+    fireEvent.change(await nameField(), { target: { value: "Protokoll" } });
+    await saveStep();
+    expect(patchBodies()[0]).toMatchObject({
+      step_edits: [{ step_id: "step-1", changes: { user_description: "Protokoll" } }]
+    });
+    expect(current().steps[0]!.output_config).toBeNull();
+
+    // Opening the fields marks nothing; the first change does, and focus is on the label.
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_customise })
+    );
+    const label = await labelField();
+    expect(document.activeElement).toBe(label);
+    expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
+    fireEvent.change(label, { target: { value: "Protokoll till nämnden" } });
+    expect(screen.getByText("1 ändring som inte är sparad")).toBeTruthy();
+    await expectNoAxeViolations(view.container);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
+    );
+    const customise = await screen.findByRole("button", {
+      name: messages.flow_step_editor_deliverable_customise
+    });
+    expect(document.activeElement).toBe(customise);
+    expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
+  }, 20_000);
+
+  it("removes a saved customisation of the last document, which restores the default", async () => {
+    const current = storeEdits(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "render_verbatim",
+            output_type: "pdf",
+            output_config: { deliverable: { label: "Protokoll" }, future: 1 }
+          })
+        ]
+      })
+    );
+    renderEditor(current());
+    expect((await labelField()).value).toBe("Protokoll");
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
+    );
+    await saveStep();
+    expect(patchBodies()[0]).toMatchObject({
+      step_edits: [{ step_id: "step-1", changes: { output_config: { future: 1 } } }]
+    });
+  }, 20_000);
+
+  it("focuses an empty label instead of saving, and holds the label and file name to their limits", async () => {
+    renderEditor(deliveryFlow());
+    fireEvent.click(await deliverySwitch());
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_required)
+    ).toBeTruthy();
+    const label = await labelField();
+    expect(document.activeElement).toBe(label);
+    expect(label.getAttribute("aria-invalid")).toBe("true");
+
+    fireEvent.change(label, { target: { value: "a".repeat(121) } });
+    fireEvent.change(fileNameField(), { target: { value: "b".repeat(201) } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(
+        messages.flow_step_editor_deliverable_label_too_long.replace("{max}", "120")
+      )
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        messages.flow_step_editor_deliverable_file_name_too_long.replace("{max}", "200")
+      )
+    ).toBeTruthy();
+
+    fireEvent.change(label, { target: { value: "a".repeat(120) } });
+    fireEvent.change(fileNameField(), { target: { value: "b".repeat(200) } });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    await saveStep();
+    expect(patchBodies()).toHaveLength(1);
+  }, 20_000);
+
+  it.each([
+    {
+      form: "the field the refusal names",
+      answer: {
+        status: 400,
+        body: {
+          message: "Step 2: the file name reads a field the form does not have",
+          code: "flow_step_invalid",
+          context: { field: "output_config.deliverable.file_name", step_order: 2 },
+          eneo_error_code: 9000
+        }
+      }
+    },
+    {
+      form: "the request validation error",
+      answer: {
+        status: 422,
+        body: {
+          message: "Request validation failed",
+          code: "request_validation_error",
+          details: {
+            errors: [
+              {
+                location: "body.step_edits.0.changes.output_config.deliverable.file_name",
+                message: "x"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ])(
+    "puts a refused file name at its field on a Word template step ($form)",
+    async ({ answer }) => {
+      routeTemplate();
+      api.routes[EDITOR] = () => answer;
+      renderEditor(deliveryFlow(), { stepId: "step-2" });
+      fireEvent.click(await deliverySwitch());
+      fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+      fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.saknas}}" } });
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      await waitFor(() => expect(document.activeElement).toBe(fileNameField()));
+      expect(fileNameField().getAttribute("aria-invalid")).toBe("true");
+    },
+    20_000
+  );
+
+  it("reads empty output settings as none: a switch turned on and off sends nothing", async () => {
+    const flow = deliveryFlow();
+    const current = storeEdits({
+      ...flow,
+      steps: flow.steps.map((step) =>
+        step.id === "step-1" ? { ...step, output_config: {} } : step
+      )
+    });
+    renderEditor(current());
+    fireEvent.click(await deliverySwitch());
+    await labelField();
+    fireEvent.click(await deliverySwitch());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+        })
+      ).toBeNull()
+    );
+    expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(await screen.findByText(messages.flow_step_editor_no_changes)).toBeTruthy();
+    expect(patchBodies()).toHaveLength(0);
+
+    // Another edit leaves the output settings out.
+    fireEvent.change(await nameField(), { target: { value: "Standup för alla" } });
+    await saveStep();
+    expect(
+      (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
+        .changes
+    ).toEqual({ user_description: "Standup för alla" });
+  }, 20_000);
+
+  it("counts the label and file name in characters, and refuses a label of only spaces", async () => {
+    renderEditor(deliveryFlow());
+    fireEvent.click(await deliverySwitch());
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_required)
+    ).toBeTruthy();
+
+    // An emoji is one character, as the core counts it, though it is two UTF-16 units.
+    fireEvent.change(label, { target: { value: `${"a".repeat(120)}😀` } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(
+        messages.flow_step_editor_deliverable_label_too_long.replace("{max}", "120")
+      )
+    ).toBeTruthy();
+    fireEvent.change(label, { target: { value: `${"a".repeat(119)}😀` } });
+    fireEvent.change(fileNameField(), { target: { value: `${"b".repeat(199)}😀` } });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    await saveStep();
+    expect(patchBodies()[0]).toMatchObject({
+      step_edits: [
+        {
+          changes: {
+            output_config: {
+              deliverable: { label: `${"a".repeat(119)}😀`, file_name: `${"b".repeat(199)}😀` }
+            }
+          }
+        }
+      ]
+    });
+  }, 20_000);
+
+  it("unmarks the last document when its label and file name are emptied, with the fields kept open", async () => {
+    const current = storeEdits(
+      makeFlow({ steps: [makeStep({ output_mode: "render_verbatim", output_type: "pdf" })] })
+    );
+    let view = renderEditor(current());
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
+    );
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "P" } });
+    fireEvent.change(label, { target: { value: "" } });
+    expect(await labelField()).toBe(label);
+    expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
+    // An emptied customisation does not hold up another save.
+    fireEvent.change(await nameField(), { target: { value: "Protokoll" } });
+    await saveStep();
+    expect(
+      (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
+        .changes
+    ).toEqual({ user_description: "Protokoll" });
+    view.unmount();
+
+    // A saved customisation emptied the same way removes the key, and the fields stay.
+    view = renderEditor({
+      ...current(),
+      steps: current().steps.map((step) => ({
+        ...step,
+        output_config: { deliverable: { label: "Protokoll" } }
+      }))
+    });
+    fireEvent.change(await labelField(), { target: { value: "" } });
+    expect((await labelField()).value).toBe("");
+    await saveStep();
+    expect(patchBodies()[1]).toMatchObject({
+      step_edits: [{ changes: { output_config: null } }]
+    });
+  }, 20_000);
+
+  it("does not check a stale deliverable on a step that delivers no file", async () => {
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    renderEditor(
+      makeFlow({ steps: [makeStep({ output_config: { deliverable: { label: "" } } })] })
+    );
+    fireEvent.change(await nameField(), { target: { value: "Sammanfatta mötet" } });
+    await saveStep();
+    expect(patchBodies()).toHaveLength(1);
+  }, 20_000);
+
+  it("drops the deliverable when a marked document is turned to text and saved", async () => {
+    const flow = deliveryFlow();
+    const current = storeEdits({
+      ...flow,
+      steps: flow.steps.map((step) =>
+        step.id === "step-1"
+          ? { ...step, output_config: { deliverable: { label: "Till Eneo" }, future: 1 } }
+          : step
+      )
+    });
+    renderEditor(current());
+    expect((await labelField()).value).toBe("Till Eneo");
+    // An AI step's result is text.
+    fireEvent.click(
+      screen.getByRole("combobox", { name: new RegExp(`^${messages.flow_step_output_mode}`) })
+    );
+    fireEvent.click(
+      within(
+        await screen.findByRole("listbox", {
+          name: new RegExp(`^${messages.flow_step_output_mode}`)
+        })
+      ).getByRole("option", { name: messages.flow_output_mode_pass_through })
+    );
+    await saveStep();
+    const changes = (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] })
+      .step_edits[0]!.changes;
+    expect(changes).toMatchObject({ output_type: "text", output_config: { future: 1 } });
+    expect(JSON.stringify(changes)).not.toContain("deliverable");
+  }, 20_000);
+
+  it("shows a deliverable's label and file name when the step is read only", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "render_verbatim",
+            output_type: "docx",
+            output_config: {
+              deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+            }
+          })
+        ]
+      }),
+      { readOnly: true }
+    );
+    expect((await rowValue(messages.flow_step_editor_deliverable_label)).textContent).toBe(
+      "Till Startsidan"
+    );
+    expect((await rowValue(messages.flow_step_editor_deliverable_file_name)).textContent).toBe(
+      "Standup {{flow_input.team}}"
+    );
   });
 });
