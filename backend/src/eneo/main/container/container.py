@@ -98,6 +98,7 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.files.upload_access import may_read_user_uploads
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -832,20 +833,28 @@ class Container(containers.DeclarativeContainer):
 
     step_repo = providers.Factory(StepRepository, session=session)
     user_groups_repo = providers.Factory(UserGroupsRepository, session=session)
+    # Whether the principal may read the files users uploaded to conversations:
+    # an API key needs its ``files`` read grant. The repositories that hydrate
+    # a conversation's turns or an App run's inputs leave those uploads out
+    # otherwise.
+    user_uploads_readable = providers.Callable(may_read_user_uploads, user=user)
     analysis_repo = providers.Factory(
         AnalysisRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     session_repo = providers.Factory(
         SessionRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     question_repo = providers.Factory(
         QuestionRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
 
@@ -866,6 +875,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=app_run_factory,
         file_repo=file_repo,
+        include_user_uploads=user_uploads_readable,
     )
     service_repo = providers.Factory(
         ServiceRepository,
@@ -1290,6 +1300,7 @@ class Container(containers.DeclarativeContainer):
         protocol=file_protocol,
         object_content=object_content_service,
         upload_admission=upload_admission,
+        audit_service=audit_service,
     )
     widget_service = providers.Factory(
         WidgetService,
@@ -1329,6 +1340,7 @@ class Container(containers.DeclarativeContainer):
         session_repo=session_repo,
         file_service=file_service,
         file_content_loader_factory=providers.Object(_file_content_loader_for_session),
+        include_user_uploads=user_uploads_readable,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
