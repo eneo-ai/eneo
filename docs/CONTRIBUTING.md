@@ -37,6 +37,10 @@ Comment on the issue and wait for a maintainer to confirm your approach before y
 - Docker and VS Code with Dev Containers extension
 - Git configured with your identity
 
+Developers at a partner organisation who work on the same branches set up a
+[shared fork](#working-as-a-team-at-a-partner-organisation) first and clone
+that instead of a personal fork.
+
 **Setup Steps:**
 ```bash
 # Fork on GitHub (https://github.com/eneo-ai/eneo/fork), then clone your fork
@@ -86,8 +90,8 @@ git push -u origin feature/your-feature-name
 ```
 
 When you work alone, fork to your personal account. GitHub offers **Allow
-edits by maintainers** only for forks owned by a user account, and it lets a
-maintainer push a small fix to your pull request.
+edits and access to secrets by maintainers** only for forks owned by a user
+account, and it lets a maintainer push a small fix to your pull request.
 
 #### Working as a team at a partner organisation
 
@@ -101,15 +105,17 @@ gh repo fork eneo-ai/eneo --org YOUR_ORG --clone=false
 ```
 
 Each developer then uses the shared fork as `origin` and the main repository
-as `upstream`:
+as `upstream`. In a new clone:
 
 ```bash
-# New clone
 git clone https://github.com/YOUR_ORG/eneo.git
 cd eneo
 git remote add upstream https://github.com/eneo-ai/eneo.git
+```
 
-# Existing clone of eneo-ai/eneo
+Or in an existing clone of `eneo-ai/eneo`:
+
+```bash
 git remote rename origin upstream
 git remote add origin https://github.com/YOUR_ORG/eneo.git
 ```
@@ -219,12 +225,12 @@ Open a pull request from your fork into `eneo-ai/eneo`'s `develop` branch and fi
 - Write the title as a Conventional Commit, for example `fix(spaces): resolve permission check bug`. A pull request with several commits lands with its title as the commit title on `develop`; one with a single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in **Changes**, **Why**, **User-facing** and **Testing**, plus **Accessibility** for UI changes.
-- From a personal fork, leave **Allow edits by maintainers** ticked so a maintainer can push a small fix for you.
+- From a personal fork, leave **Allow edits and access to secrets by maintainers** ticked so a maintainer can push a small fix for you. It also lets maintainers edit your fork's workflows, so do not tick it if you have added secrets to your fork.
 - Open it as a **draft** if you want early feedback on the direction.
 
 ### 6. Checks, Review and Merge
 
-- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing workflow runs before they start; PR labels runs straight away.
+- Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`, `PR label policy / PR labels` and `PR user-facing notes / User-facing section`. The last one runs again when you edit the description. For contributors outside the `eneo-ai` organisation, and after a push from someone outside it, a maintainer approves the CI, Dependency Review and User-facing workflow runs before they start; PR labels runs straight away.
 - If you have Triage access or higher, add the labels yourself. Otherwise a maintainer adds them during review and the PR label check turns green. A ready pull request into `develop` that closes no issue gets `needs:task-link`; add a closing reference such as `Fixes #123` to the description.
 - A member of `@eneo-ai/core-maintainers` reviews the pull request. Answer comments with new commits on the same branch rather than force-pushing, and resolve every conversation.
 - When the change is ready, the Core Maintainer approves it and chooses **Merge when ready**. The pull request enters the merge queue as soon as the checks are green, and the queue tests it against the latest `develop` and squash-merges it. You only need to update your branch if GitHub reports a conflict.

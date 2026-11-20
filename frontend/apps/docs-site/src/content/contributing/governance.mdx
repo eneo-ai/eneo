@@ -68,7 +68,9 @@ to a reviewable pull request:
 - With Triage, they label their own pull requests, so the PR label check
   passes without waiting for a maintainer.
 - As members of the `eneo-ai` organisation, their CI and Dependency Review runs
-  start without a maintainer approving them first.
+  start without a maintainer approving them first. GitHub also checks who
+  pushed the latest commit, so a push from someone outside the organisation
+  still needs approval.
 
 ### Everyone else
 
@@ -265,8 +267,7 @@ Working from a fork gives you the same ability to propose and test changes.
 Yes. Fork `eneo-ai/eneo` once into your organisation's GitHub account and give
 your developers write access to that fork. You share branches there and open
 pull requests into `eneo-ai/eneo` as usual, and a Core Maintainer reviews and
-merges them. Maintainers cannot push fixes to branches in an organisation's
-fork, so they suggest changes in the review instead. The steps are in
+merges them. The steps and the trade-offs are in
 [Working as a team at a partner organisation](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#working-as-a-team-at-a-partner-organisation).
 
 ### Why is my push to `eneo-ai/eneo` refused with 403?
