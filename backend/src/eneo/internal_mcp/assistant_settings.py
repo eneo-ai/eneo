@@ -51,7 +51,7 @@ from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_completion_model,
 )
-from eneo.helper_chats.personas.assistant import SETTING_NAMES
+from eneo.helper_chats.personas.assistant import FUNCTIONS, SETTING_NAMES
 from eneo.internal_mcp.constants import ASSISTANT_SERVER_NAME
 from eneo.internal_mcp.foundation import (
     build_ephemeral_server,
@@ -102,54 +102,9 @@ OptionsSection = Literal["model", "knowledge", "tools", "all"]
 # whole line.
 _LINE_CHARS = 1000
 
-# The functions as the editor's "Funktioner" section shows them, in its
-# order: the key a change takes (the function's purpose), the name the editor
-# shows and the description under it, in the editor's English text. The
-# editor's frontend has the same three for each function (CAPABILITIES in
-# frontend/apps/web-next/src/features/capabilities/capabilities.ts, named and
-# described by its messages); a test on each side holds its table to the same
-# written-out one, so change both together.
-FUNCTIONS: tuple[tuple[str, str, str], ...] = (
-    (
-        "web_search",
-        "Webbsökning",
-        "Lets the assistant search the web via the organisation's search engine.",
-    ),
-    (
-        "image_generation",
-        "Bildgenerering",
-        "Lets the assistant generate images via the organisation's image generator.",
-    ),
-    (
-        "file_analysis",
-        "Fråga fil",
-        "Lets the assistant calculate totals, compare and join attached CSV and "
-        "Excel files instead of reading them as text.",
-    ),
-    (
-        "file_creation",
-        "Skapa fil",
-        "Lets the assistant create Word, PDF and Excel files that the user can "
-        "download from the conversation. A Word template attached in the chat or "
-        "to the assistant can be used as the base.",
-    ),
-    (
-        "charts",
-        "Diagram",
-        "Lets the assistant compare values and show trends with bar, line, pie "
-        "and scatter charts. Eneo’s provider shows interactive charts and can "
-        "export images when requested.",
-    ),
-    (
-        "compute",
-        "Beräkning",
-        "Lets the assistant run exact arithmetic, statistics, date and text "
-        "calculations in an isolated sandbox instead of estimating. Results can "
-        "be shown as a table and exported as CSV for charts, spreadsheets and "
-        "documents.",
-    ),
-)
-
+# The functions as the editor's "Funktioner" section shows them (FUNCTIONS in
+# the persona): each one's name and the description under it, by the key a
+# change takes.
 _FUNCTION_TEXTS: dict[str, tuple[str, str]] = {
     key: (name, description) for key, name, description in FUNCTIONS
 }

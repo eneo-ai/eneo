@@ -19,7 +19,7 @@ import type { SettingReference } from "./setting-references";
 
 afterEach(cleanup);
 
-/** What the form shows this person: two sections, the second one's settings. */
+/** What the form shows this person: three sections and settings in two of them. */
 const LIST: SettingReference[] = [
   {
     key: "section:general",
@@ -58,6 +58,29 @@ const LIST: SettingReference[] = [
     label: "Modellbeteende",
     value: "Standard",
     control: "assistant-model-behaviour"
+  },
+  {
+    key: "section:capabilities",
+    section: "capabilities",
+    sectionLabel: "Funktioner",
+    label: "Funktioner",
+    value: "Hela avsnittet"
+  },
+  {
+    key: "enabled_capabilities",
+    section: "capabilities",
+    sectionLabel: "Funktioner",
+    label: "Funktioner",
+    value: "Inga valda",
+    control: "capabilities"
+  },
+  {
+    key: "enabled_capabilities.charts",
+    section: "capabilities",
+    sectionLabel: "Funktioner",
+    label: "Diagram",
+    value: "Inaktiverad",
+    control: "assistant-capability-charts"
   }
 ];
 const MAP = new Map(LIST.map((reference) => [reference.key, reference]));
@@ -133,16 +156,23 @@ describe("The '@' menu of the assistant's settings", () => {
     const groups = within(menu).getAllByRole("group");
     expect(groups.map((group) => group.getAttribute("aria-label"))).toEqual([
       "Allmänt",
-      "AI-inställningar"
+      "AI-inställningar",
+      "Funktioner"
     ]);
-    expect(
-      within(groups[1]!)
+    const options = (group: HTMLElement) =>
+      within(group)
         .getAllByRole("option")
-        .map((option) => option.textContent)
-    ).toEqual([
+        .map((option) => option.textContent);
+    expect(options(groups[1]!)).toEqual([
       "AI-inställningarHela avsnittet",
       "ChattmodellNordic Large",
       "ModellbeteendeStandard"
+    ]);
+    // A function by its own name, with the others of Funktioner.
+    expect(options(groups[2]!)).toEqual([
+      "FunktionerHela avsnittet",
+      "FunktionerInga valda",
+      "DiagramInaktiverad"
     ]);
     // The field is the combobox; the highlighted option is what it points at.
     const combobox = screen.getByRole("combobox");
@@ -264,6 +294,40 @@ describe("Setting references in a message", () => {
     expect(container.textContent).toBe(
       "Jag föreslår att ändra Namn till Hej Çagri, och Chattmodell under Allmänt."
     );
+  });
+
+  it("draws a function's mention as its own pill, in a sent message and in an answer", () => {
+    const show = vi.fn();
+    function Sent({ text }: { text: string }) {
+      const { references } = useSettingReferenceMenu(LIST);
+      return (
+        <SettingReferences references={MAP} show={show}>
+          <ChatTokenizedText tokens={references.tokens!(text)}>{text}</ChatTokenizedText>
+        </SettingReferences>
+      );
+    }
+    renderInApp(
+      <>
+        <Sent text="Varför syns inga @[Diagram](setting:enabled_capabilities.charts)?" />
+        <Answer
+          show={show}
+          text="Slå på @[Diagram](setting:enabled_capabilities.charts) under @[Funktioner](setting:enabled_capabilities), eller @[Diagram](enabled_capabilities.charts) och @[Kartor](setting:enabled_capabilities.maps)."
+        />
+      </>
+    );
+
+    const pills = screen.getAllByRole("button", { name: "Diagram" });
+    // The sent message's, then the answer's with the scheme and without it.
+    expect(pills).toHaveLength(3);
+    for (const pill of pills) {
+      fireEvent.click(pill);
+      expect(show).toHaveBeenLastCalledWith("enabled_capabilities.charts");
+    }
+    // The whole of Funktioner is its own pill; a function the editor does not know is its name.
+    fireEvent.click(screen.getByRole("button", { name: "Funktioner" }));
+    expect(show).toHaveBeenLastCalledWith("enabled_capabilities");
+    expect(screen.queryByRole("button", { name: "Kartor" })).toBeNull();
+    expect(screen.getByText(/och Kartor\./)).toBeTruthy();
   });
 
   it("draws an answer's mention of no known setting as its name, and leaves links as links", () => {

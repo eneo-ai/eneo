@@ -353,6 +353,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     kwargsModel: ai.model,
     kwargs: ai.kwargs,
     fileReferences: settings.file_references_enabled === true,
+    space,
     spaceModels,
     documentTemplates: documentTemplates?.items,
     t,

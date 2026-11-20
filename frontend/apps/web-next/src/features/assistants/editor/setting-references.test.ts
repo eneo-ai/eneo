@@ -45,6 +45,17 @@ const assistant = (overrides: Record<string, unknown> = {}) =>
 
 const ALL_SECTIONS = ASSISTANT_SECTION_IDS.map((id) => ({ id, label: id }));
 
+/** A space that offers every function but "Bildgenerering", each one ready but "Beräkning". */
+const SPACE: SettingReferenceInput["space"] = {
+  enabled_capabilities: ["web_search", "file_analysis", "file_creation", "charts", "compute"],
+  available_capabilities: CAPABILITIES.map(({ purpose }) => ({
+    purpose,
+    available: purpose !== "compute",
+    reason: purpose === "compute" ? "no_active_provider" : null
+  })),
+  completion_models: []
+};
+
 const RERANKER = {
   id: "rerank-1",
   name: "multilingual-rerank",
@@ -68,6 +79,7 @@ function input(overrides: Partial<SettingReferenceInput> = {}): SettingReference
     kwargsModel: reasoningModel as SettingReferenceInput["kwargsModel"],
     kwargs: { temperature: 0.25, reasoning_effort: "medium" },
     fileReferences: true,
+    space: SPACE,
     t,
     format,
     ...overrides
@@ -99,6 +111,12 @@ describe("The keys a setting reference can name", () => {
     "completion_model_kwargs.frequency_penalty",
     "completion_model_kwargs.top_k",
     "enabled_capabilities",
+    "enabled_capabilities.web_search",
+    "enabled_capabilities.image_generation",
+    "enabled_capabilities.file_analysis",
+    "enabled_capabilities.file_creation",
+    "enabled_capabilities.charts",
+    "enabled_capabilities.compute",
     "document_template",
     "data_retention_days",
     "published",
@@ -228,6 +246,12 @@ describe("The settings, options, presets and badges the helper's tools name", ()
     ["completion_model_kwargs.frequency_penalty", "Frekvensstraff"],
     ["completion_model_kwargs.top_k", "Top K"],
     ["enabled_capabilities", "Funktioner"],
+    ["enabled_capabilities.web_search", "Webbsökning"],
+    ["enabled_capabilities.image_generation", "Bildgenerering"],
+    ["enabled_capabilities.file_analysis", "Fråga fil"],
+    ["enabled_capabilities.file_creation", "Skapa fil"],
+    ["enabled_capabilities.charts", "Diagram"],
+    ["enabled_capabilities.compute", "Beräkning"],
     ["document_template", "Dokumentmall"],
     ["data_retention_days", "Gallring av konversationshistorik"],
     ["published", "Status"],
@@ -538,6 +562,98 @@ describe("The result ranking and the document template in the '@' menu", () => {
   });
 });
 
+describe("The functions in the '@' menu", () => {
+  const functions = (overrides: Partial<SettingReferenceInput> = {}) =>
+    settingReferences(input(overrides))
+      .filter((reference) => reference.section === "capabilities")
+      .map(({ key, label, value, control }) => [key, label, value, control]);
+  // A chat model that can use tools, so only the space and the sources stand in the way.
+  const toolModel = { id: "model-1", name: "nordic-large", supports_tool_calling: true };
+
+  it("lists each one under Funktioner by its name, on, off or not available, landing on its line", () => {
+    expect(
+      functions({
+        assistant: assistant({
+          completion_model: toolModel,
+          enabled_capabilities: ["file_creation", "charts"]
+        })
+      })
+    ).toEqual([
+      ["section:capabilities", "capabilities", "Hela avsnittet", undefined],
+      ["enabled_capabilities", "Funktioner", "2 valda", "capabilities"],
+      [
+        "enabled_capabilities.web_search",
+        "Webbsökning",
+        "Inaktiverad",
+        "assistant-capability-web_search"
+      ],
+      // The space has it off, or no source is ready: the switch cannot be switched on.
+      [
+        "enabled_capabilities.image_generation",
+        "Bildgenerering",
+        "Inte tillgänglig",
+        "assistant-capability-image_generation"
+      ],
+      [
+        "enabled_capabilities.file_analysis",
+        "Fråga fil",
+        "Inaktiverad",
+        "assistant-capability-file_analysis"
+      ],
+      [
+        "enabled_capabilities.file_creation",
+        "Skapa fil",
+        "Aktiverad",
+        "assistant-capability-file_creation"
+      ],
+      // The template under "Skapa fil", where the form shows it.
+      [
+        "document_template",
+        "Dokumentmall",
+        "Organisationens standard",
+        "assistant-document-template"
+      ],
+      ["enabled_capabilities.charts", "Diagram", "Aktiverad", "assistant-capability-charts"],
+      [
+        "enabled_capabilities.compute",
+        "Beräkning",
+        "Inte tillgänglig",
+        "assistant-capability-compute"
+      ]
+    ]);
+  });
+
+  it("reads a function as not available while the chat model cannot use tools, unless it is on", () => {
+    const values = Object.fromEntries(
+      functions({
+        assistant: assistant({
+          completion_model: { ...toolModel, supports_tool_calling: false },
+          enabled_capabilities: ["charts"]
+        })
+      }).map(([key, , value]) => [key, value])
+    );
+    expect(values["enabled_capabilities.web_search"]).toBe("Inte tillgänglig");
+    expect(values["enabled_capabilities.charts"]).toBe("Aktiverad");
+  });
+
+  it("lists only the policy's functions where a policy governs them", () => {
+    const keys = functions({
+      assistant: assistant({
+        completion_model: toolModel,
+        effective_config: {
+          available_models: [],
+          mcp_enforced: true,
+          enabled_capabilities: ["charts"],
+          available_capabilities: [{ purpose: "charts", available: true }]
+        }
+      })
+    }).map(([key]) => key);
+    expect(keys.filter((key) => String(key).startsWith("enabled_capabilities."))).toEqual([
+      "enabled_capabilities.charts"
+    ]);
+  });
+});
+
 describe("A setting mention", () => {
   it("names the setting as the editor does and reads back", () => {
     const raw = settingMention({ key: "section:ai", label: "AI-inställningar" });
@@ -560,8 +676,23 @@ describe("A setting mention", () => {
       name: "Allmänt",
       key: "section:general"
     });
+    // One function, as the whole of Funktioner is.
+    for (const raw of [
+      "@[Diagram](setting:enabled_capabilities.charts)",
+      "@[Diagram](enabled_capabilities.charts)"
+    ]) {
+      expect(answerSettingMention(raw)).toEqual({
+        name: "Diagram",
+        key: "enabled_capabilities.charts"
+      });
+    }
     // A mention of no setting the editor knows keeps its name; the key is compared as written.
-    for (const raw of ["@[Namn](nonsense)", "@[Namn](setting:nonsense)", "@[Namn](Name)"]) {
+    for (const raw of [
+      "@[Namn](nonsense)",
+      "@[Namn](setting:nonsense)",
+      "@[Namn](Name)",
+      "@[Namn](setting:enabled_capabilities.maps)"
+    ]) {
       expect(answerSettingMention(raw)).toEqual({ name: "Namn", key: null });
     }
     // A link, or a mention of a web address, is no mention of a setting.

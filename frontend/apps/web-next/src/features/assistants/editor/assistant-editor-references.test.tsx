@@ -81,10 +81,6 @@ vi.mock("./instructions-section", () => ({
 }));
 vi.mock("./knowledge-section", () => ({ KnowledgeSection: () => null }));
 vi.mock("./mcp-section", () => ({ McpSection: () => null }));
-vi.mock("./capabilities-section", () => ({
-  CapabilitiesSection: () => null,
-  selectedCapabilities: () => []
-}));
 vi.mock("./attachments-section", () => ({ AttachmentsSection: () => null }));
 vi.mock("./publishing-section", () => ({ PublishingSection: () => null }));
 // The helper panel is the helper feature's: here it is the chat's real
@@ -205,6 +201,7 @@ describe("'Fråga' on each section", () => {
     ).toEqual([
       "Fråga hjälpassistenten om Allmänt",
       "Fråga hjälpassistenten om AI-inställningar",
+      "Fråga hjälpassistenten om Funktioner",
       "Fråga hjälpassistenten om Säkerhet och integritet"
     ]);
     await expectNoAxeViolations(container);
@@ -321,7 +318,9 @@ describe("'Hjälp mig skriva instruktionerna' beside the prompt", () => {
   });
 
   it("is not offered where a policy sets the prompt", () => {
-    renderEditor({ assistant: { effective_config: { prompt_locked: true } } });
+    renderEditor({
+      assistant: { effective_config: { prompt_locked: true, available_models: [] } }
+    });
     expect(screen.getByRole("heading", { name: "AI-inställningar" })).toBeTruthy();
     expect(ask()).toBeNull();
   });
@@ -397,6 +396,52 @@ describe("A pill in the helper chat", () => {
     } finally {
       state.message = "Se @[Namn](setting:name) och @[Webbwidget](setting:section:widget).";
     }
+  });
+
+  describe("for one function", () => {
+    // A space that offers "Diagram", ready to be switched on.
+    const space = () =>
+      makeSpace({
+        overrides: {
+          enabled_capabilities: ["charts"],
+          available_capabilities: [{ purpose: "charts", available: true }]
+        }
+      });
+    const diagram = () => screen.getByRole("switch", { name: "Diagram" });
+
+    afterEach(() => {
+      state.message = "Se @[Namn](setting:name) och @[Webbwidget](setting:section:widget).";
+    });
+
+    it("shows the function's own line beside the helper: focus moves to its switch", async () => {
+      state.message = "Slå på @[Diagram](setting:enabled_capabilities.charts).";
+      renderEditor({ space: space() });
+      act(() => reportResize(document.querySelector("[data-companion-row]")!, { width: 1600 }));
+      fireEvent.click(headerToggle());
+
+      fireEvent.click(await screen.findByRole("button", { name: "Diagram" }));
+
+      expect(document.activeElement).toBe(diagram());
+      expect(document.getElementById("assistant-capability-charts")?.contains(diagram())).toBe(
+        true
+      );
+      expect(helperPanel()).toBeTruthy();
+    });
+
+    it("opens Funktioner on a phone at the function's switch, with the helper closed", async () => {
+      setViewport("phone");
+      state.message = "Slå på @[Diagram](setting:enabled_capabilities.charts).";
+      renderEditor({ space: space() });
+      fireEvent.click(screen.getAllByRole("button", { name: "Hjälpassistent" }).at(-1)!);
+
+      fireEvent.click(await screen.findByRole("button", { name: "Diagram" }));
+
+      expect(helperPanel()).toBeNull();
+      await waitFor(() => expect(document.activeElement).toBe(diagram()));
+      expect(document.querySelector("[data-editor-view]")?.getAttribute("data-editor-view")).toBe(
+        "section"
+      );
+    });
   });
 
   it("is plain text for what the form does not show this person", async () => {

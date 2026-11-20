@@ -79,7 +79,8 @@ vi.mock("./knowledge-section", () => ({ KnowledgeSection: () => null }));
 vi.mock("./mcp-section", () => ({ McpSection: () => null }));
 vi.mock("./capabilities-section", () => ({
   CapabilitiesSection: () => null,
-  selectedCapabilities: () => []
+  selectedCapabilities: () => [],
+  capabilityRows: () => []
 }));
 vi.mock("./attachments-section", () => ({ AttachmentsSection: () => null }));
 vi.mock("./publishing-section", () => ({ PublishingSection: () => null }));
