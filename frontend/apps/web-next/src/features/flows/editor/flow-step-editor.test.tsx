@@ -2430,6 +2430,55 @@ describe("FlowStepEditor deliverables", () => {
     ).toEqual({ user_description: "Standup för alla" });
   }, 20_000);
 
+  it("keeps a switch turned on and off out of the edits, so a newer version's deliverable stays", async () => {
+    const flow = deliveryFlow();
+    const start = {
+      ...flow,
+      steps: flow.steps.map((step) =>
+        step.id === "step-1" ? { ...step, output_config: {} } : step
+      )
+    };
+    // Someone else marks the document as a deliverable meanwhile.
+    const newer = {
+      ...start,
+      draft_revision: start.draft_revision + 1,
+      steps: start.steps.map((step) =>
+        step.id === "step-1"
+          ? { ...step, output_config: { deliverable: { label: "Till ledningen" } } }
+          : step
+      )
+    };
+    storeEdits(newer);
+    const { rerender } = renderEditor(start);
+    fireEvent.click(await deliverySwitch());
+    await labelField();
+    fireEvent.click(await deliverySwitch());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+        })
+      ).toBeNull()
+    );
+    rerender(
+      <FlowStepEditor
+        flow={newer}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    expect((await labelField()).value).toBe("Till ledningen");
+    fireEvent.change(await nameField(), { target: { value: "Standup för alla" } });
+    await saveStep();
+    expect(
+      (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
+        .changes
+    ).toEqual({ user_description: "Standup för alla" });
+  }, 20_000);
+
   it("says a label or file name must be one line, as the core keeps them as written", async () => {
     renderEditor(deliveryFlow());
     fireEvent.click(await deliverySwitch());
