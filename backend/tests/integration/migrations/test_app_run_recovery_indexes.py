@@ -1,12 +1,15 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
+from datetime import datetime, timezone
 from time import monotonic, sleep
 
 import pytest
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
+from eneo.apps.app_runs.app_run_dispatch import stale_app_submissions
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
+from tests.integration.migrations.test_restart_safe_knowledge_jobs import _prepared_plan
 
 cleanup_database = expand.cleanup_database
 encryption_service = expand.encryption_service
@@ -76,3 +79,10 @@ def test_recovery_indexes_wait_for_an_in_flight_job_write():
                 (list(_INDEXES),),
             )
             assert {name for (name,) in query.fetchall()} == _INDEXES
+            query.execute("SET enable_seqscan = off")
+            query.execute("SET plan_cache_mode = force_generic_plan")
+            assert "ix_jobs_active_task_updated_id" in _prepared_plan(
+                connection,
+                name="app_recovery_scan",
+                statement=stale_app_submissions(datetime.now(timezone.utc)),
+            )

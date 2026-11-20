@@ -17,7 +17,7 @@ from eneo.jobs.job_models import (
     JobUpdate,
     Task,
 )
-from eneo.jobs.task_models import DispatchEnvelope
+from eneo.jobs.task_models import AppDispatchEnvelope, DispatchEnvelope
 from eneo.main.models import Status
 
 KNOWLEDGE_REAPER_PAGE_SIZE = 50
@@ -74,12 +74,12 @@ class JobRepository:
     async def add_job(self, job: Job):
         return await self.delegate.add(job)
 
-    async def add_durable_knowledge_job(
+    async def add_durable_job(
         self,
         job: Job,
         *,
         job_id: UUID,
-        dispatch_envelope: DispatchEnvelope,
+        dispatch_envelope: DispatchEnvelope | AppDispatchEnvelope,
     ) -> JobInDb:
         return await self.delegate.add(
             job,
@@ -100,6 +100,13 @@ class JobRepository:
             .where(Jobs.id == id)
             .returning(Jobs)
         )
+        if job.status in (Status.COMPLETE, Status.FAILED):
+            # Knowledge jobs retain their envelope until staging cleanup.
+            stmt = stmt.values(
+                dispatch_envelope=sa.case(
+                    (Jobs.task == Task.RUN_APP, sa.null()), else_=Jobs.dispatch_envelope
+                )
+            )
         if from_statuses:
             stmt = stmt.where(Jobs.status.in_(from_statuses))
 
@@ -139,12 +146,14 @@ class JobRepository:
             sa.update(Jobs)
             .where(Jobs.id == id)
             .where(Jobs.status == Status.IN_PROGRESS)
-            .values(updated_at=sa.func.now())
+            .values(updated_at=sa.func.clock_timestamp())
         )
         result = await self.delegate.session.execute(stmt)
         return affected_row_count(result) > 0
 
-    async def mark_job_started(self, id: UUID) -> bool:
+    async def mark_job_started(
+        self, id: UUID, *, durable_queue_age: timedelta | None = None
+    ) -> bool:
         """Atomically transition job from QUEUED to IN_PROGRESS.
 
         Uses Compare-and-Swap (CAS) to prevent a worker from resurrecting a job
@@ -160,34 +169,20 @@ class JobRepository:
             True if job was successfully transitioned to IN_PROGRESS
             False if job status had already changed
         """
-        started = await self.update_job(
-            id,
-            JobUpdate(status=Status.IN_PROGRESS),
-            from_statuses=(Status.QUEUED,),
+        stmt = sa.update(Jobs).where(Jobs.id == id, Jobs.status == Status.QUEUED)
+        if durable_queue_age is not None:
+            stmt = stmt.where(
+                sa.or_(
+                    Jobs.dispatch_envelope.is_(None),
+                    Jobs.created_at > sa.func.clock_timestamp() - durable_queue_age,
+                )
+            ).values(dispatch_envelope=sa.null(), updated_at=sa.func.clock_timestamp())
+        started = await self.delegate.get_model_from_query(
+            stmt.values(status=Status.IN_PROGRESS).returning(Jobs)
         )
+        if started is not None:
+            publish_job_update_after_commit(self.delegate.session, started)
         return started is not None
-
-    async def fail_app_dispatch_if_unclaimed(self, job_id: UUID) -> None:
-        # An enqueue can reach Redis even when its acknowledgement is lost.
-        # A worker holds this row lock until it commits the app result.
-        available = await self.delegate.session.scalar(
-            sa.select(Jobs.id)
-            .where(
-                Jobs.id == job_id,
-                Jobs.task == Task.RUN_APP,
-                Jobs.status == Status.QUEUED,
-            )
-            .with_for_update(skip_locked=True)
-        )
-        if available is not None:
-            await self.update_job(
-                job_id,
-                JobUpdate(
-                    status=Status.FAILED,
-                    failure_code=JobFailureCode.DISPATCH_FAILED,
-                    finished_at=datetime.now(timezone.utc),
-                ),
-            )
 
     async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
         from eneo.main.models import Status

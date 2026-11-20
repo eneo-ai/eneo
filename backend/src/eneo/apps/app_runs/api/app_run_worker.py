@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from collections.abc import Awaitable, Callable
 from typing import cast
 from uuid import UUID
 
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
+from eneo.apps.app_runs.app_run_dispatch import claim_app_job, reconcile_app_runs
 from eneo.database.database import AsyncSession
-from eneo.jobs.job_models import JobFailureCode, Task
+from eneo.jobs.job_manager import DURABLE_APP_FUNCTION
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
 from eneo.main.models import Channel, ChannelType, RedisMessage, Status
@@ -13,11 +14,6 @@ from eneo.worker.worker import Worker
 
 worker = Worker()
 logger = get_logger(__name__)
-
-# Maintenance fails unlocked queued or in-progress runs older than this age.
-# The execution transaction holds the job row lock while the app is running.
-APP_RUN_QUEUE_TIMEOUT = timedelta(hours=2)
-APP_RUN_REAPER_BATCH_SIZE = 50
 
 
 def _update_data(
@@ -32,13 +28,19 @@ def _update_data(
     channel_type=ChannelType.APP_RUN_UPDATES,
     keep_result=0,
     max_tries=1,
-    commit_start_before_run=True,
+    claim_before_run=claim_app_job,
+    function_alias=DURABLE_APP_FUNCTION,
 )
 async def run_app(
-    params: AppRunParams, container: Container, worker_config: WorkerConfig
+    params: AppRunParams,
+    container: Container,
+    worker_config: WorkerConfig,
+    checkpoint: Callable[[], Awaitable[None]],
 ):
-    app_run_service = container.app_run_service()
-    app_service = container.app_service()
+    app_service = container.app_service(
+        transcriber=container.transcriber(after_transcription_saved=checkpoint)
+    )
+    app_run_service = container.app_run_service(app_service=app_service)
     space_service = container.space_service()
 
     app, _ = await app_service.get_app(params.app_id)
@@ -59,12 +61,7 @@ async def run_app(
 async def fail_expired_app_runs(container: Container) -> None:
     session = cast(AsyncSession, container.session())
     async with session.begin():
-        failed_ids = await container.job_repo().mark_stale_jobs_failed(
-            tasks=[Task.RUN_APP.value],
-            stale_before=datetime.now(timezone.utc) - APP_RUN_QUEUE_TIMEOUT,
-            limit=APP_RUN_REAPER_BATCH_SIZE,
-            failure_code=JobFailureCode.PROCESSING_INTERRUPTED,
-        )
+        failed_ids = await reconcile_app_runs(session)
         if not failed_ids:
             return
 

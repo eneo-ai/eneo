@@ -40,6 +40,10 @@ class WorkerConfig:
         self.task_manager.additional_data = data  # type: ignore[attr-defined]
 
 
+class JobCheckpointError(Exception):
+    """The worker must record the failure outside the interrupted transaction."""
+
+
 class TaskManager:
     def __init__(
         self,
@@ -122,6 +126,8 @@ class TaskManager:
 
         try:
             yield
+        except JobCheckpointError:
+            raise
         except asyncio.CancelledError:
             # CancelledError inherits from BaseException (not Exception) in Python 3.8+
             # Must handle explicitly to mark job as failed when worker shuts down

@@ -118,7 +118,7 @@ def _service_with_real_job_service(
     )
     job_repo = MagicMock()
     job_repo.delegate.session = session
-    job_repo.add_job = AsyncMock(
+    job_repo.add_durable_job = AsyncMock(
         return_value=JobInDb(
             id=job_id,
             user_id=TEST_USER.id,

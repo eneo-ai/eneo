@@ -11,6 +11,7 @@ from eneo.completion_models.infrastructure.context_builder import count_tokens
 from eneo.files.file_service import FileService
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_service import JobService
+from eneo.jobs.task_models import AppDispatchEnvelope
 from eneo.main.exceptions import (
     BadRequestException,
     NotFoundException,
@@ -72,6 +73,7 @@ class AppRunService:
                 app_id=app.id,
             ),
             after_commit=True,
+            dispatch_envelope=AppDispatchEnvelope(version=1, file_ids=file_ids),
         )
 
         app_run_in_db.update(job_id=job.id)

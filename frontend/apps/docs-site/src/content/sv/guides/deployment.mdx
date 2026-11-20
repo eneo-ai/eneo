@@ -203,6 +203,15 @@ eller anslutas till `eneo_data_net`.
 
 ## Uppgradera och återställ
 
+Starta de nya generella workerprocesserna innan du öppnar API:t vid uppgraderingen
+som inför återhämtning av appkörningar. De kan ta emot både gamla och nya jobb.
+Om en ny körning tappar sin plats i kön skickas samma jobb till kön igen efter
+fem minuter. En körning som inte har startat efter två timmar markeras som
+misslyckad. Om en worker försvinner under arbetet markeras körningen som
+misslyckad vid en underhållskörning efter fem minuters inaktivitet. Användaren
+kan då öppna resultatet, ladda ner ett sparat transkript och använda samma
+inspelning i en ny körning.
+
 Ta databasbackup och, om objektlagrade poster finns, en matchande ögonblicksbild
 av objektlagringen medan skrivningar är stoppade. Behandla dem som en gemensam
 återställningspunkt. Inline-innehåll följer med PostgreSQL-backupen.

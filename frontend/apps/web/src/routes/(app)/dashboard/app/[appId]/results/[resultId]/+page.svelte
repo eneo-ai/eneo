@@ -93,75 +93,73 @@
   {/if}
 
   <div class="flex-grow overflow-y-auto p-4">
-    {#if run.isComplete}
-      {#if run.transcribedFiles.length > 0 && activeTab === "transcription"}
-        <div class="flex flex-col gap-4">
-          {#each run.transcribedFiles as file (file.id)}
-            {@const url = attachmentUrlService.getUrl(file)}
-            <AppResultToolbar
-              type="transcription"
-              text={file.transcription}
-              fileName={run.textFileName}
-              {printElement}
-              class="pb-2"
-            />
+    {#if run.transcribedFiles.length > 0 && activeTab === "transcription"}
+      <div class="flex flex-col gap-4">
+        {#each run.transcribedFiles as file (file.id)}
+          {@const url = attachmentUrlService.getUrl(file)}
+          <AppResultToolbar
+            type="transcription"
+            text={file.transcription}
+            fileName={run.textFileName}
+            {printElement}
+            class="pb-2"
+          />
 
-            <div class="border-stronger bg-secondary rounded-xl border">
-              <div class="border-stronger bg-primary rounded-t-xl border-b p-2">
-                <div class="flex items-center justify-between gap-4 px-1 pb-2">
-                  <div class="flex gap-2">
-                    <UploadedFileIcon {file} />
-                    <span class="truncate">{file.name}</span>
-                  </div>
-                  <AppRunFileDownload {file} compact />
+          <div class="border-stronger bg-secondary rounded-xl border">
+            <div class="border-stronger bg-primary rounded-t-xl border-b p-2">
+              <div class="flex items-center justify-between gap-4 px-1 pb-2">
+                <div class="flex gap-2">
+                  <UploadedFileIcon {file} />
+                  <span class="truncate">{file.name}</span>
                 </div>
-                {#if url}
-                  <audio
-                    controls
-                    src={url}
-                    class="border-stronger h-8 w-full rounded-full border shadow-sm"
-                  ></audio>
-                {/if}
+                <AppRunFileDownload {file} compact />
               </div>
-              <div class="prose p-4">
-                <Markdown source={file.transcription} />
-              </div>
+              {#if url}
+                <audio
+                  controls
+                  src={url}
+                  class="border-stronger h-8 w-full rounded-full border shadow-sm"
+                ></audio>
+              {/if}
             </div>
-          {/each}
-        </div>
-      {:else if run.result.output}
-        <AppResultToolbar
-          type="output"
-          text={run.result.output}
-          fileName={run.textFileName}
-          {printElement}
-          class="pb-2"
-        />
-        <div
-          class="printable-document prose border-default bg-primary rounded-lg border p-4 shadow"
-          bind:this={printElement}
-        >
-          <Markdown source={run.result.output} />
-        </div>
-      {:else if run.result.status === "failed" && run.result.input.files.length > 0}
-        <div class="flex flex-col items-center justify-center gap-4 py-8">
-          <span class="text-secondary">{m.app_run_failed_files_list()}</span>
-          {#each run.result.input.files as file (file.id)}
-            <AppRunFileDownload {file} />
-          {/each}
-        </div>
-      {:else}
-        <div class="flex flex-col items-center justify-center py-8">
-          <span class="text-secondary">{m.no_outputs_generated()}</span>
-        </div>
-      {/if}
-    {:else}
+            <div class="prose p-4">
+              <Markdown source={file.transcription} />
+            </div>
+          </div>
+        {/each}
+      </div>
+    {:else if !run.isComplete}
       <div class="flex h-[50vh] flex-col items-center justify-center gap-2">
         <IconLoadingSpinner class="animate-spin" />
         <span class="text-secondary">{m.result_being_generated()}</span>
         {#each run.recordings as file (file.id)}
           <AppRunFileDownload {file} />
         {/each}
+      </div>
+    {:else if run.result.output}
+      <AppResultToolbar
+        type="output"
+        text={run.result.output}
+        fileName={run.textFileName}
+        {printElement}
+        class="pb-2"
+      />
+      <div
+        class="printable-document prose border-default bg-primary rounded-lg border p-4 shadow"
+        bind:this={printElement}
+      >
+        <Markdown source={run.result.output} />
+      </div>
+    {:else if run.result.status === "failed" && run.result.input.files.length > 0}
+      <div class="flex flex-col items-center justify-center gap-4 py-8">
+        <span class="text-secondary">{m.app_run_failed_files_list()}</span>
+        {#each run.result.input.files as file (file.id)}
+          <AppRunFileDownload {file} />
+        {/each}
+      </div>
+    {:else}
+      <div class="flex flex-col items-center justify-center py-8">
+        <span class="text-secondary">{m.no_outputs_generated()}</span>
       </div>
     {/if}
 
