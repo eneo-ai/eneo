@@ -8,6 +8,7 @@ from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from eneo.allowed_origins.origin_matching import is_too_broad_wildcard
 from eneo.widgets.domain.widget import MAX_DAILY_TOKEN_BUDGET, BotProtection, Widget
 
 # The widget setting each violation is about.
@@ -38,6 +39,8 @@ class WidgetPolicy(BaseModel):
     allow_bot_protection_none: bool = False
     min_retention_days: int = Field(default=0, ge=0, le=3650)
     max_retention_days: int = Field(default=365, ge=0, le=3650)
+    # Applies to activation and to each visitor turn, including previews.
+    allow_external_tools: bool = True
 
     @model_validator(mode="after")
     def _retention_window(self) -> "WidgetPolicy":
@@ -102,9 +105,16 @@ class WidgetPolicy(BaseModel):
         forbids ``none``, and retention cut to the policy maximum. The
         minimum is left to the retention job: the policy can make a widget
         keep less, never start storing conversations it was set not to store.
+        A wildcard over a whole top-level domain is never served: it was
+        saved before the two-label rule and the overview reports it.
         """
         return widget.serving_copy(
             {
+                "allowed_origins": [
+                    origin
+                    for origin in widget.allowed_origins
+                    if not is_too_broad_wildcard(origin)
+                ],
                 "limits": widget.limits.model_copy(
                     update={"daily_token_budget": self.daily_token_budget_for(widget)}
                 ),

@@ -1,26 +1,31 @@
-import type { MetaRecord } from 'nextra';
+import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
   index: {
-    title: 'Home',
-    type: 'page',
+    title: "Home",
+    type: "page",
   },
   docs: {
-    title: 'Documentation',
-    type: 'page',
+    title: "Documentation",
+    type: "page",
   },
   guides: {
-    title: 'Guides',
-    type: 'page',
+    title: "Guides",
+    type: "page",
+  },
+  security: {
+    title: "Security",
+    type: "page",
+    href: "/docs/security",
   },
   contributing: {
-    title: 'Contributing',
-    type: 'page',
+    title: "Contributing",
+    type: "page",
   },
   about: {
-    title: 'About',
-    type: 'page',
+    title: "About",
+    type: "page",
   },
-}
+};
 
 export default meta;

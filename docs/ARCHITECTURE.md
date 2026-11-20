@@ -443,7 +443,7 @@ erDiagram
 
 **Multi-tenancy:**
 - All entities include `tenant_id` for data isolation
-- Row-level security ensures tenant separation
+- Tenant isolation is enforced in application repositories and services through scoped queries and authorization checks; PostgreSQL row-level security is not used
 - UUID primary keys prevent enumeration attacks
 
 **Soft Deletes:**
@@ -469,8 +469,8 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 ### Tenant Isolation
 
 **Database Level:**
-- All entities include `tenant_id` for row-level security
-- PostgreSQL policies enforce tenant separation
+- All entities include `tenant_id`
+- Tenant isolation is enforced in application repositories and services through scoped queries and authorization checks; there are no PostgreSQL row-level security policies
 - UUID primary keys prevent enumeration
 
 **Authentication Modes:**
@@ -714,15 +714,15 @@ Eneo implements security at every layer to protect sensitive public sector data 
 - **Data Retention**: Automatic deletion per policy
 
 **Multi-Tenant Security:**
-- Database isolation with row-level security
+- Tenant isolation in the application layer, covered by adversarial isolation tests
 - Encrypted credentials (Fernet) for LLM keys and IdP secrets
 - Per-tenant federation support
 - Masked credential responses
 
-**Compliance Ready:**
-- **GDPR**: Built-in data subject rights and privacy controls
-- **EU AI Act**: Transparency and accountability features
-- **Public Sector**: Designed for government security requirements
+**Compliance Support:**
+- **GDPR**: Audit logging, configurable data retention and an export of a user's audit records for access requests (Article 15) support an organisation's own GDPR work; the deploying organisation remains responsible for its processing
+- **EU AI Act**: Self-hosting, model choice per space and security classifications support transparency and control
+- **Public Sector**: Designed for government security requirements; see [Security at Eneo](https://docs.eneo.ai/dev/docs/security)
 
 **See Also:** [Multi-Tenancy Architecture](#multi-tenancy-architecture) for detailed security implementation
 
@@ -732,25 +732,12 @@ Eneo implements security at every layer to protect sensitive public sector data 
 
 ### Built-in Monitoring
 
-Eneo includes comprehensive monitoring capabilities for production deployments.
+Eneo emits structured logs (NDJSON on STDOUT) and OpenTelemetry traces, and leaves collection, storage and dashboards to the deployment. It does not export metrics or traces itself. See [OBSERVABILITY.md](./OBSERVABILITY.md) for the log format, trace flow and redaction policy.
 
-**System Health:**
-- Container resource usage and performance
-- Database query performance and connection health
-- Background task queue status and processing times
-- API response times and error rates
-
-**Business Intelligence:**
-- User engagement and feature adoption
-- AI model usage patterns and costs
-- Document processing statistics
-- Space collaboration metrics
-
-**Security Monitoring:**
-- Authentication failures and suspicious login attempts
-- API rate limiting and abuse detection
-- Data access patterns and compliance audits
-- System resource anomalies
+Inside the application:
+- Administrators see usage and model statistics in the admin Insights views
+- The audit log records actions per tenant and can be searched and exported
+- Login attempts are rate limited and failed sign-ins are logged
 
 ---
 

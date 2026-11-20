@@ -94,6 +94,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   // --- Removed content ---
   9085: () => m.eneo_error_9085(), // DERIVED_SOURCE_REMOVED
 
+  // --- Retention periods ---
+  9086: () => m.eneo_error_9086(), // RETENTION_EXCEEDS_SPACE
+
   // --- Skill lifecycle ---
   9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION
   9048: () => m.eneo_error_9048(), // SKILL_SLUG_TAKEN

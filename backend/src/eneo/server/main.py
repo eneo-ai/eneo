@@ -2,7 +2,6 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
-import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Security
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field
@@ -633,13 +632,3 @@ def get_application():
 
 
 app = get_application()
-
-
-def start():
-    uvicorn.run(
-        "eneo.server.main:app",
-        host="0.0.0.0",
-        port=8123,
-        reload=True,
-        reload_dirs="./src/",
-    )

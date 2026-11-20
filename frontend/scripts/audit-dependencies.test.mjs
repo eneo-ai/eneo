@@ -77,6 +77,68 @@ test("expired exceptions still fail when the finding is absent or below high", (
   }
 });
 
+test("a low deepmerge advisory stays a visible warning and high still blocks", () => {
+  const after = new Date("2026-11-27T00:00:00Z");
+  const deepmerge = (severity) => ({
+    deepmerge: [
+      advisory(severity, {
+        url: "https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+        vulnerable_versions: ">=4.2.0 <=4.3.1",
+      }),
+    ],
+  });
+  assert.deepEqual(evaluate(deepmerge("low"), after), {
+    errors: [],
+    warnings: [
+      "deepmerge: low https://github.com/advisories/GHSA-gcqx-w48m-w2h4",
+    ],
+    accepted: [],
+  });
+  assert.equal(evaluate(deepmerge("high"), after).errors.length, 1);
+});
+
+const remoteFormDos = advisory("high", {
+  url: "https://github.com/advisories/GHSA-3r8g-jcqq-3p5j",
+  vulnerable_versions: ">=2.42.0 <=3.1.0",
+});
+const remoteFunctionsCheck = "scripts/remote-functions-off.test.mjs";
+
+test("the remote functions form advisory is accepted only while its check passes", () => {
+  const report = { "@sveltejs/kit": [remoteFormDos] };
+  assert.equal(evaluate(report, NOW).accepted.length, 1);
+  const failed = evaluate(report, NOW, [remoteFunctionsCheck]);
+  assert.equal(failed.accepted.length, 0);
+  assert.match(failed.errors.join("\n"), /@sveltejs\/kit: high .*GHSA-3r8g/);
+  assert.match(
+    failed.errors.join("\n"),
+    /GHSA-3r8g.*remote-functions-off\.test\.mjs failed/,
+  );
+  assert.equal(
+    evaluate(
+      {
+        "@sveltejs/kit": [
+          { ...remoteFormDos, vulnerable_versions: ">=2.42.0 <=3.2.0" },
+        ],
+      },
+      NOW,
+    ).errors.length,
+    1,
+  );
+});
+
+test("the picomatch extglob advisory is accepted for its exact range only", () => {
+  const extglob = advisory("high", {
+    url: "https://github.com/advisories/GHSA-fc5q-39xc-vjpf",
+    vulnerable_versions: "<=4.0.7",
+  });
+  assert.equal(evaluate({ picomatch: [extglob] }, NOW).accepted.length, 1);
+  for (const report of [
+    { picomatch: [{ ...extglob, vulnerable_versions: "<=4.0.8" }] },
+    { micromatch: [extglob] },
+  ])
+    assert.equal(evaluate(report, NOW).errors.length, 1);
+});
+
 test("malformed reports fail instead of reporting a clean audit", () => {
   for (const report of [
     null,

@@ -1,15 +1,25 @@
 # Authentication Architecture
 
-Technical reference for Eneo's OIDC authentication system, including protocol details, security mechanisms, and internal components.
+This page explains how sign-in to Eneo works: the OIDC flow, the Eneo session token, local passwords and the settings that control them.
 
 import { Callout, Tabs, Steps } from 'nextra/components'
+
+**In short**
+
+- Sign-in uses the OAuth 2.0 Authorization Code Flow through `/api/v1/auth/initiate` and `/api/v1/auth/callback`. The `state` is a JWT that the server signs (HS256) and that expires after 600 seconds (`oidc_state_ttl_seconds`).
+- An Eneo session needs `token_version` `2`, and Eneo finds the account by both `user_id` and `tenant_id`. After this upgrade every user signs in again; update all API instances and workers together.
+- A password set for another account normally has to be replaced at the account's next password sign-in ([exceptions](#local-password-lifecycle)). Password expiry (`max_age_days`) is off by default.
+- No account is created at sign-in by default (`tenant.provisioning: false`). When it is on, the tenant needs a domain allowlist, the email domain must match and the identity provider must send `email_verified: true`.
+- `ENCRYPTION_KEY` is required when `FEDERATION_ENABLED=true`. Back it up: without it, every tenant's identity provider must be registered again.
 
 <Callout type="info">
   Looking to set up authentication? See the [OIDC Federation](/guides/oidc-federation) guides
   ([single-tenant](/guides/oidc-federation/single-tenant) or
   [multi-tenant](/guides/oidc-federation/multi-tenant)).
   For how optional module applications reuse the Eneo session through one-time
-  tickets, see [Module Authentication](/docs/module-authentication).
+  tickets, see [Module Authentication](/docs/module-authentication). For how
+  sign-in fits with Eneo's other security controls, see [Security at
+  Eneo](/docs/security).
 </Callout>
 
 ---
@@ -712,3 +722,11 @@ Other refusals are plain `400` answers without a code: `Invalid state parameter`
 3. Send the verifier as `binding_verifier` to `/callback`.
 
 A bound sign-in is redeemed only with its verifier. An unbound one works as before and refuses a `binding_verifier`. Binding adds only the verifier: the callback's other requirements stay, including forwarding the provider's `iss` when it sends one. A malformed value is refused with `422`. `code_verifier` is still accepted and ignored.
+
+## Related pages
+
+- [Authentication & OIDC](/guides/oidc-federation) for the setup steps
+- [SCIM Provisioning](/guides/scim-provisioning) for provisioning users and groups from the identity provider
+- [Module Authentication](/docs/module-authentication) for how modules reuse the Eneo session
+- [API Key Management](/docs/api-key-management) for service keys and unattended access
+- [Audit Logging](/docs/audit-logging) for the events sign-in and federation changes record

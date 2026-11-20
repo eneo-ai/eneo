@@ -71,6 +71,7 @@ class AppRunService:
                 file_ids=file_ids,
                 app_id=app.id,
             ),
+            after_commit=True,
         )
 
         app_run_in_db.update(job_id=job.id)

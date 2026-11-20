@@ -14,12 +14,14 @@ vi.mock("@astryxdesign/core/NumberInput", () => ({
     label,
     value,
     onChange,
-    status
+    status,
+    isDisabled
   }: {
     label: string;
     value: number;
     onChange: (value: number | null) => void;
     status?: { message: string };
+    isDisabled?: boolean;
   }) => (
     <label>
       {label}
@@ -27,6 +29,8 @@ vi.mock("@astryxdesign/core/NumberInput", () => ({
         type="number"
         value={value}
         aria-invalid={status ? true : undefined}
+        aria-disabled={isDisabled ? true : undefined}
+        readOnly={isDisabled}
         onChange={(event) =>
           onChange(event.target.value === "" ? null : Number(event.target.value))
         }
@@ -36,7 +40,7 @@ vi.mock("@astryxdesign/core/NumberInput", () => ({
   )
 }));
 
-function widget(): Widget {
+function widget(overrides: Partial<Widget> = {}): Widget {
   return {
     id: "w1",
     name: "Kaffe",
@@ -55,18 +59,19 @@ function widget(): Widget {
     allowed_origins: ["https://www.kommun.se"],
     bot_protection: "altcha",
     activation_blockers: [],
-    template: null
+    template: null,
+    ...overrides
   } as unknown as Widget;
 }
 
 /** The rules fields as the editor mounts them: state read from the store. */
-function Rules({ autosave }: { autosave: WidgetAutosave }) {
+function Rules({ autosave, isAdmin }: { autosave: WidgetAutosave; isAdmin?: boolean }) {
   const state = useSyncExternalStore(
     autosave.subscribe,
     autosave.getSnapshot,
     autosave.getSnapshot
   );
-  return <WidgetRulesFields autosave={autosave} state={state} policy={null} />;
+  return <WidgetRulesFields autosave={autosave} state={state} policy={null} isAdmin={isAdmin} />;
 }
 
 afterEach(() => vi.restoreAllMocks());
@@ -93,5 +98,107 @@ describe("WidgetRulesFields", () => {
       )
     );
     expect(consoleError.mock.calls.flat().join(" ")).not.toContain("Maximum update depth");
+  });
+});
+
+const GOVERNED =
+  "Tillåtna webbplatser, integritet och botskydd granskades av en organisationsadministratör vid aktiveringen. Medan widgeten är aktiv ändrar bara en administratör dem; pausa widgeten för att ändra dem själv.";
+
+/** The fields an admin reviewed at activation, then a limit outside that review. */
+function governedFields() {
+  return {
+    origins: screen.getByRole("textbox", { name: "Tillåtna webbplatser" }),
+    retention: screen.getByRole("spinbutton", { name: "Lagringstid i dagar" }),
+    feedback: screen.getByRole("switch", { name: /^Spara fritextåterkoppling/ }),
+    protection: screen.getByRole("combobox", { name: /^Botskydd/ }),
+    budget: screen.getByRole("spinbutton", { name: "Daglig tokenbudget" })
+  };
+}
+
+describe("WidgetRulesFields governed settings", () => {
+  it("an editor cannot change what an admin reviewed while the widget is active", async () => {
+    const save = vi.fn(async (update: Record<string, unknown>) => ({ ...widget(), ...update }));
+    const autosave = new WidgetAutosave(widget({ status: "active" }), save, { delay: 10 });
+    renderInApp(<Rules autosave={autosave} isAdmin={false} />);
+
+    expect(screen.getByRole("note").textContent).toBe(GOVERNED);
+    const { origins, retention, feedback, protection, budget } = governedFields();
+    for (const field of [origins, retention, feedback, protection]) {
+      expect(field.getAttribute("aria-disabled")).toBe("true");
+    }
+    // The budget is capped by the policy at run time and stays the editor's.
+    expect(budget.getAttribute("aria-disabled")).toBeNull();
+
+    fireEvent.click(feedback);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { case: "an admin on an active widget", status: "active", isAdmin: true },
+    { case: "an editor on a draft", status: "draft", isAdmin: false }
+  ] as const)("$case edits every rule", ({ status, isAdmin }) => {
+    const autosave = new WidgetAutosave(widget({ status }), vi.fn(), { delay: 10 });
+    renderInApp(<Rules autosave={autosave} isAdmin={isAdmin} />);
+    expect(screen.queryByRole("note")).toBeNull();
+    for (const field of Object.values(governedFields())) {
+      expect(field.getAttribute("aria-disabled")).toBeNull();
+    }
+  });
+});
+
+describe("WidgetRulesFields allowed websites", () => {
+  it("explains a saved wildcard the API no longer accepts, and holds no edit until it changes", async () => {
+    const save = vi.fn(async (update: Record<string, unknown>) => ({ ...widget(), ...update }));
+    const autosave = new WidgetAutosave(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      }),
+      save,
+      { delay: 10 }
+    );
+    renderInApp(<Rules autosave={autosave} />);
+
+    const origins = screen.getByRole("textbox", { name: "Tillåtna webbplatser" });
+    expect(origins.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByText(/täcker en hel toppdomän/)).toBeTruthy();
+    // Nothing was typed, so leaving the page has nothing to ask about.
+    expect(autosave.hasDrafts).toBe(false);
+
+    fireEvent.change(origins, { target: { value: "https://*.kommun.se" } });
+    fireEvent.blur(origins);
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith(
+        expect.objectContaining({ allowed_origins: ["https://*.kommun.se"] })
+      )
+    );
+  });
+
+  it("a saved list left, or typed back, as it was is explained as the saved one", () => {
+    const autosave = new WidgetAutosave(
+      widget({
+        allowed_origins: ["https://*.se"],
+        activation_blockers: ["allowed_origin_too_broad"]
+      }),
+      vi.fn(),
+      { delay: 10 }
+    );
+    renderInApp(<Rules autosave={autosave} />);
+    const origins = screen.getByRole("textbox", { name: "Tillåtna webbplatser" });
+    const tooBroad = /täcker en hel toppdomän/;
+
+    fireEvent.focus(origins);
+    fireEvent.blur(origins);
+    expect(screen.getByText(tooBroad)).toBeTruthy();
+
+    fireEvent.change(origins, { target: { value: "https://*.se\nkontakt" } });
+    fireEvent.blur(origins);
+    expect(screen.getByText(/Ingen giltig origin/)).toBeTruthy();
+
+    fireEvent.change(origins, { target: { value: "https://*.se" } });
+    fireEvent.blur(origins);
+    expect(screen.getByText(tooBroad)).toBeTruthy();
+    expect(screen.queryByText(/Ingen giltig origin/)).toBeNull();
   });
 });

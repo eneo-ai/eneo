@@ -499,6 +499,11 @@
                 ? localizeHref("/admin/widgets")
                 : undefined}
           />
+        {:else}
+          <p class="text-secondary text-sm">
+            {#if data.servesActiveWidget === null}{m.widget_admin_assistant_status_unknown()}{/if}
+            {m.widget_admin_assistant_notice_conditional()}
+          </p>
         {/if}
         <Settings.Row
           title={m.tools()}

@@ -104,7 +104,8 @@ function showPage(
           max_daily_token_budget: 1000000,
           min_retention_days: 0,
           max_retention_days: 365,
-          allow_bot_protection_none: false
+          allow_bot_protection_none: false,
+          allow_external_tools: true
         });
       case "/api/v1/widget-templates/":
         return ok({ items: templates, count: templates.length, total_count: templates.length });
@@ -136,6 +137,15 @@ function showPage(
 const WIDGET_PATH = "/api/v1/widgets/{id}/";
 const WIDGETS_PATH = "/api/v1/spaces/{space_id}/widgets/";
 const LINK_PATH = "/api/v1/widgets/{id}/link-template/";
+
+/** The text of the elements an element's aria-describedby points at. */
+function descriptionOf(element: Element) {
+  return (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+}
 
 /** A 422 as openapi-fetch hands it over: the body on `error`, the status on `response`. */
 function refused(detail: unknown) {
@@ -265,6 +275,94 @@ describe("WidgetAdminPage", () => {
       expect(api.POST).toHaveBeenCalledWith("/api/v1/widgets/{id}/activate/", expect.anything())
     );
     await screen.findByText("Aktiv");
+  });
+
+  it("visitor access lists each server outside Eneo with the tools switched on there", async () => {
+    showPage([
+      widget({
+        external_tools: [
+          {
+            id: "m1",
+            name: "Kommunens ärenden",
+            tools: [
+              { id: "t1", name: "Sök ärende" },
+              { id: "t2", name: "Skapa ärende" }
+            ]
+          }
+        ]
+      })
+    ]);
+    fireEvent.click(await screen.findByRole("tab", { name: /Publicera/ }));
+    const access = await screen.findByRole("region", { name: "Besökare får tillgång till" });
+    expect(
+      within(access)
+        .getAllByRole("listitem")
+        .map((item) => item.textContent)
+    ).toEqual([
+      "Kunskap: assistentens samlingar och webbplatser",
+      "Kommunens ärenden: Sök ärende, Skapa ärende"
+    ]);
+  });
+
+  it.each([
+    {
+      case: "the organisation does not allow them",
+      blockers: ["external_tools_not_allowed"],
+      items: [
+        "Kunskap: assistentens samlingar och webbplatser",
+        "Inga verktyg på MCP-servrar utanför Eneo: organisationen tillåter dem inte i widgetar."
+      ]
+    },
+    {
+      case: "the assistant enables them",
+      blockers: [],
+      items: [
+        "Kunskap: assistentens samlingar och webbplatser",
+        "Kommunens ärenden: Sök ärende",
+        "Används, men visas inte för besökaren (verktygsaktivitet är av)."
+      ]
+    }
+  ])(
+    "visitor access lists only the tools visitors reach when $case",
+    async ({ blockers, items }) => {
+      showPage([
+        widget({
+          status: "active",
+          activated_at: "2026-09-01T00:00:00Z",
+          external_tools: [
+            { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
+          ],
+
+          activation_blockers: blockers,
+          show_tool_activity: false
+        })
+      ]);
+      fireEvent.click(await screen.findByRole("tab", { name: /Publicera/ }));
+      const access = await screen.findByRole("region", { name: "Besökare får tillgång till" });
+      expect(
+        within(access)
+          .getAllByRole("listitem")
+          .map((item) => item.textContent)
+      ).toEqual(items);
+    }
+  );
+
+  it.each([
+    { case: "only an admin", permissions: ["widgets"], locked: true },
+    { case: "an admin", permissions: ["widgets", "admin"], locked: false }
+  ] as const)("$case detaches a live widget from its template", async ({ permissions, locked }) => {
+    showPage(
+      [linked({ status: "active", activated_at: "2026-09-01T00:00:00Z" })],
+      [...permissions]
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: /Utseende/ }));
+    const detach = await screen.findByRole("button", { name: "Koppla loss från mallen" });
+    expect(detach.hasAttribute("disabled")).toBe(locked);
+    expect(descriptionOf(detach)).toBe(
+      locked
+        ? "Bara en organisationsadministratör kan koppla loss mallen från en aktiv widget, eftersom mallens låsningar bara gäller medan widgeten följer den. Pausa widgeten för att koppla loss den själv."
+        : ""
+    );
   });
 
   it("creates the widget from the assistant's name when there is none", async () => {
