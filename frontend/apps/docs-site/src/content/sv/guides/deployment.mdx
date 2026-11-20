@@ -1,6 +1,6 @@
 ---
 title: Driftsätt Eneo
-translationSource: guides/deployment.mdx@3e66d774f9e7
+translationSource: guides/deployment.mdx@b4c44681f90d
 ---
 
 import { Callout } from "nextra/components";
@@ -206,9 +206,11 @@ eller anslutas till `eneo_data_net`.
 Starta de nya generella workerprocesserna innan du öppnar API:t vid uppgraderingen
 som inför återhämtning av appkörningar. De kan ta emot både gamla och nya jobb.
 Om en ny körning tappar sin plats i kön skickas samma jobb till kön igen efter
-fem minuter. En körning som inte har startat efter två timmar markeras som
-misslyckad. Om en worker försvinner under arbetet markeras körningen som
-misslyckad vid en underhållskörning efter fem minuters inaktivitet. Användaren
+fem minuter. Workern måste begära jobbet i databasen inom två timmar från det
+att körningen skickades in. Om workern begär jobbet i tid kan den starta det
+även om den måste vänta på att ett nytt köförsök släpper låset. Om en worker
+försvinner under arbetet markeras körningen som misslyckad vid en
+underhållskörning efter fem minuters inaktivitet. Användaren
 kan då öppna resultatet, ladda ner ett sparat transkript och använda samma
 inspelning i en ny körning.
 
