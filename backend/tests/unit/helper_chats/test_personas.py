@@ -375,6 +375,12 @@ EDITOR_REFERENCE_KEYS = (
     "completion_model_kwargs.frequency_penalty",
     "completion_model_kwargs.top_k",
     "enabled_capabilities",
+    "enabled_capabilities.web_search",
+    "enabled_capabilities.image_generation",
+    "enabled_capabilities.file_analysis",
+    "enabled_capabilities.file_creation",
+    "enabled_capabilities.charts",
+    "enabled_capabilities.compute",
     "document_template",
     "data_retention_days",
     "published",
@@ -412,3 +418,26 @@ def test_the_persona_explains_setting_references_and_lists_every_key():
     assert "Use only these keys" in paragraph
     for key in EDITOR_REFERENCE_KEYS:
         assert f"\n- {key}: " in SETTING_REFERENCE_PARAGRAPH
+
+
+def test_the_persona_points_at_one_function_with_its_own_reference():
+    paragraph = _unwrapped(SETTING_REFERENCE_PARAGRAPH)
+
+    # Each function is listed by the name the editor shows, under Funktioner.
+    for key, name, _ in assistant_settings.FUNCTIONS:
+        assert (
+            f"\n- enabled_capabilities.{key}: the function {name} in Funktioner\n"
+        ) in SETTING_REFERENCE_PARAGRAPH
+    assert (
+        "When an answer is about one function, name that function by its name "
+        "and point at it with its own reference, such as "
+        "@[Diagram](setting:enabled_capabilities.charts), never at the whole of "
+        "Funktioner as if that were the function's name."
+    ) in paragraph
+    assert (
+        "Point at @[Funktioner](setting:enabled_capabilities) only for the list "
+        "of functions as a whole."
+    ) in paragraph
+    assert "\n- enabled_capabilities: the functions (Funktioner)\n" in (
+        SETTING_REFERENCE_PARAGRAPH
+    )

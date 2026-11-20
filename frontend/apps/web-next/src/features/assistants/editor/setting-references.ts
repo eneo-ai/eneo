@@ -7,14 +7,17 @@ import {
   type MentionPart
 } from "@/features/references/mentions";
 import type { Schema } from "@/lib/api/models";
+import { CAPABILITIES } from "@/features/capabilities/capabilities";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import {
   DOCUMENT_TEMPLATE_CONTROL,
+  capabilityRowId,
   rerankerShown,
   selectableRerankModels
 } from "./assistant-editor-rules";
 import { settingLabel, settingText } from "./assistant-helper-cards";
-import { selectedCapabilities } from "./capabilities-section";
+import { FUNCTION_FIELD_PREFIX } from "./assistant-helper-changes";
+import { capabilityRows, selectedCapabilities, type CapabilitySpace } from "./capabilities-section";
 import {
   MODEL_SPECIFIC_KWARGS,
   behaviourFromKwargs,
@@ -56,7 +59,9 @@ export type AssistantSectionId = (typeof ASSISTANT_SECTION_IDS)[number];
  * (`SETTING_REFERENCES` in backend/src/eneo/helper_chats/personas/assistant.py);
  * a test on each side holds its list to the one written there, so a key
  * added on one side fails until the other has it too. A setting that is one
- * field of the assistant is named by the API's field.
+ * field of the assistant is named by the API's field; one function of
+ * "Funktioner" as `enabled_capabilities.<purpose>`, as a model setting is
+ * `completion_model_kwargs.<name>`.
  */
 export const SETTING_REFERENCE_KEYS: readonly string[] = [
   "name",
@@ -72,6 +77,7 @@ export const SETTING_REFERENCE_KEYS: readonly string[] = [
   "completion_model_kwargs",
   ...MODEL_SPECIFIC_KWARGS.map((name) => `completion_model_kwargs.${name}`),
   "enabled_capabilities",
+  ...CAPABILITIES.map(({ purpose }) => `${FUNCTION_FIELD_PREFIX}${purpose}`),
   "document_template",
   "data_retention_days",
   "published",
@@ -118,6 +124,8 @@ export type SettingReferenceInput = {
   kwargs: ModelKwargs;
   /** Whether files uploaded in a chat can be read by reference (the organisation's setting). */
   fileReferences: boolean;
+  /** The space, as the functions' switches read it. */
+  space: CapabilitySpace;
   /** The space's models, as the result ranking reads them; undefined while not known. */
   spaceModels?: Schema<"ModelsPresentation">;
   /** The organisation's document templates; undefined while not known. */
@@ -169,6 +177,28 @@ function templateSetting(input: SettingReferenceInput): Setting[] {
       control: DOCUMENT_TEMPLATE_CONTROL
     }
   ];
+}
+
+/**
+ * Each function "Funktioner" lists, by its name, landing on its own line
+ * there: on or off in the editor's words, and not available where its switch
+ * cannot be switched on. The document template follows "Skapa fil", under
+ * which the form shows it.
+ */
+function functionSettings(input: SettingReferenceInput): Setting[] {
+  const { assistant, space, t } = input;
+  return capabilityRows(assistant, space).flatMap(({ capability, enabled, blocked }) => {
+    const key = `${FUNCTION_FIELD_PREFIX}${capability.purpose}`;
+    const setting: Setting = {
+      key,
+      label: settingLabel(key, t),
+      value: t(enabled ? "enabled" : blocked ? "not_available" : "disabled"),
+      control: capabilityRowId(capability.purpose)
+    };
+    return capability.purpose === "file_creation"
+      ? [setting, ...templateSetting(input)]
+      : [setting];
+  });
 }
 
 /** A section's own settings, as the form shows them to this person. */
@@ -284,7 +314,7 @@ function sectionSettings(id: AssistantSectionId, input: SettingReferenceInput): 
           value: summary.chosen(selectedCapabilities(assistant).length),
           control: "capabilities"
         },
-        ...templateSetting(input)
+        ...functionSettings(input)
       ];
     case "security":
       return [

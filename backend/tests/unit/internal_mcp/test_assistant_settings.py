@@ -625,6 +625,10 @@ _SET_BY_THE_POLICY = (
 def test_the_tools_name_and_describe_every_function_as_the_editor_does():
     assert assistant_settings.FUNCTIONS == EDITOR_FUNCTIONS
     assert tuple(key for key, _, _ in EDITOR_FUNCTIONS) == CAPABILITY_PURPOSES
+    # A setting reference to one function is named as the function.
+    named = dict(EDITOR_SETTING_NAMES)
+    for key, name, _ in EDITOR_FUNCTIONS:
+        assert named[f"enabled_capabilities.{key}"] == name
 
 
 # The same tables, in the same order, as the editor's names for its settings
@@ -657,6 +661,12 @@ EDITOR_SETTING_NAMES = (
     ("completion_model_kwargs.frequency_penalty", "Frekvensstraff"),
     ("completion_model_kwargs.top_k", "Top K"),
     ("enabled_capabilities", "Funktioner"),
+    ("enabled_capabilities.web_search", "Webbsökning"),
+    ("enabled_capabilities.image_generation", "Bildgenerering"),
+    ("enabled_capabilities.file_analysis", "Fråga fil"),
+    ("enabled_capabilities.file_creation", "Skapa fil"),
+    ("enabled_capabilities.charts", "Diagram"),
+    ("enabled_capabilities.compute", "Beräkning"),
     ("document_template", "Dokumentmall"),
     ("data_retention_days", "Gallring av konversationshistorik"),
     ("published", "Status"),
@@ -840,6 +850,8 @@ def test_read_assistant_names_the_functions_as_the_editor_does():
     assert f"{_WEB_SEARCH}; on, but not available: {_TURNED_OFF}" in tools
     for key in ("file_analysis", "web_search"):
         assert f"- {key}:" not in _text(tools)
+    # A function is named by the key a change takes, never by its reference's.
+    assert "enabled_capabilities." not in overview + _text(tools)
 
 
 def test_a_saved_chat_model_the_space_no_longer_offers_is_named_as_such():

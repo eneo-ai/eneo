@@ -99,16 +99,71 @@ the assistant. When the person wants one of them changed, say where in the
 editor they change it and what to choose.
 """
 
+# The functions as the editor's "Funktioner" section shows them, in its
+# order: the key a change takes (the function's purpose), the name the editor
+# shows and the description under it, in the editor's English text. The
+# helper's setting references and its tools
+# (backend/src/eneo/internal_mcp/assistant_settings.py) name a function by
+# these. The editor's frontend has the same three for each function
+# (CAPABILITIES in frontend/apps/web-next/src/features/capabilities/capabilities.ts,
+# named and described by its messages); a test on each side holds its table to
+# the same written-out one, so change both together.
+FUNCTIONS: tuple[tuple[str, str, str], ...] = (
+    (
+        "web_search",
+        "Webbsökning",
+        "Lets the assistant search the web via the organisation's search engine.",
+    ),
+    (
+        "image_generation",
+        "Bildgenerering",
+        "Lets the assistant generate images via the organisation's image generator.",
+    ),
+    (
+        "file_analysis",
+        "Fråga fil",
+        "Lets the assistant calculate totals, compare and join attached CSV and "
+        "Excel files instead of reading them as text.",
+    ),
+    (
+        "file_creation",
+        "Skapa fil",
+        "Lets the assistant create Word, PDF and Excel files that the user can "
+        "download from the conversation. A Word template attached in the chat or "
+        "to the assistant can be used as the base.",
+    ),
+    (
+        "charts",
+        "Diagram",
+        "Lets the assistant compare values and show trends with bar, line, pie "
+        "and scatter charts. Eneo’s provider shows interactive charts and can "
+        "export images when requested.",
+    ),
+    (
+        "compute",
+        "Beräkning",
+        "Lets the assistant run exact arithmetic, statistics, date and text "
+        "calculations in an isolated sandbox instead of estimating. Results can "
+        "be shown as a table and exported as CSV for charts, spreadsheets and "
+        "documents.",
+    ),
+)
+
+# The key a setting reference names one function by, before its purpose:
+# ``enabled_capabilities.charts`` is "Diagram", where ``enabled_capabilities``
+# is the whole of "Funktioner".
+_FUNCTION_REFERENCE_PREFIX = "enabled_capabilities."
+
 # The editor's own names for its settings and sections, the one place the
 # helper takes them from: its setting references and its tools
 # (backend/src/eneo/internal_mcp/assistant_settings.py) name a setting or a
 # section by these. Each is keyed by what a change takes (a field of the
 # assistant's update request, a model setting as
 # ``completion_model_kwargs.<setting>``) or by the key a setting reference
-# names (a section as ``section:<id>``); the organisation's knowledge has a
-# row of its own in Kunskap. The editor's frontend names each the same: a
-# test on each side holds its table to the same written-out one, so change
-# both together.
+# names (a function as ``enabled_capabilities.<purpose>``, a section as
+# ``section:<id>``); the organisation's knowledge has a row of its own in
+# Kunskap. The editor's frontend names each the same: a test on each side
+# holds its table to the same written-out one, so change both together.
 SETTING_NAMES: tuple[tuple[str, str], ...] = (
     ("name", "Namn"),
     ("description", "Beskrivning"),
@@ -134,6 +189,7 @@ SETTING_NAMES: tuple[tuple[str, str], ...] = (
     ("completion_model_kwargs.frequency_penalty", "Frekvensstraff"),
     ("completion_model_kwargs.top_k", "Top K"),
     ("enabled_capabilities", "Funktioner"),
+    *((f"{_FUNCTION_REFERENCE_PREFIX}{key}", name) for key, name, _ in FUNCTIONS),
     ("document_template", "Dokumentmall"),
     ("data_retention_days", "Gallring av konversationshistorik"),
     ("published", "Status"),
@@ -187,6 +243,13 @@ SETTING_REFERENCES: tuple[tuple[str, str], ...] = (
     ("completion_model_kwargs.frequency_penalty", "the frequency penalty"),
     ("completion_model_kwargs.top_k", "the model's top_k setting"),
     ("enabled_capabilities", f"the functions ({_NAME['enabled_capabilities']})"),
+    *(
+        (
+            f"{_FUNCTION_REFERENCE_PREFIX}{key}",
+            f"the function {name} in {_NAME['enabled_capabilities']}",
+        )
+        for key, name, _ in FUNCTIONS
+    ),
     ("document_template", "the document template generated documents use"),
     ("data_retention_days", "how long conversations are kept"),
     ("published", "whether the assistant is published"),
@@ -202,7 +265,12 @@ one, and it means that setting or part as the form shows it now. When you name
 a setting in an answer, you may write it the same way, with the name the editor
 shows and one of the keys below, so the person can press it to see the setting
 in the form. This is the one place a key may appear: the editor draws the
-reference as a button and never shows the key. Use only these keys:
+reference as a button and never shows the key. When an answer is about one
+function, name that function by its name and point at it with its own
+reference, such as @[Diagram](setting:enabled_capabilities.charts), never at
+the whole of Funktioner as if that were the function's name. Point at
+@[Funktioner](setting:enabled_capabilities) only for the list of functions as
+a whole. Use only these keys:
 """ + "".join(f"- {key}: {what}\n" for key, what in SETTING_REFERENCES)
 
 ASSISTANT_INSTRUCTIONS = (

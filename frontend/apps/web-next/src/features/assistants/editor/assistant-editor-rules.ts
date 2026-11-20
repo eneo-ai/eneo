@@ -82,6 +82,13 @@ export const DOCUMENT_TEMPLATE_CONTROL = "assistant-document-template";
 export const capabilityControlId = (purpose: string) => `assistant-${purpose}`;
 
 /**
+ * A function's own line in the form (its name, its hint and its switch),
+ * where a reference to the function lands; "Skapa fil"'s template choice
+ * under it has a reference of its own.
+ */
+export const capabilityRowId = (purpose: string) => `assistant-capability-${purpose}`;
+
+/**
  * Where a function's readiness is read: the policy's under a policy that
  * governs the functions, else the assistant's, else the space's.
  */

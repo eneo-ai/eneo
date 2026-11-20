@@ -28,7 +28,8 @@ vi.mock("./mcp-section", () => ({ McpSection: () => null }));
 vi.mock("./ai-section", () => ({ AiSection: () => null }));
 vi.mock("./capabilities-section", () => ({
   CapabilitiesSection: () => null,
-  selectedCapabilities: () => []
+  selectedCapabilities: () => [],
+  capabilityRows: () => []
 }));
 vi.mock("./attachments-section", () => ({ AttachmentsSection: () => null }));
 vi.mock("./security-section", () => ({ SecuritySection: () => null }));
