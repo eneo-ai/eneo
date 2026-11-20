@@ -105,6 +105,10 @@ AUTHOR_ACTIONS: dict[HttpTransportError, str] = {
         "Enter a fixed https address without variables: run data must not "
         "choose where the result is sent."
     ),
+    HttpTransportError.RUN_RESULT_NOT_TESTABLE: (
+        "A run result is sent when a run has completed; start a run to try "
+        "the receiver."
+    ),
     HttpTransportError.CONTENT_TYPE_SET_BY_BODY: (
         "Remove the Content-Type header: the run result body sends application/json."
     ),

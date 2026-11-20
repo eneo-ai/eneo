@@ -10,6 +10,7 @@ import httpx
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.http_transport.authored_config import (
     HttpAuthoredConfig,
+    HttpBodyMode,
     HttpMethod,
     contains_secret_sentinel,
 )
@@ -111,6 +112,15 @@ async def execute_http_test(
             success=False,
             error_code=errors[0],
             error_message=_error_message(errors[0], max_timeout=max_timeout),
+        )
+
+    # A run result exists only once a run has completed: there is nothing
+    # true to send, and an invented body would test a different request.
+    if decrypted.body.mode is HttpBodyMode.RUN_RESULT:
+        return HttpTestResult(
+            success=False,
+            error_code=HttpTransportError.RUN_RESULT_NOT_TESTABLE,
+            error_message=_error_message(HttpTransportError.RUN_RESULT_NOT_TESTABLE),
         )
 
     try:
