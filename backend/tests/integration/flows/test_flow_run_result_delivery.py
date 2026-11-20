@@ -49,6 +49,7 @@ from eneo.flows.runtime.run_outcome import (
     finalize_run_from_current_results,
 )
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.config import get_settings
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_queued_webhook_run,
     _create_running_webhook_run,
@@ -238,9 +239,7 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
         "run_created_at": finished.created_at.isoformat(),
         "run_completed_at": finished.finished_at.isoformat(),
         # The only step reads the run's form, so that is its text.
-        "text": json.dumps(
-            {"case_id": "case-123", "question": "What happened?"}, ensure_ascii=False
-        ),
+        "text": "What happened?",
         "deliverables": [],
     }
 
@@ -429,13 +428,10 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     monkeypatch,
 ):
     """The body's text is the run's text result: the markdown the POST step
-    reads, not empty and not the POST step's own answer."""
+    reads and keeps as its own text, without calling its model."""
     run = await queued_markdown_documents_then_post_run()
 
-    async def _answer(_self, **_kwargs):
-        return SimpleNamespace(
-            completion="The POST step's own answer", total_token_count=1
-        )
+    model = AsyncMock(side_effect=AssertionError("no step here calls a model"))
 
     sent: list[bytes] = []
 
@@ -443,12 +439,13 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
         sent.append(kwargs["body_bytes"])
         return _response(200)
 
-    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    monkeypatch.setattr(CompletionService, "get_response", model)
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
 
     assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
     await _run_outbox()
 
+    model.assert_not_awaited()
     delivery = await _read_one(
         sa.select(
             FlowRunWebhookDeliveries.delivery_status,
@@ -462,3 +459,65 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     for deliverable in body["deliverables"]:
         [file] = deliverable["files"]
         assert file["content_base64"]
+
+
+@pytest.fixture
+def queued_long_markdown_then_post_run(
+    admin_user, completion_model_factory, space_factory, assistant_factory
+):
+    """Markdown longer than a step result keeps inline, then the POST step."""
+
+    async def create():
+        async with sessionmanager.session() as session:
+            enable_autobegin_for_flow_task_session(session)
+            _, run, _ = await _create_queued_webhook_run(
+                session=session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                output_config=RUN_RESULT_CONFIG,
+                include_prior_step=True,
+                prior_step_output=("compose_text", "text", None),
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(input_payload_json={"question": "# Lång\n\n" + "x" * 200})
+            )
+            await session.commit()
+        return run
+
+    return create
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_markdown_beyond_the_inline_limit_fails_the_run_and_is_never_cut(
+    setup_database,
+    object_content_runtime_ready,
+    queued_long_markdown_then_post_run,
+    monkeypatch,
+):
+    """Text beyond what a step result keeps inline is never sent in part: the
+    POST step cannot read it whole, so the run fails with a typed error and no
+    delivery is made."""
+    monkeypatch.setattr(get_settings(), "flow_max_inline_text_bytes", 64)
+    run = await queued_long_markdown_then_post_run()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    await _execute(run)
+    await _run_outbox()
+
+    send.assert_not_awaited()
+    state = await _read_one(
+        sa.select(FlowRuns.status, FlowRuns.error_json).where(FlowRuns.id == run.id)
+    )
+    assert state.status == FlowRunStatus.FAILED.value
+    assert state.error_json["code"] == "typed_io_input_too_large"
+    assert not await _read(
+        sa.select(FlowRunWebhookDeliveries.id).where(
+            FlowRunWebhookDeliveries.flow_run_id == run.id
+        )
+    )

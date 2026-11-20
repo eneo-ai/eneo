@@ -25,7 +25,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
-from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -52,7 +52,6 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
-from eneo.flows.output_modes import OUTSIDE_INPUT_SOURCES
 from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
@@ -76,7 +75,6 @@ from eneo.flows.runtime.run_result_body import (
     run_result_body,
     run_result_file_ids,
 )
-from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.json_types import JsonValue
 from eneo.main.exceptions import (
@@ -574,13 +572,8 @@ class FlowRunWebhookDeliveryService:
             audit_actor=audit_actor,
             run_result_body=run_result_body(
                 run=run,
-                text=_run_result_text(
-                    step=step,
-                    run=run,
-                    step_result=step_result,
-                    results=results,
-                    state=state,
-                ),
+                # The step kept the text it read as its own: the run's text.
+                text=text_payload,
                 deliverables=deliverables,
                 contents=await self._read_file_contents(
                     file_ids, tenant_id=row.tenant_id
@@ -906,38 +899,3 @@ class FlowRunWebhookDeliveryService:
             duration_ms=duration_ms,
             deps=deps,
         )
-
-
-def _run_result_text(
-    *,
-    step: RuntimeStep,
-    run: FlowRun,
-    step_result: FlowStepResult,
-    results: list[FlowStepResult],
-    state: RunExecutionState,
-) -> str:
-    """The run's text result: the text the sending step reads from its input
-    source (by default the step before it), resolved as the step resolved it.
-    The sending step's own model answer is not the result. Text from outside
-    the run was fetched once, so it is read from the step's stored input."""
-    if step.input_source in OUTSIDE_INPUT_SOURCES:
-        stored = (step_result.input_payload_json or {}).get("source_text")
-        if not isinstance(stored, str) or (
-            (step_result.input_payload_json or {}).get("source_text_truncated")
-        ):
-            raise ValueError("Run result delivery found no whole source text.")
-        return stored
-    try:
-        return resolve_input_source_text(
-            input_source=step.input_source,
-            input_type=step.input_type,
-            run=run,
-            step_order=step.step_order,
-            prior_results=results,
-            state=state,
-            logger=None,
-        )
-    except (BadRequestException, TypedIOValidationException) as exc:
-        raise ValueError(
-            "Run result delivery could not read the text its step reads."
-        ) from exc

@@ -9,6 +9,7 @@ from eneo.flows.domain.flow_webhook_delivery import (
 )
 from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.enums import FlowOutputMode
+from eneo.flows.http_transport import sends_run_result
 from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_handlers.base import StepHandler
 
@@ -16,6 +17,9 @@ from eneo.flows.runtime.step_handlers.base import StepHandler
 @dataclass(frozen=True)
 class HttpPostStepHandler:
     completion_handler: StepHandler
+    # A run result sends the run's result, not an answer of the step's own,
+    # so the step keeps the text it reads without calling its model.
+    run_result_handler: StepHandler
     output_mode: FlowOutputMode = FlowOutputMode.HTTP_POST
 
     async def execute(
@@ -27,7 +31,12 @@ class HttpPostStepHandler:
         version_metadata: dict[str, object] | None,
         attempt_no: int,
     ) -> StepExecutionResult:
-        result = await self.completion_handler.execute(
+        handler = (
+            self.run_result_handler
+            if sends_run_result(step.output_mode, step.output_config)
+            else self.completion_handler
+        )
+        result = await handler.execute(
             step=step,
             run=run,
             state=state,

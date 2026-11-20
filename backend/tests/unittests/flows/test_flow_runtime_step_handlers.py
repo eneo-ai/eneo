@@ -164,6 +164,11 @@ class _OutputOnlyHandler:
         return StepExecutionResult(output=_step_output())
 
 
+class _RefusingHandler(_OutputOnlyHandler):
+    async def execute(self, **_kwargs: object) -> StepExecutionResult:
+        raise AssertionError("This handler must not run.")
+
+
 @pytest.mark.parametrize(
     ("mode", "expected_type"),
     [
@@ -208,7 +213,9 @@ def test_resolve_handler_mode_rejects_unsupported_output_mode() -> None:
 async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
     run = _run()
     step = _step(output_mode="http_post")
-    handler = HttpPostStepHandler(completion_handler=_OutputOnlyHandler())
+    handler = HttpPostStepHandler(
+        completion_handler=_OutputOnlyHandler(), run_result_handler=_RefusingHandler()
+    )
 
     result = await handler.execute(
         step=step,
@@ -227,6 +234,28 @@ async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
     assert intent.attempt_no == 3
     assert intent.idempotency_key
     assert isinstance(intent.payload, WebhookPayloadRef)
+
+
+@pytest.mark.asyncio
+async def test_a_run_result_step_keeps_what_it_reads_without_its_model() -> None:
+    step = replace(
+        _step(output_mode="http_post"),
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+    handler = HttpPostStepHandler(
+        completion_handler=_RefusingHandler(), run_result_handler=_OutputOnlyHandler()
+    )
+
+    result = await handler.execute(
+        step=step, run=_run(), state=_state(), version_metadata=None, attempt_no=1
+    )
+
+    assert result.output.full_text == "done"
+    assert len(result.delivery_intents) == 1
 
 
 @pytest.mark.asyncio
