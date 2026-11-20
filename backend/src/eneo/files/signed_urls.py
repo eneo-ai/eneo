@@ -1,27 +1,11 @@
 from __future__ import annotations
 
 import time
-from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.authentication.signed_urls import generate_signed_token
 from eneo.files.file_models import SignedURLRequest, SignedURLResponse
 from eneo.main.config import get_settings
-
-if TYPE_CHECKING:
-    from eneo.tenants.tenant import TenantInDB
-
-
-def public_api_origin(tenant: TenantInDB) -> str | None:
-    """The origin a client outside Eneo reaches the API on, or None when none
-    is configured: the tenant's canonical public origin, else PUBLIC_ORIGIN.
-
-    Never the file reference base URL, which may be an internal address that
-    only a tool next to the backend can reach."""
-    origin = tenant.federation_config.get("canonical_public_origin")
-    if isinstance(origin, str) and origin.strip():
-        return origin.strip()
-    return get_settings().public_origin or None
 
 
 def build_signed_download_response(
