@@ -16,6 +16,19 @@
             "en": "You can download the recording while the app runs. The result page catches up if it misses the completion notice. You can download a saved transcript even if the app fails to generate a summary.",
             "sv": "Du kan ladda ner inspelningen medan appen körs. Resultatsidan uppdateras även om den missar beskedet att jobbet är klart. Du kan ladda ner ett sparat transkript även om appen misslyckas med att skapa sammanfattningen."
           }
+        },
+        {
+          "id": "app-run-progress-after-interruption",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "App runs show when processing starts",
+            "sv": "Appkörningar visar när bearbetningen börjar"
+          },
+          "body": {
+            "en": "When you reopen an app result, you can see whether processing has started. If the worker stops, the run stays in progress until it is marked as failed. You can then start a new run.",
+            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om den avbryts står körningen kvar som pågående tills den markeras som misslyckad. Då kan du starta en ny körning."
+          }
         }
       ]
     },

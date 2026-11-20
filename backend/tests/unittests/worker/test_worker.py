@@ -278,6 +278,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
 
     job_id = uuid4()
     sessions: list[_AsyncContext] = [
+        _AsyncContext(),
         _AsyncContext(exit_error=RuntimeError("storage quota exceeded")),
         _AsyncContext(),
     ]
@@ -297,7 +298,10 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     )
     task_container = MagicMock()
     task_container.task_manager.return_value = task_manager
-    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        worker_module.JobRepository, "mark_job_started", AsyncMock(return_value=True)
+    )
+    task_container.job_repo.return_value.touch_job = AsyncMock(return_value=True)
     recovery_container = MagicMock()
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
@@ -321,7 +325,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
     # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.PROCESSING_FAILED
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_queued=False
     )
 
 
@@ -342,8 +346,8 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     job_id = uuid4()
     run_id = uuid4()
     user_id = uuid4()
-    tx_contexts = [_AsyncContext(), _AsyncContext()]
-    pending = list(tx_contexts)
+    claim_tx, task_tx, failure_tx = _AsyncContext(), _AsyncContext(), _AsyncContext()
+    pending = [claim_tx, task_tx, failure_tx]
 
     def session() -> _AsyncContext:
         db = MagicMock()
@@ -356,7 +360,7 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     published_when_recovery_committed: list[bool] = []
 
     async def fake_publish(_channel: str, _payload: str) -> None:
-        published_when_recovery_committed.append(tx_contexts[1].committed)
+        published_when_recovery_committed.append(failure_tx.committed)
 
     monkeypatch.setattr(task_manager_module, "r", SimpleNamespace(publish=fake_publish))
 
@@ -370,7 +374,10 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     )
     task_container = MagicMock()
     task_container.task_manager.return_value = task_manager
-    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
+    monkeypatch.setattr(
+        worker_module.JobRepository, "mark_job_started", AsyncMock(return_value=True)
+    )
+    task_container.job_repo.return_value.touch_job = AsyncMock(return_value=True)
     recovery_container = MagicMock()
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
@@ -399,11 +406,12 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
     with pytest.raises(asyncio.CancelledError):
         await running
 
-    assert tx_contexts[0].rolled_back is True
-    assert tx_contexts[0].committed is False
-    assert tx_contexts[1].committed is True
+    assert claim_tx.committed is True
+    assert task_tx.rolled_back is True
+    assert task_tx.committed is False
+    assert failure_tx.committed is True
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, failure_code=JobFailureCode.CANCELLED
+        job_id, failure_code=JobFailureCode.CANCELLED, only_if_queued=False
     )
     assert published_when_recovery_committed[-1] is True
 
