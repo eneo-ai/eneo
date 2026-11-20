@@ -951,11 +951,10 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
   a credential for an ordinary form value, such as `Basic plan` or `token=`.
 - The run's day is added after the name, as for every document:
   `Standup Eneo 2026-11-19.docx`. Characters a file name cannot hold become
-  spaces, and a value that credential masking would change is left out, as is
-  a whole name that masking would change. A value longer than 1,000
-  characters is left out too, and a filled-in name longer than that gives the
-  label. When nothing is left, the document is named by its label and the
-  day: `Standup 2026-11-19.docx`.
+  spaces. When a value, or the whole filled-in name, reads as a credential or
+  is longer than 1,000 characters, or nothing is left, the document is named
+  by its label and the day: `Standup 2026-11-19.docx`. An empty field is
+  filled in as empty.
 - Documents of one type that would share a name all carry `Steg <n>`.
 - Saving a step whose output is not a document removes the key; publishing
   or importing one refuses it.
