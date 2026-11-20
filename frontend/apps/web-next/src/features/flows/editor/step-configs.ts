@@ -287,7 +287,12 @@ export function isSecretSentinel(value: unknown): value is SecretSentinel {
 }
 
 export type HttpAuthMode = "none" | "bearer_token" | "api_key" | "basic_auth";
-export type HttpBodyMode = "auto" | "json_template" | "text_template" | "none";
+/**
+ * `run_result` sends the finished run's result, built by Eneo, once the run
+ * is complete; it is not in the generated API types yet. Widened here until
+ * the types are generated with it.
+ */
+export type HttpBodyMode = "auto" | "json_template" | "text_template" | "none" | "run_result";
 
 export const HTTP_CONFIG_KEYS = [
   "url",
@@ -302,6 +307,32 @@ export type HttpHeader = { name: string; value: SecretValue; secret: boolean };
 
 /** A row the author left without a name is no header: it is not sent, checked or counted. */
 export const headerSent = (header: HttpHeader) => header.name.trim() !== "";
+
+/** True when the URL is https:// with its host written out: the core sends a credential only there. */
+export function httpsHostFixed(url: string): boolean {
+  return /^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url.trim());
+}
+
+/**
+ * True when a body that sends the run's result may go to the URL: one fixed
+ * https address with no variable anywhere, so run data cannot choose where
+ * the result goes (the core's rule).
+ */
+export function runResultUrlFixed(url: string): boolean {
+  return httpsHostFixed(url) && !url.includes("{{");
+}
+
+/**
+ * Where the call names a Content-Type header, which a body that sends the
+ * run's result sets itself: the API key's header name, or a header that is sent.
+ */
+export function contentTypeHeaderPart(http: HttpConfig): "auth" | "more" | null {
+  const isContentType = (name: string) => name.trim().toLowerCase() === "content-type";
+  if (http.auth.mode === "api_key" && isContentType(http.auth.header_name)) return "auth";
+  return http.custom_headers.some((header) => headerSent(header) && isContentType(header.name))
+    ? "more"
+    : null;
+}
 
 export type HttpConfig = {
   url: string;
@@ -379,7 +410,8 @@ export function readHttpConfig(config: unknown, direction: "input" | "output"): 
         bodyMode === "auto" ||
         bodyMode === "json_template" ||
         bodyMode === "text_template" ||
-        bodyMode === "none"
+        bodyMode === "none" ||
+        bodyMode === "run_result"
           ? bodyMode
           : defaults.body.mode,
       template: typeof body.template === "string" ? body.template : null
@@ -412,8 +444,11 @@ export function withHttpConfig(config: unknown, http: HttpConfig): JsonObject {
   next.url = http.url;
   next.auth = { ...http.auth };
   next.timeout_seconds = http.timeout_seconds;
+  // Eneo builds the body that sends the run's result; the core refuses a template there.
   next.body =
-    http.body.template === undefined || http.body.template === null
+    http.body.template === undefined ||
+    http.body.template === null ||
+    http.body.mode === "run_result"
       ? { mode: http.body.mode }
       : { mode: http.body.mode, template: http.body.template };
   next.custom_headers = http.custom_headers.map((header) => ({ ...header }));
@@ -744,6 +779,58 @@ export function withRetrievalPolicy(
   const next = objectOf(outputConfig);
   if (mode === null) delete next.retrieval_policy;
   else next.retrieval_policy = { version: 1, mode };
+  return Object.keys(next).length > 0 ? next : null;
+}
+
+// ---------------------------------------------------------------------------
+// Deliverable: `output_config.deliverable` marks a step whose file is one of
+// the run's results, with a label and an optional file name.
+// ---------------------------------------------------------------------------
+
+/**
+ * The stored shape (`FlowStepDeliverable` in the core). Local until the API
+ * types are generated with it; then it is replaced by the generated one.
+ */
+export type StepDeliverable = { label: string; file_name?: string };
+
+/** The core's bounds for a deliverable's label and file name, in characters. */
+export const DELIVERABLE_LABEL_MAX = 120;
+export const DELIVERABLE_FILE_NAME_MAX = 200;
+
+/**
+ * Whether the step's output is a file of the run, the only kind of step that
+ * can be a deliverable: a document the step does not send away over HTTP
+ * (the core's `final_output_delivery` is `artifact`).
+ */
+export function stepDeliversArtifact(
+  step: Pick<StepConfig, "output_type" | "output_mode">
+): boolean {
+  return (
+    step.output_mode !== "http_post" && (step.output_type === "pdf" || step.output_type === "docx")
+  );
+}
+
+export function readDeliverable(outputConfig: unknown): StepDeliverable | null {
+  const stored = objectOf(outputConfig).deliverable;
+  if (!isJsonObject(stored)) return null;
+  const label = typeof stored.label === "string" ? stored.label : "";
+  return typeof stored.file_name === "string" && stored.file_name
+    ? { label, file_name: stored.file_name }
+    : { label };
+}
+
+/** `output_config` with the deliverable set, or removed for null; an empty file name is left out. */
+export function withDeliverable(
+  outputConfig: unknown,
+  deliverable: StepDeliverable | null
+): JsonObject | null {
+  const next = objectOf(outputConfig);
+  if (deliverable === null) delete next.deliverable;
+  else {
+    next.deliverable = deliverable.file_name
+      ? { label: deliverable.label, file_name: deliverable.file_name }
+      : { label: deliverable.label };
+  }
   return Object.keys(next).length > 0 ? next : null;
 }
 

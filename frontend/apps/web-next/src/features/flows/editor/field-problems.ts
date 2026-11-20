@@ -39,6 +39,8 @@ export const FIELD_ANCHORS = [
   // The first of the template's fields that needs a value.
   "output_config.template.fields",
   "output_config.speaker_mapping",
+  "output_config.deliverable.label",
+  "output_config.deliverable.file_name",
   "output_config.citation_mode",
   "output_config.retrieval_policy",
   "review_policy",
@@ -85,7 +87,7 @@ export function anchorForPath(
   path: string,
   step: Pick<StepConfig, "input_source" | "output_mode">
 ): FieldAnchor | null {
-  const [head = "", second = ""] = path.split(".");
+  const [head = "", second = "", third = ""] = path.split(".");
   if (head === "input_config") {
     if (second === "tool") return "input_config.tool";
     if (second === "runtime_input") return "input_config.runtime_input";
@@ -99,6 +101,12 @@ export function anchorForPath(
     if (second === "speaker_mapping") return "output_config.speaker_mapping";
     if (second === "citation_mode") return "output_config.citation_mode";
     if (second === "retrieval_policy") return "output_config.retrieval_policy";
+    // Before the template's catch-all: a Word template step is a deliverable too.
+    if (second === "deliverable") {
+      return third === "file_name"
+        ? "output_config.deliverable.file_name"
+        : "output_config.deliverable.label";
+    }
     if (step.output_mode === "template_fill") return "output_config.template";
     if (
       step.output_mode === "http_post" &&
@@ -235,7 +243,10 @@ export const HTTP_ERROR_KEYS: Record<string, string> = {
   HTTP_BLOCKED_URL: "http_test_blocked",
   HTTP_RESPONSE_TOO_LARGE: "http_test_response_too_large",
   HTTP_CREDENTIALS_REQUIRE_HTTPS: "flow_step_editor_http_credentials_need_https",
-  HTTP_INVALID_HEADER_NAME: "flow_step_editor_http_header_name_invalid"
+  HTTP_INVALID_HEADER_NAME: "flow_step_editor_http_header_name_invalid",
+  HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL: "flow_step_editor_http_run_result_url_fixed",
+  HTTP_RUN_RESULT_TAKES_NO_TEMPLATE: "flow_step_editor_http_run_result_no_template",
+  HTTP_CONTENT_TYPE_SET_BY_BODY: "flow_step_editor_http_run_result_content_type"
 };
 
 export type Translator = ((key: string, values?: Record<string, string | number>) => string) & {

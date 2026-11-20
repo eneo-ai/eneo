@@ -1,19 +1,35 @@
+import { Button } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
+import { useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { TextInput } from "@/components/astryx/text-input";
+import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { ContractFromExampleDialog } from "./contract-from-example-dialog";
-import { Anchor, EditorSection, problemStatus, TemplateScope } from "./editor-fields";
+import {
+  Anchor,
+  EditorSection,
+  focusAnchor,
+  problemStatus,
+  TemplateScope,
+  VariablePicker
+} from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
   readCitationsOn,
+  readDeliverable,
   readHttpConfig,
   readSpeakerMapping,
+  stepDeliversArtifact,
   supportsCitations,
   withCitations,
+  withDeliverable,
   withHttpConfig,
   withSpeakerMapping,
-  type SpeakerMapping
+  type SpeakerMapping,
+  type StepDeliverable
 } from "./step-configs";
 import { HttpFields } from "./step-http-fields";
 import {
@@ -38,7 +54,7 @@ import {
   type OutputType,
   type StepConfig
 } from "./step-types";
-import { formFieldsOf, variableGroups, type VariableGroup } from "./step-variables";
+import { formFieldsOf, insertToken, variableGroups, type VariableGroup } from "./step-variables";
 
 const NONE = "__none";
 
@@ -101,6 +117,172 @@ function SpeakerMappingFields({
         <Text type="supporting" size="sm" as="p" display="block" className="m-0">
           {t("flow_step_editor_speakers_no_fields")}
         </Text>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The form fields a file name can read: not the run's day, which every
+ * generated name carries already. The core decides the rest (a sensitive
+ * field name is refused on save).
+ */
+function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGroup[] {
+  const runDate = new Set(
+    formFieldDrafts(flow.metadata_json)
+      .filter((field) => field.role === "run_date")
+      .map((field) => `flow_input.${field.name}`)
+  );
+  return groups.flatMap((group) => {
+    if (group.type !== "fields") return [];
+    const entries = group.entries.filter((entry) => !runDate.has(entry.token));
+    return entries.length > 0 ? [{ ...group, entries }] : [];
+  });
+}
+
+/** The labels of the other steps marked as deliverables, in step order. */
+function deliverableLabels(flow: FlowPublic, stepId: string): string[] {
+  return [...flow.steps]
+    .sort((left, right) => left.step_order - right.step_order)
+    .flatMap((step) => {
+      const deliverable =
+        step.id !== stepId && stepDeliversArtifact(step)
+          ? readDeliverable(step.output_config)
+          : null;
+      return deliverable?.label.trim() ? [deliverable.label] : [];
+    });
+}
+
+/**
+ * Whether the document is one of the run's results, under which label and
+ * file name. The last document always is: it stays unmarked (the core names
+ * it after the step) until the author customises it. Any other document is
+ * one when its switch is on.
+ */
+function DeliverableFields({
+  formId,
+  flow,
+  draft,
+  isLast,
+  groups,
+  onChange,
+  problems
+}: {
+  formId: string;
+  flow: FlowPublic;
+  draft: StepConfig;
+  isLast: boolean;
+  groups: VariableGroup[];
+  onChange: (next: StepConfig) => void;
+  problems: FieldProblems;
+}) {
+  const t = useTranslations();
+  // The last document's fields opened without a change yet: nothing is marked.
+  const [customising, setCustomising] = useState(false);
+  const customiseRef = useRef<HTMLDivElement>(null);
+  const deliverable = readDeliverable(draft.output_config);
+  const shown = deliverable ?? (isLast && customising ? { label: "" } : null);
+  const set = (next: StepDeliverable | null) => {
+    // The last document emptied is the default again; its fields stay open.
+    if (isLast && next && next.label === "" && !next.file_name) {
+      setCustomising(true);
+      next = null;
+    }
+    onChange({ ...draft, output_config: withDeliverable(draft.output_config, next) });
+  };
+
+  const fields = shown && (
+    <>
+      <Anchor formId={formId} anchor="output_config.deliverable.label">
+        <TextInput
+          label={t("flow_step_editor_deliverable_label")}
+          description={t("flow_step_editor_deliverable_label_description")}
+          value={shown.label}
+          onChange={(label) => set({ ...shown, label })}
+          isRequired
+          autoComplete="off"
+          status={problemStatus(problems["output_config.deliverable.label"])}
+        />
+      </Anchor>
+      <Anchor
+        formId={formId}
+        anchor="output_config.deliverable.file_name"
+        className="flex flex-col gap-2"
+      >
+        <TextInput
+          label={t("flow_step_editor_deliverable_file_name")}
+          description={t("flow_step_editor_deliverable_file_name_description")}
+          value={shown.file_name ?? ""}
+          onChange={(file_name) => set({ ...shown, file_name })}
+          autoComplete="off"
+          status={problemStatus(problems["output_config.deliverable.file_name"])}
+        />
+        <div>
+          <VariablePicker
+            groups={fileNameGroups(flow, groups)}
+            label={t("flow_step_editor_deliverable_insert_field")}
+            onInsert={(token) =>
+              set({ ...shown, file_name: insertToken(shown.file_name ?? "", token, null).text })
+            }
+          />
+        </div>
+      </Anchor>
+    </>
+  );
+
+  if (!isLast) {
+    return (
+      <div className="flex flex-col gap-4">
+        <Switch
+          label={t("flow_step_editor_deliverable_switch")}
+          description={t("flow_step_editor_deliverable_switch_description")}
+          value={deliverable !== null}
+          onChange={(on) => set(on ? { label: "" } : null)}
+        />
+        {fields}
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div ref={customiseRef} className="flex flex-col gap-1">
+        <Text as="p" display="block" className="m-0 font-medium">
+          {t("flow_step_editor_deliverable_always")}
+        </Text>
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {t("flow_step_editor_deliverable_always_description")}
+        </Text>
+        {!shown && (
+          <div className="pt-2">
+            <Button
+              label={t("flow_step_editor_deliverable_customise")}
+              size="sm"
+              onClick={() => {
+                // The button goes; focus moves to the field it opened.
+                flushSync(() => setCustomising(true));
+                focusAnchor(formId, "output_config.deliverable.label");
+              }}
+            />
+          </div>
+        )}
+      </div>
+      {fields}
+      {shown && (
+        <div>
+          <Button
+            label={t("flow_step_editor_deliverable_reset")}
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              flushSync(() => {
+                setCustomising(false);
+                if (deliverable) set(null);
+              });
+              customiseRef.current?.querySelector("button")?.focus();
+            }}
+          />
+        </div>
       )}
     </div>
   );
@@ -225,6 +407,7 @@ export function StepOutputSection({
                 inputConfig: draft.input_config
               })}
               problems={problems}
+              deliverableLabels={deliverableLabels(flow, stepId)}
             />
           </TemplateScope>
         </Anchor>
@@ -258,6 +441,18 @@ export function StepOutputSection({
             problem={problems["output_config.speaker_mapping"]}
           />
         </Anchor>
+      )}
+
+      {stepDeliversArtifact(draft) && (
+        <DeliverableFields
+          formId={formId}
+          flow={flow}
+          draft={draft}
+          isLast={isLast}
+          groups={groups}
+          onChange={onChange}
+          problems={problems}
+        />
       )}
 
       {(supportsCitations(draft) || readCitationsOn(draft.output_config)) && (

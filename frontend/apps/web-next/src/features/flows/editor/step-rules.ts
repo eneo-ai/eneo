@@ -12,9 +12,11 @@ import {
   readHttpConfig,
   reviewLocked,
   reviewSupported,
+  stepDeliversArtifact,
   supportsCitations,
   supportsRetrievalPolicy,
   withCitations,
+  withDeliverable,
   withHttpConfig,
   withRetrievalPolicy,
   withRuntimeInput,
@@ -28,14 +30,15 @@ import {
   withLongMaterial,
   type ToolArgumentSpec
 } from "./step-configs";
-import type {
-  FlowPublic,
-  FlowStep,
-  InputSource,
-  InputType,
-  OutputMode,
-  OutputType,
-  StepConfig
+import {
+  objectOf,
+  type FlowPublic,
+  type FlowStep,
+  type InputSource,
+  type InputType,
+  type OutputMode,
+  type OutputType,
+  type StepConfig
 } from "./step-types";
 import { templateParts } from "../flow-steps";
 import { readMeaning, readTone } from "./request-preview";
@@ -316,6 +319,10 @@ function settle(step: StepConfig): StepConfig {
   if (!supportsRetrievalPolicy(next.output_mode)) {
     const output_config = withRetrievalPolicy(next.output_config, null);
     if (output_config !== next.output_config) next = { ...next, output_config };
+  }
+  // Only a step whose output is a file of the run can be one of its deliverables.
+  if (!stepDeliversArtifact(next) && "deliverable" in objectOf(next.output_config)) {
+    next = { ...next, output_config: withDeliverable(next.output_config, null) };
   }
   if (reviewLocked(next.output_mode)) {
     if (next.review_policy?.mode !== "edit") {

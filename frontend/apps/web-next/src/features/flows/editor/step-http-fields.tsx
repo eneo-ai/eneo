@@ -20,6 +20,7 @@ import { TemplateTextArea } from "./reference-text-area";
 import { describeSaveError, HTTP_ERROR_KEYS, type FieldProblems } from "./field-problems";
 import {
   headerSent,
+  httpsHostFixed,
   httpUrlProblem,
   isSecretSentinel,
   type HttpBodyMode,
@@ -222,6 +223,25 @@ type TestOutcome = {
   preview: string | null;
 };
 
+const BODY_MODES: readonly HttpBodyMode[] = [
+  "auto",
+  "json_template",
+  "text_template",
+  "none",
+  "run_result"
+];
+
+type TestConfig = Parameters<typeof testHttp>[1]["config"];
+
+/**
+ * The settings as the test takes them, or null for a body that sends the
+ * run's result: the test has no run to send.
+ */
+function testableConfig(config: HttpConfig): TestConfig | null {
+  const { mode } = config.body;
+  return mode === "run_result" ? null : { ...config, body: { ...config.body, mode } };
+}
+
 /**
  * One test request with the step's settings as they stand in the form. The
  * core resolves a stored credential from the saved step, so a step that has
@@ -242,6 +262,8 @@ function HttpTest({
   const t = useTranslations();
   const announce = useAnnounce();
   const previewId = useId();
+  const untestableId = useId();
+  const testable = testableConfig(config);
   // Follows the call's references until the author edits it.
   const [editedVariables, setVariables] = useState<string | null>(null);
   const variables = editedVariables ?? sampleTestVariables(config);
@@ -255,10 +277,16 @@ function HttpTest({
   }
 
   const test = useMutation({
-    mutationFn: (testVariables: Record<string, unknown>) =>
+    mutationFn: ({
+      testConfig,
+      testVariables
+    }: {
+      testConfig: TestConfig;
+      testVariables: Record<string, unknown>;
+    }) =>
       testHttp(flowId, {
         step_id: stepId,
-        config,
+        config: testConfig,
         direction,
         method: direction === "input" ? "GET" : "POST",
         test_variables: testVariables
@@ -299,7 +327,7 @@ function HttpTest({
   });
 
   function run() {
-    if (test.isPending) return;
+    if (test.isPending || !testable) return;
     if (!config.url.trim()) {
       report({ ok: false, title: t("http_test_needs_url"), detail: null, preview: null });
       return;
@@ -316,7 +344,7 @@ function HttpTest({
       }
     }
     setVariablesProblem(null);
-    test.mutate(testVariables);
+    test.mutate({ testConfig: testable, testVariables });
   }
 
   return (
@@ -330,7 +358,7 @@ function HttpTest({
       >
         {t(direction === "input" ? "http_test_desc_input" : "http_test_desc_output")}
       </Text>
-      {templated && (
+      {templated && testable && (
         <TextArea
           label={t("http_test_variables_label")}
           description={t("http_test_variables_help")}
@@ -350,9 +378,16 @@ function HttpTest({
           size="sm"
           isLoading={test.isPending}
           isInterruptible
+          isDisabled={!testable}
+          aria-describedby={testable ? undefined : untestableId}
           onClick={run}
         />
       </div>
+      {!testable && (
+        <Text id={untestableId} type="supporting" size="sm" as="p" display="block" className="m-0">
+          {t("flow_step_editor_http_test_run_result")}
+        </Text>
+      )}
       {outcome && (
         <div className="flex flex-col gap-2">
           <p
@@ -402,7 +437,8 @@ export function HttpFields({
   config,
   onChange,
   groups,
-  problems
+  problems,
+  deliverableLabels = []
 }: {
   formId: string;
   flowId: string;
@@ -412,6 +448,8 @@ export function HttpFields({
   onChange: (config: HttpConfig) => void;
   groups: VariableGroup[];
   problems: FieldProblems;
+  /** The labels of the flow's marked documents, which a body that sends the run's result carries. */
+  deliverableLabels?: readonly string[];
 }) {
   const t = useTranslations();
   // A refused save lands at the part it is about (`field-problems.ts`).
@@ -426,6 +464,7 @@ export function HttpFields({
     config.custom_headers.some((header) => headerSent(header) && !HEADER_NAME.test(header.name));
   const bodyTemplated =
     config.body.mode === "json_template" || config.body.mode === "text_template";
+  const sendsRunResult = config.body.mode === "run_result";
   const urlId = useId();
   const moreId = useId();
   const [showUrlProblem, setShowUrlProblem] = useState(false);
@@ -442,7 +481,7 @@ export function HttpFields({
     (auth.mode !== "none" ||
       config.custom_headers.some((header) => header.secret && headerSent(header))) &&
     url !== "" &&
-    !/^https:\/\/[^/?#{]+(?:[/?#]|$)/i.test(url);
+    !httpsHostFixed(url);
   const localUrlProblem = !showUrlProblem
     ? null
     : urlProblem === "missing"
@@ -500,14 +539,17 @@ export function HttpFields({
                 : undefined
           }
         />
-        <div>
-          <VariablePicker
-            groups={groups}
-            onInsert={(token) =>
-              onChange({ ...config, url: insertToken(config.url, token, null).text })
-            }
-          />
-        </div>
+        {/* Run data may not choose where the run's result goes. */}
+        {!sendsRunResult && (
+          <div>
+            <VariablePicker
+              groups={groups}
+              onInsert={(token) =>
+                onChange({ ...config, url: insertToken(config.url, token, null).text })
+              }
+            />
+          </div>
+        )}
       </div>
 
       <Anchor formId={formId} anchor={`${base}.auth`} className="flex flex-col gap-4">
@@ -586,10 +628,7 @@ export function HttpFields({
           <Selector
             label={t("flow_step_editor_http_body")}
             description={t("flow_step_editor_http_body_description")}
-            options={(["auto", "json_template", "text_template", "none"] as const).map((mode) => ({
-              value: mode,
-              label: httpBodyModeLabel(mode, t)
-            }))}
+            options={BODY_MODES.map((mode) => ({ value: mode, label: httpBodyModeLabel(mode, t) }))}
             value={config.body.mode}
             onChange={(value) =>
               onChange({ ...config, body: { ...config.body, mode: value as HttpBodyMode } })
@@ -608,6 +647,20 @@ export function HttpFields({
               code
               status={problemStatus(bodyProblem)}
             />
+          )}
+          {sendsRunResult && (
+            <div className="flex max-w-prose flex-col gap-1">
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {t("flow_step_editor_http_body_run_result_description")}
+              </Text>
+              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
+                {deliverableLabels.length > 0
+                  ? t("flow_step_editor_http_body_run_result_deliverables", {
+                      labels: deliverableLabels.join(", ")
+                    })
+                  : t("flow_step_editor_http_body_run_result_text_only")}
+              </Text>
+            </div>
           )}
         </Anchor>
       )}

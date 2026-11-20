@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   argumentValue,
+  contentTypeHeaderPart,
   longMaterialEligibility,
   newSourceRef,
   readHttpConfig,
   readInputBindings,
   readLongMaterial,
   readRuntimeInput,
+  readDeliverable,
   readTemplateFill,
+  runResultUrlFixed,
+  stepDeliversArtifact,
   toolArguments,
+  withDeliverable,
   withHttpConfig,
   withLongMaterial,
   withReviewChoice,
@@ -113,6 +118,64 @@ describe("uploads", () => {
 });
 
 describe("HTTP", () => {
+  it("keeps a body that sends the run's result as stored", () => {
+    const stored = {
+      url: "https://hook.example.org",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "run_result" },
+      custom_headers: [],
+      response_format: null
+    };
+    const config = readHttpConfig(stored, "output");
+    expect(config.body).toEqual({ mode: "run_result", template: null });
+    expect(withHttpConfig(stored, { ...config, timeout_seconds: 45 })).toEqual({
+      ...stored,
+      timeout_seconds: 45
+    });
+  });
+
+  it("writes no template for a body that sends the run's result", () => {
+    const stored = {
+      url: "https://hook.example.org",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "json_template", template: '{"a": 1}' },
+      custom_headers: [],
+      response_format: null
+    };
+    const config = readHttpConfig(stored, "output");
+    expect(
+      withHttpConfig(stored, { ...config, body: { ...config.body, mode: "run_result" } }).body
+    ).toEqual({ mode: "run_result" });
+  });
+
+  it("holds a body that sends the run's result to the core's address and header rules", () => {
+    expect(runResultUrlFixed("https://receiver.example.org/eneo/results")).toBe(true);
+    expect(runResultUrlFixed("https://receiver.example.org/{{ flow_input.path }}")).toBe(false);
+    expect(runResultUrlFixed("http://receiver.example.org/eneo/results")).toBe(false);
+    const config = readHttpConfig(
+      { url: "https://receiver.example.org", auth: { mode: "none" }, body: { mode: "run_result" } },
+      "output"
+    );
+    expect(contentTypeHeaderPart(config)).toBeNull();
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        custom_headers: [
+          { name: "X-Trace", value: "1", secret: false },
+          { name: "content-type", value: "text/plain", secret: false }
+        ]
+      })
+    ).toBe("more");
+    expect(
+      contentTypeHeaderPart({
+        ...config,
+        auth: { mode: "api_key", header_name: "Content-Type", key: "k" }
+      })
+    ).toBe("auth");
+  });
+
   it("round-trips a stored secret as its sentinel and never as a value", () => {
     const stored = {
       url: "https://api.example.org",
@@ -251,5 +314,49 @@ describe("long material", () => {
         input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } }
       })
     ).toBe("mapped");
+  });
+});
+
+describe("deliverable", () => {
+  const stored = {
+    template_asset_id: "asset-1",
+    bindings: { namn: "{{flow_input.namn}}" },
+    future: { kept: true }
+  };
+
+  it("is set and cleared without touching the step's other output settings", () => {
+    const on = withDeliverable(stored, {
+      label: "Till Startsidan",
+      file_name: "Standup {{flow_input.team}}"
+    });
+    expect(on).toEqual({
+      ...stored,
+      deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+    });
+    expect(readDeliverable(on)).toEqual({
+      label: "Till Startsidan",
+      file_name: "Standup {{flow_input.team}}"
+    });
+    expect(withDeliverable(on, null)).toEqual(stored);
+    expect(withDeliverable({ deliverable: { label: "Eneo" } }, null)).toBeNull();
+  });
+
+  it("leaves an empty file name out, so the run's own naming applies", () => {
+    expect(withDeliverable(null, { label: "Eneo", file_name: "" })).toEqual({
+      deliverable: { label: "Eneo" }
+    });
+    expect(readDeliverable({ deliverable: { label: "Eneo" } })).toEqual({ label: "Eneo" });
+    expect(readDeliverable({ future: 1 })).toBeNull();
+    expect(readDeliverable(null)).toBeNull();
+  });
+
+  it("is something only a step that delivers a file can be", () => {
+    expect(stepDeliversArtifact({ output_type: "docx", output_mode: "template_fill" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "render_verbatim" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "pass_through" })).toBe(true);
+    expect(stepDeliversArtifact({ output_type: "text", output_mode: "pass_through" })).toBe(false);
+    expect(stepDeliversArtifact({ output_type: "json", output_mode: "copy_input" })).toBe(false);
+    // Outbound delivery sends the result away: it is never a file of the run.
+    expect(stepDeliversArtifact({ output_type: "pdf", output_mode: "http_post" })).toBe(false);
   });
 });

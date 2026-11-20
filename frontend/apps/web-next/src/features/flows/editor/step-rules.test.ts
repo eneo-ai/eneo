@@ -103,6 +103,25 @@ describe("changing one setting keeps the step valid", () => {
     expect(applyOutputModeChange(step, "compose_text").output_config).toEqual({ future: true });
   });
 
+  it("drops the deliverable when the step stops delivering a file, and nothing else", () => {
+    const document = later({
+      input_type: "json",
+      output_type: "docx",
+      output_config: { deliverable: { label: "Eneo" }, future: true }
+    });
+    expect(applyOutputTypeChange(document, "text").output_config).toEqual({ future: true });
+    expect(applyOutputModeChange(document, "http_post").output_config).not.toHaveProperty(
+      "deliverable"
+    );
+    expect(applyOutputModeChange(document, "http_post").output_config).toMatchObject({
+      future: true
+    });
+    expect(applyOutputTypeChange(document, "pdf").output_config).toEqual({
+      deliverable: { label: "Eneo" },
+      future: true
+    });
+  });
+
   it("makes a speaker mapping always reviewed and review impossible before outbound delivery", () => {
     expect(applyOutputModeChange(later(), "speaker_mapping").review_policy).toEqual({
       mode: "edit"
