@@ -29399,7 +29399,7 @@ export interface components {
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };
@@ -35879,7 +35879,7 @@ export interface components {
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };

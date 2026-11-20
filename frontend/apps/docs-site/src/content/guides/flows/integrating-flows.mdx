@@ -933,7 +933,8 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
 }
 ```
 
-- `label` is one line of at most 120 characters, shown as written.
+- `label` is one line of at most 120 characters, shown as written, so it
+  cannot hold `{{` or `}}`.
 - `file_name` is optional: one line of at most 200 characters of fixed text
   and `{{ flow_input.<field> }}` for fields of the flow's form. Nothing else
   between `{{ }}` is allowed, nor a field whose name marks it as sensitive,

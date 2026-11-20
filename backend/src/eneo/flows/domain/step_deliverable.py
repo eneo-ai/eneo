@@ -44,8 +44,8 @@ class FlowStepDeliverable(BaseModel):
     label: str = Field(
         description=(
             "What a client calls this document, for example `Standup Eneo`. One "
-            f"line of at most {DELIVERABLE_LABEL_MAX_CHARS} characters, read as "
-            "literal text: `{{ }}` is not filled in."
+            f"line of at most {DELIVERABLE_LABEL_MAX_CHARS} characters, shown as "
+            "written: publishing refuses `{{` or `}}` in it."
         ),
     )
     file_name: str | None = Field(

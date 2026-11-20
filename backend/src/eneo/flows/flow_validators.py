@@ -1046,6 +1046,7 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
 
 
 _DELIVERABLE_PATH = f"output_config.{FLOW_STEP_DELIVERABLE_KEY}"
+_DELIVERABLE_LABEL_PATH = f"{_DELIVERABLE_PATH}.label"
 _DELIVERABLE_FILE_NAME_PATH = f"{_DELIVERABLE_PATH}.file_name"
 
 
@@ -1085,6 +1086,13 @@ def _validate_deliverable(
             "(DOCX or PDF, not posted elsewhere). Remove it, or change the "
             "step's output to a document.",
             path=_DELIVERABLE_PATH,
+        )
+    if "{{" in deliverable.label or "}}" in deliverable.label:
+        raise refuse(
+            "is shown as written and never filled in, so it cannot hold `{{` or "
+            "`}}`. Write the label as plain text; a form value belongs in "
+            "`file_name`.",
+            path=_DELIVERABLE_LABEL_PATH,
         )
     if deliverable.file_name is None or form_field_names is None:
         return

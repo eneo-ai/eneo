@@ -4535,3 +4535,19 @@ def test_a_malformed_deliverable_is_refused_at_its_field(
         _publish(_document_step(deliverable))
 
     assert caught.value.context["field"] == f"output_config.deliverable.{field}"
+
+
+@pytest.mark.parametrize(
+    "label", ["Report {{ flow_input.text }}", "Report {{", "Report }}"]
+)
+def test_a_deliverable_label_with_braces_is_refused_at_the_label(label: str) -> None:
+    # A label is shown as written and never filled in.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step({"label": label}))
+
+    assert caught.value.context["field"] == "output_config.deliverable.label"
+    assert "shown as written" in str(caught.value)
+
+
+def test_a_deliverable_label_of_plain_text_publishes() -> None:
+    _publish(_document_step({"label": "Rapport: vecka 47 (utkast) – 50 %"}))
