@@ -24,6 +24,7 @@ from eneo.flows.http_transport import (
     HttpAuthoredConfig,
     is_authored_config,
     sends_http_config,
+    sends_run_result,
 )
 from eneo.flows.http_transport.authored_config import ConfigPath
 from eneo.flows.input_binding_contract_rules import (
@@ -214,6 +215,13 @@ def step_reads_by_channel(
         ("output_config", output_config),
         ("input_config", input_config),
     )
+    if sends_run_result(mode, output_config):
+        # A run result sends the run's text and every deliverable, and any
+        # earlier step may be one, so the body reads each of them.
+        reads.extend(
+            StepRead("config", order, (), "output_config.body")
+            for order in range(1, max_prior_step_order + 1)
+        )
     for column, config in configs:
         channel = config_channel(
             column=column,
@@ -464,6 +472,13 @@ def step_form_field_reads(
         ("output_config", output_config),
         ("input_config", input_config),
     )
+    if sends_run_result(mode, output_config):
+        # A run result sends the run's text and every deliverable, and any
+        # earlier step may be one, so the body reads each of them.
+        reads.extend(
+            StepRead("config", order, (), "output_config.body")
+            for order in range(1, max_prior_step_order + 1)
+        )
     for column, config in configs:
         channel = config_channel(
             column=column,

@@ -484,6 +484,20 @@ def test_upstream_orders_read_what_an_http_post_templates(
     assert orders == [1]
 
 
+def test_a_run_result_step_reads_every_earlier_step() -> None:
+    """A run result sends the run's text and every deliverable, which may come
+    from any earlier step, so its classification counts each of them."""
+    config = {
+        "url": "https://receiver.example.org/results",
+        "auth": {"mode": "none"},
+        "body": {"mode": "run_result"},
+    }
+
+    orders = _upstream(output_mode=FlowOutputMode.HTTP_POST, output_config=config)
+
+    assert orders == [1, 2]
+
+
 @pytest.mark.parametrize("config", _HTTP_TEMPLATE_CARRIERS)
 def test_upstream_orders_read_what_an_http_get_templates(
     config: dict[str, object],
