@@ -399,7 +399,12 @@ export function StepOutputSection({
               direction="output"
               config={readHttpConfig(draft.output_config, "output")}
               onChange={(http) =>
-                onChange({ ...draft, output_config: withHttpConfig(draft.output_config, http) })
+                onChange({
+                  ...draft,
+                  // The run's result is sent as the text the step reads.
+                  ...(http.body.mode === "run_result" ? { output_type: "text" } : {}),
+                  output_config: withHttpConfig(draft.output_config, http)
+                })
               }
               groups={variableGroups({
                 flow,

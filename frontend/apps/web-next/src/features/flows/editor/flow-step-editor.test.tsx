@@ -2558,6 +2558,20 @@ describe("FlowStepEditor deliverables", () => {
       }
     ).step_edits[0]!.changes.output_config;
 
+  it("sends the run's result as text, whatever the step answered before", async () => {
+    const flow = resultFlow({ body: { mode: "auto" } });
+    flow.steps[1] = { ...flow.steps[1]!, output_type: "json" };
+    renderEditor(storeEdits(flow)(), { stepId: "step-2" });
+    await chooseBody(messages.flow_step_editor_http_body_run_result);
+    await saveStep();
+    const changes = (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] })
+      .step_edits[0]!.changes;
+    expect(changes).toMatchObject({
+      output_type: "text",
+      output_config: { body: { mode: "run_result" } }
+    });
+  });
+
   it("sends the run's result when chosen, keeps it when reopened, and goes back to the step's own result", async () => {
     const current = storeEdits(
       resultFlow({ body: { mode: "json_template", template: '{"text": "{{text}}"}' } })
