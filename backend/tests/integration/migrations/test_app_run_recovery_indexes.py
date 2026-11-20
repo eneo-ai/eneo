@@ -17,7 +17,7 @@ seed_default_models = expand.seed_default_models
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _PREVIOUS_REVISION = "202610261200"
-_REVISION = "202611190900"
+_REVISION = "202611201300"
 _MIGRATION_APPLICATION = "app-run-recovery-index-test"
 _INDEXES = {"ix_jobs_active_task_updated_id", "ix_app_runs_job_id"}
 

@@ -1,8 +1,8 @@
-"""Index stale job selection and recovery notifications.
+"""Index stale jobs and app run notifications on the 2.3 release line.
 
 Build both indexes concurrently so API and worker writes can continue.
 
-Revision ID: 202611190900
+Revision ID: 202611201300
 Revises: 202610261200
 """
 
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision: str = "202611190900"
+revision: str = "202611201300"
 down_revision: str | None = "202610261200"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
