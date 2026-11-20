@@ -47,6 +47,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    with op.get_context().autocommit_block():
+    context = op.get_context()
+    # After splitting the merge, the other head can still own these indexes.
+    if "202611201300" in context.get_current_heads():
+        return
+    with context.autocommit_block():
         for name in _INDEXES:
             op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")

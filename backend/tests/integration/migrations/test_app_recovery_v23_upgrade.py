@@ -48,3 +48,11 @@ def test_upgrade_preserves_indexes_and_applies_missing_revisions(start):
             assert cursor.fetchall() == [(_MERGE,)]
             cursor.execute("SELECT name_set_at, feedback_set_at FROM sessions LIMIT 0")
             assert _index_ids(cursor) == indexes
+
+            # Split the merge, then downgrade only one side. The other side
+            # still owns the indexes and must continue using the same objects.
+            command.downgrade(config, start)
+            command.downgrade(config, f"{start}@-1")
+            assert _index_ids(cursor) == indexes
+            command.upgrade(config, _MERGE)
+            assert _index_ids(cursor) == indexes
