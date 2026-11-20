@@ -5,7 +5,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.base import ExecutableOption
 
@@ -48,11 +48,18 @@ class AppRunRepository:
         self.factory = factory
         self.file_repo = file_repo
 
-    def _options(self) -> list[ExecutableOption]:
+    def _options(self, stmt: Executable) -> list[ExecutableOption]:
+        # Read the status and output in the same PostgreSQL snapshot. DML RETURNING
+        # cannot join the job, so write paths load it separately in their transaction.
+        job = (
+            joinedload(AppRuns.job)
+            if isinstance(stmt, sa.Select)
+            else selectinload(AppRuns.job)
+        )
         return [
             selectinload(AppRuns.user),
             selectinload(AppRuns.input_files),
-            selectinload(AppRuns.job),
+            job,
         ]
 
     async def _to_domain(self, app_run: AppRuns) -> AppRun:
@@ -89,7 +96,7 @@ class AppRunRepository:
     async def _get_with_options(
         self, stmt: Executable, multiple: bool = False
     ) -> AppRuns | list[AppRuns] | None:
-        for option in self._options():
+        for option in self._options(stmt):
             stmt = stmt.options(option)  # type: ignore[union-attr]  # ORM options on DML stmts
 
         if multiple:
