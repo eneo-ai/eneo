@@ -72,6 +72,9 @@ class HttpBodyMode(str, Enum):
     JSON_TEMPLATE = "json_template"
     TEXT_TEMPLATE = "text_template"
     NONE = "none"
+    # The run's finished result as a typed JSON document, sent by an
+    # ``http_post`` step after the run has completed. It has no template.
+    RUN_RESULT = "run_result"
 
 
 class HttpBody(BaseModel):

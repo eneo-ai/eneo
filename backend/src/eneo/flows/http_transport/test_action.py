@@ -34,6 +34,7 @@ from eneo.flows.http_transport.secret_codec import (
     unresolved_secret_sentinel_fields,
 )
 from eneo.flows.http_transport.validator import (
+    AUTHOR_ACTIONS,
     validate_authored_config,
     validate_http_url,
 )
@@ -289,4 +290,4 @@ def _error_message(
         HttpTransportError.CREDENTIALS_REQUIRE_HTTPS: "HTTP credentials require a fixed HTTPS origin",
         HttpTransportError.INVALID_HEADER_NAME: "Invalid custom header name",
     }
-    return messages.get(error, error.value)
+    return messages.get(error) or AUTHOR_ACTIONS.get(error, error.value)

@@ -140,6 +140,7 @@ from eneo.flows.flow_security_classification import (
 from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
 from eneo.flows.http_transport import (
     credential_template_message,
+    sends_run_result,
     sent_step_http_configs,
     templated_step_credentials,
 )
@@ -1389,6 +1390,10 @@ class FlowRunExecutor:
                         flow_id=flow_id,
                         tenant_id=tenant_id,
                         intent=delivery_intent,
+                    )
+                if sends_run_result(step.output_mode, step.output_config):
+                    return await self._complete_run_then_deliver(
+                        run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
                     )
                 await self._commit()
                 await self._request_webhook_delivery(run_id=run_id)
@@ -3804,6 +3809,40 @@ class FlowRunExecutor:
             cancelled_at=cancelled_at,
             principal=self.principal,
         )
+
+    async def _complete_run_then_deliver(
+        self, *, run_id: UUID, flow_id: UUID, tenant_id: UUID
+    ) -> dict[str, Any]:
+        """Complete the run in the transaction that holds its last step's
+        result and its run result delivery row, then ask for the delivery.
+
+        The receiver gets the result of a completed run, and the delivery's
+        outcome never changes the run. A last write that does not complete
+        the run keeps nothing of it: no step result, no delivery row."""
+        try:
+            finalization = await finalize_run_from_current_results(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_run_repo=self.flow_run_repo,
+                terminalizer=self.flow_run_terminalizer,
+                principal=self.principal,
+            )
+        except BaseException:
+            await self.session.rollback()
+            raise
+        terminalization = finalization.terminalization
+        if (
+            terminalization is None
+            or not terminalization.did_transition
+            or terminalization.run.status != FlowRunStatus.COMPLETED
+        ):
+            await self.session.rollback()
+            return await self._return_after_terminalized_step_write(
+                run_id=run_id, flow_id=flow_id, tenant_id=tenant_id
+            )
+        await self._commit()
+        await self._request_webhook_delivery(run_id=run_id)
+        return finalization.payload
 
     async def _commit(self) -> None:
         await self.session.commit()

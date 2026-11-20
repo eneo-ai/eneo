@@ -27,12 +27,13 @@ from eneo.flows.domain.step_output import (
     StepOutputMetadataError,
     interpret_step_text,
 )
-from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
 )
 from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.http_transport import sends_run_result
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -59,12 +60,15 @@ from eneo.flows.runtime.http_orchestration import (
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.json_types import JsonValue
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
 
 logger = logging.getLogger(__name__)
+
+RUN_RESULT_SCHEMA = "eneo.flow_run_result.v1"
 
 # Typed failures that repeat on every attempt, so they are not retried: compiling
 # the delivery from the published definition, and a destination the sender
@@ -132,6 +136,9 @@ class WebhookDeliveryPayload:
     text_payload: str
     context: dict[str, Any]
     audit_actor: FlowRunActor | None
+    # The document a run_result body sends; None for a template body, which
+    # is sent while its run is running.
+    run_result_body: JsonValue | None = None
 
 
 class WebhookDeliveryClaimLostError(RuntimeError):
@@ -429,7 +436,10 @@ class FlowRunWebhookDeliveryService:
             tenant_id=row.tenant_id,
             flow_id=row.flow_id,
         )
-        if run.status != FlowRunStatus.RUNNING:
+        # A template body is sent while its run is running; a run result body
+        # once its run has completed. Only the pinned step says which, so a
+        # run in any other state is refused before the version is read.
+        if run.status not in (FlowRunStatus.RUNNING, FlowRunStatus.COMPLETED):
             raise ValueError("Webhook delivery run is no longer running.")
         flow_version = await self.flow_version_repo.get(
             flow_id=row.flow_id,
@@ -447,6 +457,15 @@ class FlowRunWebhookDeliveryService:
         if step is None:
             raise ValueError(
                 "Webhook delivery step is missing from published snapshot."
+            )
+        run_result = sends_run_result(step.output_mode, step.output_config)
+        if run.status != (
+            FlowRunStatus.COMPLETED if run_result else FlowRunStatus.RUNNING
+        ):
+            raise ValueError(
+                "Run result delivery requires a completed run."
+                if run_result
+                else "Webhook delivery run is no longer running."
             )
         results = await self.flow_run_repo.list_step_results(
             run_id=row.flow_run_id,
@@ -474,6 +493,16 @@ class FlowRunWebhookDeliveryService:
                 "stored in a generated output file."
             )
         text_payload = text.text
+        if run_result:
+            return WebhookDeliveryPayload(
+                run=run,
+                step=step,
+                step_result=step_result,
+                text_payload=text_payload,
+                context={},
+                audit_actor=audit_actor,
+                run_result_body=_run_result_body(run=run, text=text_payload),
+            )
 
         state = build_run_execution_state(
             steps=steps,
@@ -549,6 +578,7 @@ class FlowRunWebhookDeliveryService:
             deps=deps,
             idempotency_key=row.idempotency_key,
             sends_end_at=deadline.sends_end_at,
+            run_result_body=payload.run_result_body,
         )
 
     async def _record_success(
@@ -557,6 +587,17 @@ class FlowRunWebhookDeliveryService:
         row: FlowRunWebhookDeliveryRow,
         payload: WebhookDeliveryPayload,
     ) -> bool:
+        if payload.run_result_body is not None:
+            # The run completed before the send: only the delivery is recorded.
+            if not await self.webhook_delivery_repo.mark_delivery_succeeded(
+                delivery_id=row.id,
+                claim_token=row.claim_token,
+                delivered_at=datetime.now(timezone.utc),
+            ):
+                raise WebhookDeliveryClaimLostError(
+                    "Webhook delivery claim was lost before success could be recorded."
+                )
+            return True
         # Preserve the active-run write guard before marking delivery succeeded.
         saved_result = await self.flow_run_repo.save_step_result(
             row.flow_run_id,
@@ -621,7 +662,7 @@ class FlowRunWebhookDeliveryService:
                 "Webhook delivery claim was lost before failure could be recorded."
             )
 
-        if dead_lettered_at is not None:
+        if dead_lettered_at is not None and not await self._run_has_ended(row):
             await self.flow_run_terminalizer.terminalize_run(
                 run_id=row.flow_run_id,
                 tenant_id=row.tenant_id,
@@ -640,6 +681,15 @@ class FlowRunWebhookDeliveryService:
                 ),
             )
         return dead_lettered_at is not None
+
+    async def _run_has_ended(self, row: FlowRunWebhookDeliveryRow) -> bool:
+        """A delivery for a run that has already ended never ends the run: a
+        run result is sent after its run completed, and the run stays
+        completed whatever the receiver does."""
+        run = await self.flow_run_repo.get(
+            run_id=row.flow_run_id, tenant_id=row.tenant_id, flow_id=row.flow_id
+        )
+        return is_terminal_flow_run_status(run.status)
 
     async def _resolve_audit_actor(self, run: FlowRun) -> FlowRunActor | None:
         if self.audit_service is None:
@@ -712,3 +762,20 @@ class FlowRunWebhookDeliveryService:
             duration_ms=duration_ms,
             deps=deps,
         )
+
+
+def _run_result_body(*, run: FlowRun, text: str) -> JsonValue:
+    """The run's finished result, as the receiver gets it."""
+    if run.finished_at is None:
+        raise ValueError(
+            "Run result delivery found a completed run without a finish time."
+        )
+    return {
+        "schema": RUN_RESULT_SCHEMA,
+        "flow_id": str(run.flow_id),
+        "run_id": str(run.id),
+        "run_created_at": run.created_at.isoformat(),
+        "run_completed_at": run.finished_at.isoformat(),
+        "text": text,
+        "deliverables": [],
+    }

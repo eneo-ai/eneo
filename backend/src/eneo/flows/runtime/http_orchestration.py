@@ -31,6 +31,7 @@ from eneo.flows.http_transport import (
 from eneo.flows.http_transport.validator import validate_http_url
 from eneo.flows.runtime.http_audit import await_read_audit, unfinished_call_message
 from eneo.flows.variable_resolver import FlowVariableContext
+from eneo.json_types import JsonValue
 from eneo.main.exceptions import BadRequestException, TypedIOValidationException
 
 
@@ -132,6 +133,7 @@ def _compile_authored_http_request(
     step_order: int,
     config_label: str,
     deps: FlowHttpOrchestrationDeps,
+    run_result_body: JsonValue | None = None,
 ) -> tuple[EffectiveHttpRequest, str | None]:
     authored = parse_authored_http_config(
         raw_config, step_order=step_order, config_label=config_label
@@ -150,6 +152,7 @@ def _compile_authored_http_request(
             else None
         ),
         resolve_value=deps.variable_resolver.resolve_value,
+        run_result_body=run_result_body,
     )
     timeout_seconds = deps.resolve_timeout_seconds(
         decrypted.timeout_seconds,
@@ -331,6 +334,7 @@ async def deliver_webhook(
     deps: FlowHttpOrchestrationDeps,
     idempotency_key: str,
     sends_end_at: float,
+    run_result_body: JsonValue | None = None,
 ) -> None:
     """Send one webhook request. ``sends_end_at`` (event-loop clock) bounds the
     send together with the step's own timeout; a send that cannot start before
@@ -346,6 +350,7 @@ async def deliver_webhook(
             step_order=step.step_order,
             config_label="output_config",
             deps=deps,
+            run_result_body=run_result_body,
         )
     except TypedIOValidationException as exc:
         raise BadRequestException(str(exc), code=exc.code) from exc

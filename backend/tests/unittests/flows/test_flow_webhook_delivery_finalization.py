@@ -88,7 +88,8 @@ async def test_a_delivered_last_step_completes_the_run_with_the_last_output():
     row = _row()
 
     recorded = await service._record_success(  # pyright: ignore[reportPrivateUsage]
-        row=row, payload=SimpleNamespace(step_result=SimpleNamespace())
+        row=row,
+        payload=SimpleNamespace(step_result=SimpleNamespace(), run_result_body=None),
     )
 
     assert recorded is True
@@ -112,7 +113,8 @@ async def test_a_delivery_in_a_cancelled_run_never_reads_a_step_output():
     )
 
     recorded = await service._record_success(  # pyright: ignore[reportPrivateUsage]
-        row=_row(), payload=SimpleNamespace(step_result=SimpleNamespace())
+        row=_row(),
+        payload=SimpleNamespace(step_result=SimpleNamespace(), run_result_body=None),
     )
 
     assert recorded is True
