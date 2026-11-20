@@ -30,7 +30,14 @@ def run_result_file_ids(deliverables: Sequence[FlowRunDeliverablePublic]) -> lis
 
 def check_run_result_files(deliverables: Sequence[FlowRunDeliverablePublic]) -> None:
     """Refuse, before any content is read, a body that could only be sent in
-    part or that is larger than the cap. Every refusal is permanent."""
+    part or that is larger than the cap. Every refusal is permanent. A run
+    that marks no document is sent with its text alone."""
+    empty = [str(item.step_id) for item in deliverables if not item.files]
+    if empty:
+        raise ValueError(
+            "Run result delivery has documents the run did not produce, from "
+            f"steps {', '.join(empty)}: a document step has no file."
+        )
     files = [file for deliverable in deliverables for file in deliverable.files]
     unavailable = [str(file.file_id) for file in files if not file.content_available]
     if unavailable:

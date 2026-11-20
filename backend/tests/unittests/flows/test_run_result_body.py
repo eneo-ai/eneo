@@ -151,3 +151,16 @@ def test_files_over_the_cap_refuse_the_body_before_any_is_read() -> None:
         check_run_result_files([_deliverable(*big)])
 
     check_run_result_files([_deliverable(_file(size=RUN_RESULT_MAX_FILE_BYTES))])
+
+
+def test_a_deliverable_without_a_file_refuses_the_body() -> None:
+    """A marked document the run did not produce would be sent as an empty
+    group, and the receiver would take a part of the result for all of it."""
+    empty = _deliverable()
+
+    with pytest.raises(ValueError, match="has no file") as refused:
+        check_run_result_files([_deliverable(_file()), empty])
+
+    assert str(empty.step_id) in str(refused.value)
+    # A run that marks no document sends its text alone.
+    check_run_result_files([])

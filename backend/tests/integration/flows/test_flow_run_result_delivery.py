@@ -16,14 +16,17 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
 )
 from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRuns,
+    FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
@@ -518,6 +521,46 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     for deliverable in body["deliverables"]:
         [file] = deliverable["files"]
         assert file["content_base64"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_marked_document_without_its_file_is_never_sent_in_part(
+    setup_database,
+    object_content_runtime_ready,
+    queued_markdown_documents_then_post_run,
+    monkeypatch,
+):
+    """One document is whole and the other step's file is gone: the result is
+    refused before anything is read, audited or sent, and the run stays
+    completed."""
+    run = await queued_markdown_documents_then_post_run()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    monkeypatch.setattr(FlowRunExecutor, "_request_webhook_delivery", AsyncMock())
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.delete(FlowRunStepResultFiles).where(
+                FlowRunStepResultFiles.flow_run_id == run.id,
+                FlowRunStepResultFiles.step_order == 3,
+            )
+        )
+
+    outcome = await _run_outbox()
+
+    assert outcome["dead_lettered"] == 1
+    send.assert_not_awaited()
+    assert await _run_state(run.id) == (
+        FlowRunStatus.COMPLETED.value,
+        [FlowOutboxDeliveryStatus.DEAD_LETTERED.value],
+    )
+    assert not await _read(
+        sa.select(AuditLog.id).where(
+            AuditLog.action == ActionType.FLOW_RUN_RESULT_SENDING.value,
+            AuditLog.entity_id == run.id,
+        )
+    )
 
 
 @pytest.fixture
