@@ -165,7 +165,9 @@ class JobService:
         error_message: str | None = None,
         *,
         failure_code: JobFailureCode | None = None,
+        only_if_queued: bool = False,
     ):
+        """Use only_if_queued when the caller cannot confirm it owns a running job."""
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
@@ -173,7 +175,9 @@ class JobService:
             failure_code=failure_code,
         )
         return await self.job_repo.update_job(
-            job_id, job_update, from_statuses=ACTIVE_JOB_STATUSES
+            job_id,
+            job_update,
+            from_statuses=(Status.QUEUED,) if only_if_queued else ACTIVE_JOB_STATUSES,
         )
 
     async def get_running_jobs(self):

@@ -14,8 +14,8 @@ from eneo.worker.worker import Worker
 worker = Worker()
 logger = get_logger(__name__)
 
-# This is a queue wait budget. A running task holds its job row lock and is
-# skipped even if a long transcription exceeds the budget.
+# Maintenance fails unlocked queued or in-progress runs older than this age.
+# The execution transaction holds the job row lock while the app is running.
 APP_RUN_QUEUE_TIMEOUT = timedelta(hours=2)
 APP_RUN_REAPER_BATCH_SIZE = 50
 
