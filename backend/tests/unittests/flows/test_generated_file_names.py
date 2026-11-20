@@ -527,13 +527,16 @@ def test_a_name_masking_would_change_before_or_after_cleaning_takes_the_label(
 
 
 def test_a_credential_starting_before_the_length_limit_takes_the_label() -> None:
-    # The cut at 255 bytes would keep only "toke", which masking leaves alone.
-    value = "x" * 250 + f" token={SECRET_MARKER}"
+    # Each value is clean on its own; the cut at 255 bytes would keep only
+    # "toke" of the credential they make, which masking leaves alone.
+    form_values: dict[str, object] = {"A": "x" * 250, "B": SECRET_MARKER}
     names = _own_names(
-        _own(1, "pdf", "{{ flow_input.Team }}", "Protokoll"),
-        form_values={"Team": value},
+        _own(1, "pdf", "{{ flow_input.A }} token={{ flow_input.B }}", "Protokoll"),
+        form_values=form_values,
     )
 
+    for field, value in form_values.items():
+        assert redact_string(str(value), key=field) == value
     assert len(" ".join(["x" * 250, "toke"]).encode("utf-8")) == MAX_FILE_NAME_BYTES
     assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
 
