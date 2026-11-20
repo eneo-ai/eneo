@@ -16,7 +16,7 @@ import { blockingError, ListError, RefreshError } from "@/components/composites/
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
-import { hasAnswered, pollEvery } from "@/lib/api/query";
+import { hasAnswered, pollEvery, pollWhile } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpaceSections } from "@/features/spaces/frame/use-space-sections";
@@ -86,6 +86,13 @@ const INPUT_LOSS_CODES = new Set([
 ]);
 
 /** The files the run's final result carries. */
+/**
+ * How often a completed run is read again while its result is on its way.
+ * Each read of the detail is an audited read, and a delivery's retries wait
+ * from 30 seconds up to 15 minutes, so the page does not ask more often.
+ */
+const RESULT_DELIVERY_POLL_MS = 30_000;
+
 function resultFileIds(result: RunDetail["result"]): Set<string> {
   if (result?.kind === "artifact") return new Set(result.files.map((file) => file.file_id));
   if (result?.kind === "file_backed_text") return new Set([result.file.file_id]);
@@ -432,7 +439,15 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const detail = useShownRead(
     useQuery({
       ...runDetailQueryOptions(browserApi, flowId, runId, readSignature ?? ""),
-      enabled: readSignature !== null
+      enabled: readSignature !== null,
+      // A completed run's result is sent afterwards, without moving the run, so
+      // its detail is read again until the delivery has settled.
+      refetchInterval: pollWhile<RunDetail>(
+        (data) =>
+          data?.result?.kind === "outbound_http" && data.result.delivery_status === "pending",
+        RESULT_DELIVERY_POLL_MS
+      ),
+      refetchIntervalInBackground: false
     })
   );
   const settled = progress.data ? isTerminal(progress.data.status.status) : false;

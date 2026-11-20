@@ -822,6 +822,25 @@ describe("FlowRunPage", () => {
     );
   });
 
+  it("reads a completed run again while its result is on its way, and stops once it arrived", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const completed = makeRunSummary();
+    const sent = (delivery_status: "pending" | "delivered") =>
+      makeRunDetail({ ...completed, result: { kind: "outbound_http", delivery_status } });
+    answerRun(completed, sent("pending"));
+    renderRun();
+    expect(await screen.findByText(messages.flow_runs_result_sending)).toBeTruthy();
+    const read = calls(DETAIL).length;
+
+    answerRun(completed, sent("delivered"));
+    await act(() => vi.advanceTimersByTimeAsync(30_100));
+    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    expect(calls(DETAIL)).toHaveLength(read + 1);
+
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls(DETAIL)).toHaveLength(read + 1);
+  });
+
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
