@@ -31,31 +31,44 @@ async def claim_app_job(repo: JobRepository, job_id: UUID) -> bool:
     return await repo.mark_job_started(job_id, durable_queue_age=APP_RUN_QUEUE_TIMEOUT)
 
 
-def stale_app_submissions(now: datetime):
-    deadline = now - APP_RUN_QUEUE_TIMEOUT
+def _recovery_page():
     return (
         sa.select(Jobs)
-        .where(
-            Jobs.task == Task.RUN_APP,
-            Jobs.status.in_((_QUEUED, _RUNNING)),
-            sa.or_(
-                Jobs.updated_at < deadline,
-                sa.and_(
-                    Jobs.status == _QUEUED,
-                    Jobs.dispatch_envelope.is_not(None),
-                    Jobs.created_at <= deadline,
-                ),
-                sa.and_(
-                    Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
-                    sa.or_(
-                        Jobs.status == _RUNNING, Jobs.dispatch_envelope.is_not(None)
+        .where(Jobs.task == Task.RUN_APP, Jobs.status.in_((_QUEUED, _RUNNING)))
+        .order_by(Jobs.updated_at, Jobs.id)
+        .limit(APP_RUN_RECOVERY_BATCH)
+        .with_for_update(skip_locked=True)
+    )
+
+
+def interrupted_app_jobs(now: datetime):
+    deadline = now - APP_RUN_QUEUE_TIMEOUT
+    return _recovery_page().where(
+        sa.or_(
+            sa.and_(
+                Jobs.status == _RUNNING, Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE
+            ),
+            sa.and_(
+                Jobs.status == _QUEUED,
+                sa.or_(
+                    sa.and_(
+                        Jobs.dispatch_envelope.is_(None), Jobs.updated_at < deadline
+                    ),
+                    sa.and_(
+                        Jobs.dispatch_envelope.is_not(None), Jobs.created_at <= deadline
                     ),
                 ),
             ),
         )
-        .order_by(Jobs.updated_at, Jobs.id)
-        .limit(APP_RUN_RECOVERY_BATCH)
-        .with_for_update(skip_locked=True)
+    )
+
+
+def retryable_app_submissions(now: datetime):
+    return _recovery_page().where(
+        Jobs.status == _QUEUED,
+        Jobs.dispatch_envelope.is_not(None),
+        Jobs.created_at > now - APP_RUN_QUEUE_TIMEOUT,
+        Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
     )
 
 
@@ -63,17 +76,16 @@ async def reconcile_app_runs(
     session: AsyncSession, *, now: datetime | None = None
 ) -> list[UUID]:
     now = now or datetime.now(timezone.utc)
-    jobs = list(await session.scalars(stale_app_submissions(now)))
-    retry_ids = {
-        job.id
-        for job in jobs
-        if job.status == Status.QUEUED
-        and job.dispatch_envelope is not None
-        and job.created_at > now - APP_RUN_QUEUE_TIMEOUT
-    }
+    # Broker outages must not consume the capacity for reporting interrupted work.
+    failures = [
+        (job, JobFailureCode.PROCESSING_INTERRUPTED)
+        for job in await session.scalars(interrupted_app_jobs(now))
+    ]
+    retry_jobs = list(await session.scalars(retryable_app_submissions(now)))
     runs = {}
     linked_files: dict[UUID, set[UUID]] = {}
-    if retry_ids:
+    if retry_jobs:
+        retry_ids = [job.id for job in retry_jobs]
         sources = await session.execute(
             sa.select(
                 AppRuns.job_id, AppRuns.id, AppRuns.app_id, AppRuns.user_id
@@ -88,44 +100,44 @@ async def reconcile_app_runs(
         for run_id, file_id in links:
             linked_files.setdefault(run_id, set()).add(file_id)
 
-    failed: list[UUID] = []
     broker_unavailable = False
-    for job in jobs:
-        if job.id in retry_ids:
-            try:
-                envelope = AppDispatchEnvelope.model_validate(job.dispatch_envelope)
-                run = runs.get(job.id)
-                if (
-                    run is None
-                    or run.user_id != job.user_id
-                    or set(envelope.file_ids) != linked_files.get(run.id, set())
-                ):
-                    raise ValueError("App run inputs no longer match the submission")
-                params = AppRunParams(
-                    id=run.id,
-                    app_id=run.app_id,
-                    user_id=job.user_id,
-                    file_ids=envelope.file_ids,
-                    text=None,
-                )
-            except ValueError:
-                code = JobFailureCode.INVALID_JOB_PAYLOAD
-            else:
-                if not broker_unavailable:
-                    job.updated_at = now
-                    job.dispatch_attempted_at = now
-                    try:
-                        async with asyncio.timeout(get_settings().redis_conn_timeout):
-                            await job_manager.redispatch_app(job.id, params)
-                    except Exception:
-                        broker_unavailable = True
-                        logger.warning(
-                            "App redispatch unavailable", extra={"job_id": str(job.id)}
-                        )
-                continue
-        else:
-            code = JobFailureCode.PROCESSING_INTERRUPTED
+    for job in retry_jobs:
+        try:
+            envelope = AppDispatchEnvelope.model_validate(job.dispatch_envelope)
+            run = runs.get(job.id)
+            if (
+                run is None
+                or run.user_id != job.user_id
+                or set(envelope.file_ids) != linked_files.get(run.id, set())
+            ):
+                raise ValueError("App run inputs no longer match the submission")
+            params = AppRunParams(
+                id=run.id,
+                app_id=run.app_id,
+                user_id=job.user_id,
+                file_ids=envelope.file_ids,
+                text=None,
+            )
+        except ValueError:
+            failures.append((job, JobFailureCode.INVALID_JOB_PAYLOAD))
+            continue
 
+        if broker_unavailable:
+            continue
+        job.updated_at = now
+        job.dispatch_attempted_at = now
+        try:
+            async with asyncio.timeout(get_settings().redis_conn_timeout):
+                await job_manager.redispatch_app(job.id, params)
+        except Exception as exc:
+            broker_unavailable = True
+            logger.warning(
+                "App redispatch unavailable",
+                extra={"job_id": str(job.id), "error_type": type(exc).__name__},
+            )
+
+    failed: list[UUID] = []
+    for job, code in failures:
         job.status = Status.FAILED
         job.failure_code = code
         job.finished_at = now

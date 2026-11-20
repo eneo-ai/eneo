@@ -690,6 +690,49 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
         assert (await session.get(Jobs, other_task)).status == Status.QUEUED.value
 
 
+async def test_retry_backlog_does_not_hide_interrupted_or_expired_results(
+    app_run_fixture, db_session, client, admin_user_api_key, monkeypatch
+):
+    from eneo.apps.app_runs.app_run_dispatch import APP_RUN_RECOVERY_BATCH
+
+    now = datetime.now(timezone.utc)
+    retry_ids = []
+    for _ in range(APP_RUN_RECOVERY_BATCH):
+        job_id, _, _ = await app_run_fixture()
+        retry_ids.append(job_id)
+    _, interrupted, _ = await app_run_fixture(
+        status=Status.IN_PROGRESS, age=timedelta(minutes=6)
+    )
+    expired_id, expired, _ = await app_run_fixture()
+    envelope = {"version": 1, "file_ids": []}
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id.in_(retry_ids))
+            .values(dispatch_envelope=envelope, updated_at=now - timedelta(minutes=15))
+        )
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == expired_id)
+            .values(
+                dispatch_envelope=envelope,
+                created_at=now - timedelta(hours=2, minutes=1),
+                updated_at=now - timedelta(minutes=1),
+            )
+        )
+
+    broker = AsyncMock(side_effect=ConnectionError("broker unavailable"))
+    monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    await _run_app_maintenance()
+    broker.assert_awaited_once()
+    for run in (interrupted, expired):
+        detail = await client.get(
+            f"/api/v1/app-runs/{run.id}/", headers={"X-API-Key": admin_user_api_key.key}
+        )
+        assert detail.status_code == 200
+        assert detail.json()["status"] == Status.FAILED
+
+
 async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery(
     app_run_fixture, db_session, monkeypatch, client, admin_user_api_key
 ):
