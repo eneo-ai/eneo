@@ -45,6 +45,9 @@ class Permission(str, Enum):
     MODULES = "modules"
     WIDGETS = "widgets"
     ASSISTANT_DEBUG = "assistant_debug"
+    # The helper chat beside an assistant's settings. Decoupled from ASSISTANTS:
+    # without it a person still edits assistants, only without the helper.
+    HELPER_CHAT = "helper_chat"
     # Capability use permissions. Each value equals the MCP capability purpose
     # it governs (see CAPABILITY_PURPOSES) so the purpose -> permission mapping
     # stays generic: Permission(purpose).

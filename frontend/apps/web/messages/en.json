@@ -4821,6 +4821,8 @@
   "permission_storage_description": "Administer file storage: connect an S3-compatible destination, rotate its keys and set upload limits.",
   "permission_assistant_debug": "Assistant debugging",
   "permission_assistant_debug_description": "Inspect content-free chat diagnostics, such as which Skills were activated, for conversations you can access.",
+  "permission_helper_chat": "Helper assistant",
+  "permission_helper_chat_description": "Use the helper assistant beside an assistant's settings. Without it the helper is not shown; all other access is unaffected.",
   "permission_group_chat": "Chat & collaboration",
   "permission_group_chat_short": "Chat",
   "permission_group_functions": "Functions",

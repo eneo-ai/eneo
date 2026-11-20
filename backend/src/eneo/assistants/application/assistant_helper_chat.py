@@ -51,6 +51,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
+from eneo.roles.permissions import Permission, has_permission
 
 if TYPE_CHECKING:
     from eneo.assistants.assistant import Assistant
@@ -68,14 +69,18 @@ class AssistantHelperChatErrorCode(StrEnum):
     MODEL_NOT_IN_SPACE = "helper_chat_model_not_in_space"
     REASONING_EFFORT_UNSUPPORTED = "helper_chat_reasoning_effort_unsupported"
     DISABLED = "helper_chat_disabled"
+    NO_PERMISSION = "helper_chat_no_permission"
 
 
 # Why the person gets no chat on an assistant: the organisation has turned the
-# chat off; the space has no model the chat can answer with; the person may
+# chat off; the person's role does not give the helper chat; the space has no
+# model the chat can answer with; the person may
 # not edit the assistant, or it does not exist or cannot be read, which are
 # told apart from nothing else; or the assistant is configured elsewhere (a
 # helper chat's own, a help assistant, a flow step's).
-UnavailableReason = Literal["disabled", "no_model", "no_edit_rights", "not_supported"]
+UnavailableReason = Literal[
+    "disabled", "no_permission", "no_model", "no_edit_rights", "not_supported"
+]
 
 
 class AssistantHelperChatPublic(BaseModel):
@@ -125,7 +130,9 @@ class AssistantHelperChatAvailability(BaseModel):
         default=None,
         description=(
             "Why not: `disabled` when the organisation has turned the helper "
-            "chat off (checked first); `no_model` when the space has no model "
+            "chat off (checked first); `no_permission` when the caller's role "
+            "lacks the `helper_chat` permission (checked next); `no_model` "
+            "when the space has no model "
             "that supports tools; `no_edit_rights` when the caller may not edit the "
             "assistant, which is also the answer for one that does not exist "
             "or cannot be read; `not_supported` for an assistant that is "
@@ -133,6 +140,11 @@ class AssistantHelperChatAvailability(BaseModel):
             "flow step's). Null when available."
         ),
     )
+
+
+def _has_helper_chat(container: Container) -> bool:
+    """Whether the caller's role gives the helper chat."""
+    return has_permission(container.user().permissions, Permission.HELPER_CHAT)
 
 
 def _policy(container: Container) -> HelperChatPolicy:
@@ -203,6 +215,8 @@ class _AssistantChatRefusals:
     def unavailable(self, reason: UnavailableReason) -> Exception:
         if reason == "disabled":
             return self.disabled()
+        if reason == "no_permission":
+            return self.no_permission()
         if reason == "not_supported":
             return BadRequestException(
                 "This assistant is configured elsewhere, so it has no helper chat.",
@@ -224,6 +238,13 @@ class _AssistantChatRefusals:
         return UnauthorizedException(
             "Your organisation has turned off the helper chat.",
             code=AssistantHelperChatErrorCode.DISABLED,
+        )
+
+    def no_permission(self) -> Exception:
+        return UnauthorizedException(
+            "Your role does not give access to the helper chat.",
+            code=AssistantHelperChatErrorCode.NO_PERMISSION,
+            context={"auth_layer": "tenant_role"},
         )
 
     def no_model(self) -> Exception:
@@ -278,7 +299,8 @@ class _AssistantTarget:
     proposes each change for the person to apply, publishes or unpublishes
     only once the person approves the call, and never changes the assistant
     itself. The organisation's settings (``helper_chats.policy``) turn the
-    chat off and add their guidance to its persona."""
+    chat off and add their guidance to its persona, and a person has the
+    chat only while their role gives ``Permission.HELPER_CHAT``."""
 
     target_type = HelperChatTargetType.ASSISTANT
     modes = None
@@ -310,6 +332,9 @@ class _AssistantTarget:
         # turns and tool calls load it through here.
         if not _policy(container).enabled:
             raise self.refusals.disabled()
+        # A role that loses the permission loses the chats it opened as well.
+        if not _has_helper_chat(container):
+            raise self.refusals.no_permission()
 
     def target_exists(self, tenant_id: UUID) -> sa.ColumnElement[bool]:
         return sa.exists().where(
@@ -473,6 +498,8 @@ async def assistant_chat_availability(
     changing anything."""
     if not _policy(container).enabled:
         return _unavailable("disabled")
+    if not _has_helper_chat(container):
+        return _unavailable("no_permission")
     editable = await _editable(container, request, assistant_id)
     if isinstance(editable, str):
         return _unavailable(editable)

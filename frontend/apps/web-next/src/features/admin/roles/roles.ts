@@ -73,7 +73,7 @@ const MEMBERS: Record<Exclude<PermissionGroupId, "other">, readonly string[]> = 
     "web_search",
     "image_generation"
   ],
-  build: ["assistants", "apps", "services", "skills", "skills_management", "AI"],
+  build: ["assistants", "helper_chat", "apps", "services", "skills", "skills_management", "AI"],
   knowledge: ["collections", "websites", "integrations"],
   insight: ["insights", "assistant_debug"],
   admin: ["admin", "api_keys", "storage", "modules", "widgets"]

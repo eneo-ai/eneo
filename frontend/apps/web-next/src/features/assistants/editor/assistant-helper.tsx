@@ -23,7 +23,8 @@ const UNAVAILABLE_KEYS: Record<UnavailableReason, string> = {
   no_model: "helper_unavailable_no_model",
   no_edit_rights: "helper_no_access",
   not_supported: "helper_unavailable_not_supported",
-  disabled: "helper_unavailable_disabled"
+  disabled: "helper_unavailable_disabled",
+  no_permission: "helper_unavailable_no_permission"
 };
 
 /** The assistant's helper chat's refusals (the error's `code`), in plain words. */
@@ -32,6 +33,7 @@ const REFUSAL_KEYS: Record<string, string> = {
   helper_chat_no_edit_rights: "helper_no_access",
   helper_chat_not_supported: "helper_unavailable_not_supported",
   helper_chat_disabled: "helper_unavailable_disabled",
+  helper_chat_no_permission: "helper_unavailable_no_permission",
   helper_chat_model_without_tools: "helper_refusal_model_without_tools",
   helper_chat_model_below_classification: "helper_refusal_model_below_classification",
   helper_chat_model_not_in_space: "helper_refusal_model_not_in_space",
@@ -121,8 +123,9 @@ export function useAssistantHelper({
 /**
  * "Hjälpassistent" in the editor's header: opens and closes the helper
  * beside the settings, pressed while it is open. It follows the availability
- * read: absent while that is pending or failed, and for a person who may not
- * edit the assistant or an assistant configured elsewhere; disabled, with
+ * read: absent while that is pending or failed, for a person who may not
+ * edit the assistant or whose role does not give the helper, and for an
+ * assistant configured elsewhere; disabled, with
  * the reason, while the space has no model for it. `compact` (a phone's bar)
  * shows the icon alone, its name as a tooltip, and leaves a disabled toggle
  * out: its reason would be only in a tooltip, which a finger cannot reach.

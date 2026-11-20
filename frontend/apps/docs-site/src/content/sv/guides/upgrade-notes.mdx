@@ -127,7 +127,7 @@ flowchart TB
 | [Härdning av HTTP](#http-hardening) | Proxyer som sätter HSTS eller CSP | Bestäm vem som äger HSTS och CSP |
 | Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500`; `422` listar bara `loc`, `type` och `msg`; ett oväntat fel svarar `500` med koden `internal_error` och ett `error_id` | API-klienter med lösenord | Hantera de två koderna; uppdatera tolkningen av `422` |
 | [Lösenordens livscykel](#password-lifecycle) | Förinlagda användare, lösenordsintegrationer | Kontrollera `DEFAULT_USER_PASSWORD` |
-| [Hjälpassistenten ersätter Promptguiden i React-webbappen](#helper-replaces-prompt-guide) | Administratörer i organisationer med en Promptguide | Flytta era egna regler till hjälpassistentens riktlinjer; kontrollera reglaget och modellen |
+| [Hjälpassistenten ersätter Promptguiden i React-webbappen](#helper-replaces-prompt-guide) | Administratörer i organisationer med en Promptguide | Flytta era egna regler till hjälpassistentens riktlinjer; kontrollera reglaget och modellen; ge behörigheten till de roller som ska ha hjälpassistenten |
 
 ### API-kontrakt [#api-contract]
 
@@ -344,7 +344,9 @@ Det här tar hjälpassistenten inte över:
 
 Hjälpassistentens konversationer räknas som modellanvändning, också i personens egen användning. Det gjorde inte guidens konversationer. Hjälpassistenten föreslår varje ändring av en assistent och sparar inget själv. Ändringen sparas när personen använder förslaget, och då är den personens egen. Publicering och avpublicering via hjälpassistenten väntar tills personen godkänner dem i chatten. Båda loggas i granskningsloggen som personens egna ändringar.
 
-**Gör:** flytta era egna regler från guidens prompt till hjälpassistentens riktlinjer. Kontrollera sedan reglaget och standardmodellen under **Admin > Hjälpassistent**.
+Hjälpassistenten kräver behörigheten **Hjälpassistent** i personens roll. Uppgraderingen ger den bara till den fördefinierade rollen Owner. Utan behörigheten visas inte hjälpassistenten, och personen redigerar assistenten som förut. Flödesassistenten följer inte behörigheten.
+
+**Gör:** flytta era egna regler från guidens prompt till hjälpassistentens riktlinjer. Kontrollera sedan reglaget och standardmodellen under **Admin > Hjälpassistent**. Ge behörigheten **Hjälpassistent** till de roller som ska ha hjälpassistenten.
 
 ## Detaljer: API-kontrakt [#details-api-contract]
 

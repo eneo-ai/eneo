@@ -52,15 +52,24 @@ from tests.integration.helper_chats.conftest import Setup, loopback_ctx, open_ch
 
 
 async def _member_headers(
-    db_container, tenant_id: UUID, space_id: str, role: SpaceRoleValue
+    db_container,
+    tenant_id: UUID,
+    space_id: str,
+    role: SpaceRoleValue,
+    *,
+    helper_chat: bool = True,
 ) -> dict[str, str]:
-    """Another person of the tenant, in the space with ``role``."""
+    """Another person of the tenant, in the space with ``role``, whose own
+    role gives the helper chat unless ``helper_chat`` is false."""
+    permissions = [Permission.ASSISTANTS]
+    if helper_chat:
+        permissions.append(Permission.HELPER_CHAT)
     async with db_container() as container:
         suffix = uuid4().hex[:8]
         created = await container.role_repo().create_role(
             RoleCreate(
                 name=f"helper-chat-member-{suffix}",
-                permissions=[Permission.ASSISTANTS],
+                permissions=permissions,
                 tenant_id=tenant_id,
             )
         )
@@ -548,6 +557,26 @@ async def test_a_person_who_may_not_edit_gets_the_answer_a_missing_assistant_get
             .where(HelperChats.target_id == UUID(setup.assistant_id))
         )
     assert chats == 0
+
+
+async def test_a_person_whose_role_lacks_the_helper_chat_gets_none(
+    client, setup: Setup, db_container, admin_user
+):
+    # May edit the assistant, but their role does not give the helper chat.
+    colleague = await _member_headers(
+        db_container,
+        admin_user.tenant_id,
+        setup.space_id,
+        SpaceRoleValue.ADMIN,
+        helper_chat=False,
+    )
+
+    available = await client.get(setup.url + "availability", headers=colleague)
+    refused = await client.post(setup.url, headers=colleague)
+
+    assert available.json() == {"available": False, "reason": "no_permission"}
+    assert refused.status_code == 403, refused.text
+    assert refused.json()["code"] == "helper_chat_no_permission"
 
 
 async def test_a_chats_own_assistant_gets_no_chat_and_another_person_no_hint_of_it(
