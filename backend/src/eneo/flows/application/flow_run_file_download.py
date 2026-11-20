@@ -1,7 +1,7 @@
 """The required record of a download link minted for a file of a Flow run.
 
-Every link to a run's file, whether a caller asks for it or a delivery sends
-it, gets one ``FILE_SIGNED_URL_MINTED`` row with ``required=True``. The caller
+Every link to a run's file that a caller asks for gets one
+``FILE_SIGNED_URL_MINTED`` row with ``required=True``. The caller
 has already checked the file: that the run is visible to it and that the file
 belongs to the run, is in its tenant and still has content. The row is written
 in the caller's transaction, and the caller builds the link with
@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.flows.runtime.flow_run_actor import FlowRunActor
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -31,28 +30,14 @@ async def log_run_file_download_minted(
     audit_service: AuditService,
     file_repo: FileRepository,
     file: FileMetadata,
-    actor: UserInDB | FlowRunActor,
+    actor: UserInDB,
     description: str,
     extra: Mapping[str, object],
 ) -> None:
-    """Write the required row; a failure propagates so no link is built.
-
-    ``actor`` is the requesting user for an API call, or the run's own actor
-    for a delivery made without a request."""
+    """Write the required row for the requesting user; a failure propagates
+    so no link is built."""
     (file_info,) = await file_repo.get_infos_by_ids([file.id])
     row_extra: dict[str, object] = {**extra, "size_bytes": file_info.size}
-    if isinstance(actor, FlowRunActor):
-        await audit_service.log(
-            tenant_id=actor.tenant_id,
-            **actor.audit_actor_fields(),
-            action=ActionType.FILE_SIGNED_URL_MINTED,
-            entity_type=EntityType.FILE,
-            entity_id=file.id,
-            description=description,
-            metadata=actor.audit_metadata(target=file, extra=row_extra),
-            required=True,
-        )
-        return
     await audit_service.log(
         tenant_id=actor.tenant_id,
         user=actor,
