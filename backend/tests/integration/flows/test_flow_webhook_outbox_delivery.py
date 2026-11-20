@@ -102,8 +102,9 @@ def _build_flow(
         "text",
         None,
     ),
+    later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
 ) -> Flow:
-    webhook_step_order = 2 if include_prior_step else 1
+    webhook_step_order = (2 if include_prior_step else 1) + len(later_prior_steps)
     steps = (
         [
             FlowStep(
@@ -127,6 +128,29 @@ def _build_flow(
         ]
         if include_prior_step
         else []
+    )
+    # Further steps before the webhook step, each reading the step before it.
+    first_later = len(steps) + 1
+    steps.extend(
+        FlowStep(
+            id=None,
+            flow_id=uuid4(),
+            tenant_id=tenant_id,
+            assistant_id=assistant_id,
+            step_order=first_later + offset,
+            user_description=f"Step {first_later + offset}",
+            input_source="previous_step",
+            input_type="text",
+            input_contract=None,
+            output_mode=mode,
+            output_type=output_type,
+            output_contract=None,
+            input_bindings=None,
+            output_config=config,
+            output_classification_override=None,
+            input_config=None,
+        )
+        for offset, (mode, output_type, config) in enumerate(later_prior_steps)
     )
     steps.append(
         FlowStep(
@@ -200,6 +224,7 @@ async def _create_queued_webhook_run(
         "text",
         None,
     ),
+    later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
 ):
     """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
@@ -221,6 +246,7 @@ async def _create_queued_webhook_run(
             output_config=output_config,
             include_prior_step=include_prior_step,
             prior_step_output=prior_step_output,
+            later_prior_steps=later_prior_steps,
         ),
         tenant_id=admin_user.tenant_id,
     )

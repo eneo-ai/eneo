@@ -15,7 +15,7 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
-from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_models import FileContentVariant
 from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
@@ -25,7 +25,7 @@ from eneo.flows.application.flow_webhook_delivery_policy import (
     sanitize_webhook_delivery_error,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus, FlowStepResult
-from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
@@ -52,6 +52,7 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRow,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.output_modes import OUTSIDE_INPUT_SOURCES
 from eneo.flows.published_definition import (
     PublishedDefinitionChecksumMismatchError,
     parse_verified_published_definition,
@@ -75,6 +76,7 @@ from eneo.flows.runtime.run_result_body import (
     run_result_body,
     run_result_file_ids,
 )
+from eneo.flows.runtime.step_input_resolution import resolve_input_source_text
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.json_types import JsonValue
 from eneo.main.exceptions import (
@@ -82,6 +84,8 @@ from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
 )
+from eneo.object_content.content import ContentReadGrant
+from eneo.object_content.content_service import ObjectContentService
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
@@ -190,10 +194,10 @@ class FlowRunWebhookDeliveryService:
         tenant_repo: TenantRepository,
         http_runtime: FlowHttpRuntimeHelper,
         file_repo: FileRepository,
-        file_content_loader: Callable[[], FileContentLoader],
+        object_content: Callable[[], ObjectContentService],
     ) -> None:
         self.file_repo = file_repo
-        self.file_content_loader = file_content_loader
+        self.object_content = object_content
         self.webhook_delivery_repo = webhook_delivery_repo
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
@@ -570,7 +574,13 @@ class FlowRunWebhookDeliveryService:
             audit_actor=audit_actor,
             run_result_body=run_result_body(
                 run=run,
-                text=_run_result_text(step_order=step.step_order, results=results),
+                text=_run_result_text(
+                    step=step,
+                    run=run,
+                    step_result=step_result,
+                    results=results,
+                    state=state,
+                ),
                 deliverables=deliverables,
                 contents=await self._read_file_contents(
                     file_ids, tenant_id=row.tenant_id
@@ -582,20 +592,38 @@ class FlowRunWebhookDeliveryService:
     async def _read_file_contents(
         self, file_ids: list[UUID], *, tenant_id: UUID
     ) -> dict[UUID, bytes]:
-        """Each file's stored bytes; a file that cannot be read is left out,
-        which refuses the body."""
-        contents: dict[UUID, bytes] = {}
+        """Each file's own bytes: an upload's original or a generated
+        document's artifact. A file that cannot be read is left out, which
+        refuses the body."""
+        if not file_ids:
+            return {}
+        references = await self.file_repo.get_content_references(file_ids)
+        grants: dict[UUID, ContentReadGrant] = {}
         for file_id in file_ids:
             try:
-                metadata = await self.file_repo.get_by_id(
-                    file_id=file_id, tenant_id=tenant_id
-                )
+                await self.file_repo.get_by_id(file_id=file_id, tenant_id=tenant_id)
             except NotFoundException:
                 continue
-            loaded = (await self.file_content_loader().load([metadata]))[metadata.id]
-            if loaded.blob is not None:
-                contents[file_id] = loaded.blob
-        return contents
+            own = {
+                reference.variant: reference
+                for reference in references
+                if reference.file_id == file_id and reference.ordinal == 0
+            }
+            reference = own.get(FileContentVariant.ORIGINAL) or own.get(
+                FileContentVariant.GENERATED_ARTIFACT
+            )
+            if reference is not None:
+                grants[file_id] = ContentReadGrant(
+                    content_id=reference.content_id,
+                    tenant_id=tenant_id,
+                    access_class=reference.access_class,
+                )
+        payloads = await self.object_content().read_content_bytes(list(grants.values()))
+        return {
+            file_id: payloads[grant.content_id]
+            for file_id, grant in grants.items()
+            if grant.content_id in payloads
+        }
 
     async def _audit_run_result_send(
         self, *, row: FlowRunWebhookDeliveryRow, payload: WebhookDeliveryPayload
@@ -880,25 +908,36 @@ class FlowRunWebhookDeliveryService:
         )
 
 
-def _run_result_text(*, step_order: int, results: list[FlowStepResult]) -> str:
-    """The run's text result: the saved text of the step before the sending
-    step, the one it reads by default. A document step before it saves the
-    text it rendered, so documents in between keep that text. The sending
-    step's own model answer is not the result. No step before it: empty."""
-    previous = next(
-        (item for item in results if item.step_order == step_order - 1), None
-    )
-    if previous is None:
-        return ""
+def _run_result_text(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    step_result: FlowStepResult,
+    results: list[FlowStepResult],
+    state: RunExecutionState,
+) -> str:
+    """The run's text result: the text the sending step reads from its input
+    source (by default the step before it), resolved as the step resolved it.
+    The sending step's own model answer is not the result. Text from outside
+    the run was fetched once, so it is read from the step's stored input."""
+    if step.input_source in OUTSIDE_INPUT_SOURCES:
+        stored = (step_result.input_payload_json or {}).get("source_text")
+        if not isinstance(stored, str) or (
+            (step_result.input_payload_json or {}).get("source_text_truncated")
+        ):
+            raise ValueError("Run result delivery found no whole source text.")
+        return stored
     try:
-        text = interpret_step_text(previous.output_payload_json or {})
-    except StepOutputMetadataError as exc:
-        raise ValueError(
-            "Run result delivery found malformed text metadata on the step before it."
-        ) from exc
-    if isinstance(text, FileBackedStepText):
-        raise ValueError(
-            "Run result delivery requires the whole text of the step before it, "
-            "but that text is stored in a generated output file."
+        return resolve_input_source_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            run=run,
+            step_order=step.step_order,
+            prior_results=results,
+            state=state,
+            logger=None,
         )
-    return text.text
+    except (BadRequestException, TypedIOValidationException) as exc:
+        raise ValueError(
+            "Run result delivery could not read the text its step reads."
+        ) from exc

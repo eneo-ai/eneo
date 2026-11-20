@@ -77,7 +77,7 @@ def _service(
         tenant_repo=AsyncMock(),
         http_runtime=AsyncMock(),
         file_repo=AsyncMock(),
-        file_content_loader=AsyncMock(),
+        object_content=AsyncMock(),
     )
     return service, flow_run_repo, terminalizer.terminalize_run
 

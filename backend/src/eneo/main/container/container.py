@@ -1299,7 +1299,7 @@ class Container(containers.DeclarativeContainer):
         http_runtime=flow_http_runtime,
         file_repo=file_repo,
         # Built only when a run result has files to read.
-        file_content_loader=file_content_loader.provider,
+        object_content=object_content_service.provider,
     )
     browser_session_service = providers.Factory(
         BrowserSessionService,

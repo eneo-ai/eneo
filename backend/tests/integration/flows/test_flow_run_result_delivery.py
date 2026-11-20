@@ -237,8 +237,10 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
         "run_id": str(run.id),
         "run_created_at": finished.created_at.isoformat(),
         "run_completed_at": finished.finished_at.isoformat(),
-        # The only step has no step before it to read text from.
-        "text": "",
+        # The only step reads the run's form, so that is its text.
+        "text": json.dumps(
+            {"case_id": "case-123", "question": "What happened?"}, ensure_ascii=False
+        ),
         "deliverables": [],
     }
 
@@ -376,11 +378,15 @@ async def test_a_template_delivery_for_a_completed_run_is_refused_as_before(
     send_http_request.assert_not_awaited()
 
 
+MARKDOWN = "# Möte\n\n- Beslut: klart"
+
+
 @pytest.fixture
-def queued_markdown_then_post_run(
+def queued_markdown_documents_then_post_run(
     admin_user, completion_model_factory, space_factory, assistant_factory
 ):
-    """A step that writes markdown, then the run result POST step reading it."""
+    """Markdown composed from the form, two document deliverables rendered
+    from it, then the run result POST step."""
 
     async def create():
         async with sessionmanager.session() as session:
@@ -393,6 +399,20 @@ def queued_markdown_then_post_run(
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
                 include_prior_step=True,
+                prior_step_output=("compose_text", "text", None),
+                later_prior_steps=(
+                    (
+                        "render_verbatim",
+                        "docx",
+                        {"deliverable": {"label": "Protokoll"}},
+                    ),
+                    ("render_verbatim", "docx", {"deliverable": {"label": "Kopia"}}),
+                ),
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == run.id)
+                .values(input_payload_json={"question": MARKDOWN, "case_id": "c-1"})
             )
             await session.commit()
         return run
@@ -402,19 +422,20 @@ def queued_markdown_then_post_run(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_the_result_text_is_the_markdown_the_post_step_reads(
+async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     setup_database,
     object_content_runtime_ready,
-    queued_markdown_then_post_run,
+    queued_markdown_documents_then_post_run,
     monkeypatch,
 ):
-    """The body's text is the run's text result: what the POST step reads,
-    not an answer of its own."""
-    run = await queued_markdown_then_post_run()
-    answers = iter(["# Möte\n\n- Beslut: klart", "The POST step's own answer"])
+    """The body's text is the run's text result: the markdown the POST step
+    reads, not empty and not the POST step's own answer."""
+    run = await queued_markdown_documents_then_post_run()
 
     async def _answer(_self, **_kwargs):
-        return SimpleNamespace(completion=next(answers), total_token_count=1)
+        return SimpleNamespace(
+            completion="The POST step's own answer", total_token_count=1
+        )
 
     sent: list[bytes] = []
 
@@ -428,5 +449,16 @@ async def test_the_result_text_is_the_markdown_the_post_step_reads(
     assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
     await _run_outbox()
 
-    [body] = sent
-    assert json.loads(body)["text"] == "# Möte\n\n- Beslut: klart"
+    delivery = await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.flow_run_id == run.id)
+    )
+    assert delivery.delivery_status == "delivered", delivery.delivery_last_error
+    [body] = [json.loads(item) for item in sent]
+    assert body["text"] == MARKDOWN
+    assert [item["label"] for item in body["deliverables"]] == ["Protokoll", "Kopia"]
+    for deliverable in body["deliverables"]:
+        [file] = deliverable["files"]
+        assert file["content_base64"]
