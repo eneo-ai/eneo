@@ -60,7 +60,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "published_flow_version": 3,
     "final_output": {
         "step_id": "00000000-0000-0000-0000-000000000104",
-        "step_order": 3,
+        "step_order": 4,
         "label": "Create Word report",
         "output_type": "docx",
         "output_mode": "pass_through",
@@ -78,7 +78,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
         },
         {
             "step_id": "00000000-0000-0000-0000-000000000104",
-            "step_order": 3,
+            "step_order": 4,
             "label": "Report",
             "output_type": "docx",
             "output_mode": "pass_through",
@@ -117,7 +117,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "steps_requiring_review": [
         {
             "step_id": "00000000-0000-0000-0000-000000000103",
-            "step_order": 2,
+            "step_order": 3,
             "label": "Review transcription",
             "review_mode": "edit",
             "output_type": "json",

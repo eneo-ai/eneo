@@ -273,6 +273,50 @@ def test_flow_run_public_examples_exactly_match_their_typed_contracts() -> None:
     assert summary.id == detail.id
 
 
+def test_the_contract_and_run_detail_examples_describe_one_flow() -> None:
+    # A client joins a run's deliverables to the contract by step_id.
+    from eneo.flows.api.flow_models import (
+        FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
+        FLOW_RUN_DETAIL_PUBLIC_EXAMPLE,
+        FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+    )
+
+    contract = FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE
+    detail = FLOW_RUN_DETAIL_PUBLIC_EXAMPLE
+    steps = [
+        contract["final_output"],
+        *contract["deliverables"],
+        *contract["steps_requiring_input"],
+        *contract["steps_requiring_review"],
+        FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+    ]
+    order_by_step: dict[str, set[int]] = {}
+    for step in steps:
+        order_by_step.setdefault(step["step_id"], set()).add(step["step_order"])
+    step_by_order: dict[int, set[str]] = {}
+    for step_id, orders in order_by_step.items():
+        for order in orders:
+            step_by_order.setdefault(order, set()).add(step_id)
+
+    assert all(len(orders) == 1 for orders in order_by_step.values())
+    assert all(len(step_ids) == 1 for step_ids in step_by_order.values())
+    assert [
+        (item["step_id"], item["step_order"], item["label"], item["output_type"])
+        for item in detail["deliverables"]
+    ] == [
+        (item["step_id"], item["step_order"], item["label"], item["output_type"])
+        for item in contract["deliverables"]
+    ]
+    for item in detail["deliverables"]:
+        assert {(file["step_id"], file["step_order"]) for file in item["files"]} == {
+            (item["step_id"], item["step_order"])
+        }
+    assert {file["step_id"] for file in detail["result"]["files"]} == {
+        contract["final_output"]["step_id"]
+    }
+    assert detail["webhook_deliveries"]
+
+
 def test_flow_run_status_snapshot_rejects_content_fields() -> None:
     with pytest.raises(ValidationError) as exc_info:
         FlowRunStatusSnapshot.model_validate(

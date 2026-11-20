@@ -565,7 +565,7 @@ FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE: dict[str, Any] = {
     "flow_id": "00000000-0000-0000-0000-000000000001",
     "flow_run_id": "00000000-0000-0000-0000-000000000301",
     "step_id": "00000000-0000-0000-0000-000000000103",
-    "step_order": 2,
+    "step_order": 3,
     "attempt_no": 1,
     "state": "awaiting_review",
     "revision": 1,
@@ -2079,7 +2079,7 @@ _SUMMARY_DOCUMENT_EXAMPLE = _completed_run_document_example(
     step=2, file=2, name="Summary Alex Example 2026-03-17.pdf"
 )
 _REPORT_DOCUMENT_EXAMPLE = _completed_run_document_example(
-    step=3, file=3, name="Report Alex Example 2026-03-17.docx"
+    step=4, file=3, name="Report Alex Example 2026-03-17.docx"
 )
 
 FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
@@ -2107,13 +2107,13 @@ FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
         {
             "kind": "artifact",
             "step_id": _REPORT_DOCUMENT_EXAMPLE["step_id"],
-            "step_order": 3,
+            "step_order": 4,
             "label": "Report",
             "output_type": "docx",
             "files": [_REPORT_DOCUMENT_EXAMPLE],
         },
     ],
-    "webhook_deliveries": [],
+    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
     "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
 }
 
