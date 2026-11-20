@@ -57,6 +57,12 @@ class Transcription(UploadTask):
     pass
 
 
+class AppDispatchEnvelope(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    version: Literal[1]
+    file_ids: list[UUID]
+
+
 class UploadInfoBlobDispatchEnvelope(BaseModel):
     version: Literal[2] = 2
     task: Literal[Task.UPLOAD_FILE] = Task.UPLOAD_FILE

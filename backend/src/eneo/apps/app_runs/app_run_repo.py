@@ -1,19 +1,25 @@
+from collections.abc import Sequence
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import TypeAdapter
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.sql import Executable
 from sqlalchemy.sql.base import ExecutableOption
 
 from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.app_runs.app_run_factory import AppRunFactory
 from eneo.database.database import AsyncSession
-from eneo.database.tables.app_table import AppRuns, AppRunsFiles
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
+from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileInfo
 from eneo.files.file_repo import FileRepository
 from eneo.files.unused_file_cleanup import delete_unused_root_files
+from eneo.jobs.job_models import JobFailureCode, JobUpdate
+from eneo.jobs.job_repo import JobRepository
+from eneo.main.models import Status
 from eneo.skills.domain.skill import SkillExecutionReference
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
@@ -42,11 +48,18 @@ class AppRunRepository:
         self.factory = factory
         self.file_repo = file_repo
 
-    def _options(self) -> list[ExecutableOption]:
+    def _options(self, stmt: Executable) -> list[ExecutableOption]:
+        # Read the status and output in the same PostgreSQL snapshot. DML RETURNING
+        # cannot join the job, so write paths load it separately in their transaction.
+        job = (
+            joinedload(AppRuns.job)
+            if isinstance(stmt, sa.Select)
+            else selectinload(AppRuns.job)
+        )
         return [
             selectinload(AppRuns.user),
             selectinload(AppRuns.input_files),
-            selectinload(AppRuns.job),
+            job,
         ]
 
     async def _to_domain(self, app_run: AppRuns) -> AppRun:
@@ -83,7 +96,7 @@ class AppRunRepository:
     async def _get_with_options(
         self, stmt: Executable, multiple: bool = False
     ) -> AppRuns | list[AppRuns] | None:
-        for option in self._options():
+        for option in self._options(stmt):
             stmt = stmt.options(option)  # type: ignore[union-attr]  # ORM options on DML stmts
 
         if multiple:
@@ -125,6 +138,23 @@ class AppRunRepository:
         )
 
         return await self._to_domain_many(app_runs_in_db)
+
+    async def get_update_targets_for_jobs(
+        self, job_ids: list[UUID]
+    ) -> Sequence[tuple[UUID, UUID, UUID, UUID, bool]]:
+        stmt = (
+            sa.select(
+                AppRuns.id,
+                AppRuns.user_id,
+                AppRuns.app_id,
+                Spaces.id,
+                Spaces.user_id.is_not(None),
+            )
+            .join(Apps, Apps.id == AppRuns.app_id)
+            .join(Spaces, Spaces.id == Apps.space_id)
+            .where(AppRuns.job_id.in_(job_ids))
+        )
+        return (await self.session.execute(stmt)).tuples().all()
 
     async def add(self, app_run: AppRun) -> AppRun:
         stmt = (
@@ -181,5 +211,15 @@ class AppRunRepository:
             )
         )
         stmt = sa.delete(AppRuns).where(AppRuns.id == id)
-        await self.session.execute(stmt)
+        job_id = await self.session.scalar(stmt.returning(AppRuns.job_id))
+        if job_id is not None:
+            await JobRepository(self.session).update_job(
+                job_id,
+                JobUpdate(
+                    status=Status.FAILED,
+                    failure_code=JobFailureCode.CANCELLED,
+                    finished_at=datetime.now(timezone.utc),
+                ),
+                from_statuses=(Status.QUEUED,),
+            )
         await delete_unused_root_files(self.session, file_ids)

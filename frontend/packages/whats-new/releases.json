@@ -2,6 +2,37 @@
   "$schema": "./releases.schema.json",
   "releases": [
     {
+      "version": "2.3.3",
+      "entries": [
+        {
+          "id": "app-run-transcript-download",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "Download the transcript from an app result",
+            "sv": "Ladda ner transkriptet från en appkörning"
+          },
+          "body": {
+            "en": "You can download the recording while the app runs. Eneo saves the transcript before starting the summary. If the summary is interrupted, you can download the transcript or use the same recording in a new run.",
+            "sv": "Du kan ladda ner inspelningen medan appen körs. Eneo sparar transkriptet innan sammanfattningen börjar. Om sammanfattningen avbryts kan du ladda ner texten eller använda samma inspelning i en ny körning."
+          }
+        },
+        {
+          "id": "app-run-progress-after-interruption",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "App runs show when processing starts",
+            "sv": "Appkörningar visar när bearbetningen börjar"
+          },
+          "body": {
+            "en": "When you reopen an app result, you can see whether processing has started. If a new run loses its place in the queue, Eneo queues it again automatically. If processing is interrupted after it starts, the result shows the failure and you can start a new run.",
+            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om en ny körning försvinner ur kön lägger Eneo tillbaka den automatiskt. Om bearbetningen avbryts efter start syns felet i resultatet och du kan starta en ny körning."
+          }
+        }
+      ]
+    },
+    {
       "version": "2.3.0",
       "date": "2026-11-02",
       "entries": [

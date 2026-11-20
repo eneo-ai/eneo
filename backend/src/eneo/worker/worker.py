@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
+from collections.abc import Awaitable
+from contextlib import AsyncExitStack
 from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
@@ -14,16 +17,23 @@ from dependency_injector import providers
 from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
+from eneo.jobs.job_models import failure_code_for_exception
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType
+from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig
+from eneo.worker.task_manager import (
+    JobCheckpointError,
+    TaskManager,
+    WorkerConfig,
+    publish_task_status,
+)
 
 logger = get_logger(__name__)
 
@@ -231,7 +241,10 @@ class Worker:
         override_user(container=container, user=user)
 
     def _get_kwargs(
-        self, func: Callable[..., Any], task_manager: TaskManager
+        self,
+        func: Callable[..., Any],
+        task_manager: TaskManager,
+        checkpoint: Callable[[], Awaitable[None]],
     ) -> dict[str, Any]:
         sig = inspect.signature(func)
         parameters = {k for k in sig.parameters if k not in {"params", "container"}}
@@ -239,6 +252,8 @@ class Worker:
 
         if "worker_config" in parameters:
             kwargs["worker_config"] = WorkerConfig(task_manager=task_manager)
+        if "checkpoint" in parameters:
+            kwargs["checkpoint"] = checkpoint
 
         return kwargs
 
@@ -398,38 +413,162 @@ class Worker:
         self,
         with_user: bool = True,
         channel_type: ChannelType | None = None,
+        *,
+        keep_result: int | None = None,
+        max_tries: int | None = None,
+        claim_before_run: Callable[[JobRepository, UUID], Awaitable[bool]]
+        | None = None,
+        function_alias: str | None = None,
     ):
+        """Persist the start before execution for jobs dispatched after commit."""
+
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            if (
+                "checkpoint" in inspect.signature(func).parameters
+                and claim_before_run is None
+            ):
+                raise ValueError("Job checkpoints require a committed start")
+
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
-                async with sessionmanager.session() as session, session.begin():
-                    user_id = params.user_id if with_user else None
-                    container = await self._create_container(session, user_id=user_id)
+                job_id = _job_id_from_ctx(ctx)
+                assert job_id is not None
+                user_id = params.user_id if with_user else None
 
-                    job_id = _job_id_from_ctx(ctx)
-                    assert job_id is not None
-                    task_manager = container.task_manager(
-                        job_id=job_id,
-                        resource_id=params.id,
-                        channel_type=channel_type,
-                    )
-                    optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
+                task_manager: TaskManager | None = None
+                after_commit = claim_before_run is not None
+                claim_pending = after_commit
+                try:
+                    if claim_before_run is not None:
+                        async with sessionmanager.session() as start, start.begin():
+                            if not await claim_before_run(JobRepository(start), job_id):
+                                return False
+                        # Only a confirmed commit lets this delivery fail a running job.
+                        claim_pending = False
 
-                    async with task_manager.set_status_on_exception():
-                        task_manager.result_location = await func(
-                            params, container=container, **optional_kwargs
+                    async with (
+                        sessionmanager.session() as session,
+                        AsyncExitStack() as transactions,
+                    ):
+                        await transactions.enter_async_context(session.begin())
+                        container = await self._create_container(
+                            session, user_id=user_id
+                        )
+                        # Hold the row through completion so recovery skips live work.
+                        repo = container.job_repo()
+                        if claim_before_run is not None and not await repo.touch_job(
+                            job_id
+                        ):
+                            return False
+                        task_manager = container.task_manager(
+                            job_id=job_id,
+                            resource_id=params.id,
+                            channel_type=channel_type,
                         )
 
-                    return task_manager.successful()
+                        async def checkpoint() -> None:
+                            # Commit the finished file before another provider call. Reacquire
+                            # the job on the same session so even a one-slot pool can progress.
+                            try:
+                                # A long provider call can outlive the grace period.
+                                # Refresh with wall-clock time before releasing the lock.
+                                await repo.touch_job(job_id)
+                                await transactions.aclose()
+                                await transactions.enter_async_context(session.begin())
+                                if await repo.touch_job(job_id):
+                                    return
+                            except Exception as exc:
+                                raise JobCheckpointError(
+                                    "Could not save app progress"
+                                ) from exc
+                            raise JobCheckpointError("App job is no longer running")
 
-            self.functions.append(_traced_job("job", wrapper))
+                        optional_kwargs = self._get_kwargs(
+                            func, task_manager, checkpoint
+                        )
+
+                        async with task_manager.set_status_on_exception(
+                            status_already_set=after_commit, transactional=after_commit
+                        ):
+                            if after_commit:
+                                await task_manager.publish_status(Status.IN_PROGRESS)
+                            task_manager.result_location = await func(
+                                params, container=container, **optional_kwargs
+                            )
+
+                        success = task_manager.successful()
+                except (Exception, asyncio.CancelledError) as exc:
+                    if after_commit and await self._record_job_failure(
+                        job_id, user_id, exc, only_if_queued=claim_pending
+                    ):
+                        if task_manager is not None:
+                            await task_manager.publish_status(Status.FAILED)
+                        elif channel_type is not None and user_id is not None:
+                            await publish_task_status(
+                                Channel(type=channel_type, user_id=user_id),
+                                RedisMessage(id=params.id, status=Status.FAILED),
+                            )
+                    raise
+
+                assert success is not None
+                if after_commit:
+                    await task_manager.publish_status(
+                        Status.COMPLETE if success else Status.FAILED
+                    )
+                return success
+
+            traced = _traced_job("job", wrapper)
+            self.functions.append(
+                arq_func(traced, keep_result=keep_result, max_tries=max_tries)
+                if keep_result is not None or max_tries is not None
+                else traced
+            )
+            if function_alias is not None:
+                self.functions.append(
+                    arq_func(
+                        traced,
+                        name=function_alias,
+                        keep_result=keep_result,
+                        max_tries=max_tries,
+                    )
+                )
             return wrapper
 
         return decorator
+
+    async def _record_job_failure(
+        self,
+        job_id: UUID,
+        user_id: UUID | None,
+        exc: BaseException,
+        *,
+        only_if_queued: bool,
+    ) -> bool:
+        """Record the failure in a fresh session so the job is not left pending
+        until the reaper finds it.
+
+        Like a task's own failure it is stored as its code: a commit error
+        carries SQL with bound values.
+        """
+        code = failure_code_for_exception(exc)
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                container = await self._create_container(session, user_id=user_id)
+                failed = await container.job_service().fail_job(
+                    job_id, failure_code=code, only_if_queued=only_if_queued
+                )
+            return failed is not None
+        except Exception:
+            logger.error(
+                "Could not record job failure after task rollback",
+                extra={"job_id": str(job_id), "failure_code": code.value},
+            )
+            return False
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
         """Register a cron job.
