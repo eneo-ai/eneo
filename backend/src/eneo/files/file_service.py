@@ -598,6 +598,15 @@ class FileService:
         )
         return await self._project_public_files(metadata)
 
+    async def get_public_files_by_ids(self, file_ids: list[UUID]) -> list[FilePublic]:
+        metadata = await self.repo.get_list_by_id_and_user(
+            ids=file_ids, user_id=self._authenticated_user().id
+        )
+        by_id = {file.id: file for file in metadata}
+        return await self._project_public_files(
+            [by_id[file_id] for file_id in file_ids if file_id in by_id]
+        )
+
     async def get_derived_images(self, parent_ids: list[UUID]) -> list[File]:
         metadata = await self.repo.get_by_parent_ids(
             parent_ids=parent_ids,

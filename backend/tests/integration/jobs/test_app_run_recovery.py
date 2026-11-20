@@ -30,7 +30,9 @@ from eneo.worker import task_manager
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+@pytest.mark.parametrize("terminal", [Status.COMPLETE, Status.FAILED])
 async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
+    terminal,
     client,
     admin_user_api_key,
     db_container,
@@ -72,6 +74,8 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
 
     async def complete(self, *, model, transcription_inputs, **kwargs):
         assert transcription_inputs == ["meeting transcript"]
+        if terminal == Status.FAILED:
+            raise RuntimeError("Summary provider unavailable")
         return CompletionModelResponse(
             completion=Completion(text="meeting summary"),
             model=model,
@@ -115,6 +119,10 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         release.set()
         response = await asyncio.wait_for(request, timeout=5)
     assert response.status_code == 203, response.text
+    pending = await client.get(f"/api/v1/app-runs/{run.id}/", headers=headers)
+    assert pending.status_code == 200, pending.text
+    assert pending.json()["status"] == Status.QUEUED
+    assert pending.json()["input"]["files"][0]["transcription"] is None
 
     assert job_manager._redis is not None
     delivery = ArqJob(str(run.job_id), redis=job_manager._redis)
@@ -131,7 +139,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
 
     async def publish_and_wait(channel, message):
         await publish(channel, message)
-        if message.status == Status.COMPLETE:
+        if message.status == terminal:
             await release_terminal_publish.wait()
 
     monkeypatch.setattr(task_manager, "publish_task_status", publish_and_wait)
@@ -147,20 +155,35 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
                     event = await subscription.get_message(timeout=1)
                     if event is not None:
                         update = RedisMessage.model_validate_json(event["data"])
-                        if update.id == run.id and update.status == Status.COMPLETE:
+                        if update.id == run.id and update.status == terminal:
                             break
             result = await client.get(f"/api/v1/app-runs/{run.id}/", headers=headers)
             assert result.status_code == 200, result.text
-            assert result.json()["status"] == "complete"
-            assert result.json()["output"] == "meeting summary"
+            assert result.json()["status"] == terminal
+            expected_output = "meeting summary" if terminal == Status.COMPLETE else None
+            assert result.json()["output"] == expected_output
+            assert (
+                result.json()["input"]["files"][0]["transcription"]
+                == "meeting transcript"
+            )
             file_id = result.json()["input"]["files"][0]["id"]
             audio = await client.get(f"/api/v1/files/{file_id}/", headers=headers)
             assert audio.status_code == 200, audio.text
             assert audio.json()["transcription"] == "meeting transcript"
+            signed = await client.post(
+                f"/api/v1/files/{file_id}/signed-url/",
+                json={"content_disposition": "attachment"},
+                headers=headers,
+            )
+            assert signed.status_code == 200, signed.text
+            downloaded = await client.get(signed.json()["url"])
+            assert downloaded.status_code == 200, downloaded.text
+            assert downloaded.headers["content-disposition"].startswith("attachment")
+            assert downloaded.content == recording.getvalue()
         finally:
             release_terminal_publish.set()
             succeeded = await asyncio.wait_for(running, timeout=5)
-        assert succeeded is True
+        assert succeeded is (terminal == Status.COMPLETE)
 
 
 @pytest.fixture
