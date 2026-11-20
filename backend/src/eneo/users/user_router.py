@@ -1,5 +1,5 @@
 import traceback
-from typing import Annotated, Optional, Protocol, cast
+from typing import Annotated, Any, Optional, Protocol, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
@@ -766,14 +766,18 @@ async def update_user(
             status_code=status.HTTP_404_NOT_FOUND, detail="User not found"
         )
 
-    # Update user
-    updated_user = await user_service.update_user(
-        user_id=id,
-        user_update_public=UserUpdatePublic(
-            roles=[user_update.role] if user_update.role else None,
-            state=user_update.state if user_update.state else None,
-        ),
-    )
+    # Update user. Only the fields sent are written: an omitted one given as None
+    # would be written as null, and the state column does not take it.
+    fields: dict[str, Any] = {}
+    if user_update.role:
+        fields["roles"] = [user_update.role]
+    if user_update.state:
+        fields["state"] = user_update.state
+    updated_user = old_user
+    if fields:
+        updated_user = await user_service.update_user(
+            user_id=id, user_update_public=UserUpdatePublic(**fields)
+        )
 
     # Track comprehensive changes
     changes: dict[str, object] = {}
