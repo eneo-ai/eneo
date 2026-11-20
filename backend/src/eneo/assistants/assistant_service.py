@@ -3741,9 +3741,7 @@ class AssistantService:
             ]
 
         if self.user.active_widget is not None:
-            # Anonymous input reaches only the external tools an admin
-            # acknowledged for the widget (WidgetService), whatever the
-            # assistant has since been given.
+            # Use the assistant’s current tools within the organisation’s widget policy.
             mcp_servers_override = self.user.active_widget.reachable_servers(
                 mcp_servers_override
             )

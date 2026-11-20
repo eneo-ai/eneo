@@ -77,32 +77,9 @@ describe("WidgetOverviewList", () => {
   });
 
   test("names the MCP servers outside Eneo a widget reaches", async () => {
-    renderList([
-      item({ external_tools: ["Ärendesystemet", "Bokningen"], external_tools_acknowledged: true })
-    ]);
+    renderList([item({ external_tools: ["Ärendesystemet", "Bokningen"] })]);
     await expect
       .element(page.getByText("widget_admin_overview_external_tools(Ärendesystemet, Bokningen)"))
-      .toBeVisible();
-  });
-
-  test("a paused widget with unacknowledged servers is resumed from the widget page", async () => {
-    renderList([
-      item({
-        id: "w2",
-        name: "Bygglov",
-        status: "paused",
-        external_tools: ["Ärendesystemet"],
-        external_tools_acknowledged: false
-      })
-    ]);
-    const resume = page.getByRole("button", { name: "widget_admin_resume" });
-    await expect.element(resume).toBeDisabled();
-    await expect
-      .element(
-        page.getByText(
-          "widget_admin_overview_blocked(widget_admin_overview_acknowledge_on_widget_page)"
-        )
-      )
       .toBeVisible();
   });
 

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { apiErrorFromResponse } from "@/lib/api/errors";
 import {
-  currentExternalTools,
   isStaleEditorError,
   widgetErrorCode,
   widgetErrorMessage,
@@ -55,28 +54,10 @@ describe("widget admin errors", () => {
     );
   });
 
-  it("explains the refusals about tools outside Eneo and a paused preview", () => {
-    expect(widgetErrorMessage(apiError(400, "external_tools_unacknowledged"), t)).toBe(
-      "widget_admin_error_external_tools_unacknowledged"
-    );
-    expect(widgetErrorMessage(apiError(409, "external_tools_changed"), t)).toBe(
-      "widget_admin_external_tools_changed"
-    );
+  it("explains the refusal to preview a paused widget", () => {
     expect(widgetErrorMessage(apiError(400, "preview_unavailable_while_paused"), t)).toBe(
       "widget_admin_preview_paused"
     );
-  });
-
-  it("hands back the current external tools when the admin saw another list", () => {
-    const servers = [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }];
-    const withServers = (status: number, code: string) =>
-      refusal(status, { code, message: "raw", servers });
-    expect(currentExternalTools(withServers(409, "external_tools_changed"))).toEqual(servers);
-    expect(currentExternalTools(withServers(400, "external_tools_unacknowledged"))).toEqual(
-      servers
-    );
-    expect(currentExternalTools(withServers(400, "widget_serving_blocked"))).toBeNull();
-    expect(currentExternalTools(new Error("x"))).toBeNull();
   });
 
   it("treats a published lock like a revision conflict", () => {

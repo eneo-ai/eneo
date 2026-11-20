@@ -11,7 +11,7 @@ import { WidgetPreview } from "./widget-preview";
 
 const PREVIEW_TOKEN_PATH = "/api/v1/widgets/{id}/preview-token/";
 const WITHHELD =
-  "Precis som besökarnas turer når förhandsvisningen bara de verktyg på MCP-servrar utanför Eneo som en administratör har bekräftat och organisationen tillåter.";
+  "Organisationens widgetpolicy blockerar externa MCP-verktyg för besökare och i förhandsvisningen.";
 
 function widget(overrides: Partial<Widget> = {}): Widget {
   return {
@@ -24,7 +24,7 @@ function widget(overrides: Partial<Widget> = {}): Widget {
     theme: { primary_color: "#1F4E79", radius: 12, color_scheme: "auto" },
     activation_blockers: [],
     external_tools: [],
-    external_tools_acknowledged: true,
+
     updated_at: "2026-09-21T10:00:00Z",
     ...overrides
   } as unknown as Widget;
@@ -101,13 +101,12 @@ describe("WidgetPreview", () => {
   });
 
   it.each([
-    { case: "unacknowledged tools", overrides: { external_tools_acknowledged: false }, note: true },
     {
       case: "tools the policy forbids",
       overrides: { activation_blockers: ["external_tools_not_allowed"] },
       note: true
     },
-    { case: "acknowledged, allowed tools", overrides: {}, note: false }
+    { case: "allowed tools", overrides: {}, note: false }
   ])("says whether it runs without $case", ({ overrides, note }) => {
     mintOnRequest();
     renderInApp(

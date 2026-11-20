@@ -17,8 +17,6 @@ from eneo.roles.permissions import Permission
 from eneo.widgets.application.widget_service import WidgetService
 from eneo.widgets.domain.exceptions import (
     WidgetAdminRequiredError,
-    WidgetExternalToolsChangedError,
-    WidgetExternalToolsUnacknowledgedError,
     WidgetPolicyViolationError,
     WidgetPreviewUnavailableError,
     WidgetServingBlockedError,
@@ -1058,14 +1056,6 @@ def _external_server(
     )
 
 
-def _shown(*servers):
-    """What the admin's dialog sends back: each server with the tools shown."""
-    return {
-        server.id: [tool.id for tool in server.tools if tool.is_enabled]
-        for server in servers
-    }
-
-
 async def _activatable(service, space, assistant):
     view = await service.create_widget(
         space_id=space.id, target_id=assistant.id, name="w"
@@ -1078,7 +1068,7 @@ async def _activatable(service, space, assistant):
     )
 
 
-async def test_activation_needs_every_external_tool_acknowledged_first(assistant):
+async def test_activation_lists_the_enabled_external_tools(assistant):
     server = _external_server("Ärendesystemet", ["search_cases", "create_case"])
     server.tools[0].display_name = "Sök ärende"
     server.tools.append(_tool("delete_case", enabled=False))
@@ -1100,148 +1090,8 @@ async def test_activation_needs_every_external_tool_acknowledged_first(assistant
             {"id": str(search.id), "name": "Sök ärende"},
         ],
     }
-    assert view.external_tools_acknowledged is False
-    # On a draft the missing acknowledgement is not a blocker: activation asks.
-    assert view.activation_blockers == []
-
-    with pytest.raises(WidgetExternalToolsUnacknowledgedError) as exc:
-        await admin.activate_widget(widget_id)
-    assert exc.value.details() == {"servers": [view.external_tools[0].public()]}
-    assert repo.rows[widget_id].status == WidgetStatus.DRAFT
-
-    acknowledged = await admin.acknowledge_external_tools(widget_id, _shown(server))
-    ack = acknowledged.widget.external_tools_acknowledgement
-    assert ack is not None and ack.acknowledged_by_user_id == admin_user.id
-    assert acknowledged.widget.external_tool_grant() == {
-        server.id: frozenset({create.id, search.id})
-    }
-    assert acknowledged.previous is not None
-    assert acknowledged.previous.external_tools_acknowledgement is None
-    assert repo.locked_reads[-1] == widget_id
-    assert repo.last_update == {
-        "check_revision": False,
-        "only": {"external_tools_acknowledgement"},
-    }
-
     activated = await admin.activate_widget(widget_id)
     assert activated.widget.status == WidgetStatus.ACTIVE
-    assert activated.external_tools_acknowledged is True
-    assert activated.activation_blockers == []
-
-
-@pytest.mark.parametrize(
-    "shown",
-    [
-        pytest.param(lambda server, tool: {}, id="nothing"),
-        pytest.param(lambda server, tool: {server.id: []}, id="a tool left out"),
-        pytest.param(
-            lambda server, tool: {server.id: [tool.id, uuid4()]}, id="an unknown tool"
-        ),
-        pytest.param(
-            lambda server, tool: {server.id: [tool.id], uuid4(): []},
-            id="an unknown server",
-        ),
-    ],
-)
-async def test_an_acknowledgement_of_anything_but_the_current_tools_is_refused(
-    assistant, shown
-):
-    server = _external_server("Ärendesystemet", ["create_case"])
-    assistant.mcp_servers = [server]
-    space, _ = _space(uuid4(), assistant)
-    repo = _InMemoryRepo()
-    admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
-    view = await _activatable(admin, space, assistant)
-
-    with pytest.raises(WidgetExternalToolsChangedError) as exc:
-        await admin.acknowledge_external_tools(
-            view.widget.id, shown(server, server.tools[0])
-        )
-    assert exc.value.status_code == 409
-    assert exc.value.details() == {"servers": [view.external_tools[0].public()]}
-    assert repo.rows[view.widget.id].external_tools_acknowledgement is None
-
-
-async def test_new_tools_on_a_live_widget_wait_for_an_acknowledgement_in_place(
-    assistant,
-):
-    first = _external_server("Ärendesystemet", ["create_case"])
-    assistant.mcp_servers = [first]
-    space, _ = _space(uuid4(), assistant)
-    repo = _InMemoryRepo()
-    admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
-    view = await _activatable(admin, space, assistant)
-    widget_id = view.widget.id
-    await admin.acknowledge_external_tools(widget_id, _shown(first))
-    await admin.activate_widget(widget_id)
-
-    first.tools.append(_tool("close_case"))
-    second = _external_server("Bokningen", ["book_slot"])
-    assistant.mcp_servers = [first, second]
-    live = await admin.get_widget(widget_id)
-    assert live.external_tools_acknowledged is False
-    assert live.activation_blockers == ["external_tools_unacknowledged"]
-    assert [s.name for s in live.external_tools] == ["Bokningen", "Ärendesystemet"]
-    # Visitors keep what was acknowledged meanwhile.
-    assert live.widget.external_tool_grant() == {
-        first.id: frozenset({first.tools[0].id})
-    }
-
-    acknowledged = await admin.acknowledge_external_tools(
-        widget_id, _shown(first, second)
-    )
-    assert acknowledged.widget.status == WidgetStatus.ACTIVE
-    assert acknowledged.activation_blockers == []
-    assert set(acknowledged.widget.external_tool_grant()) == {first.id, second.id}
-
-
-async def test_fewer_external_tools_ask_for_nothing_new(assistant):
-    server = _external_server("Ärendesystemet", ["create_case", "search_cases"])
-    other = _external_server("Bokningen", ["book_slot"])
-    assistant.mcp_servers = [server, other]
-    space, _ = _space(uuid4(), assistant)
-    repo = _InMemoryRepo()
-    admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
-    view = await _activatable(admin, space, assistant)
-    await admin.acknowledge_external_tools(view.widget.id, _shown(server, other))
-    await admin.activate_widget(view.widget.id)
-    await admin.pause_widget(view.widget.id)
-
-    server.tools[1].is_enabled = False
-    assistant.mcp_servers = [server]
-    resumed = await admin.activate_widget(view.widget.id)
-    assert resumed.widget.status == WidgetStatus.ACTIVE
-    assert resumed.external_tools_acknowledged is True
-
-
-@pytest.mark.parametrize(
-    ("permissions", "status", "error"),
-    [
-        ((Permission.WIDGETS,), WidgetStatus.DRAFT, UnauthorizedException),
-        (
-            (Permission.WIDGETS, Permission.ADMIN),
-            WidgetStatus.ARCHIVED,
-            BadRequestException,
-        ),
-    ],
-    ids=["an editor", "an archived widget"],
-)
-async def test_external_tools_are_acknowledged_by_admins_on_live_or_coming_widgets(
-    assistant, permissions, status, error
-):
-    server = _external_server("Ärendesystemet", ["create_case"])
-    assistant.mcp_servers = [server]
-    space, _ = _space(uuid4(), assistant)
-    repo = _InMemoryRepo()
-    service = _service(_user(*permissions), space, repo=repo)
-    view = await _activatable(service, space, assistant)
-    repo.rows[view.widget.id] = repo.rows[view.widget.id].model_copy(
-        update={"status": status}
-    )
-
-    with pytest.raises(error):
-        await service.acknowledge_external_tools(view.widget.id, _shown(server))
-    assert repo.rows[view.widget.id].external_tools_acknowledgement is None
 
 
 async def test_the_policy_can_forbid_external_servers(assistant):
@@ -1261,8 +1111,6 @@ async def test_the_policy_can_forbid_external_servers(assistant):
     view = await _activatable(admin, space, assistant)
     assert view.activation_blockers == ["external_tools_not_allowed"]
 
-    # Not even an acknowledgement gets past the policy.
-    await admin.acknowledge_external_tools(view.widget.id, _shown(server))
     with pytest.raises(WidgetServingBlockedError) as exc:
         await admin.activate_widget(view.widget.id)
     assert exc.value.blockers == ["external_tools_not_allowed"]
@@ -1279,7 +1127,6 @@ async def test_a_live_widget_is_flagged_when_the_policy_turns_external_servers_o
     admin_user = _user(Permission.WIDGETS, Permission.ADMIN)
     admin = _service(admin_user, space, repo=repo)
     view = await _activatable(admin, space, assistant)
-    await admin.acknowledge_external_tools(view.widget.id, _shown(server))
     await admin.activate_widget(view.widget.id)
 
     await admin.update_policy({"allow_external_tools": False})
@@ -1310,10 +1157,8 @@ async def test_only_tools_switched_on_at_general_servers_outside_eneo_count(
     admin = _service(_user(Permission.WIDGETS, Permission.ADMIN), space, repo=repo)
     view = await _activatable(admin, space, assistant)
     assert view.external_tools == []
-    assert view.external_tools_acknowledged is True
     activated = await admin.activate_widget(view.widget.id)
     assert activated.widget.status == WidgetStatus.ACTIVE
-    assert activated.widget.external_tools_acknowledgement is None
 
 
 # --- governed settings on an active widget (L2, L3) --------------------------

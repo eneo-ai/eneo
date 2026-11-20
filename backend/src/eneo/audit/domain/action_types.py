@@ -207,9 +207,6 @@ class ActionType(str, Enum):
     WIDGET_POLICY_UPDATED = "widget_policy_updated"
     WIDGET_BUDGET_EXHAUSTED = "widget_budget_exhausted"
     WIDGET_PREVIEW_TOKEN_MINTED = "widget_preview_token_minted"
-    # A tenant admin let anonymous visitors make the assistant call these
-    # tools on servers outside Eneo.
-    WIDGET_EXTERNAL_TOOLS_ACKNOWLEDGED = "widget_external_tools_acknowledged"
     # A visitor turn was approved to attempt an external tool. The proxy
     # may refuse it locally. Recorded regardless of widget retention.
     WIDGET_EXTERNAL_TOOL_CALLED = "widget_external_tool_called"

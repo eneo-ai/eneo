@@ -84,16 +84,6 @@
 
   function blockedReason(item: WidgetOverviewItem): string {
     const reasons = (item.activation_blockers ?? []).map(blockerLabel);
-    // The acknowledgement of external MCP servers is given on the widget page,
-    // where the servers and their tools are listed; the overview's button
-    // cannot give it.
-    if (
-      item.status !== "active" &&
-      externalTools(item).length > 0 &&
-      !(item.external_tools_acknowledged ?? true)
-    ) {
-      reasons.push(m.widget_admin_overview_acknowledge_on_widget_page());
-    }
     return reasons.join(", ");
   }
 

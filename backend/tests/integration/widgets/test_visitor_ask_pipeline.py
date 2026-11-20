@@ -147,7 +147,7 @@ async def visitor_pipeline(
 ) -> dict[str, Any]:
     """The widget's assistant with everything a visitor could reach:
     injected knowledge on a tool-calling model, an MCP server that forwards
-    identity with its tool acknowledged for the widget, and web search and
+    identity with its tool enabled on the assistant, and web search and
     image generation from external providers."""
     assistant_id = UUID(active_widget["target_id"])
     space_id = UUID(active_widget["space_id"])
@@ -218,18 +218,6 @@ async def visitor_pipeline(
     assert [
         (server["id"], [t["name"] for t in server["tools"]]) for server in listed
     ] == [(str(casefiles_id), ["run"])]
-    resp = await client.post(
-        f"{widget_url}acknowledge-external-tools/",
-        json={
-            "servers": [
-                {"id": server["id"], "tool_ids": [t["id"] for t in server["tools"]]}
-                for server in listed
-            ]
-        },
-        headers=_auth(admin_token),
-    )
-    assert resp.status_code == 200, resp.text
-
     seen = _Pipeline()
     blob_with_score = InfoBlobInDBWithScore(
         **blob.model_dump(exclude={"original_available"}),
@@ -245,7 +233,6 @@ async def visitor_pipeline(
         info_blob_title=blob.title,
         score=0.9,
     )
-    resource_id = uuid4()
 
     async def get_references(self, **kwargs):
         seen.retrievals += 1
@@ -312,6 +299,7 @@ async def visitor_pipeline(
                 for chunk in seen.stream:
                     yield chunk
                 return
+            resource_id = uuid4()
             yield Completion(
                 reasoning_content=REASONING, response_type=ResponseType.REASONING
             )
@@ -391,6 +379,7 @@ async def visitor_pipeline(
         "blob": blob,
         "chunk": chunk,
         "casefiles_id": casefiles_id,
+        "casefiles_tool_id": casefiles_tool_id,
         "web_search_id": web_search_id,
         "images_id": images_id,
     }
@@ -425,6 +414,46 @@ def _assert_no_internal_data(payload: str) -> None:
 async def _files_count() -> int:
     async with sessionmanager.session() as db, db.begin():
         return int(await db.scalar(sa.select(sa.func.count()).select_from(Files)) or 0)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change", ["assistant", "organisation"])
+async def test_next_visitor_question_uses_current_tools_and_policy(
+    client, admin_token, active_widget, visitor_pipeline, change
+):
+    public_id = active_widget["public_id"]
+    token = await _mint(client, public_id)
+    seen: _Pipeline = visitor_pipeline["seen"]
+    for enabled in (False, True):
+        if change == "assistant":
+            resp = await client.post(
+                f"/api/v1/assistants/{active_widget['target_id']}/",
+                json={
+                    "mcp_tools": [
+                        {
+                            "tool_id": str(visitor_pipeline["casefiles_tool_id"]),
+                            "is_enabled": enabled,
+                        }
+                    ]
+                },
+                headers=_auth(admin_token),
+            )
+        else:
+            resp = await client.patch(
+                "/api/v1/admin/widget-policy/",
+                json={"allow_external_tools": enabled},
+                headers=_auth(admin_token),
+            )
+        assert resp.status_code == 200, resp.text
+        # Saving an assistant can also open a proxy to validate its configuration.
+        seen.proxies.clear()
+        await _ask(client, public_id, token)
+        [(servers, _)] = seen.proxies
+        expected = {visitor_pipeline["web_search_id"]}
+        if enabled:
+            expected.add(visitor_pipeline["casefiles_id"])
+        assert {server.id for server in servers} == expected
 
 
 @pytest.mark.integration

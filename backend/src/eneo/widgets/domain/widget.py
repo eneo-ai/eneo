@@ -5,7 +5,7 @@
 
 import re
 import secrets
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Annotated, Any, Optional, cast
@@ -313,41 +313,6 @@ class WidgetPrivacy(BaseModel):
         return self.retention_days == 0
 
 
-class AcknowledgedExternalServer(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    id: UUID
-    tool_ids: list[UUID]
-
-
-class ExternalToolsAcknowledgement(BaseModel):
-    """A tenant admin's acknowledgement that anonymous visitor input may make
-    the assistant call these tools on MCP servers outside Eneo.
-
-    It is also the limit of what a visitor turn reaches (``grant``): a server
-    or tool added to the assistant afterwards stays out of visitor turns
-    until an admin acknowledges the new set.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    servers: list[AcknowledgedExternalServer]
-    acknowledged_at: datetime
-    acknowledged_by_user_id: Optional[UUID] = None
-
-    def grant(self) -> dict[UUID, frozenset[UUID]]:
-        return {server.id: frozenset(server.tool_ids) for server in self.servers}
-
-    def covers(self, servers: Mapping[UUID, Iterable[UUID]]) -> bool:
-        """Every server and tool in ``servers`` was acknowledged. A server or
-        tool since removed or switched off does not ask again."""
-        granted = self.grant()
-        return all(
-            server_id in granted and set(tool_ids) <= granted[server_id]
-            for server_id, tool_ids in servers.items()
-        )
-
-
 def normalize_allowed_origins(
     origins: list[str], *, allow_too_broad: bool = False
 ) -> list[str]:
@@ -478,9 +443,6 @@ class Widget(BaseModel):
     # The template this widget follows; None for a stand-alone widget. Only
     # the link/detach commands change it, never a plain update.
     template_id: Optional[UUID] = None
-    # Set only by a tenant admin's acknowledgement (WidgetService); None until
-    # one is given. Visitor turns reach no external tool outside it.
-    external_tools_acknowledgement: Optional[ExternalToolsAcknowledgement] = None
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
     activated_at: Optional[datetime] = None
@@ -585,45 +547,6 @@ class Widget(BaseModel):
             for code in self.configuration_blockers()
             if _SERVING_REQUIREMENTS[code](self) != _SERVING_REQUIREMENTS[code](before)
         ]
-
-    def external_tools_acknowledged(
-        self, servers: Mapping[UUID, Iterable[UUID]]
-    ) -> bool:
-        """Whether the stored acknowledgement covers these servers (server id
-        to enabled tool ids). True when there are none."""
-        if not servers:
-            return True
-        ack = self.external_tools_acknowledgement
-        return ack is not None and ack.covers(servers)
-
-    def external_tool_grant(self) -> dict[UUID, frozenset[UUID]]:
-        """The external servers and tools a visitor turn may reach, before
-        the tenant policy has its say; empty without an acknowledgement."""
-        ack = self.external_tools_acknowledgement
-        return ack.grant() if ack is not None else {}
-
-    def acknowledge_external_tools(
-        self,
-        servers: Mapping[UUID, Iterable[UUID]],
-        *,
-        by: Optional[UUID],
-        now: Optional[datetime] = None,
-    ) -> None:
-        """Replace the acknowledgement with one for exactly ``servers``."""
-        self.external_tools_acknowledgement = (
-            ExternalToolsAcknowledgement(
-                servers=[
-                    AcknowledgedExternalServer(
-                        id=server_id, tool_ids=sorted(set(servers[server_id]))
-                    )
-                    for server_id in sorted(servers)
-                ],
-                acknowledged_at=now or datetime.now(timezone.utc),
-                acknowledged_by_user_id=by,
-            )
-            if servers
-            else None
-        )
 
     def activate(self, *, by: UUID, now: Optional[datetime] = None) -> None:
         if self.status not in (WidgetStatus.DRAFT, WidgetStatus.PAUSED):

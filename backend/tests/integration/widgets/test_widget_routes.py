@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
-from eneo.audit.application import audit_service as audit_service_module
+from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
     AssistantMCPServerTools,
@@ -20,7 +21,6 @@ from eneo.database.tables.mcp_server_table import (
 )
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.models import ModelId
-from eneo.mcp_servers.application.capability_resolver import general_servers_for_space
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
@@ -1102,15 +1102,6 @@ async def _attach_external_server(db_container, space_id, assistant_id):
         )
 
 
-async def _switch_on(db_container, assistant_id, tool_id):
-    async with db_container() as container:
-        container.session().add(
-            AssistantMCPServerTools(
-                assistant_id=assistant_id, mcp_server_tool_id=tool_id, is_enabled=True
-            )
-        )
-
-
 async def _draft_for(client, token, space_id, assistant_id):
     resp = await client.post(
         f"/api/v1/spaces/{space_id}/widgets/",
@@ -1129,114 +1120,43 @@ async def _draft_for(client, token, space_id, assistant_id):
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_external_tools_are_acknowledged_against_the_assistants_servers(
-    client, admin_token, space_with_assistant, db_container, monkeypatch
-):
-    space_id, assistant_id = space_with_assistant
-    server = await _attach_external_server(db_container, space_id, assistant_id)
-    widget = await _draft_for(client, admin_token, space_id, assistant_id)
-    widget_id = widget["id"]
-    audit = AsyncMock()
-    monkeypatch.setattr(audit_service_module.job_manager, "enqueue", audit)
-
-    listed = {
-        "id": server.id,
-        "name": server.name,
-        "tools": [{"id": server.search, "name": "Sök ärende"}],
-    }
-    assert widget["external_tools"] == [listed]
-    assert widget["external_tools_acknowledged"] is False
-    assert widget["activation_blockers"] == []
-
-    resp = await client.post(
-        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
-    )
-    assert resp.status_code == 400, resp.text
-    assert resp.json()["detail"]["code"] == "external_tools_unacknowledged"
-    assert resp.json()["detail"]["servers"] == [listed]
-
-    # Only what the dialog showed is acknowledged: a stale list is refused.
-    url = f"/api/v1/widgets/{widget_id}/acknowledge-external-tools/"
-    resp = await client.post(url, json={"servers": []}, headers=_auth(admin_token))
-    assert resp.status_code == 409, resp.text
-    assert resp.json()["detail"]["code"] == "external_tools_changed"
-    assert resp.json()["detail"]["servers"] == [listed]
-
-    shown = {"servers": [{"id": server.id, "tool_ids": [server.search]}]}
-    resp = await client.post(url, json=shown, headers=_auth(admin_token))
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["external_tools_acknowledged"] is True
-    entry = audit.await_args.args[2]
-    assert entry["action"] == "widget_external_tools_acknowledged"
-    assert entry["entity_id"] == widget_id
-    assert entry["metadata"]["extra"]["external_tools"] == [listed]
-
-    resp = await client.post(
-        f"/api/v1/widgets/{widget_id}/activate/", headers=_auth(admin_token)
-    )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "active"
-
-    # A tool switched on after the acknowledgement waits for a new one; the
-    # widget keeps serving meanwhile.
-    await _switch_on(db_container, assistant_id, server.create)
-    live = (
-        await client.get(f"/api/v1/widgets/{widget_id}/", headers=_auth(admin_token))
-    ).json()
-    assert live["status"] == "active"
-    assert live["external_tools_acknowledged"] is False
-    assert live["activation_blockers"] == ["external_tools_unacknowledged"]
-    resp = await client.get("/api/v1/admin/widgets/", headers=_auth(admin_token))
-    [item] = [i for i in resp.json()["items"] if i["id"] == widget_id]
-    assert item["external_tools"] == [server.name]
-    assert item["external_tools_acknowledged"] is False
-
-    shown = {"servers": [{"id": server.id, "tool_ids": [server.create, server.search]}]}
-    resp = await client.post(url, json=shown, headers=_auth(admin_token))
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "active"
-    assert resp.json()["activation_blockers"] == []
-
-
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_a_visitor_reaches_only_the_acknowledged_tools_of_the_servers(
-    client, admin_token, space_with_assistant, db_container
+async def test_editor_tool_change_records_the_active_widget_in_the_assistant_audit(
+    client, admin_token, widget_editor, space_with_assistant, db_container, monkeypatch
 ):
     space_id, assistant_id = space_with_assistant
     server = await _attach_external_server(db_container, space_id, assistant_id)
     widget = await _draft_for(client, admin_token, space_id, assistant_id)
     resp = await client.post(
-        f"/api/v1/widgets/{widget['id']}/acknowledge-external-tools/",
-        json={"servers": [{"id": server.id, "tool_ids": [server.search]}]},
+        f"/api/v1/widgets/{widget['id']}/activate/", headers=_auth(admin_token)
+    )
+    assert resp.status_code == 200, resp.text
+    resp = await client.post(
+        f"/api/v1/spaces/{space_id}/members/",
+        json={"id": str(widget_editor.id), "role": "editor"},
         headers=_auth(admin_token),
     )
+    assert resp.status_code in (200, 201), resp.text
+    log = AsyncMock()
+    monkeypatch.setattr(AuditService, "log_async", log)
+    resp = await client.post(
+        f"/api/v1/assistants/{assistant_id}/",
+        json={"mcp_tools": [{"tool_id": server.create, "is_enabled": True}]},
+        headers=_auth(widget_editor.token),
+    )
     assert resp.status_code == 200, resp.text
-    await _switch_on(db_container, assistant_id, server.create)
 
-    async with db_container() as container:
-        stored = await container.widget_repo().get(UUID(widget["id"]))
-        assert stored is not None
-        visitor = await container.widget_authentication_service().resolve_user(
-            stored, uuid4(), preview=True
-        )
-        # The servers a turn of the assistant is handed, read as it reads them.
-        space = await container.space_service().get_space(UUID(space_id))
-        attached = space.get_assistant(UUID(assistant_id)).mcp_servers
-        servers = general_servers_for_space(attached, space.security_classification)
-
-    assert visitor.active_widget is not None
-    (reached,) = visitor.active_widget.reachable_servers(servers)
-    assert {tool.name: tool.is_enabled for tool in reached.tools} == {
-        "search_cases": True,
-        "create_case": False,
-    }
-    # The assistant's own entities keep the tool switched on for staff.
-    (own,) = [s for s in attached if str(s.id) == server.id]
-    assert {tool.name: tool.is_enabled for tool in own.tools} == {
-        "search_cases": True,
-        "create_case": True,
-    }
+    [event] = [
+        call.kwargs
+        for call in log.await_args_list
+        if call.kwargs["action"] == ActionType.ASSISTANT_UPDATED
+    ]
+    assert str(event["entity_id"]) == assistant_id
+    assert event["user"].id == widget_editor.id
+    assert event["metadata"]["extra"]["serves_active_widget"] is True
+    assert {
+        (change["tool_id"], change["old_enabled"], change["new_enabled"])
+        for change in event["metadata"]["changes"]["mcp_tools"]
+    } == {(server.search, True, None), (server.create, None, True)}
 
 
 @pytest.mark.integration

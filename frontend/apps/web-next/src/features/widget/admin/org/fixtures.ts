@@ -61,7 +61,7 @@ export function overviewItem(overrides: Partial<WidgetOverviewItem> = {}): Widge
     allowed_origins: ["https://www.kommun.se"],
     activation_blockers: [],
     external_tools: [],
-    external_tools_acknowledged: true,
+
     updated_at: "2026-10-28T08:00:00Z",
     daily_token_budget: 1000,
     budget_used_today: 0,

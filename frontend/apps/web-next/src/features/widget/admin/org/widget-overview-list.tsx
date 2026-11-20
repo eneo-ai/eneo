@@ -76,16 +76,6 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
   const externalTools = (item: WidgetOverviewItem) => item.external_tools ?? [];
   const blockedReason = (item: WidgetOverviewItem) => {
     const reasons = (item.activation_blockers ?? []).map((code) => blockerLabel(code, t));
-    // The acknowledgement of external MCP servers is given on the widget page,
-    // where the servers and their tools are listed; the overview's button
-    // cannot give it.
-    if (
-      item.status !== "active" &&
-      externalTools(item).length > 0 &&
-      !(item.external_tools_acknowledged ?? true)
-    ) {
-      reasons.push(t("widget_admin_overview_acknowledge_on_widget_page"));
-    }
     return reasons.join(", ");
   };
   const budgetPercent = (item: WidgetOverviewItem) =>

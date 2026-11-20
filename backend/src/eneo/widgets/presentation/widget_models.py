@@ -9,7 +9,6 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from eneo.mcp_servers.domain.entities.mcp_server import MCP_TOOL_CATALOG_HARD_MAX_COUNT
 from eneo.widgets.domain.widget import (
     MAX_DAILY_TOKEN_BUDGET,
     BotProtection,
@@ -66,35 +65,6 @@ class WidgetExternalToolServerPublic(BaseModel):
     id: UUID
     name: str
     tools: list[WidgetExternalToolPublic]
-
-
-class WidgetAcknowledgedServer(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    id: UUID
-    tool_ids: list[UUID] = Field(max_length=MCP_TOOL_CATALOG_HARD_MAX_COUNT)
-
-
-class WidgetExternalToolsAcknowledge(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    servers: list[WidgetAcknowledgedServer] = Field(
-        description=(
-            "The servers and tools the admin was shown, as `external_tools` on"
-            " the widget lists them. Refused with `external_tools_changed`"
-            " (listing the current `servers`) when they are not the current set."
-        ),
-    )
-
-
-class WidgetExternalToolsChangedDetail(BaseModel):
-    code: Literal["external_tools_changed"]
-    message: str
-    servers: list[WidgetExternalToolServerPublic]
-
-
-class WidgetExternalToolsChangedResponse(BaseModel):
-    detail: WidgetExternalToolsChangedDetail
 
 
 class WidgetTemplateLinkPublic(BaseModel):
@@ -158,19 +128,7 @@ class WidgetPublic(BaseModel):
         description="Set when the widget follows a template.",
     )
     external_tools: list[WidgetExternalToolServerPublic] = Field(
-        description=(
-            "The assistant's MCP servers outside Eneo and its tools there."
-            " Visitor turns reach only the ones a tenant admin has acknowledged"
-            " (`POST /widgets/{id}/acknowledge-external-tools/`), and activation"
-            " needs all of them acknowledged."
-        ),
-    )
-    external_tools_acknowledged: bool = Field(
-        description=(
-            "Whether the stored acknowledgement covers every tool in"
-            " `external_tools`; true when there are none. False on an active"
-            " widget means visitor turns run without the tools not covered."
-        )
+        description="The assistant’s enabled tools on external MCP servers."
     )
     created_by_user_id: Optional[UUID] = None
     activated_by_user_id: Optional[UUID] = None
@@ -295,12 +253,6 @@ class WidgetOverviewItem(BaseModel):
     external_tools: list[str] = Field(
         description=(
             "Names of the assistant's MCP servers outside Eneo with a tool switched on."
-        ),
-    )
-    external_tools_acknowledged: bool = Field(
-        description=(
-            "Whether the admin's acknowledgement covers every tool on the"
-            " current `external_tools`; true when there are none."
         ),
     )
 

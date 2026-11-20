@@ -28,12 +28,12 @@
           "type": "improved",
           "area": "assistants",
           "title": {
-            "en": "Acknowledge the tools outside Eneo a widget reaches",
-            "sv": "Bekräfta verktygen utanför Eneo som en widget når"
+            "en": "Widgets follow the assistant’s tool selection",
+            "sv": "Widgeten följer assistentens verktygsval"
           },
           "body": {
-            "en": "On the assistant's own external MCP servers, visitors can use only tools an administrator has acknowledged on the widget page. Tools switched on later wait for acknowledgement while the widget stays active. Eneo logs every approved attempt to call one of those tools, including attempts the MCP proxy stops locally. Web search tools are reviewed separately by the organisation. The widget policy can refuse such tools altogether, and while a widget is active only an administrator can change its allowed websites, privacy, bot protection or template.",
-            "sv": "På assistentens egna externa MCP-servrar når besökarna bara de verktyg som en administratör har bekräftat på widgetsidan. Verktyg som slås på senare väntar på bekräftelse medan widgeten fortsätter att svara. Eneo loggar varje godkänt försök att anropa ett sådant verktyg, även när MCP-proxyn stoppar det lokalt. Organisationen granskar webbsökningens verktyg separat. Widgetpolicyn kan avböja sådana verktyg helt, och medan en widget är aktiv kan bara en administratör ändra dess tillåtna webbplatser, integritet, botskydd eller mall."
+            "en": "An active widget follows the assistant’s saved MCP tool selection. Pilots upgrading from per-widget tool approval should review active assistants before upgrading. Previously unconfirmed tools that are enabled on the assistant become available to visitors at upgrade if the organisation’s policy permits them. Eneo logs every approved attempt to call one of those tools, including attempts the MCP proxy stops locally. Web search tools are reviewed separately by the organisation. The widget policy can refuse such tools altogether, and while a widget is active only an administrator can change its allowed websites, privacy, bot protection or template.",
+            "sv": "En aktiv widget följer assistentens sparade val av MCP-verktyg. Piloter som har använt separat verktygsgodkännande per widget bör granska aktiva assistenter före uppgradering. Tidigare obekräftade verktyg som är påslagna i assistenten blir tillgängliga för besökare vid uppgraderingen om organisationens policy tillåter dem. Eneo loggar varje godkänt försök att anropa ett sådant verktyg, även när MCP-proxyn stoppar det lokalt. Organisationen granskar webbsökningens verktyg separat. Widgetpolicyn kan avböja sådana verktyg helt, och medan en widget är aktiv kan bara en administratör ändra dess tillåtna webbplatser, integritet, botskydd eller mall."
           }
         },
         {

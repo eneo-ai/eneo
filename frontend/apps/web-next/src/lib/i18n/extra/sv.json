@@ -1,4 +1,5 @@
 {
+  "widget_admin_assistant_notice_body": "Den här assistenten används i en publik widget. Ändringar av MCP-servrar och verktyg sparas automatiskt och gäller från besökarens nästa fråga, inom organisationens widgetpolicy. Kontrollera vad ett verktyg kan läsa eller ändra innan du slår på det.",
   "access_disabled": "Din åtkomst till Eneo har tillfälligt inaktiverats. Kontakta din administratör för att återfå åtkomsten för din organisation.",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",
   "mcp_tools_count": "{count, plural, one {# verktyg} other {# verktyg}}",
@@ -1728,7 +1729,6 @@
   "editor_summary_sources": "{count, plural, one {# källa} other {# källor}}",
   "editor_summary_space_retention": "Ytans gallring",
   "form_problem_confirm_migration_warning": "Bekräfta att du vill fortsätta trots kompatibilitetsvarningarna.",
-  "form_problem_acknowledge_external_tools": "Kryssa i rutan för att bekräfta verktygen.",
   "form_problem_number_between": "Ange ett tal från {min} till {max}.",
   "help_about": "Hjälp: {topic}",
   "insights_chart_grouping": "Gruppera aktivitet",

@@ -1,7 +1,6 @@
 import { EneoApiError } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
-import type { Widget } from "./queries";
 import { blockerLabel } from "./blockers";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
@@ -110,18 +109,6 @@ export function widgetFieldErrors(error: unknown, t: Translate): Record<string, 
   return fields;
 }
 
-/**
- * The assistant's current servers and tools outside Eneo, when an
- * acknowledgement or an activation was refused because the admin saw another
- * list; null for any other error.
- */
-export function currentExternalTools(error: unknown): Widget["external_tools"] | null {
-  const code = widgetErrorCode(error);
-  if (code !== "external_tools_changed" && code !== "external_tools_unacknowledged") return null;
-  const servers = detail(error)?.servers;
-  return Array.isArray(servers) ? (servers as Widget["external_tools"]) : null;
-}
-
 export function widgetErrorMessage(error: unknown, t: Translate): string | null {
   const reasons = () =>
     refusalCodes(error)
@@ -147,10 +134,6 @@ export function widgetErrorMessage(error: unknown, t: Translate): string | null 
       return codes(detail(error)?.fields).includes("template")
         ? t("widget_admin_template_detach_admin_only")
         : t("widget_admin_error_admin_required_while_active");
-    case "external_tools_unacknowledged":
-      return t("widget_admin_error_external_tools_unacknowledged");
-    case "external_tools_changed":
-      return t("widget_admin_external_tools_changed");
     case "preview_unavailable_while_paused":
       return t("widget_admin_preview_paused");
   }

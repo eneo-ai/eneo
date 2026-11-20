@@ -61,7 +61,6 @@ class WidgetAssembler:
                 )
                 for server in view.external_tools
             ],
-            external_tools_acknowledged=view.external_tools_acknowledged,
             created_by_user_id=widget.created_by_user_id,
             activated_by_user_id=widget.activated_by_user_id,
             activated_at=widget.activated_at,

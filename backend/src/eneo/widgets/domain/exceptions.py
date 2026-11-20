@@ -202,42 +202,6 @@ class WidgetPolicyViolationError(WidgetPublicError):
         return {"violations": list(self.violations)}
 
 
-class WidgetExternalToolsUnacknowledgedError(WidgetPublicError):
-    """Activation of a widget whose assistant reaches tools on MCP servers
-    outside Eneo that no admin has acknowledged."""
-
-    status_code = 400
-    code = "external_tools_unacknowledged"
-
-    def __init__(self, servers: list[dict[str, Any]]) -> None:
-        super().__init__(
-            "The assistant uses tools on MCP servers outside Eneo that anonymous"
-            " visitors could make it call. Acknowledge them before activating."
-        )
-        self.servers = servers
-
-    def details(self) -> dict[str, Any]:
-        return {"servers": list(self.servers)}
-
-
-class WidgetExternalToolsChangedError(WidgetPublicError):
-    """An acknowledgement of external tools that are not the current ones:
-    the assistant changed while the admin was reading the list."""
-
-    status_code = 409
-    code = "external_tools_changed"
-
-    def __init__(self, servers: list[dict[str, Any]]) -> None:
-        super().__init__(
-            "The assistant's external tools changed. Review the current list and"
-            " acknowledge it again."
-        )
-        self.servers = servers
-
-    def details(self) -> dict[str, Any]:
-        return {"servers": list(self.servers)}
-
-
 class WidgetAdminRequiredError(WidgetPublicError):
     """An editor changed a setting a tenant admin reviewed at activation while
     the widget is active. Pausing the widget first reopens the setting."""

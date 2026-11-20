@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@fbf419c4aacb
+translationSource: guides/embed-widget.mdx@47e98b2c58c9
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -50,8 +50,7 @@ separat verktygsinställning per widget. En besökare får:
   som ytans säkerhetsklassificering tillåter, med verktygen så som de är
   konfigurerade. Besökaren är anonym: en server med _Vidarebefordra
   användaridentitet_ får inga identitetsrubriker, och inget verktygsanrop
-  väntar på godkännande. På servrar utanför Eneo når besökarna bara de
-  verktyg som en organisationsadministratör har bekräftat för widgeten. Eneo
+  väntar på godkännande. På assistentens externa MCP-servrar gäller dess verktygsval. Eneo
   loggar varje godkänt försök att anropa dem, och organisationens policy kan
   förbjuda verktygen. Se
   [MCP-servrar utanför Eneo](#external-mcp-servers).
@@ -73,8 +72,7 @@ Publicera bara kunskap och verktyg som är lämpliga för anonyma besökare.
 
 <Callout type="warning">
   En ändring av assistentens MCP-servrar eller funktioner ändrar direkt vad en
-  aktiv widget exponerar, utan ny aktivering. Nya verktyg på assistentens egna
-  externa MCP-servrar kräver en organisationsadministratörs bekräftelse. Allt som en
+  aktiv widget exponerar från besökarens nästa fråga. Allt som en
   servers nåbara verktyg kan läsa eller göra kan en anonym besökare be
   assistenten att använda. Medan en aktiv widget publicerar assistenten visar
   redigeringssidan det överst i avsnittet **Verktyg** ("Publicerad som
@@ -160,10 +158,7 @@ Du behöver behörigheten för webbwidgetar och rätt att redigera assistenten.
    medan widgeten är pausad: pausen stänger alla vägar in till chattsidan.
 5. När statusraden inte visar några hinder aktiverar en
    organisationsadministratör widgeten. Fram till dess är den ett utkast och
-   visas inte på den externa webbplatsen. När assistenten använder verktyg på
-   sina egna externa MCP-servrar listar aktiveringen först dem och ber
-   administratören bekräfta att anonyma besökare kan få assistenten att anropa
-   dem ([MCP-servrar utanför Eneo](#external-mcp-servers)).
+   visas inte på den externa webbplatsen. Vid aktivering visas en upplysning om att framtida ändringar av assistentens MCP-verktyg gäller även för anonyma besökare inom organisationens widgetpolicy.
 6. Kopiera installationskoden och lämna den till webbansvarig. Den läggs in en
    gång, helst strax före `</body>`:
 
@@ -481,8 +476,7 @@ att ladda om när mallen har ändrat deras widget.
 ### När assistenten ändras [#when-the-assistant-changes]
 
 - **Verktyg och funktioner.** En ändring av assistentens MCP-servrar eller
-  funktioner når besökarna direkt. Nya verktyg på assistentens egna externa
-  MCP-servrar kräver en organisationsadministratörs bekräftelse. Se
+  funktioner når besökarna direkt. Se
   [Vad besökare kommer åt](#what-visitors-can-reach) och
   [MCP-servrar utanför Eneo](#external-mcp-servers).
 - **Avpublicering** av assistenten tar en aktiv widget offline. Besökare ser
@@ -511,21 +505,7 @@ Webbsökning godkänns separat enligt beskrivningen nedan.
   de ombeds göra. En MCP-server som nås från en widget måste behandla varje
   argument som obetrodd indata: validera det, auktorisera åtgärden på sin egen
   sida och föra sin egen logg över vad den gjorde.
-- **Besökare når bara bekräftade verktyg.** När assistenten har verktyg
-  påslagna på sådana servrar säger widgetens statusrad det, och **Aktivera**
-  öppnar en dialog som listar servrarna med de verktygen.
-  Organisationsadministratören bekräftar att hen förstår och godtar detta
-  innan widgeten går live. Bekräftelsen gäller exakt de listade verktygen; den
-  sparas på widgeten och skrivs till granskningsloggen. Har listan ändrats
-  medan dialogen var öppen visar dialogen den aktuella listan och frågar igen.
-- **Nya verktyg väntar på samma bekräftelse.** Ett verktyg som slås på senare,
-  eller en ny server, når inte besökarna förrän en organisationsadministratör
-  har bekräftat det. Under tiden fortsätter den aktiva widgeten att svara utan
-  det, och statusraden och översikten flaggar den ("behöver åtgärdas").
-  Administratören bekräftar de nya verktygen från widgetens statusrad utan att
-  pausa den. Att stänga av verktyg kräver ingen ny bekräftelse.
-  Förhandsvisningen följer samma regel, så ett obekräftat verktyg saknas även
-  där.
+- **Assistentens verktygsval gäller även widgeten.** Efter att en organisationsadministratör aktiverat widgeten räcker det att spara ändringen på assistenten. Redaktören ser en varning vid MCP-inställningarna. Betan sparar varje ändring automatiskt. Om loggning av assistentändringar är påslagen visar granskningsposten om assistenten användes i en aktiv widget vid ändringen. Ändringen gäller både förhandsvisningen och besökarens nästa fråga. Nyupptäckta verktyg på en MCP-server går fortfarande genom Eneos ordinarie kataloggranskning och måste slås på för assistenten.
 - **Översikten visar vilka widgetar som når utanför Eneo**, med servrarnas
   namn, så att organisationens publika yta kan granskas utan att öppna varje
   widget.
@@ -544,12 +524,8 @@ Webbsökning godkänns separat enligt beskrivningen nedan.
   (på som standard) låter en organisation avböja detta helt: avstängt kan en
   sådan widget inte aktiveras, och en aktiv svarar utan de verktygen och
   flaggas i översikten tills den pausas eller assistenten förlorar dem.
-  Reglaget är på som standard eftersom en assistent vars syfte är att skriva
-  till ett externt system (ett ärendesystem, en bokning) fortfarande måste
-  fungera som widget; bekräftelsen, flaggan och granskningsspåret är
-  skyddsräckena för det valet.
 
-**Webbsökning är undantagen från både widgetens verktygsbekräftelse och
+**Webbsökning hanteras separat och dess anrop undantas från
 `widget_external_tool_called`.** Organisationen väljer sökleverantören och
 godkänner dess aktiverade verktyg gemensamt för widgetarna. Eneo begränsar
 inte verktygen till läsning. Granska vad varje verktyg kan läsa eller ändra
@@ -623,10 +599,7 @@ kontaktar bara servrar med aktiverade verktyg.
   dem genom att först pausa widgeten, vilket gör nästa aktivering till en ny
   granskning. Begränsningarna lämnas åt redaktörerna eftersom var och en har
   ett hårt tak och policyn begränsar den dagliga budgeten vid varje anrop.
-- **Externa verktyg hålls till bekräftelsen vid varje tur.** På assistentens egna
-  externa MCP-servrar når besökare och förhandsvisningar bara de verktyg som
-  en organisationsadministratör har bekräftat för widgeten. När policyn
-  stängs av blockeras alla dessa verktyg.
+- **Organisationens widgetpolicy gäller vid varje fråga.** Om externa verktyg stängs av blockeras de för besökare och i förhandsvisningen.
 
 - **Begränsningarna stänger vid fel som standard.** Redis skyddar
   anropsfrekvens och återanvändning av utmaningar. Den dagliga budgeten och
@@ -758,7 +731,7 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
   användning: det verktygen kan läsa eller göra kan en besökare be om, och
   senare ändringar av assistenten gäller direkt
   ([Vad besökare kommer åt](#what-visitors-can-reach));
-- varje bekräftat verktyg på en MCP-server utanför Eneo är ett beslut ni står
+- varje påslaget verktyg på en MCP-server utanför Eneo är ett beslut ni står
   för: verktygen behandlar sina argument som obetrodd indata, läsning föredras
   framför skrivning, och granskningsposterna för deras anrop följs upp
   ([MCP-servrar utanför Eneo](#external-mcp-servers));
@@ -770,8 +743,7 @@ Innan en widget aktiveras på en publik webbplats, kontrollera att:
 - den dagliga tokenbudgeten motsvarar den kostnad ni accepterar och att
   användningen följs upp regelbundet;
 - granskningsloggning är påslagen: skapande, ändringar (med inställningarna
-  före och efter), aktivering, bekräftelser av verktyg utanför Eneo (med de
-  servrar och verktyg de gäller), paus, arkivering, förbrukad budget och varje
+  före och efter), aktivering, paus, arkivering, förbrukad budget och varje
   utfärdad förhandsgranskningstoken loggas. Eneo loggar varje godkänt försök att
   anropa ett verktyg på assistentens egna externa MCP-servrar oavsett
   granskningsinställningarna.

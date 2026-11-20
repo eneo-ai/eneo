@@ -214,13 +214,7 @@ export function WidgetEditor({
   ];
 
   const blockers = current.activation_blockers ?? [];
-  // The assistant's tools at MCP servers outside Eneo as the API lists them
-  // (what an admin acknowledges; visitors reach no other), and web search
-  // only through an external provider (VISITOR_CAPABILITY_PURPOSES in
-  // assistant_service.py). Image generation never.
   const visitorServers = current.external_tools ?? [];
-  // The organisation's policy can take all of them away. On a live widget,
-  // tools switched on after the last acknowledgement wait for an admin.
   const externalToolsAllowed = !blockers.includes("external_tools_not_allowed");
   const reachableServers = externalToolsAllowed ? visitorServers : [];
   // The template's locks hold only while the widget follows it, so on an
@@ -284,9 +278,6 @@ export function WidgetEditor({
           onReloaded(saved);
         }}
         onActivate={lifecycle(widgetApi.activate)}
-        onAcknowledgeExternalTools={(servers) =>
-          lifecycle((id) => widgetApi.acknowledgeExternalTools(id, servers))()
-        }
         onPause={lifecycle(widgetApi.pause)}
         onArchive={async () => {
           await lifecycle(widgetApi.archive)();
@@ -601,12 +592,6 @@ export function WidgetEditor({
                         })}
                       </li>
                     ))}
-                    {reachableServers.length > 0 &&
-                      blockers.includes("external_tools_unacknowledged") && (
-                        <li className="text-ax-text-secondary">
-                          {t("widget_admin_visitor_access_unacknowledged")}
-                        </li>
-                      )}
                     {visitorCapabilities.map((capability) => (
                       <li key={capability}>
                         {t("widget_admin_visitor_access_capability", { name: capability })}

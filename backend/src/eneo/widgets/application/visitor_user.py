@@ -23,8 +23,7 @@ def build_visitor_user(
     service key on. The id is the visitor id so logs correlate with the
     session's ``visitor_id`` without ever being persisted as ``user_id``.
 
-    The visitor reaches the external tools an admin acknowledged for the
-    widget, and none while the tenant policy allows none; previews too.
+    The organisation's widget policy also applies to previews.
     """
     assert widget.id is not None
     allowed = WidgetPolicy.from_tenant(tenant.widget_policy).allow_external_tools
@@ -50,7 +49,7 @@ def build_visitor_user(
             token_generation=widget.token_generation,
             preview=preview,
             never_persist=widget.privacy.never_persists,
-            external_tools=widget.external_tool_grant() if allowed else {},
+            allow_external_tools=allowed,
         ),
         roles=[role],
         used_tokens=0,

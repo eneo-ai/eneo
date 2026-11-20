@@ -39,11 +39,7 @@ class WidgetPolicy(BaseModel):
     allow_bot_protection_none: bool = False
     min_retention_days: int = Field(default=0, ge=0, le=3650)
     max_retention_days: int = Field(default=365, ge=0, le=3650)
-    # Whether a widget may publish an assistant whose MCP servers run outside
-    # Eneo. Allowed by default: an assistant whose purpose is to write to an
-    # external system must still work as a widget. Activation then requires
-    # the admin's acknowledgement (WidgetService.activate_widget); switched
-    # off, such a widget cannot be activated and a live one is flagged.
+    # Applies to activation and to each visitor turn, including previews.
     allow_external_tools: bool = True
 
     @model_validator(mode="after")

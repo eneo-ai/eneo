@@ -475,14 +475,11 @@ describe("WidgetEditor", () => {
   });
 
   test("visitor access lists what visitors get and what they never get", async () => {
-    // The servers come from the widget as the API lists them (what an admin
-    // acknowledges), with the tools switched on there.
     renderEditor(
       widget({
         external_tools: [
           { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
-        ],
-        external_tools_acknowledged: true
+        ]
       } as unknown as Partial<Widget>),
       {
         enabled_capabilities: ["web_search", "image_generation"]
@@ -511,12 +508,11 @@ describe("WidgetEditor", () => {
       items: ["widget_admin_visitor_access_knowledge", "widget_admin_visitor_access_not_allowed"]
     },
     {
-      case: "newer ones wait for an admin",
-      blockers: ["external_tools_unacknowledged"],
+      case: "the assistant enables them",
+      blockers: [],
       items: [
         "widget_admin_visitor_access_knowledge",
         "widget_admin_visitor_access_server_tools(Kommunens ärenden|Sök ärende)",
-        "widget_admin_visitor_access_unacknowledged",
         "widget_admin_visitor_access_hidden"
       ]
     }
@@ -528,7 +524,7 @@ describe("WidgetEditor", () => {
           external_tools: [
             { id: "m1", name: "Kommunens ärenden", tools: [{ id: "t1", name: "Sök ärende" }] }
           ],
-          external_tools_acknowledged: false,
+
           activation_blockers: blockers,
           show_tool_activity: false
         } as unknown as Partial<Widget>)

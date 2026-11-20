@@ -21,7 +21,6 @@ vi.mock("$lib/paraglide/messages", () => ({
 
 import { EneoError } from "@eneo/eneo-js";
 import {
-  currentExternalTools,
   isStaleEditorError,
   widgetErrorCode,
   widgetErrorMessage,
@@ -76,16 +75,6 @@ describe("widget admin errors", () => {
       "privacy.retention_days": "widget_admin_error_admin_required_while_active",
       bot_protection: "widget_admin_error_admin_required_while_active"
     });
-  });
-
-  it("hands back the current external tools when the admin saw another list", () => {
-    const servers = [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }];
-    const refusal = (status: number, code: string) =>
-      new EneoError("raw", "RESPONSE", status, 0, { detail: { code, message: "raw", servers } });
-    expect(currentExternalTools(refusal(409, "external_tools_changed"))).toEqual(servers);
-    expect(currentExternalTools(refusal(400, "external_tools_unacknowledged"))).toEqual(servers);
-    expect(currentExternalTools(refusal(400, "widget_serving_blocked"))).toBeNull();
-    expect(currentExternalTools(new Error("x"))).toBeNull();
   });
 
   it("treats a published lock like a revision conflict", () => {

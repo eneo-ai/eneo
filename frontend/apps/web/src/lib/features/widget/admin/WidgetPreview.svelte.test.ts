@@ -189,20 +189,19 @@ describe("WidgetPreview tokens", () => {
 
 describe("WidgetPreview external tools", () => {
   test.each([
-    { case: "unacknowledged tools", overrides: { external_tools_acknowledged: false }, note: true },
     {
       case: "tools the policy forbids",
       overrides: { activation_blockers: ["external_tools_not_allowed"] },
       note: true
     },
-    { case: "acknowledged, allowed tools", overrides: {}, note: false }
+    { case: "allowed tools", overrides: {}, note: false }
   ])("says when the preview runs without $case", async ({ overrides, note }) => {
     const eneo = { widgets: { previewToken: vi.fn(() => new Promise(() => {})) } };
     render(WidgetPreview, {
       widget: {
         ...widget,
         external_tools: [{ id: "m1", name: "Ärenden", tools: [{ id: "t1", name: "Sök" }] }],
-        external_tools_acknowledged: true,
+
         activation_blockers: [],
         ...overrides
       } as unknown as Widget,

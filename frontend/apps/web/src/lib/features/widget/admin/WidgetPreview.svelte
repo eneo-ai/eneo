@@ -33,12 +33,8 @@
   // A pause is the kill switch: the API mints no preview token for a paused
   // widget, so nothing is asked for and the frame says why it is empty.
   const paused = $derived(widget.status === "paused");
-  // The preview's turns reach external tools as visitors' do: only those an
-  // admin acknowledged, and none while the tenant policy forbids them.
   const externalToolsWithheld = $derived(
-    (widget.external_tools ?? []).length > 0 &&
-      (!(widget.external_tools_acknowledged ?? true) ||
-        (widget.activation_blockers ?? []).includes("external_tools_not_allowed"))
+    (widget.activation_blockers ?? []).includes("external_tools_not_allowed")
   );
   // A widget pinned to light or dark previews that way whatever the toggle says.
   const pinnedScheme = $derived(

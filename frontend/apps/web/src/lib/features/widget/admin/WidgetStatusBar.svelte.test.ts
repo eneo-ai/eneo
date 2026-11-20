@@ -36,7 +36,6 @@ function renderBar(autosave: WidgetAutosave, isAdmin = true) {
     autosave,
     isAdmin,
     onActivate: noop,
-    onAcknowledgeExternalTools: noop,
     onPause: noop,
     onArchive: noop,
     onReload: noop
@@ -44,6 +43,24 @@ function renderBar(autosave: WidgetAutosave, isAdmin = true) {
 }
 
 describe("WidgetStatusBar", () => {
+  test.each(["draft", "paused"] as const)("describes %s activation to an admin", async (status) => {
+    renderBar(new WidgetAutosave(widget({ status }), vi.fn()));
+    const action = status === "paused" ? "widget_admin_resume" : "widget_admin_activate";
+    await expect.element(page.getByText("widget_admin_external_tools_note")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: action }))
+      .toHaveAccessibleDescription("widget_admin_external_tools_note");
+  });
+
+  test.each([
+    ["active", true],
+    ["draft", false],
+    ["paused", false]
+  ] as const)("omits the activation notice for %s with admin=%s", (status, isAdmin) => {
+    renderBar(new WidgetAutosave(widget({ status }), vi.fn()), isAdmin);
+    expect(page.getByText("widget_admin_external_tools_note").query()).toBeNull();
+  });
+
   test("an active widget that is not serving as configured says so", async () => {
     renderBar(
       new WidgetAutosave(widget({ activation_blockers: ["target_not_published"] }), vi.fn())
@@ -96,7 +113,6 @@ describe("WidgetStatusBar", () => {
       autosave,
       isAdmin: true,
       onActivate: noop,
-      onAcknowledgeExternalTools: noop,
       onPause: vi.fn(async () => autosave.replace(widget({ status: "paused" }))),
       onArchive: noop,
       onReload: noop
@@ -136,7 +152,6 @@ describe("WidgetStatusBar", () => {
       render(WidgetStatusBar, {
         autosave: new WidgetAutosave(current, vi.fn()),
         isAdmin: true,
-        onAcknowledgeExternalTools: noop,
         onArchive: noop,
         onReload: noop,
         ...handlers

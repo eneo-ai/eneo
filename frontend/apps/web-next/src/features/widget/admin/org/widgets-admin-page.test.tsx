@@ -139,31 +139,6 @@ describe("WidgetsAdminPage", () => {
       await screen.findByText("MCP-servrar utanför Eneo: Ärendesystemet, Bokningen")
     ).toBeTruthy();
   });
-
-  it("a paused widget with unacknowledged tools is resumed from the widget page", async () => {
-    showPage({
-      items: [
-        overviewItem({
-          name: "Bygglov",
-          status: "paused",
-          external_tools: ["Ärendesystemet"],
-          external_tools_acknowledged: false
-        })
-      ]
-    });
-    const actions = await screen.findByRole("group", { name: "Åtgärder för Bygglov" });
-    const resume = within(actions).getByRole("button", { name: "Återuppta" });
-    expect(resume.getAttribute("aria-disabled") ?? String(resume.hasAttribute("disabled"))).toBe(
-      "true"
-    );
-    expect(
-      within(actions).getByText(
-        "Kan inte aktiveras: Aktivera från widgetsidan för att bekräfta dess verktyg på MCP-servrar utanför Eneo."
-      )
-    ).toBeTruthy();
-    fireEvent.click(resume);
-    expect(api.POST).not.toHaveBeenCalled();
-  });
 });
 
 describe("WidgetsAdminPage policy", () => {

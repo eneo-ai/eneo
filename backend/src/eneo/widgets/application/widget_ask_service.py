@@ -188,7 +188,7 @@ UNKNOWN_STATUS = "unknown"
 def is_external_tool_call(call: ToolCallMetadata) -> bool:
     """Whether this call targets an assistant's own MCP server outside Eneo.
 
-    The widget acknowledgement and audit cover general MCP tools. Web search
+    The widget audit covers general MCP tools. Web search
     uses the organisation's separately configured capability provider.
     """
     return call.is_internal is not True and call.purpose is None

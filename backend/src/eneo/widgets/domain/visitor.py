@@ -3,7 +3,6 @@
 # Licensed under the MIT License.
 
 
-import copy
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -18,8 +17,11 @@ if TYPE_CHECKING:
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 
 
-def _no_external_tools() -> dict[UUID, frozenset[UUID]]:
-    return {}
+def external_tools_for_widget(server: "MCPServer") -> list["MCPServerTool"]:
+    """Enabled assistant tools on an external server, for display and visitor turns."""
+    if server.is_internal or not server.is_enabled or not server.tools_loaded:
+        return []
+    return [tool for tool in server.tools if tool.is_enabled]
 
 
 class WidgetVisitorContext(BaseModel):
@@ -41,47 +43,17 @@ class WidgetVisitorContext(BaseModel):
     # Retention 0: conversation content must never be committed, so the
     # session service keeps placeholders inside the request transaction.
     never_persist: bool = False
-    # Server id to tool ids: the tools outside Eneo an admin acknowledged for
-    # this widget, empty when the tenant policy allows none. Decided per
-    # request from the widget row, so never serialised into a delegated token.
-    external_tools: dict[UUID, frozenset[UUID]] = Field(
-        default_factory=_no_external_tools, exclude=True, repr=False
-    )
+    # Request-scoped policy supplied by build_visitor_user, also for previews.
+    allow_external_tools: bool = Field(default=False, exclude=True)
 
     def reachable_servers(self, servers: Sequence["MCPServer"]) -> list["MCPServer"]:
-        """``servers`` as this visitor's turn may call them.
-
-        Eneo's own servers pass untouched. An external server is left out
-        unless a tool switched on there is acknowledged, so the turn never
-        contacts it for nothing; on one kept, each tool outside the
-        acknowledgement is switched off on a copy rather than dropped, since
-        the MCP proxy stages a listed tool missing from the catalog as newly
-        discovered.
-        """
-        reachable: list["MCPServer"] = []
-        for server in servers:
-            if server.is_internal:
-                reachable.append(server)
-                continue
-            granted = self.external_tools.get(server.id)
-            if granted is None or not server.tools_loaded:
-                continue
-            tools = [
-                tool if tool.id in granted else _switched_off(tool)
-                for tool in server.tools
-            ]
-            if not any(tool.is_enabled for tool in tools):
-                continue
-            narrowed = copy.copy(server)
-            narrowed.tools = tools
-            reachable.append(narrowed)
-        return reachable
-
-
-def _switched_off(tool: "MCPServerTool") -> "MCPServerTool":
-    withheld = copy.copy(tool)
-    withheld.enabled_override = False
-    return withheld
+        """Apply the organisation's widget policy to the assistant's current servers."""
+        return [
+            server
+            for server in servers
+            if server.is_internal
+            or (self.allow_external_tools and external_tools_for_widget(server))
+        ]
 
 
 @dataclass(frozen=True)

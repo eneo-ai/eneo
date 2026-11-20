@@ -218,15 +218,8 @@
   });
 
   const blockers = $derived(current.activation_blockers ?? []);
-  // What an active widget exposes besides knowledge, as the backend serves
-  // visitors: the assistant's tools at MCP servers outside Eneo as the API
-  // lists them (what an admin acknowledges; visitors reach no other), and
-  // web search only through an external provider (VISITOR_CAPABILITY_PURPOSES
-  // in assistant_service.py). Image generation never.
   const VISITOR_CAPABILITIES: ReadonlySet<string> = new Set(["web_search"]);
   const visitorServers = $derived(current.external_tools ?? []);
-  // The organisation's policy can take all of them away. On a live widget,
-  // tools switched on after the last acknowledgement wait for an admin.
   const externalToolsAllowed = $derived(!blockers.includes("external_tools_not_allowed"));
   const reachableServers = $derived(externalToolsAllowed ? visitorServers : []);
   // The template's locks hold only while the widget follows it, so on an
@@ -257,10 +250,6 @@
       completed(saved);
     }}
     onActivate={lifecycle(eneo.widgets.activate)}
-    onAcknowledgeExternalTools={(servers) =>
-      autosave.exclusive(() =>
-        eneo.widgets.acknowledgeExternalTools({ widget: { id: widget.id }, servers })
-      )}
     onPause={lifecycle(eneo.widgets.pause)}
     onArchive={async () => {
       const completed = onArchived;
@@ -600,11 +589,6 @@
                       })}
                     </li>
                   {/each}
-                  {#if reachableServers.length > 0 && blockers.includes("external_tools_unacknowledged")}
-                    <li class="text-secondary">
-                      {m.widget_admin_visitor_access_unacknowledged()}
-                    </li>
-                  {/if}
                   {#each visitorCapabilities as capability (capability)}
                     <li>{m.widget_admin_visitor_access_capability({ name: capability })}</li>
                   {/each}

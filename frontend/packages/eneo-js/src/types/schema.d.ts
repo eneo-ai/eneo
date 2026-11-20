@@ -3808,29 +3808,9 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy, with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete, and with `external_tools_unacknowledged` (listing `servers`) when the assistant reaches tools on MCP servers outside Eneo that no admin has acknowledged.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy, with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
-    delete?: never;
-    options?: never;
-    head?: never;
-    patch?: never;
-    trace?: never;
-  };
-  "/api/v1/widgets/{id}/acknowledge-external-tools/": {
-    parameters: {
-      query?: never;
-      header?: never;
-      path?: never;
-      cookie?: never;
-    };
-    get?: never;
-    put?: never;
-    /**
-     * Acknowledge Widget External Tools
-     * @description Acknowledge that anonymous visitors can make the widget's assistant call its tools on MCP servers outside Eneo, as `external_tools` on the widget lists them. Tenant admins only. Visitor turns reach only acknowledged tools, so on an active widget newly added tools reach visitors from here, without a pause. Replaces any earlier acknowledgement. Fails with `external_tools_changed` (listing the current `servers`) when the body is not the current set.
-     */
-    post: operations["acknowledge_widget_external_tools_api_v1_widgets__id__acknowledge_external_tools__post"];
     delete?: never;
     options?: never;
     head?: never;
@@ -10491,7 +10471,6 @@ export interface components {
       | "widget_policy_updated"
       | "widget_budget_exhausted"
       | "widget_preview_token_minted"
-      | "widget_external_tools_acknowledged"
       | "widget_external_tool_called"
       | "widget_template_created"
       | "widget_template_updated"
@@ -26443,16 +26422,6 @@ export interface components {
        */
       version: string;
     };
-    /** WidgetAcknowledgedServer */
-    WidgetAcknowledgedServer: {
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Tool Ids */
-      tool_ids: string[];
-    };
     /** WidgetAsk */
     WidgetAsk: {
       /** Question */
@@ -26544,30 +26513,6 @@ export interface components {
       name: string;
       /** Tools */
       tools: components["schemas"]["WidgetExternalToolPublic"][];
-    };
-    /** WidgetExternalToolsAcknowledge */
-    WidgetExternalToolsAcknowledge: {
-      /**
-       * Servers
-       * @description The servers and tools the admin was shown, as `external_tools` on the widget lists them. Refused with `external_tools_changed` (listing the current `servers`) when they are not the current set.
-       */
-      servers: components["schemas"]["WidgetAcknowledgedServer"][];
-    };
-    /** WidgetExternalToolsChangedDetail */
-    WidgetExternalToolsChangedDetail: {
-      /**
-       * Code
-       * @constant
-       */
-      code: "external_tools_changed";
-      /** Message */
-      message: string;
-      /** Servers */
-      servers: components["schemas"]["WidgetExternalToolServerPublic"][];
-    };
-    /** WidgetExternalToolsChangedResponse */
-    WidgetExternalToolsChangedResponse: {
-      detail: components["schemas"]["WidgetExternalToolsChangedDetail"];
     };
     /**
      * WidgetFeedback
@@ -26715,11 +26660,6 @@ export interface components {
        * @description Names of the assistant's MCP servers outside Eneo with a tool switched on.
        */
       external_tools: string[];
-      /**
-       * External Tools Acknowledged
-       * @description Whether the admin's acknowledgement covers every tool on the current `external_tools`; true when there are none.
-       */
-      external_tools_acknowledged: boolean;
     };
     /** WidgetOverviewPublic */
     WidgetOverviewPublic: {
@@ -26881,14 +26821,9 @@ export interface components {
       template?: components["schemas"]["WidgetTemplateLinkPublic"] | null;
       /**
        * External Tools
-       * @description The assistant's MCP servers outside Eneo and its tools there. Visitor turns reach only the ones a tenant admin has acknowledged (`POST /widgets/{id}/acknowledge-external-tools/`), and activation needs all of them acknowledged.
+       * @description The assistant’s enabled tools on external MCP servers.
        */
       external_tools: components["schemas"]["WidgetExternalToolServerPublic"][];
-      /**
-       * External Tools Acknowledged
-       * @description Whether the stored acknowledgement covers every tool in `external_tools`; true when there are none. False on an active widget means visitor turns run without the tools not covered.
-       */
-      external_tools_acknowledged: boolean;
       /** Created By User Id */
       created_by_user_id?: string | null;
       /** Activated By User Id */
@@ -42231,77 +42166,6 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["WidgetConflictResponse"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["HTTPValidationError"];
-        };
-      };
-    };
-  };
-  acknowledge_widget_external_tools_api_v1_widgets__id__acknowledge_external_tools__post: {
-    parameters: {
-      query?: never;
-      header?: never;
-      path: {
-        id: string;
-      };
-      cookie?: never;
-    };
-    requestBody: {
-      content: {
-        "application/json": components["schemas"]["WidgetExternalToolsAcknowledge"];
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["WidgetPublic"];
-        };
-      };
-      /** @description Bad Request */
-      400: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Forbidden */
-      403: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description Not Found */
-      404: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["GeneralError"];
-        };
-      };
-      /** @description The assistant's external tools changed. Review the current list. */
-      409: {
-        headers: {
-          [name: string]: unknown;
-        };
-        content: {
-          "application/json": components["schemas"]["WidgetExternalToolsChangedResponse"];
         };
       };
       /** @description Validation Error */
