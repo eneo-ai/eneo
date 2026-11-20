@@ -170,10 +170,12 @@ class JobRepository:
         """
         stmt = sa.update(Jobs).where(Jobs.id == id, Jobs.status == Status.QUEUED)
         if durable_queue_age is not None:
+            # A Redis retry can hold this row across the cutoff. Judge the
+            # claim when its UPDATE starts, including on a PostgreSQL recheck.
             stmt = stmt.where(
                 sa.or_(
                     Jobs.dispatch_envelope.is_(None),
-                    Jobs.created_at > sa.func.clock_timestamp() - durable_queue_age,
+                    Jobs.created_at > sa.func.statement_timestamp() - durable_queue_age,
                 )
             ).values(dispatch_envelope=sa.null(), updated_at=sa.func.clock_timestamp())
         started = await self.delegate.get_model_from_query(

@@ -1152,9 +1152,11 @@ its migrations and the old Scrapy worker cannot run side by side. Returning to
 When upgrading to the release with app run recovery, start the general workers
 before reopening the API. They accept both old and new app jobs. If a new
 submission loses its queue delivery, maintenance offers the same job again
-after five minutes. After two hours an unstarted submission expires. A worker
-that disappears after starting a run leaves it failed on a maintenance pass
-once it has been inactive for five minutes. The user can open the result,
+after five minutes. A worker has two hours from submission to claim the job
+in the database. If it begins the claim in time, it can still start the job
+after a queue retry releases the lock. If a worker disappears after starting
+a run, maintenance marks the run as failed after five minutes of inactivity.
+The user can open the result,
 download any saved transcript and start a new run with the same recording.
 
 ### Take the stopped-writer recovery point

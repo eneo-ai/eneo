@@ -18,6 +18,7 @@ from eneo.ai_models.completion_models.completion_model import (
 from eneo.apps.app_runs.api import app_run_worker
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
 from eneo.apps.app_runs.app_run_dispatch import (
+    APP_RUN_QUEUE_TIMEOUT,
     claim_app_job,
     fail_interrupted_app_runs,
     retry_app_submissions,
@@ -741,6 +742,55 @@ async def test_slow_redispatch_does_not_block_a_different_delivered_job(
         release.set()
         await asyncio.wait_for(maintenance, 10)
     assert retries == [first_id]
+
+
+async def test_worker_claim_keeps_its_deadline_while_redispatch_holds_the_job(
+    queued_recording, app_run_fixture, db_session, monkeypatch
+):
+    job_id, _ = queued_recording
+    late_id, _, _ = await app_run_fixture()
+    async with asyncio.timeout(5):
+        while (
+            await job_manager.get_job_status(job_id, Task.RUN_APP) != JobStatus.queued
+        ):
+            await asyncio.sleep(0.01)
+
+    async with db_session() as worker, sessionmanager.session() as retry:
+        now = await worker.scalar(sa.select(sa.func.clock_timestamp()))
+        deadline = now + timedelta(seconds=3)
+        created_at = deadline - APP_RUN_QUEUE_TIMEOUT
+        async with db_session() as setup:
+            await setup.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == job_id)
+                .values(created_at=created_at, updated_at=now - timedelta(minutes=6))
+            )
+            await setup.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == late_id)
+                .values(
+                    created_at=created_at,
+                    dispatch_envelope={"version": 1, "file_ids": []},
+                )
+            )
+
+        redispatch_started = asyncio.Event()
+
+        async def delayed_redispatch(job_id, params):
+            redispatch_started.set()
+            await retry.execute(sa.select(sa.func.pg_sleep_until(deadline)))
+
+        monkeypatch.setattr(job_manager, "redispatch_app", delayed_redispatch)
+        repo = JobRepository(worker)
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            tasks.create_task(retry_app_submissions(retry))
+            await redispatch_started.wait()
+            claimed = await claim_app_job(repo, job_id)
+
+        assert claimed
+        assert (await worker.get(Jobs, job_id)).updated_at >= deadline
+        # The transaction predates the cutoff, but this second claim does not.
+        assert not await claim_app_job(repo, late_id)
 
 
 async def test_retry_backlog_does_not_hide_interrupted_or_expired_results(
