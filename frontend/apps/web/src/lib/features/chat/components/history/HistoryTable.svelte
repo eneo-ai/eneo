@@ -24,7 +24,7 @@
       value: (item) => item.name ?? "",
       cell: (item) => {
         return Table.renderComponent(Table.ButtonCell, {
-          label: item.value.name ?? m.chat_history_untitled(),
+          label: item.value.name || m.chat_history_untitled(),
           async onclick() {
             const loaded = await chat.loadConversation(item.value);
             if (loaded && onConversationLoaded) {

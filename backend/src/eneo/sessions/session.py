@@ -61,6 +61,8 @@ class SessionInDB(SessionBase, InDB):
     visitor_id: Optional[UUID] = None
     feedback_value: Optional[Literal[-1, 1]] = None
     feedback_text: Optional[str] = None
+    # Read with the row, before its turns: see Sessions.history_revision.
+    history_revision: int = 0
 
     questions: list[Question] = []
     assistant: Optional["AssistantSparse"] = None
@@ -77,7 +79,6 @@ class SessionContext(BaseModel):
     visitor_id: UUID | None = None
     assistant_id: UUID | None
     group_chat_id: UUID | None
-    space_id: UUID | None
     settings: ConversationSettingsState | None
 
 
@@ -90,7 +91,9 @@ class SessionMetadataPublic(SessionUpdateRequest, DateTimeModelMixin):
 
 
 class SessionPublic(SessionMetadataPublic):
-    settings: ConversationSettingsState | None = None
+    settings: ConversationSettingsState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     messages: list[Message]
     feedback: Optional[SessionFeedback] = None
 
@@ -108,7 +111,9 @@ class GroupChatInfo(BaseModel):
 
 
 class AskChatResponse(BaseModel):
-    settings: ConversationSettingsState | None = None
+    settings: ConversationSettingsState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     id: Optional[UUID] = None
     # The protocol helper has always passed these along with the computed
     # pricing-gated completion model, but Pydantic silently dropped them while
@@ -228,6 +233,11 @@ class ViewToolCallRequest(BaseModel):
     """A tool call made by the interactive view (MCP App) of an earlier call."""
 
     view_id: UUID = Field(description="The view shown for the tool call.")
+    automatic_settings_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description="For an automatic call, the conversation settings revision observed by the host. Omit for a user-confirmed call.",
+    )
     name: str = Field(
         min_length=1,
         max_length=256,

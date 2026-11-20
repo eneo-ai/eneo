@@ -76,6 +76,7 @@ import {
   useToolApprovalState
 } from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
+import { ChatSkills } from "./chat-skills";
 import { ChatTools } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
 import {
@@ -257,7 +258,7 @@ type ChatViewProps = {
    * Start a fresh conversation (offered when the context estimate overflows);
    * `prepare` runs only once the user has agreed to leave this one.
    */
-  onNewConversation?: (prepare?: () => void) => void;
+  onNewConversation?: (prepare?: () => void, onStay?: () => void) => void;
   /** The generated title of a new conversation. */
   onTitle?: (title: string) => void;
   /**
@@ -267,8 +268,8 @@ type ChatViewProps = {
   onStartedChange?: (started: boolean) => void;
   /** Interactive model picker shown in the composer (default-assistant only). */
   modelSelector?: ReactNode;
-  /** The personal chat's Skills control, beside Verktyg in the composer. */
-  skills?: ReactNode;
+  /** The personal chat: its Skills share the composer's Verktyg control. */
+  withSkills?: boolean;
   /** Start state for the personal assistant: the assistant selector inside the composer. */
   partnerToken?: ReactNode;
   activity: ActivityState | null;
@@ -312,7 +313,7 @@ function ConversationView({
   onTitle,
   onStartedChange,
   modelSelector,
-  skills,
+  withSkills = false,
   partnerToken,
   activity,
   onActivityChange,
@@ -732,7 +733,7 @@ function ConversationView({
     [panel, setInput]
   );
 
-  const preflight = usePreflight({
+  const { estimate: preflight, pending: preflightPending } = usePreflight({
     question: input,
     revision: partner.preflightRevision ?? partner.completionModel?.id,
     fileIds: attachments.fileIds,
@@ -1220,28 +1221,23 @@ function ConversationView({
       />
     ) : null;
 
-  const tools = (
-    // A save never disables the switches: a disabled control drops keyboard
-    // focus (WCAG 2.4.3), and presses made during a save are saved after it.
-    <fieldset
-      disabled={sending || !resolution || resolution.settings_compatible === false}
-      aria-busy={conversationSettings.busy}
-    >
-      <ChatTools
-        capabilities={toolChoices.capabilities}
-        disabledCapabilities={toolChoices.disabledCapabilities}
-        servers={toolChoices.mcpServers}
-        disabledServerIds={toolChoices.disabledMcpServerIds}
-        autoAcceptTools={toolChoices.autoAcceptTools}
-        modelSupportsTools={toolChoices.modelSupportsTools}
-        onDisabledCapabilitiesChange={toolChoices.setDisabledCapabilities}
-        onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
-        onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
-        onSelectionChange={toolChoices.setTools}
-        supportsToolApproval={partner.type !== "group-chat"}
-      />
-    </fieldset>
-  );
+  const toolsProps = {
+    capabilities: toolChoices.capabilities,
+    disabledCapabilities: toolChoices.disabledCapabilities,
+    servers: toolChoices.mcpServers,
+    disabledServerIds: toolChoices.disabledMcpServerIds,
+    autoAcceptTools: toolChoices.autoAcceptTools,
+    modelSupportsTools: toolChoices.modelSupportsTools,
+    onDisabledCapabilitiesChange: toolChoices.setDisabledCapabilities,
+    onDisabledServerIdsChange: toolChoices.setDisabledMcpServerIds,
+    onAutoAcceptToolsChange: toolChoices.setAutoAcceptTools,
+    onSelectionChange: toolChoices.setTools,
+    supportsToolApproval: partner.type !== "group-chat",
+    // Disabling controls during a save would drop keyboard focus.
+    disabled: sending || !resolution || resolution.settings_compatible === false,
+    busy: conversationSettings.busy
+  };
+  const tools = withSkills ? <ChatSkills tools={toolsProps} /> : <ChatTools {...toolsProps} />;
 
   const composerLabel = t("chat_composer_label", { name: partnerName });
   const composerProps = {
@@ -1260,13 +1256,13 @@ function ConversationView({
     knowledge: partner.knowledge,
     knowledgeMode: partner.knowledgeMode,
     tools,
-    skills,
     mention,
     modelSelector,
     quote: composerQuote,
     contextBar: (
       <ContextUsageBar
         usage={usage}
+        pending={preflightPending}
         modelName={partner.completionModel?.name}
         cumulativeTokens={cumulative.tokens}
         turnCount={cumulative.turns}

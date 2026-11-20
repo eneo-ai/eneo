@@ -21,22 +21,10 @@ This prevents memory exhaustion and ensures reasonable response times.
 Can be overridden via max_records query parameter.
 """
 
-# Retention policy constraints
-MIN_RETENTION_DAYS = 1
-"""Minimum retention period for audit logs (1 day)."""
-
-MAX_RETENTION_DAYS = 2555
-"""Maximum retention period for audit logs (approximately 7 years).
-
-This aligns with common regulatory requirements like GDPR (up to 7 years for
-certain financial and legal records) and Swedish Arkivlagen.
-"""
-
+# Retention policy (its bounds are the shared ones in eneo.data_retention.constants)
 DEFAULT_RETENTION_DAYS = 365
-"""Default retention period for audit logs (1 year).
-
-Complies with Swedish Arkivlagen and GDPR requirements for most data categories.
-"""
+"""The audit log retention an organisation starts with, until an administrator
+changes it on the audit log page. The one definition of this value."""
 
 # Field length constraints
 MAX_DESCRIPTION_LENGTH = 500

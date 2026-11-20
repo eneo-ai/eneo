@@ -5,6 +5,7 @@ from uuid import uuid4
 from sqlalchemy.dialects import postgresql
 
 from eneo.questions.question import MessageFeedback
+from eneo.sessions.session import SessionInDB, SessionUpdate
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
 
 
@@ -20,11 +21,12 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
     await repo._hydrate_sessions(
         [
             SimpleNamespace(
+                id=uuid4(),
                 questions=[
                     SimpleNamespace(
                         info_blobs=blobs, questions_files=[], tool_calls=None
                     )
-                ]
+                ],
             )
         ]
     )
@@ -35,19 +37,22 @@ async def test_hydrates_all_info_blobs_without_file_loader(monkeypatch):
 async def test_update_hydrates_info_blob_availability(monkeypatch):
     blob = MagicMock()
     updated = SimpleNamespace(
+        id=uuid4(),
         questions=[
             SimpleNamespace(info_blobs=[blob], questions_files=[], tool_calls=None)
-        ]
+        ],
     )
     hydrate = AsyncMock()
     monkeypatch.setattr(
         "eneo.sessions.sessions_repo.InfoBlobRepository.hydrate_original_availability",
         hydrate,
     )
+    monkeypatch.setattr(SessionInDB, "model_validate", lambda row: row)
     repo = SessionRepository(AsyncMock())
-    repo.delegate.update = AsyncMock(return_value=updated)
+    repo.session.scalar = AsyncMock(return_value=updated)
+    repo.session.scalars = AsyncMock(return_value=[updated.id])
 
-    result = await repo.update(MagicMock())
+    result = await repo.update(SessionUpdate(id=updated.id, name="renamed"))
 
     assert result is updated
     hydrate.assert_awaited_once_with([blob])
@@ -107,7 +112,7 @@ async def test_owned_chat_partner_returns_none_for_an_inaccessible_session():
 
 
 async def test_context_reads_only_metadata_without_question_or_file_content():
-    session_id, tenant_id, user_id, space_id = uuid4(), uuid4(), uuid4(), uuid4()
+    session_id, tenant_id, user_id = uuid4(), uuid4(), uuid4()
     session = AsyncMock()
     result = MagicMock()
     result.mappings.return_value.one_or_none.return_value = {
@@ -116,14 +121,12 @@ async def test_context_reads_only_metadata_without_question_or_file_content():
         "api_key_id": None,
         "assistant_id": uuid4(),
         "group_chat_id": None,
-        "space_id": space_id,
         "settings": {"revision": 2, "settings": {"require_tool_approval": True}},
     }
     session.execute.return_value = result
     repo = SessionRepository(session)
     context = await repo.get_context(session_id, tenant_id)
     assert context.id == session_id
-    assert context.space_id == space_id
     assert context.settings.revision == 2
     assert context.settings.settings.require_tool_approval is True
     # This query shape is the bounded-read contract: no ORM entity loading,
@@ -131,7 +134,8 @@ async def test_context_reads_only_metadata_without_question_or_file_content():
     statement = session.execute.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)
-    assert "questions" not in sql
+    assert "content_derivations" in sql
+    assert "questions.answer" not in sql
     assert "sessions.name" not in sql
     assert "coalesce(users.tenant_id, api_keys_v2.tenant_id, widgets.tenant_id)" in sql
     assert "help_assistant_runs" in sql

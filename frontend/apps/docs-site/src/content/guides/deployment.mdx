@@ -345,20 +345,20 @@ value and a comment.
       **Glossary:** IdP = Identity Provider (Entra ID, MobilityGuard, Auth0). OIDC = OpenID Connect protocol.
 
       **Choose one mode:**
-      - **Single-Tenant via env vars** (`FEDERATION_ENABLED=false`): Configure `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID`, and `OIDC_CLIENT_SECRET` in `env_backend.env`. Requires a restart to change settings. Simplest for single-organization deployments.
-      - **Federation via API** (`FEDERATION_ENABLED=true`): Configure IdP via sysadmin API. Changes take effect immediately (no restart). Use for multi-tenant deployments OR single-tenant with dynamic configuration.
+      - **Settings stored in Eneo** (`FEDERATION_ENABLED=true`, recommended for new installations): also set `ENCRYPTION_KEY` and `ENEO_SUPER_API_KEY`, restart, and register the IdP once with the sysadmin API (`PUT`, then `/test`). Administrators then change the client ID, client secret and allowed email domains under **Administration › Sign-in (SSO)**, without a restart, and every change is audited. The `OIDC_*` sign-in variables are ignored, never a fallback.
+      - **Settings in the server configuration** (`FEDERATION_ENABLED=false`, the template value): set `OIDC_DISCOVERY_ENDPOINT`, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` in `env_backend.env`, for configuration as code. Every change needs a restart, and administrators cannot change anything in Eneo.
 
-      `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias of `FEDERATION_ENABLED`; the backend logs a warning when it is used.
+      The backend reads `FEDERATION_ENABLED` at startup. Existing installations keep their mode on upgrade; to switch, [move the settings into Eneo](/guides/oidc-federation/single-tenant#move-the-settings-into-eneo). `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias of `FEDERATION_ENABLED`; the backend logs a warning when it is used.
     </Callout>
 
     | Variable | Template value | Description |
     |----------|----------------|-------------|
-    | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for single-tenant mode |
+    | `OIDC_DISCOVERY_ENDPOINT` | empty | IdP discovery URL (`.../.well-known/openid-configuration`) for the server-configuration mode |
     | `OIDC_CLIENT_ID` | empty | OIDC client ID |
     | `OIDC_CLIENT_SECRET` | empty | OIDC client secret |
-    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID required by the global OIDC/MobilityGuard login endpoint |
+    | `OIDC_TENANT_ID` | empty | Eneo tenant UUID for access tokens accepted with `OIDC_RESOURCE_SERVER_ENABLED`; without it the first active tenant |
     | `OIDC_ALLOWED_DOMAINS` | `[]` | Global OIDC email-domain restriction (JSON array); required for JIT account creation |
-    | `FEDERATION_ENABLED` | `false` | Enable per-tenant IdP configuration via API |
+    | `FEDERATION_ENABLED` | `false` | `true` stores the IdP settings in Eneo (recommended for new installations); read at startup |
     | `ENCRYPTION_KEY` | empty | 44-char base64 Fernet key (required for credentials & federation) |
     | `ENEO_SUPER_API_KEY` | empty | Super admin API access (sent as `X-API-Key`) |
 
@@ -396,11 +396,11 @@ value and a comment.
     template seed that policy once and are otherwise ignored.
 
     <Callout type="info">
-      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` (template:
-      `10485760`) as a PostgreSQL, WAL, backup, and process safety ceiling. For
-      an inline session upload, the effective limit is the smaller value; the
-      admin page shows the configured value, effective value, and constraining
-      source.
+      Files stored in PostgreSQL also have a
+      [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql): the most PostgreSQL holds per file. The template no
+      longer sets `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the variable is
+      deprecated, and a value that is still set lowers that limit. The admin
+      page shows the configured value, effective value, and constraining source.
     </Callout>
 
     **Crawler Settings:**
@@ -474,9 +474,8 @@ value and a comment.
     | `JWT_SECRET` | empty | Listed for parity with the backend; the web app does not read it |
 
     OIDC and federation settings are read by the backend, so set them in
-    `env_backend.env`. The frontend template lists the same
-    `OIDC_*`/federation keys so the two files can be kept in sync; the web app
-    itself needs only `PUBLIC_ORIGIN` for the login flow.
+    `env_backend.env`. The web app itself needs only `PUBLIC_ORIGIN` for the
+    login flow.
 
     **Optional:** the web app reads the UI flag `SHOW_HELP_CENTER`, plus
     `HELP_CENTER_URL` and `REQUEST_INTEGRATION_FORM_URL`. The remaining commented lines in
@@ -590,7 +589,7 @@ not match.
 | Owner                                 | Responsibility                                                                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`                 |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, and backups                                                         |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -930,7 +929,7 @@ key or a tenant ID. The container side is covered in
 | Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                                                        |
 | Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                                                                    |
 | Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                                                                  |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower    | Review configured, effective, and source values in Admin > File storage                                                               |
+| Large file uploads fail              | Admin policy or the storage limit is lower              | Review configured, effective, and source values in Admin > File storage                                                               |
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                                                               |
 | Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                                                              |
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)                                          |
@@ -1175,6 +1174,19 @@ For the upgrade to 2.3, also stop every backend and worker replica before
 its migrations and the old Scrapy worker cannot run side by side. Returning to
 2.2 requires restoring the backup taken in the next step.
 
+For the release that empties stored question logs, stop every backend and
+worker of the earlier version before `db-init` as well. Only the new version
+checks for a removal before it stores a log, so a log that an earlier backend or
+worker stores while the migration runs keeps its content. Stop them, then check
+that the second command lists no container:
+
+```bash
+docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env ps --status running backend worker
+```
+
+Stop replicas that run on other hosts the same way.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database
@@ -1347,10 +1359,30 @@ per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
 workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
 backend and every worker.
 
+### Temporary files
+
+Each backend and worker process keeps the files it works on (a file uploaded
+to a conversation before it is stored, audio being converted or transcribed,
+crawled pages and SharePoint files being read) in a directory of its own,
+`eneo-scratch/proc-<id>` under `UPLOAD_TMP_DIR` (default `/tmp`), and removes
+it when it stops. A process that crashes leaves its directory; the next process
+to start on the same volume removes it once the crashed process is gone. At
+start, the crawler worker also removes the `eneo-crawl-*` directories that
+earlier versions left in the system temporary directory; nothing else is
+removed at start. The owner check uses a file lock, so `UPLOAD_TMP_DIR` must be
+a local filesystem; a volume shared between hosts over a network filesystem is
+not supported.
+
+Knowledge and transcription uploads that wait for their job are kept in
+`job-staging/` under `UPLOAD_TMP_DIR` instead. A file there is removed once its
+job has finished, or after an hour when no job holds it.
+
 ---
 
 ## Related Documentation
 
+- [Security at Eneo](/docs/security) - Who is responsible for what, the protections in a deployment and how to check a release
+- [Tool Runtime Security](/docs/tool-runtime-security) - Isolation of model-written code and what the operator provides
 - [AI Provider Configuration](/guides/ai-providers) - Configure AI models and providers
 - [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) - Enterprise SSO setup
 - [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) - Simple SSO setup
@@ -1360,7 +1392,7 @@ backend and every worker.
 - [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
-- [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
+- [Release SBOMs and Attestations](/docs/release-sboms) - Verify shipped image digests and provenance
 
 ## Main host and UI rollback
 

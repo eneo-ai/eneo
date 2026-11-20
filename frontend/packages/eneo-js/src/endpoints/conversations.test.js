@@ -112,6 +112,23 @@ test("saving conversation choices uses the expected revision", async () => {
   });
 });
 
+test("view calls send the revision used for automatic approval and omit it with explicit consent", async () => {
+  const requests = [];
+  const conversations = initConversations({
+    fetch: async (_path, options) => {
+      requests.push(JSON.parse(JSON.stringify(options.requestBody["application/json"])));
+      return { content: [] };
+    }
+  });
+  const view = { sessionId: "session", toolCallId: "call", viewId: "view", name: "read" };
+  await conversations.callToolFromView({ ...view, automaticSettingsRevision: 0 });
+  await conversations.callToolFromView(view);
+  assert.deepEqual(requests, [
+    { view_id: "view", name: "read", arguments: {}, automatic_settings_revision: 0 },
+    { view_id: "view", name: "read", arguments: {} }
+  ]);
+});
+
 test("preflight preserves attachment modes alongside conversation revision", async () => {
   let body;
   const conversations = initConversations({

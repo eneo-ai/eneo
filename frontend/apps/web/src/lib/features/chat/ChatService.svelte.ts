@@ -4,6 +4,7 @@ import {
   rememberConversationDraft,
   resolveConversationDraft
 } from "@eneo/eneo-js/conversations/draft-preferences";
+import { applyConversationSettingsPatch } from "@eneo/eneo-js/conversations/settings";
 import { splitPendingInref } from "./inrefBuffer";
 import { PAGINATION } from "$lib/core/constants";
 import { getAnswerFailureMessage, toastError } from "$lib/core/errors";
@@ -113,34 +114,26 @@ export class ChatService {
   // Changes still being saved, oldest first. Each is shown at once and
   // dropped when its save has landed or failed, so a control never shows a
   // value the server rejected.
-  #pendingUpdates = $state<Partial<ConversationSettings>[]>([]);
+  #pendingUpdates = $state.raw<Partial<ConversationSettings>[]>([]);
   settings = $derived.by(() => {
     const saved = this.#savedSettings;
     if (!saved) return saved;
-    return this.#pendingUpdates.reduce((settings, update) => ({ ...settings, ...update }), saved);
+    return this.#pendingUpdates.reduce(applyConversationSettingsPatch, saved);
   });
   #resolution = $state<ConversationSettingsResolution | null>(null);
   settingsResolution = $derived.by(() => {
     const resolution = this.#resolution;
-    if (!resolution || this.#pendingUpdates.length === 0) return resolution;
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- built and read within one derivation
-    const servers = new Map<string, boolean>();
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- built and read within one derivation
-    const capabilities = new Map<string, boolean>();
-    for (const update of this.#pendingUpdates) {
-      for (const [id, on] of Object.entries(update.mcp_server_states ?? {})) servers.set(id, on);
-      for (const [purpose, on] of Object.entries(update.capability_states ?? {}))
-        capabilities.set(purpose, on);
-    }
+    const choices = this.settings;
+    if (!resolution || !choices || this.#pendingUpdates.length === 0) return resolution;
     return {
       ...resolution,
       mcp_servers: resolution.mcp_servers?.map((server) => ({
         ...server,
-        selected: servers.get(server.id) ?? server.selected
+        selected: choices.mcp_server_states?.[server.id] ?? server.selected
       })),
       capabilities: resolution.capabilities?.map((capability) => ({
         ...capability,
-        selected: capabilities.get(capability.purpose) ?? capability.selected
+        selected: choices.capability_states?.[capability.purpose] ?? capability.selected
       }))
     };
   });
@@ -148,6 +141,8 @@ export class ChatService {
   // the revision the previous one left behind. Null while nothing runs, so
   // the next request starts at once.
   #settingsQueue: Promise<void> | null = null;
+  // A foreground load or save supersedes an availability read from a finished turn.
+  #settingsGeneration = 0;
   #settingsPending = $state(0);
   settingsBusy = $derived(this.#settingsPending > 0);
   settingsError = $state<unknown>(null);
@@ -416,6 +411,7 @@ export class ChatService {
   }
 
   #queueSettings(conversation: Conversation, task: () => Promise<void>): Promise<void> {
+    this.#settingsGeneration += 1;
     this.#settingsPending += 1;
     const previous = this.#settingsQueue;
     const run = (previous ? previous.then(task) : task()).finally(() => {
@@ -497,6 +493,23 @@ export class ChatService {
     });
   }
 
+  async #refreshSettingsAfterTurn(streamGen: number) {
+    if (this.settingsBusy) return;
+    const conversation = this.currentConversation;
+    const generation = this.#settingsGeneration;
+    try {
+      const resolution = await this.#eneo.conversations.resolveSettings({
+        chatPartner: this.#chatPartner,
+        conversation
+      });
+      if (generation !== this.#settingsGeneration || streamGen !== this.#streamGen) return;
+      this.#setResolvedSettings(conversation, resolution);
+      this.settingsRefusal = null;
+    } catch {
+      // The last save still stands. The next write or send checks its revision.
+    }
+  }
+
   async updateSettings(update: Partial<ConversationSettings>) {
     const conversation = this.currentConversation;
     if (!this.settings) {
@@ -516,7 +529,7 @@ export class ChatService {
         if (conversation !== this.currentConversation || this.settingsError) return;
         const saved = this.#savedSettings;
         if (!saved) return;
-        const settings = { ...saved, ...update };
+        const settings = applyConversationSettingsPatch(saved, update);
         const state: ConversationSettingsState | null = conversation.id
           ? await this.#eneo.conversations.updateSettings(
               conversation,
@@ -715,6 +728,7 @@ export class ChatService {
     viewId: string;
     name: string;
     arguments: Record<string, unknown>;
+    automaticSettingsRevision?: number;
   }) {
     const sessionId = this.currentConversation.id;
     if (!sessionId) {
@@ -1479,7 +1493,10 @@ export class ChatService {
 
       if (this.#streamGen === streamGen) {
         this.reloadHistory();
-        if (this.#settingsEnabled && !this.settingsError) await this.loadSettings(true);
+        if (this.#settingsEnabled && !this.settingsError) {
+          if (this.currentConversation.settings) void this.#refreshSettingsAfterTurn(streamGen);
+          else await this.loadSettings(true);
+        }
       }
 
       // The $effect in constructor now handles automatic token calculation

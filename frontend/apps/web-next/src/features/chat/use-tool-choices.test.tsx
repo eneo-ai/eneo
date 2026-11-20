@@ -8,7 +8,7 @@ import { renderInApp, testAppContext } from "@/test/render";
 import {
   ConversationSettingsProvider,
   useConversationSettings,
-  useAutomaticConversationTools
+  useAutomaticToolSettingsRevision
 } from "./conversation-settings";
 import { useToolChoices } from "./use-tool-choices";
 
@@ -103,13 +103,13 @@ function renderChoices(
   let latest: {
     tools: ReturnType<typeof useToolChoices>;
     settings: ReturnType<typeof useConversationSettings>;
-    automatic: boolean;
+    automaticRevision: number | undefined;
   };
   function Probe() {
     latest = {
       tools: useToolChoices(),
       settings: useConversationSettings(),
-      automatic: useAutomaticConversationTools()
+      automaticRevision: useAutomaticToolSettingsRevision()
     };
     return null;
   }
@@ -157,7 +157,7 @@ describe("conversation choices", () => {
     const view = renderChoices(personal, "saved");
     await ready(view);
     expect(view.current.settings.resolution?.settings_compatible).toBe(false);
-    expect(view.current.automatic).toBe(false);
+    expect(view.current.automaticRevision).toBeUndefined();
     await act(async () => view.current.settings.update({ require_tool_approval: false }));
     expect(api.PATCH).not.toHaveBeenCalled();
   });
@@ -204,20 +204,59 @@ describe("conversation choices", () => {
     await act(async () => first.current.tools.setAutoAcceptTools(false));
     await act(async () => first.current.settings.update({ completion_model_id: "model-2" }));
     await ready(first);
-    expect(first.current.automatic).toBe(false);
+    expect(first.current.automaticRevision).toBeUndefined();
     expect(api.PATCH).not.toHaveBeenCalled();
     first.unmount();
     const next = renderChoices();
     await ready(next);
-    expect(next.current.automatic).toBe(false);
+    expect(next.current.automaticRevision).toBeUndefined();
     expect(next.current.settings.resolution?.settings.completion_model_id).toBe("model-2");
     expect(api.PATCH).not.toHaveBeenCalled();
     next.unmount();
     window.localStorage.clear();
     const reset = renderChoices();
     await ready(reset);
-    expect(reset.current.automatic).toBe(true);
+    expect(reset.current.automaticRevision).toBeUndefined();
+    expect(reset.current.tools.autoAcceptTools).toBe(true);
     expect(reset.current.settings.resolution?.settings.completion_model_id).toBe("model-1");
+  });
+
+  it("keeps a new draft's choices when the previous conversation's save finishes after leaving", async () => {
+    const previous = renderChoices(personal, "saved");
+    await ready(previous);
+    let finishPrevious!: () => void;
+    const previousSave = new Promise<void>((resolve) => (finishPrevious = resolve));
+    api.PATCH.mockImplementationOnce(async (_path, { body }) => {
+      await previousSave;
+      saved = { revision: 3, settings: body.settings };
+      return { data: saved, response: new Response() };
+    });
+
+    let saving!: Promise<void>;
+    await act(async () => {
+      saving = previous.current.settings.update({ require_tool_approval: true });
+    });
+    expect(api.PATCH).toHaveBeenCalledTimes(1);
+    previous.unmount();
+    try {
+      const draft = renderChoices();
+      await ready(draft);
+      await act(async () => draft.current.settings.update({ completion_model_id: "model-2" }));
+      await ready(draft);
+      await act(async () => {
+        finishPrevious();
+        await saving;
+      });
+      draft.unmount();
+
+      const next = renderChoices();
+      await ready(next);
+      expect(next.current.settings.resolution?.settings.completion_model_id).toBe("model-2");
+      expect(next.current.settings.resolution?.settings.require_tool_approval).toBe(false);
+    } finally {
+      finishPrevious();
+      await saving;
+    }
   });
 
   it("keeps stored conversation choices authoritative over browser start choices", async () => {
@@ -230,7 +269,7 @@ describe("conversation choices", () => {
     const existing = renderChoices(personal, "saved");
     await ready(existing);
     expect(existing.current.settings.resolution?.settings.completion_model_id).toBe("model-1");
-    expect(existing.current.automatic).toBe(true);
+    expect(existing.current.automaticRevision).toBe(2);
   });
 
   it("offers the personal assistant web search when enabled, permitted and provided", async () => {
@@ -264,11 +303,11 @@ describe("conversation choices", () => {
     const view = renderChoices(personal, "saved");
     await ready(view);
     expect(view.current.tools.mcpServers).toEqual([]);
-    expect(view.current.automatic).toBe(true);
+    expect(view.current.automaticRevision).toBe(2);
     await act(async () => view.current.tools.setAutoAcceptTools(false));
     await ready(view);
     expect(saved.settings.require_tool_approval).toBe(true);
-    expect(view.current.automatic).toBe(false);
+    expect(view.current.automaticRevision).toBeUndefined();
   });
 
   it("keeps dormant choices while the model cannot call tools", async () => {
@@ -302,7 +341,7 @@ describe("conversation choices", () => {
     saved = { revision: 3, settings: { ...defaults, require_tool_approval: true } };
     await act(async () => view.current.settings.update({ reasoning_effort: "high" }));
     expect(view.current.settings.error).toBeTruthy();
-    expect(view.current.automatic).toBe(false);
+    expect(view.current.automaticRevision).toBeUndefined();
     expect(saved.settings.reasoning_effort).toBeUndefined();
     await act(async () => view.current.settings.reload());
     expect(view.current.settings.resolution?.revision).toBe(3);
@@ -366,6 +405,36 @@ describe("conversation choices", () => {
     expect(saved.settings.capability_states).toEqual({ web_search: false, image_generation: true });
     expect(view.current.tools.disabledMcpServerIds.has("diarium")).toBe(true);
     expect(view.current.tools.disabledCapabilities.has("web_search")).toBe(true);
+  });
+
+  it("lets a later All off win over an in-flight switch change", async () => {
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    api.PATCH.mockImplementationOnce(async (_path, { body }) => {
+      await held;
+      saved = { revision: saved.revision + 1, settings: body.settings };
+      return { data: saved, response: new Response() };
+    });
+    expect(view.current.tools.disabledMcpServerIds.has("kalender")).toBe(true);
+    try {
+      await act(async () => view.current.tools.setDisabledMcpServerIds(new Set()));
+      expect(view.current.tools.disabledMcpServerIds.has("kalender")).toBe(false);
+      await act(async () =>
+        view.current.tools.setTools(
+          new Set(["diarium", "kalender"]),
+          new Set(["web_search", "image_generation"])
+        )
+      );
+      expect(view.current.tools.disabledMcpServerIds.has("kalender")).toBe(true);
+    } finally {
+      await act(async () => release());
+    }
+    await ready(view);
+    expect(api.PATCH.mock.calls.map(([, init]) => init.body.expected_revision)).toEqual([2, 3]);
+    expect(saved.settings.mcp_server_states).toEqual({ diarium: false, kalender: false });
+    expect(view.current.tools.disabledMcpServerIds.has("kalender")).toBe(true);
   });
 
   it("clears a reasoning level queued behind a model change to a model without it", async () => {

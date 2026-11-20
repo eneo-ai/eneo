@@ -43,7 +43,9 @@ class WidgetAuthenticationService:
         if widget.status == WidgetStatus.ACTIVE:
             if await self.widget_repo.is_target_published(widget):
                 return
-        elif widget.status != WidgetStatus.ARCHIVED and preview:
+        elif widget.status == WidgetStatus.DRAFT and preview:
+            # Only a draft is previewed. A pause is the kill switch: nothing,
+            # a preview token included, admits the embed page behind it.
             return
         raise WidgetNotActiveError()
 

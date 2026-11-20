@@ -469,7 +469,9 @@ def test_provider_probes_enforce_policy_through_real_authentication(
 
     users = {"member": make_user(), "admin": make_user(Permission.ADMIN)}
 
-    async def token_user(_self: UserService, token: str) -> UserInDB:
+    async def token_user(
+        _self: UserService, token: str, _connection: object = None
+    ) -> UserInDB:
         return users[token]
 
     async def active_state(

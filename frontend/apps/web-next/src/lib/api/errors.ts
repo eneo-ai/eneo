@@ -239,10 +239,19 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   // Icons
   9075: "eneo_error_9075", // ICON_IN_USE
   9076: "eneo_error_9076", // ICON_NOT_ATTACHABLE
+  // OIDC sign-in
+  9077: "eneo_error_9077", // OIDC_LOGIN_UNAVAILABLE
+  9078: "eneo_error_9078", // OIDC_TRANSACTION_INVALID
+  9079: "eneo_error_9079", // OIDC_RESPONSE_NOT_VERIFIED
+  9082: "eneo_error_9082", // IDENTITY_CONFLICT
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Conversation settings
   9065: "eneo_error_9065", // CONVERSATION_SETTINGS_CONFLICT
+  // Removed content
+  9085: "eneo_error_9085", // DERIVED_SOURCE_REMOVED
+  // Retention periods
+  9086: "eneo_error_9086", // RETENTION_EXCEEDS_SPACE
   // Skill lifecycle
   9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
   9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT

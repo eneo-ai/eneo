@@ -12,7 +12,11 @@ from uuid import UUID, uuid4
 import pytest
 
 from eneo.authentication.signed_urls import REDACTED_TOKEN
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConversationSettingsConflictException,
+    NotFoundException,
+)
 from eneo.mcp_apps.application import view_tool_calls
 from eneo.mcp_apps.application.view_tool_calls import (
     MAX_ARGUMENT_BYTES,
@@ -20,6 +24,10 @@ from eneo.mcp_apps.application.view_tool_calls import (
     call_tool_from_view,
 )
 from eneo.questions.question import ToolCallInfo
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 
 VIEW_ID = uuid4()
 SERVER_ID = uuid4()
@@ -124,8 +132,13 @@ def _setup(
     offered: bool = True,
     result: dict | None = None,
     purpose: str = "general",
+    is_bundled: bool = True,
 ):
-    server = SimpleNamespace(id=SERVER_ID, purpose=purpose) if reachable else None
+    server = (
+        SimpleNamespace(id=SERVER_ID, purpose=purpose, is_bundled=is_bundled)
+        if reachable
+        else None
+    )
     proxy = _Proxy(
         {"refresh_weather": "weather__refresh_weather"} if offered else {},
         result
@@ -160,6 +173,7 @@ async def _run(conversation, assistants, factory, **overrides):
         proxy_factory=factory,  # type: ignore[arg-type]
         identity_headers={"X-Eneo-User": "u"},
         tenant_id=TENANT_ID,
+        automatic_settings_revision=overrides.get("automatic_settings_revision"),
     )
 
 
@@ -173,7 +187,7 @@ async def test_view_gets_the_text_and_structured_result_of_its_servers_tool():
     assert result.is_error is False
     assert proxy.called == [("weather__refresh_weather", {"city": "Sundsvall"})]
     assert assistants.asked == [
-        {"assistant_id": ASSISTANT_ID, "mcp_server_id": SERVER_ID}
+        {"assistant_id": ASSISTANT_ID, "mcp_server_id": SERVER_ID, "settings": None}
     ]
     assert factory.created_with["for_view"] is True
     assert proxy.closed
@@ -449,8 +463,6 @@ async def test_view_handle_only_resolves_when_original_call_and_conversation_bot
 
 
 async def test_incompatible_saved_settings_block_view_tool_execution():
-    from eneo.sessions.conversation_settings import ConversationSettingsState
-
     conversation = _conversation([_call()])
     conversation.settings = ConversationSettingsState.model_validate(
         {"revision": 3, "settings": {"future_safety": True}}
@@ -462,51 +474,57 @@ async def test_incompatible_saved_settings_block_view_tool_execution():
     assert factory.created_with == {}
 
 
-async def test_server_switched_off_in_the_conversation_is_refused_from_an_open_view():
-    from eneo.sessions.conversation_settings import (
-        ConversationSettings,
-        ConversationSettingsState,
-    )
-
+@pytest.mark.parametrize("revision,approval", [(0, False), (1, True)])
+async def test_automatic_view_requires_current_revision_and_permission(
+    revision, approval
+):
     conversation = _conversation([_call()])
     conversation.settings = ConversationSettingsState(
-        revision=2,
-        settings=ConversationSettings(mcp_server_states={SERVER_ID: False}),
+        revision=1,
+        settings=ConversationSettings(require_tool_approval=approval),
     )
     assistants, factory, proxy = _setup()
-    with pytest.raises(BadRequestException, match="switched off"):
-        await _run(conversation, assistants, factory)
+    with pytest.raises(ConversationSettingsConflictException):
+        await _run(
+            conversation, assistants, factory, automatic_settings_revision=revision
+        )
     assert proxy.called == []
     assert factory.created_with == {}
+    assert (await _run(conversation, assistants, factory)).text == "13 degrees"
 
+
+async def test_uninitialized_settings_require_confirmation_even_at_revision_zero():
+    conversation = _conversation([_call()])
+    assistants, factory, proxy = _setup()
+    with pytest.raises(ConversationSettingsConflictException):
+        await _run(conversation, assistants, factory, automatic_settings_revision=0)
+    assert proxy.called == []
+    assert factory.created_with == {}
+    assert (await _run(conversation, assistants, factory)).text == "13 degrees"
+
+
+async def test_automatic_view_can_use_matching_saved_revision_without_approval():
+    conversation = _conversation([_call()])
     conversation.settings = ConversationSettingsState(
-        revision=3,
-        settings=ConversationSettings(mcp_server_states={SERVER_ID: True}),
+        revision=4, settings=ConversationSettings()
     )
-    result = await _run(conversation, assistants, factory)
+    assistants, factory, _ = _setup()
+    result = await _run(
+        conversation, assistants, factory, automatic_settings_revision=4
+    )
     assert result.text == "13 degrees"
 
 
-async def test_capability_switched_off_in_the_conversation_is_refused_from_its_view():
-    from eneo.sessions.conversation_settings import (
-        ConversationSettings,
-        ConversationSettingsState,
-    )
-
-    conversation = _conversation([_call()])
+async def test_external_view_tool_requires_confirmation_even_at_matching_saved_revision():
+    call = _call()
+    call.is_bundled = True
+    conversation = _conversation([call])
     conversation.settings = ConversationSettingsState(
-        revision=2,
-        settings=ConversationSettings(capability_states={"file_analysis": False}),
+        revision=4, settings=ConversationSettings()
     )
-    assistants, factory, proxy = _setup(purpose="file_analysis")
-    with pytest.raises(BadRequestException, match="switched off"):
-        await _run(conversation, assistants, factory)
+    assistants, factory, proxy = _setup(is_bundled=False)
+    with pytest.raises(ConversationSettingsConflictException, match="Confirm"):
+        await _run(conversation, assistants, factory, automatic_settings_revision=4)
     assert proxy.called == []
     assert factory.created_with == {}
-
-    # The provider's id never stands in for the capability choice.
-    conversation.settings = ConversationSettingsState(
-        revision=3,
-        settings=ConversationSettings(mcp_server_states={SERVER_ID: False}),
-    )
     assert (await _run(conversation, assistants, factory)).text == "13 degrees"

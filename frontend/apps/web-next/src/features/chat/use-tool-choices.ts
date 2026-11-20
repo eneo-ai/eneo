@@ -58,7 +58,9 @@ export function useToolChoices() {
       const selected = !capabilityDisabled.has(capability.purpose);
       if (selected !== capability.selected) capability_states[capability.purpose] = selected;
     }
-    void update({ mcp_server_states, capability_states });
+    if (Object.keys(mcp_server_states).length || Object.keys(capability_states).length) {
+      void update({ mcp_server_states, capability_states });
+    }
   }
   return {
     modelSupportsTools,

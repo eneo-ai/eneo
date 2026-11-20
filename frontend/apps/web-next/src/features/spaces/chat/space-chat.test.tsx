@@ -4,13 +4,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { awaitPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
   unavailableModel: false,
   lockedModel: false,
+  reasoningConfigurable: true,
   /** A second model to switch to, beside the assistant's own. */
   otherModel: false,
+  extraModel: null as typeof reasoningModel | null,
   space: {
     id: "space-1",
     name: "Upphandling",
@@ -62,17 +65,16 @@ const answer = vi.hoisted(
             completion_model_id: route.unavailableModel ? "removed" : "model-1",
             ...(init?.body as { settings?: object })?.settings
           },
-          reasoning_effort_options: (
-            route.space.default_assistant as typeof personalSpace.default_assistant | null
-          )?.effective_config.reasoning_effort_user_configurable
-            ? ["low", "medium", "high"]
-            : [],
+          reasoning_effort_user_configurable: route.reasoningConfigurable,
+          reasoning_effort_options: route.reasoningConfigurable ? ["low", "medium", "high"] : [],
           default_reasoning_effort: "medium",
-          available_models: route.otherModel ? [reasoningModel, otherModel] : [reasoningModel],
+          available_models: route.otherModel
+            ? [reasoningModel, ...(route.extraModel ? [route.extraModel] : [otherModel])]
+            : [reasoningModel],
           effective_model:
             (init?.body as { settings?: { completion_model_id?: string } })?.settings
               ?.completion_model_id === "model-2"
-              ? otherModel
+              ? (route.extraModel ?? otherModel)
               : reasoningModel,
           model_unavailable: route.unavailableModel,
           model_locked: route.lockedModel
@@ -145,18 +147,23 @@ vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
   api.GET.mockImplementation(forbidden);
 });
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // A save and the choice it carries are module state: let them settle before the next case.
+  await awaitPartnerUpdates();
   api.GET.mockClear();
   api.POST.mockReset();
   api.POST.mockImplementation(answer);
   api.PATCH.mockClear();
   route.unavailableModel = false;
   route.lockedModel = false;
+  route.reasoningConfigurable = true;
   route.otherModel = false;
+  route.extraModel = null;
   route.savedSession = false;
   route.space.personal = false;
   route.space.completion_models = [];
@@ -178,7 +185,7 @@ describe("SpaceChat", () => {
     await screen.findByText("Den sparade modellen är inte tillgänglig");
     const picker = await screen.findByRole("button", { name: /^Chattmodell:/ });
     fireEvent.click(picker);
-    const option = await screen.findByRole("option", { name: /GPT-5/ });
+    const option = await screen.findByRole("radio", { name: /GPT-5/ });
     route.unavailableModel = false;
     fireEvent.click(option);
     await waitFor(() =>
@@ -189,8 +196,9 @@ describe("SpaceChat", () => {
         }
       })
     );
+    // The polite live region can retain its announcement after the notice goes.
     await waitFor(() =>
-      expect(screen.queryByText("Den sparade modellen är inte tillgänglig")).toBeNull()
+      expect(screen.queryByRole("button", { name: "Läs in sparade val" })).toBeNull()
     );
   });
 
@@ -360,15 +368,15 @@ describe("SpaceChat", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("lets the personal assistant's reasoning effort be picked beside the model and keeps it in the conversation draft", async () => {
+  it("lets the personal assistant's reasoning effort be picked in the model picker and keeps it in the conversation draft", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
-    const effort = await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
-    // Beside the model picker, in the composer's send actions.
-    expect(screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })).toBeTruthy();
-    fireEvent.click(effort);
-    fireEvent.click(await screen.findByRole("option", { name: "Hög" }));
+    // One control for both: the level has no button of its own.
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    const levels = within(panel).getByRole("radiogroup", { name: "Resonemangsnivå" });
+    fireEvent.click(within(levels).getByRole("radio", { name: "Hög" }));
 
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
@@ -378,6 +386,72 @@ describe("SpaceChat", () => {
         }
       })
     );
+  });
+
+  it("saves a model and a level chosen together in one update", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.extraModel = { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" };
+    renderRoute("/spaces/personal/chat");
+
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
+    fireEvent.click(within(panel).getByRole("radio", { name: "Hög" }));
+
+    const writes = () =>
+      api.POST.mock.calls.filter(
+        ([path, init]) =>
+          path === "/api/v1/conversations/settings/resolve/" &&
+          (init?.body as { settings?: object })?.settings
+      );
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        [
+          "/api/v1/conversations/settings/resolve/",
+          {
+            body: {
+              assistant_id: "assistant-1",
+              settings: { completion_model_id: "model-2", reasoning_effort: "high" }
+            }
+          }
+        ]
+      ])
+    );
+  });
+
+  it("validates a model change after the earlier Skills save", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    let finishSkills!: () => void;
+    const skills = new Promise<void>((resolve) => (finishSkills = resolve));
+    void queuePartnerUpdate(() => skills);
+    try {
+      renderRoute("/spaces/personal/chat");
+      fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+      const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+      fireEvent.click(within(panel).getByRole("radio", { name: /Claude Sonnet/ }));
+      fireEvent.keyDown(panel, { key: "Escape" });
+      await act(async () => {});
+      const request = [
+        "/api/v1/conversations/settings/resolve/",
+        {
+          body: {
+            assistant_id: "assistant-1",
+            settings: { completion_model_id: "model-2", reasoning_effort: null }
+          }
+        }
+      ] as const;
+      expect(api.POST).not.toHaveBeenCalledWith(...request);
+
+      await act(async () => finishSkills());
+      await waitFor(() => expect(api.POST).toHaveBeenCalledWith(...request));
+      expect(
+        await screen.findByRole("button", { name: "Chattmodell: Claude Sonnet" })
+      ).toBeTruthy();
+    } finally {
+      finishSkills();
+    }
   });
 
   it("puts the personal chat's Skills beside the tools in the composer", async () => {
@@ -395,16 +469,11 @@ describe("SpaceChat", () => {
     Object.assign(route.space, personalSpace);
     route.lockedModel = true;
     renderRoute("/spaces/personal/chat");
-    const field = await screen.findByRole("combobox", { name: "Chattmodell" });
-    expect(field.getAttribute("aria-readonly")).toBe("true");
-    expect(field.textContent).toContain("GPT-5");
-    const description = field
-      .getAttribute("aria-describedby")!
-      .split(" ")
-      .map((id) => document.getElementById(id)?.textContent)
-      .join(" ");
-    expect(description).toContain("Låst av administratör");
-    expect(screen.queryByRole("button", { name: /^Chattmodell:/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    expect(within(panel).getByText("GPT-5")).toBeTruthy();
+    expect(within(panel).getByText("Låst av administratör")).toBeTruthy();
+    expect(within(panel).queryByRole("radiogroup", { name: "Chattmodell" })).toBeNull();
   });
 
   it("starts a new conversation with the picked model from the model-change dialog", async () => {
@@ -417,7 +486,7 @@ describe("SpaceChat", () => {
     expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
 
     fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
-    fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Claude Sonnet/ }));
     const dialog = await screen.findByRole("dialog", {
       name: "Byta modell i den här konversationen?"
     });
@@ -449,14 +518,11 @@ describe("SpaceChat", () => {
   it("holds the model and reasoning still while a question waits for a Skills save", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
-    await screen.findByRole("combobox", { name: "Resonemangsnivå: Medel" });
+    await screen.findByRole("button", { name: "Chattmodell: GPT-5" });
     // Read anew: the waiting question takes the view from the start state to the conversation.
-    const held = () => [
-      screen.getByRole("button", { name: /^Chattmodell: GPT-5/ }).getAttribute("aria-disabled") ===
-        "true",
-      screen.getByRole("combobox", { name: "Resonemangsnivå: Medel" }).closest("fieldset")!.disabled
-    ];
-    expect(held()).toEqual([false, false]);
+    const held = () =>
+      screen.getByRole("button", { name: "Chattmodell: GPT-5" }).getAttribute("aria-disabled");
+    expect(held()).toBeNull();
     let saved!: () => void;
     void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
 
@@ -466,7 +532,7 @@ describe("SpaceChat", () => {
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
 
     // The waiting question already carries the conversation's settings revision.
-    expect(held()).toEqual([true, true]);
+    expect(held()).toBe("true");
     await act(async () => {
       await Promise.resolve();
       saved();
@@ -485,7 +551,7 @@ describe("SpaceChat", () => {
     });
 
     fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
-    fireEvent.click(await screen.findByRole("option", { name: /Claude Sonnet/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Claude Sonnet/ }));
     const dialog = await screen.findByRole("dialog", {
       name: "Byta modell i den här konversationen?"
     });
@@ -507,18 +573,13 @@ describe("SpaceChat", () => {
     expect(stored).not.toContain("model-2");
   });
 
-  it("shows no reasoning picker when the policy keeps the level fixed", async () => {
-    Object.assign(route.space, personalSpace, {
-      default_assistant: {
-        ...personalSpace.default_assistant,
-        effective_config: {
-          ...personalSpace.default_assistant.effective_config,
-          reasoning_effort_user_configurable: false
-        }
-      }
-    });
+  it("uses the settings response to hide reasoning even if the cached assistant allows it", async () => {
+    Object.assign(route.space, personalSpace);
+    route.reasoningConfigurable = false;
     renderRoute("/spaces/personal/chat");
-    await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ });
-    expect(screen.queryByRole("combobox", { name: /^Resonemangsnivå/ })).toBeNull();
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    expect(within(panel).getByRole("radio", { name: /GPT-5/ })).toBeTruthy();
+    expect(within(panel).queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
   });
 });

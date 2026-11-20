@@ -10,6 +10,11 @@ const DEBOUNCE_MS = 400;
 /**
  * Debounced token preflight for the context bar. Stale responses are
  * aborted on key changes and discarded if they arrive after cancellation.
+ *
+ * `estimate` is the current request's answer: null while it is on its way,
+ * after an error (a 429 among them) and when nothing is asked. `pending` is
+ * true only while a request for the current key is scheduled or out, so the
+ * bar can hold its place instead of disappearing and coming back.
  */
 export function usePreflight(request: {
   question: string;
@@ -22,8 +27,10 @@ export function usePreflight(request: {
   settings?: Schema<"ConversationSettings">;
   settingsRevision?: number;
   disabled?: boolean;
-}): PreflightState {
-  const [result, setResult] = useState<{ context: string; value: PreflightState } | null>(null);
+}): { estimate: PreflightState; pending: boolean } {
+  const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
+    null
+  );
   const generation = useRef(0);
 
   const { question, sessionId, assistantId, groupChatId, settings, settingsRevision, disabled } =
@@ -31,9 +38,9 @@ export function usePreflight(request: {
   const revision = request.revision ?? null;
   const settingsKey = JSON.stringify(settings);
   const fileKey = request.fileIds.join(",");
-  // An estimate stays valid while the same conversation context is typed
-  // into; a model, revision or partner change invalidates it at once.
-  const contextKey = JSON.stringify([
+  const key = JSON.stringify([
+    question,
+    fileKey,
     sessionId ?? null,
     assistantId ?? null,
     groupChatId ?? null,
@@ -66,10 +73,13 @@ export function usePreflight(request: {
           })
         );
         if (!controller.signal.aborted && generation.current === current) {
-          setResult({ context: contextKey, value: response });
+          setPreflight({ key, response });
         }
       } catch {
-        // Preflight is best-effort UX; stay silent on errors (incl. 429).
+        // Preflight is best-effort UX; stay silent on errors (incl. 429): no estimate.
+        if (!controller.signal.aborted && generation.current === current) {
+          setPreflight({ key, response: null });
+        }
       }
     }, DEBOUNCE_MS);
 
@@ -87,11 +97,16 @@ export function usePreflight(request: {
     groupChatId,
     settingsKey,
     settingsRevision,
-    contextKey,
+    key,
     shouldRequest
   ]);
 
-  return shouldRequest && result?.context === contextKey ? result.value : null;
+  // A new draft/partner/session must not expose the old estimate while waiting.
+  const answered = preflight?.key === key;
+  return {
+    estimate: shouldRequest && answered ? preflight.response : null,
+    pending: shouldRequest && !answered
+  };
 }
 
 /**

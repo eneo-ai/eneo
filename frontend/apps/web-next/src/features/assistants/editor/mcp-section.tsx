@@ -1,4 +1,8 @@
 import { ChevronRight, LockKeyhole } from "lucide-react";
+import { Banner } from "@astryxdesign/core/Banner";
+import { useQuery } from "@tanstack/react-query";
+import { browserApi } from "@/lib/api/browser";
+import { assistantWidgetStatusQueryOptions } from "@/features/widget/admin/queries";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -38,6 +42,7 @@ const sortedToolKey = (settings: AssistantMcpToolSetting[]) =>
 export function McpSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
+  const widgetStatus = useQuery(assistantWidgetStatusQueryOptions(browserApi, assistant.id));
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("mcp");
 
@@ -125,6 +130,18 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <SettingsGroup title={t("mcp_servers")} description={t("mcp_servers_description")}>
+      {widgetStatus.data?.serves_active_widget ? (
+        <Banner
+          status="warning"
+          title={t("widget_admin_assistant_notice_title")}
+          description={t("widget_admin_assistant_notice_body")}
+        />
+      ) : (
+        <p className="text-ax-text-secondary text-sm">
+          {widgetStatus.isError && `${t("widget_admin_assistant_status_unknown")} `}
+          {t("widget_admin_assistant_notice_conditional")}
+        </p>
+      )}
       <SettingsRow>
         <div className="flex flex-col gap-2">
           {modelBlocksTools && (

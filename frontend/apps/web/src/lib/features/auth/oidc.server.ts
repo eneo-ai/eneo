@@ -6,7 +6,7 @@
 import { readTraceId } from "@eneo/eneo-js";
 import { getBackendUrl } from "$lib/core/environment.server";
 import { setFrontendAuthCookie } from "./auth.server";
-import { LoginError } from "./LoginError";
+import { backendErrorCode, LoginError } from "./LoginError";
 
 export type OidcLoginResult = {
   frontendState: string;
@@ -15,7 +15,11 @@ export type OidcLoginResult = {
 export async function loginWithOidc(
   code: string,
   state: string,
-  fetchFn: typeof fetch = fetch
+  // The secret whose hash initiate stored: only this browser can redeem the code.
+  bindingVerifier: string,
+  fetchFn: typeof fetch = fetch,
+  // The provider's RFC 9207 issuer from the redirect; the backend checks it.
+  iss: string | null = null
 ): Promise<OidcLoginResult | null> {
   const resolvedBackendUrl = getBackendUrl();
   if (!resolvedBackendUrl) {
@@ -39,7 +43,9 @@ export async function loginWithOidc(
       },
       body: JSON.stringify({
         code,
-        state
+        state,
+        ...(iss !== null && { iss }),
+        binding_verifier: bindingVerifier
       })
     });
 
@@ -53,8 +59,12 @@ export async function loginWithOidc(
       }
 
       const traceId = readTraceId(response.headers);
+      // Typed refusals carry `message`; other errors carry `detail`.
       const rawDetail =
-        typeof errorDetails === "object" && errorDetails?.detail ? errorDetails.detail : undefined;
+        typeof errorDetails === "object" && errorDetails
+          ? (errorDetails.detail ?? errorDetails.message ?? undefined)
+          : undefined;
+      const refusal = backendErrorCode(errorDetails);
 
       console.error("[OIDC] Backend callback failed", {
         status: response.status,
@@ -62,6 +72,28 @@ export async function loginWithOidc(
         error: errorDetails,
         traceId
       });
+
+      if (refusal === "oidc_login_unavailable") {
+        throw new LoginError("oidc", "LOGIN_UNAVAILABLE", "", {
+          traceId,
+          statusCode: response.status,
+          rawDetail
+        });
+      }
+      if (refusal === "oidc_transaction_invalid") {
+        throw new LoginError("oidc", "ATTEMPT_EXPIRED", "", {
+          traceId,
+          statusCode: response.status,
+          rawDetail
+        });
+      }
+      if (refusal === "identity_conflict") {
+        throw new LoginError("oidc", "IDENTITY_CONFLICT", "", {
+          traceId,
+          statusCode: response.status,
+          rawDetail
+        });
+      }
 
       // Map status codes to specific error codes and throw LoginError
       if (response.status === 400) {

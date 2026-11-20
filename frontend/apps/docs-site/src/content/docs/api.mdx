@@ -116,7 +116,7 @@ The `429` response also carries a `Retry-After` header. The limit applies to pas
 
 Malformed login input returns `422` with the validation fields `loc`, `type` and a static `msg`; `loc` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "login_unavailable"` and a generic message. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
 
-Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
+Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). This flow returns `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
 If a request carries both an `Authorization: Bearer` token and an API key header, the bearer token is used and the API key is ignored.
 
@@ -152,6 +152,8 @@ POST /api/v1/conversations/
 | `group_chat_id` | UUID | Start a new conversation with a group chat. |
 | `stream` | boolean | Default `false`. `true` returns Server-Sent Events. |
 | `files` | list of `{"id": UUID}` | Previously uploaded files to attach. |
+| `settings` | object | Starting choices for a new conversation. See [Conversation settings](#conversation-settings). |
+| `settings_revision` | integer | Revision observed by the caller continuing an existing conversation. A mismatch returns `409`. |
 | `tools` | object | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise). |
 | `require_tool_approval` | boolean | Default `false`. Requires `stream: true`; not supported for group chats. |
 | `disabled_mcp_server_ids` | list of UUID | MCP servers to switch off for this message. It can only narrow the active set. |
@@ -206,8 +208,15 @@ availability on each new request. Saved choices are never authorization grants.
 restrictions, and request-level approval can require more confirmation. None can
 widen the permissions or undo a saved restriction. A tool call made from an
 interactive view follows the same rule: a server or capability switched off in
-the conversation's settings is rejected even when its view is still open. Group
-chats retain their assistant-routing and model policy; model/reasoning overrides
+the conversation's settings is rejected even when its view is still open.
+When a built-in view runs a tool automatically, its host sends the observed
+`automatic_settings_revision` to the view's `app-calls/` endpoint. A stale
+revision or a requirement for approval returns `409` with error `9065`
+before the tool runs. The host can then ask the user to approve that specific
+call. A call the user explicitly approves omits the revision. External views
+and conversations without a saved revision ask for approval on every call.
+
+Group chats retain their assistant-routing and model policy; model/reasoning overrides
 and tool approval are not supported for them.
 
 Older conversations without settings adopt current defaults when first opened by
@@ -408,6 +417,8 @@ Handle errors by `code` or `eneo_error_code`, never by parsing the English `mess
 
 A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `9041` (`400`) with `code` naming the cause, for example `provider_unreachable` or `provider_rate_limited`, and `details.retryable` saying whether retrying can succeed. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) for the full list.
 
+A conversation that holds content copied from a conversation that was removed answers `410` with `code` `derived_source_removed` and `eneo_error_code` `9085` on its detail, tool result, title, rename, conversation feedback, document, Assistant session, helper run, insight and message logging routes, once the caller passed the usual access checks, including an API key scoped to its Assistant or space; a caller without access gets the usual `403` or `404`. Conversation lists and their `total_count`, recent conversations, exports and insights leave such a conversation out, while aggregate insight statistics count it until it is removed. A follow-up question to it answers `404`. Deleting it works as for any conversation; the Assistant session delete returns it without its name and feedback. See [Copies of removed conversations](/audit-logging#copies-of-removed-conversations).
+
 | Status | Typical meaning |
 |--------|-----------------|
 | 400 | Invalid request, including bad target combinations and policy violations |
@@ -415,6 +426,7 @@ A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `90
 | 403 | Authenticated but not permitted: scope, permission, ownership, or guard failures |
 | 404 | Resource not found or not visible to the caller |
 | 409 | Conflict, for example a file still referenced by a conversation |
+| 410 | The resource exists but can no longer be read, for example a conversation copied from one that was removed |
 | 422 | Request body or query parameters failed validation |
 | 429 | Rate limit exceeded |
 | 503 | A dependency such as Redis or the worker is unavailable |

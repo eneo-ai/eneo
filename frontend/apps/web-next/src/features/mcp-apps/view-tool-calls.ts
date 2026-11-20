@@ -14,11 +14,19 @@ export function callToolFromView(params: {
   viewId: string;
   name: string;
   arguments: Record<string, unknown>;
+  automaticSettingsRevision?: number;
 }): Promise<Schema<"ViewToolCallResultPublic">> {
   return unwrap(
     browserApi.POST("/api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/app-calls/", {
       params: { path: { session_id: params.sessionId, tool_call_id: params.toolCallId } },
-      body: { view_id: params.viewId, name: params.name, arguments: params.arguments }
+      body: {
+        view_id: params.viewId,
+        name: params.name,
+        arguments: params.arguments,
+        ...(params.automaticSettingsRevision === undefined
+          ? {}
+          : { automatic_settings_revision: params.automaticSettingsRevision })
+      }
     })
   );
 }

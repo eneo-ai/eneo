@@ -400,7 +400,7 @@ async def to_response(
                             completion_model=response.completion_model,
                             show_pricing=show_pricing,
                             tools=response.tools,
-                        ).model_dump_json()
+                        ).model_dump_json(exclude={"settings"})
 
         return ClosingEventSourceResponse(
             event_stream(), ping=15, closes=[response.answer]

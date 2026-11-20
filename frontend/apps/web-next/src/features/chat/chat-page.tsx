@@ -85,7 +85,7 @@ export function ChatPage({
   sessionId: urlSessionId = null,
   buildSessionUrl,
   modelSelector,
-  skills,
+  withSkills,
   switcherItems,
   editHref
 }: {
@@ -100,8 +100,8 @@ export function ChatPage({
   buildSessionUrl?: (sessionId: string | null) => string;
   /** Interactive model picker rendered in the composer (default-assistant). */
   modelSelector?: ReactNode;
-  /** The personal chat's Skills control, beside Verktyg in the composer. */
-  skills?: ReactNode;
+  /** The personal chat: its Skills share the composer's Verktyg control. */
+  withSkills?: boolean;
   /** The space's assistants and group chats for the assistant selector. */
   switcherItems?: ChatPartnerSwitcherItem[];
   /** Editor link for partners the user may edit. */
@@ -264,10 +264,10 @@ export function ChatPage({
     setActivity(null);
     updateUrl(null, { ignoreBlocker: true }, nextTab);
   }
-  function confirmConversationChange(action: () => void) {
+  function confirmConversationChange(action: () => void, onStay?: () => void) {
     // The current view owns both document edits and unsent attachments. Keep
     // it mounted until it accepts a reset, including resets at the same URL.
-    if (leaveConfirmation.current) leaveConfirmation.current.confirm(action);
+    if (leaveConfirmation.current) leaveConfirmation.current.confirm(action, onStay);
     else action();
   }
   // Ny konversation opens Chatt, from any view.
@@ -439,15 +439,15 @@ export function ChatPage({
                 initialMessages={active.messages}
                 focusComposerIfLost={active.focusComposer}
                 modelSelector={modelSelector}
-                skills={skills}
+                withSkills={withSkills}
                 partnerToken={partnerToken}
                 // Its controls (the context meter, the model dialog) go with
                 // the view, so the fresh composer takes focus if it was lost.
-                onNewConversation={(prepare) =>
+                onNewConversation={(prepare, onStay) =>
                   confirmConversationChange(() => {
                     prepare?.();
                     startConversation(true);
-                  })
+                  }, onStay)
                 }
                 onStartedChange={(value) =>
                   setActive((current) =>

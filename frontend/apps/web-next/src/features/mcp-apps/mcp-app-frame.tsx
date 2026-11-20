@@ -1,3 +1,4 @@
+import { runViewToolWithApproval } from "@eneo/eneo-js/conversations/view-tool-approval";
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { useQueryClient } from "@tanstack/react-query";
@@ -5,7 +6,7 @@ import { useTheme } from "next-themes";
 import { useLocale, useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSidePanel } from "@/features/chat/side-panel/use-side-panel";
-import { useAutomaticConversationTools } from "@/features/chat/conversation-settings";
+import { useAutomaticToolSettingsRevision } from "@/features/chat/conversation-settings";
 import { cn } from "@/lib/utils";
 import { buildAllowAttribute as sdkAllowAttribute } from "@modelcontextprotocol/ext-apps/app-bridge";
 import { McpAppBridge, type McpAppToolResult, type McpAppToolState } from "./bridge";
@@ -112,6 +113,14 @@ export function McpAppFrame({
   const [enlargeable, setEnlargeable] = useState(false);
   const [leftApprovedView, setLeftApprovedView] = useState(false);
   const [asking, setAsking] = useState<Decision<{ name: string; args: unknown }> | null>(null);
+  const pendingToolDecision = useRef<((allow: boolean) => void) | null>(null);
+  useEffect(
+    () => () => {
+      pendingToolDecision.current?.(false);
+      pendingToolDecision.current = null;
+    },
+    []
+  );
   const [link_, setLink] = useState<Decision<string> | null>(null);
   // Fixed for the frame's lifetime: the attribute only matters before the
   // first load, and Firefox reloads a frame whose `loading` changes to lazy,
@@ -120,10 +129,26 @@ export function McpAppFrame({
 
   // The bridge's callbacks read the newest props and store through this ref,
   // written after every commit.
-  const automaticTools = useAutomaticConversationTools();
-  const latest = useRef({ call, live, panel, sessionId, displayMode, locale, automaticTools });
+  const automaticSettingsRevision = useAutomaticToolSettingsRevision();
+  const latest = useRef({
+    call,
+    live,
+    panel,
+    sessionId,
+    displayMode,
+    locale,
+    automaticSettingsRevision
+  });
   useEffect(() => {
-    latest.current = { call, live, panel, sessionId, displayMode, locale, automaticTools };
+    latest.current = {
+      call,
+      live,
+      panel,
+      sessionId,
+      displayMode,
+      locale,
+      automaticSettingsRevision
+    };
   });
 
   // What the view is told about its call: the arguments while the model
@@ -218,51 +243,60 @@ export function McpAppFrame({
     [t]
   );
 
-  // External code gets consent for each concrete call, never a server-wide
-  // grant inherited from the model's automatic-tool preference.
-  const permissionToRunTools = useCallback(
-    (name: string, args: Record<string, unknown>) =>
-      new Promise<boolean>((resolve) => {
-        if (latest.current.call.isBundled && latest.current.automaticTools) return resolve(true);
-        setAsking((current) => {
-          // Concurrent requests cannot share the approval of another call.
-          if (current) {
-            resolve(false);
-            return current;
-          }
-          return {
-            payload: { name, args },
-            decide: (allow) => {
-              setAsking(null);
-              resolve(allow);
-            }
-          };
-        });
-      }),
-    []
-  );
+  // External views get consent for each concrete call. A bundled view can
+  // use the saved preference, verified by the server at the same revision.
+  const askPermission = useCallback((name: string, args: Record<string, unknown>) => {
+    if (!frameRef.current || pendingToolDecision.current) return Promise.resolve(false);
+    return new Promise<boolean>((resolve) => {
+      pendingToolDecision.current = resolve;
+      setAsking({
+        payload: { name, args },
+        decide: (allow) => {
+          pendingToolDecision.current = null;
+          setAsking(null);
+          resolve(allow);
+        }
+      });
+    });
+  }, []);
 
   const callTool = useCallback(
     async (name: string, args: Record<string, unknown>): Promise<McpAppToolResult> => {
-      if (!(await permissionToRunTools(name, args))) {
-        throw new Error("The user did not allow the tool call");
-      }
-      const { sessionId, call } = latest.current;
+      const { sessionId, call, automaticSettingsRevision } = latest.current;
       if (!sessionId) throw new Error("The conversation is not saved yet");
-      const result = await callToolFromView({
+      const frame = frameRef.current;
+      const bridge = bridgeRef.current;
+      if (!frame || !bridge) throw new Error("The view is no longer open");
+      const stillHere = () =>
+        bridgeRef.current === bridge &&
+        frameRef.current === frame &&
+        latest.current.sessionId === sessionId &&
+        latest.current.call.toolCallId === call.toolCallId &&
+        latest.current.call.view.viewId === call.view.viewId;
+      const request = {
         sessionId,
         toolCallId: call.toolCallId,
         viewId: call.view.viewId,
         name,
         arguments: args
+      };
+
+      const result = await runViewToolWithApproval({
+        automaticRevision: call.isBundled ? automaticSettingsRevision : undefined,
+        invoke: (revision) => {
+          if (!stillHere()) throw new Error("The view is no longer open");
+          return callToolFromView({ ...request, automaticSettingsRevision: revision });
+        },
+        confirm: async () => stillHere() && (await askPermission(name, args)) && stillHere()
       });
+
       return {
         content: (result.content ?? []).map((block) => ({ type: "text", text: block.text })),
         ...(result.structured_content ? { structuredContent: result.structured_content } : {}),
         ...(result.is_error ? { isError: true } : {})
       };
     },
-    [permissionToRunTools]
+    [askPermission]
   );
 
   // The frame that has loaded the approved view. A frame can navigate itself
@@ -270,6 +304,9 @@ export function McpAppFrame({
   // in the same window; such a page is never given the bridge.
   const attachBridge = (iframe: HTMLIFrameElement) => {
     bridgeRef.current?.destroy();
+    pendingToolDecision.current?.(false);
+    pendingToolDecision.current = null;
+    setAsking(null);
     setEnlargeable(false);
     if (loadedFrame.current === iframe) {
       bridgeRef.current = null;

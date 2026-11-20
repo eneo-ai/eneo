@@ -7,6 +7,7 @@ import sqlalchemy as sa
 from pydantic import TypeAdapter
 from sqlalchemy.orm import selectinload, undefer
 
+from eneo.data_retention.derivations import copy_session_valid, readable_sessions
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
@@ -26,6 +27,7 @@ from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import File
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.logging.logging import LoggingDetails
 from eneo.questions.question import Question, QuestionAdd
 from eneo.questions.question_file_projection import attach_question_files
 from eneo.skills.domain.skill import (
@@ -35,7 +37,6 @@ from eneo.skills.domain.skill import (
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import McpToolReference
-    from eneo.logging.logging import LoggingDetails
     from eneo.questions.question import ToolCallInfo
 
 
@@ -87,6 +88,22 @@ class QuestionRepository:
             loader=self.file_content_loader,
         )
         return questions
+
+    async def _hydrate_readable(self, questions: list[Question]) -> list[Question]:
+        """``_hydrate_questions`` for content reads: details, files and
+        references load in later statements, so only the questions whose
+        conversation is still readable afterwards are returned (see
+        ``readable_sessions``). Questions outside a conversation stay."""
+        hydrated = await self._hydrate_questions(questions)
+        readable = await readable_sessions(
+            self.session,
+            {question.session_id for question in hydrated if question.session_id},
+        )
+        return [
+            question
+            for question in hydrated
+            if question.session_id is None or question.session_id in readable
+        ]
 
     def _get_options(self):
         return [
@@ -212,11 +229,25 @@ class QuestionRepository:
             sa.select(Questions).where(
                 Questions.id == id,
                 Questions.tenant_id == tenant_id,
+                copy_session_valid(Questions.session_id.expression),
             )
         )
         if question is None:
             return None
-        return (await self._hydrate_questions([question]))[0]
+        readable = await self._hydrate_readable([question])
+        return readable[0] if readable else None
+
+    async def in_removed_copy(self, *, id: UUID, tenant_id: UUID) -> bool:
+        """Whether this question is in a copy whose source was removed: why
+        ``get_for_tenant`` misses it. A fact for callers that already
+        authorized the reader."""
+        return bool(
+            await self.session.scalar(
+                sa.select(~copy_session_valid(Questions.session_id.expression)).where(
+                    Questions.id == id, Questions.tenant_id == tenant_id
+                )
+            )
+        )
 
     async def get_session_partner(
         self,
@@ -253,12 +284,14 @@ class QuestionRepository:
             sa.select(Questions)
             .where(Questions.id == id)
             .where(Questions.tenant_id == tenant_id)
+            .where(copy_session_valid(Questions.session_id.expression))
             .options(undefer(Questions.skill_activation_data))
         )
         question = await self.delegate.get_model_from_query(stmt)
         if question is None:
             return None
-        return (await self._hydrate_questions([question]))[0]
+        readable = await self._hydrate_readable([question])
+        return readable[0] if readable else None
 
     async def get_skill_activation_evidence(
         self,
@@ -303,11 +336,12 @@ class QuestionRepository:
         reasoning: str | None = None,
         info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
         generated_files: list[File] | None = None,
-        logging_details: "LoggingDetails | None" = None,
+        logging_details: LoggingDetails | None = None,
+        history_revision: int | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidence | None = None,
-    ) -> None:
+    ) -> bool:
         """Update an existing placeholder Question row with the final or partial answer.
 
         Used both for normal stream completion (full answer + token counts + late-bound rows)
@@ -315,17 +349,32 @@ class QuestionRepository:
 
         tenant_id is required in the WHERE clause to defend against cross-tenant writes if a
         caller ever supplies a stale question_id.
+
+        Returns whether the question was still there; nothing is stored when it
+        was removed. A log is stored only with its question. `history_revision`
+        is the conversation's revision when the answer's history was read: if
+        it changed, a turn the answer was generated from was removed, and the
+        log is stored with its request body cleared.
         """
-        logging_details_id: object = None
         if logging_details is not None:
-            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
-                sa.insert(logging_table)
-                .values(**logging_details.model_dump())
-                .returning(logging_table)
+            if history_revision is None:
+                raise ValueError("A logged answer needs the revision of its history")
+            # Locked before the question, in the order a conversation's DELETE
+            # takes them; retention, which holds its question first, does not
+            # wait for it. A removal in the conversation raises the revision:
+            # it waits for this transaction and then clears the log stored
+            # here, or this one waits for it and stores the log cleared.
+            revision = await self.session.scalar(
+                sa.select(Sessions.history_revision)
+                .join(Questions, Questions.session_id == Sessions.id)
+                .where(Questions.id == question_id)
+                .where(Questions.tenant_id == tenant_id)
+                .with_for_update(read=True, of=Sessions)
             )
-            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
-            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
-            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            if revision is None:
+                return False
+            if revision != history_revision:
+                logging_details = LoggingDetails(model_kwargs={})
 
         update_values: dict[str, Any] = {"answer": answer}
         if num_tokens_question is not None:
@@ -347,8 +396,6 @@ class QuestionRepository:
             ]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
-        if logging_details_id is not None:
-            update_values["logging_details_id"] = logging_details_id
         update_values.update(
             self._serialize_skill_runtime_state(
                 skill_provenance=skill_provenance,
@@ -361,8 +408,25 @@ class QuestionRepository:
             .where(Questions.id == question_id)
             .where(Questions.tenant_id == tenant_id)
             .values(**update_values)
+            .returning(Questions.id)
         )
-        await self.session.execute(update_stmt)
+        if (await self.session.execute(update_stmt)).one_or_none() is None:
+            return False
+
+        if logging_details is not None:
+            log_stmt = (  # pyright: ignore[reportUnknownVariableType]  # logging_table is imperatively mapped
+                sa.insert(logging_table)
+                .values(**logging_details.model_dump())
+                .returning(logging_table)
+            )
+            log_result = await self.session.execute(log_stmt)  # pyright: ignore[reportUnknownArgumentType, reportUnknownVariableType]
+            logging_row = log_result.scalar_one()  # pyright: ignore[reportUnknownVariableType]
+            logging_details_id = logging_row.id  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            await self.session.execute(
+                sa.update(Questions)
+                .where(Questions.id == question_id)
+                .values(logging_details_id=logging_details_id)
+            )
 
         if info_blob_chunks:
             await self._add_references(
@@ -380,6 +444,7 @@ class QuestionRepository:
                 mcp_tool_references=mcp_tool_references,
                 question_id=question_id,
             )
+        return True
 
     @staticmethod
     def _serialize_skill_runtime_state(
@@ -531,10 +596,11 @@ class QuestionRepository:
                     )
                 )
             )
+            .where(copy_session_valid(Sessions.id.expression))
             .filter(Questions.created_at >= start_date)
             .filter(Questions.created_at <= end_date)
             .order_by(Questions.created_at)
         )
 
         questions = await self.delegate.get_models_from_query(stmt)
-        return await self._hydrate_questions(questions)
+        return await self._hydrate_readable(questions)

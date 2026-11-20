@@ -122,7 +122,6 @@
 
   function persistMcpServerSelection(disabledServerIds: ReadonlySet<string>) {
     const update = toolSelectionUpdate(
-      chat.settings,
       [...generalMcpServers, ...capabilityServers],
       disabledServerIds
     );

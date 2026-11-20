@@ -202,6 +202,8 @@ export type ModuleInstallation = components["schemas"]["ModuleInstallation"];
 export type ModuleInstallationConfig = components["schemas"]["ModuleInstallationConfig"];
 export type ModuleInstallationChange = components["schemas"]["ModuleInstallationChange"];
 export type ModuleInstallationList = components["schemas"]["PaginatedResponse_ModuleInstallation_"];
+export type FederationAdminView = components["schemas"]["TenantFederationAdminView"];
+export type FederationAdminPatch = components["schemas"]["TenantAdminFederationPatch"];
 
 export type CursorPaginated<T> = {
   items: T[];

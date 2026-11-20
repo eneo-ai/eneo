@@ -168,12 +168,12 @@ async def test_empty_sessions_do_not_starve_due_history(
     """Mutant: the empty-session scan runs inside the conversation task again; on
     its first-place date it spends a small budget before any question is due."""
     real_now = datetime.now(timezone.utc)
-    # The date on which a three-step rotation (questions, app runs, sessions)
-    # would put the session scan first.
+    # A date on which questions go first among the task's three steps, and on
+    # which a session scan appended as a fourth step would go first.
     now = next(
         real_now + timedelta(days=offset)
-        for offset in range(3)
-        if (real_now + timedelta(days=offset)).date().toordinal() % 3 == 2
+        for offset in range(12)
+        if (real_now + timedelta(days=offset)).date().toordinal() % 12 == 3
     )
     assistant = await _assistant(
         retention_session,
@@ -260,7 +260,9 @@ async def test_history_leaves_a_held_session_to_the_sweep(
     retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
 ):
     """Mutant: the session lock waits (or fails the unit) instead of skipping, so
-    a live chat holding its session blocks the question's deletion."""
+    a live chat holding its session blocks the question's deletion. A chat
+    adding its next question holds the session's key share until it commits;
+    the removal's revision update does not wait for it, the release would."""
     old = datetime.now(timezone.utc) - timedelta(days=60)
     assistant = await _assistant(
         retention_session,
@@ -281,7 +283,9 @@ async def test_history_leaves_a_held_session_to_the_sweep(
 
     async with sessionmanager.session() as chat, chat.begin():
         await chat.execute(
-            sa.select(Sessions.id).where(Sessions.id == held_id).with_for_update()
+            sa.select(Sessions.id)
+            .where(Sessions.id == held_id)
+            .with_for_update(read=True, key_share=True)
         )
         report = await run_registered_retention(retention_session)
 

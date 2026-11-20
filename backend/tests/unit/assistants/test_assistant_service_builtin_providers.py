@@ -45,8 +45,13 @@ async def test_builtin_provider_is_authenticated_with_a_token_naming_its_row():
     assert authenticated.http_auth_config_schema == {"token": "scoped-token"}
     assert authenticated.http_auth_type == INTERNAL_AUTH_TYPE
     assert authenticated.id == server.id
+    # Derived from the request's credential: in a browser session the token
+    # names that session.
     service.auth_service.create_scoped_mcp_token.assert_called_once_with(
-        service.user, assistant_id=assistant_id, mcp_server_id=server.id
+        service.user,
+        assistant_id=assistant_id,
+        mcp_server_id=server.id,
+        derived_from=service.user.credential,
     )
 
 

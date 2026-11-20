@@ -374,13 +374,9 @@ complete history without hand-merging.
 ## Checks in CI
 
 - **Pull requests.** `User-facing section` (`.github/workflows/user-facing.yml`)
-  reruns on every body edit. The same reusable workflow is also called from
-  `ci.yml`, so the existing required **CI** check covers it during rollout.
-  Once the standalone check is added to the develop ruleset's required
-  status checks, remove the `user-facing` caller from `ci.yml` together with
-  its entry in the `ci` job's `needs`, the `user-facing` entry of
-  `expected_jobs` in `.github/scripts/ci-change-scope.mjs`, and the
-  references in `.github/scripts/ci-contract.test.mjs`.
+  is a required status check in the develop ruleset and reruns on every body
+  edit, so fixing the section clears it without a new push. It is not part of
+  **CI**, which does not rerun on body edits.
   Merge-queue candidates report it as skipped; each PR was checked before it
   entered the queue.
 - **Frontend job.** `scripts/check_whats_new.py --branch <target>` against

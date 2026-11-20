@@ -66,7 +66,6 @@ from eneo.internal_mcp import (
     resolve_internal_mcp_availability,
 )
 from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
-from eneo.logging.logging import LoggingDetails
 from eneo.main.exceptions import (
     BadRequestException,
     FileTooLargeException,
@@ -113,7 +112,10 @@ from eneo.roles.permissions import (
 )
 from eneo.services.service import DatastoreResult
 from eneo.services.service_repo import ServiceRepository
-from eneo.sessions.conversation_settings import TOOL_APPROVAL_REQUIRES_STREAMING
+from eneo.sessions.conversation_settings import (
+    TOOL_APPROVAL_REQUIRES_STREAMING,
+    ConversationSettings,
+)
 from eneo.skills.domain.personal_chat_skill_layers import (
     PersonalSkillLayerSave,
     assert_personal_skill_layer_save,
@@ -512,7 +514,10 @@ class AssistantService:
         if not is_builtin_provider(server.http_auth_type):
             return server
         token = self.auth_service.create_scoped_mcp_token(
-            self.user, assistant_id=assistant_id, mcp_server_id=server.id
+            self.user,
+            assistant_id=assistant_id,
+            mcp_server_id=server.id,
+            derived_from=self.user.credential,
         )
         authenticated = copy.copy(server)
         authenticated.http_auth_config_schema = {"token": token}
@@ -557,7 +562,7 @@ class AssistantService:
 
     async def _servers_a_turn_reaches(
         self, assistant_id: UUID
-    ) -> "tuple[Assistant, list[MCPServer]]":
+    ) -> "tuple[Assistant, list[MCPServer], EffectiveConfig | None]":
         """The assistant and the servers one of its turns would be given now.
 
         Its own servers within the space's security classification, and the
@@ -590,10 +595,18 @@ class AssistantService:
                 space_security_classification=space.security_classification,
             )
             servers = [*resolution.capability_servers, *resolution.general_servers]
-        return assistant, [server for server in servers if server.is_enabled]
+        return (
+            assistant,
+            [server for server in servers if server.is_enabled],
+            effective_config,
+        )
 
     async def mcp_server_for_view(
-        self, *, assistant_id: UUID, mcp_server_id: UUID
+        self,
+        *,
+        assistant_id: UUID,
+        mcp_server_id: UUID,
+        settings: ConversationSettings | None = None,
     ) -> "MCPServer | None":
         """The server as a turn of this assistant would reach it now, or None.
 
@@ -603,12 +616,25 @@ class AssistantService:
         assistant has), within the space's security classification, and it is
         returned with the same tool enablement a turn would see.
         """
-        assistant, servers = await self._servers_a_turn_reaches(assistant_id)
+        assistant, servers, config = await self._servers_a_turn_reaches(assistant_id)
         server = next(
             (server for server in servers if server.id == mcp_server_id), None
         )
         if server is None:
             return None
+        choices = settings or ConversationSettings()
+        if server.purpose == "general":
+            switched_off = server.id in choices.disabled_servers(
+                config.default_disabled_mcp_server_ids if config else []
+            )
+        else:
+            switched_off = server.purpose in choices.disabled_capabilities(
+                config.default_disabled_capabilities if config else []
+            )
+        if switched_off:
+            raise BadRequestException(
+                "This tool is switched off in the conversation's settings."
+            )
         server = await self._with_builtin_provider_token(
             server, assistant_id=assistant.id
         )
@@ -623,7 +649,7 @@ class AssistantService:
         calls would reach: none when the assistant lacks the capability, the
         user may not use it, or no provider is active.
         """
-        assistant, servers = await self._servers_a_turn_reaches(assistant_id)
+        assistant, servers, _ = await self._servers_a_turn_reaches(assistant_id)
         server = next((server for server in servers if server.purpose == purpose), None)
         if server is None:
             return None
@@ -3322,8 +3348,8 @@ class AssistantService:
                         completion_model=cast("AICompletionModel", completion_model),
                         info_blob_chunks=reference_chunks,
                         generated_files=generated_files,
-                        logging_details=response.extended_logging
-                        or LoggingDetails(model_kwargs={}),
+                        logging_details=response.extended_logging,
+                        history_revision=session.history_revision,
                         tool_calls=tool_calls if tool_calls else None,
                         mcp_tool_references=filter_mcp_tool_references(
                             response_string=response_string,
@@ -3565,8 +3591,8 @@ class AssistantService:
                 generated_files=generated_files,
                 completion_model=cast("AICompletionModel", completion_model),
                 info_blob_chunks=reference_chunks,
-                logging_details=response.extended_logging
-                or LoggingDetails(model_kwargs={}),
+                logging_details=response.extended_logging,
+                history_revision=session.history_revision,
                 tool_calls=non_streaming_tool_calls or None,
                 mcp_tool_references=non_streaming_mcp_refs or None,
                 reasoning=final_reasoning,
@@ -3977,6 +4003,10 @@ class AssistantService:
             ]
 
         if self.user.active_widget is not None:
+            # Use the assistant’s current tools within the organisation’s widget policy.
+            mcp_servers_override = self.user.active_widget.reachable_servers(
+                mcp_servers_override
+            )
             await self._inline_attachments_for_visitor(
                 assistant_to_ask, effective_completion_model, skill_composition.prompt
             )
@@ -4056,6 +4086,7 @@ class AssistantService:
                     self.user,
                     assistant_id=prepared.assistant_to_ask.id,
                     table_tools=table_tools_attached,
+                    derived_from=self.user.credential,
                 )
             return scoped_token
 

@@ -32,7 +32,11 @@ from eneo.files.model_file_references import (
     resolve_file_handles,
 )
 from eneo.main.config import get_settings
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConversationSettingsConflictException,
+    NotFoundException,
+)
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -41,13 +45,10 @@ if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
     )
-    from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
-    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
         MCPProxySessionFactory,
     )
     from eneo.questions.question import ToolCallInfo
-    from eneo.sessions.conversation_settings import ConversationSettings
     from eneo.sessions.session import SessionInDB
 
 logger = get_logger(__name__)
@@ -58,18 +59,6 @@ MAX_ARGUMENT_BYTES = 1024 * 1024
 # One answer for every reason a view may not make a call, so a view learns
 # nothing about tools and servers it is not offered.
 _NOT_FOUND = "The view cannot call this tool"
-# The one exception names a choice the user made in this conversation.
-_SERVER_SWITCHED_OFF = "This tool is switched off in the conversation's settings."
-
-
-def _switched_off(settings: "ConversationSettings", server: "MCPServer") -> bool:
-    """A general server is chosen by id; a capability provider by its purpose."""
-    if server.purpose == "general":
-        return settings.mcp_server_states.get(server.id) is False
-    return (
-        settings.capability_states.get(cast("CapabilityPurpose", server.purpose))
-        is False
-    )
 
 
 class ViewCallNotReady(Exception):
@@ -194,10 +183,21 @@ async def call_tool_from_view(
     proxy_factory: "MCPProxySessionFactory",
     identity_headers: dict[str, str],
     tenant_id: UUID,
+    automatic_settings_revision: int | None = None,
 ) -> ViewToolCallResult:
     """Run ``name`` on the server of the view shown for ``tool_call_id``."""
     if conversation.settings is not None:
         conversation.settings.require_supported()
+    if automatic_settings_revision is not None:
+        state = conversation.settings
+        if (
+            state is None
+            or automatic_settings_revision != state.revision
+            or state.settings.require_tool_approval
+        ):
+            raise ConversationSettingsConflictException(
+                "Review the current conversation settings before running this tool."
+            )
     found = originating_call(conversation, tool_call_id, view_id)
     if found is None:
         raise NotFoundException(_NOT_FOUND)
@@ -215,17 +215,12 @@ async def call_tool_from_view(
         raise BadRequestException("The tool arguments are too large")
 
     server = await assistant_service.mcp_server_for_view(
-        assistant_id=assistant_id, mcp_server_id=mcp_server_id
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+        settings=conversation.settings.settings if conversation.settings else None,
     )
     if server is None:
         raise NotFoundException(_NOT_FOUND)
-    if conversation.settings is not None and _switched_off(
-        conversation.settings.settings, server
-    ):
-        # The view was opened while the tool was on; the saved choice
-        # narrows what the conversation may run from now on.
-        raise BadRequestException(_SERVER_SWITCHED_OFF)
-
     # A historical call is not an enduring grant. Check the current pin and
     # originating tool on every request, including already-open browser views.
     view = await app_view_repo.get_for_tenant(
@@ -233,6 +228,11 @@ async def call_tool_from_view(
     )
     if view is None or view.mcp_server_id != server.id:
         raise NotFoundException(_NOT_FOUND)
+
+    if automatic_settings_revision is not None and not server.is_bundled:
+        raise ConversationSettingsConflictException(
+            "Confirm this external tool call before running it."
+        )
 
     arguments, signed_files = await _with_signed_file_links(
         arguments,

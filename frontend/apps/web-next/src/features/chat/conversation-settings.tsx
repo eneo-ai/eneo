@@ -1,9 +1,18 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode
+} from "react";
 import {
   readConversationDraft,
   rememberConversationDraft,
   resolveConversationDraft
 } from "@eneo/eneo-js/conversations/draft-preferences";
+import { applyConversationSettingsPatch } from "@eneo/eneo-js/conversations/settings";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
@@ -16,11 +25,17 @@ export const PERSONAL_SKILLS_REJECTED = 9080;
 type Settings = Schema<"ConversationSettings">;
 type Resolution = Schema<"ConversationSettingsResolution">;
 type State = Schema<"ConversationSettingsState">;
+type ToolChanges = Pick<
+  Settings,
+  "mcp_server_states" | "capability_states" | "require_tool_approval"
+>;
 
 /** The settings as the last read or save left them, for work that runs between renders. */
 export type ConversationSettingsSnapshot = { resolution: Resolution | null; error: unknown };
 
 type ConversationSettingsContext = {
+  /** Identifies this conversation across composer remounts. */
+  choiceScope: string;
   resolution: Resolution | null;
   busy: boolean;
   error: unknown;
@@ -40,19 +55,9 @@ type ConversationSettingsContext = {
   update: (patch: Partial<Settings>) => Promise<void>;
   adoptSession: (id: string, state: State | null | undefined) => void;
   /** Starts a new conversation whose draft begins with these choices on top of the current ones. */
-  startConversation: ((patch: Partial<Settings>) => void) | null;
+  startConversation: ((patch: Partial<Settings>, onStay?: () => void) => void) | null;
 };
 const Context = createContext<ConversationSettingsContext | null>(null);
-
-/** A patch carries only the tool states it changes; the maps are merged, not replaced. */
-function withPatch(settings: Settings, patch: Partial<Settings>): Settings {
-  const next = { ...settings, ...patch };
-  if (patch.mcp_server_states)
-    next.mcp_server_states = { ...settings.mcp_server_states, ...patch.mcp_server_states };
-  if (patch.capability_states)
-    next.capability_states = { ...settings.capability_states, ...patch.capability_states };
-  return next;
-}
 
 /** Saved conversations own their choices; browser preferences seed only new drafts. */
 export function ConversationSettingsProvider({
@@ -65,10 +70,11 @@ export function ConversationSettingsProvider({
   partner: ChatPartner;
   initialSessionId?: string | null;
   hasHistory?: boolean;
-  onNewConversation?: (prepare?: () => void) => void;
+  onNewConversation?: (prepare?: () => void, onStay?: () => void) => void;
   children: ReactNode;
 }) {
   const { user, tenant } = useAppContext();
+  const choiceScope = useId();
   const scope = {
     tenantId: tenant.id,
     userId: user.id,
@@ -76,6 +82,7 @@ export function ConversationSettingsProvider({
     partnerType: partner.type
   };
   const [resolution, setResolution] = useState<Resolution | null>(null);
+  const [pendingToolChanges, setPendingToolChanges] = useState<ToolChanges[]>([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [refusal, setRefusal] = useState<EneoApiError | null>(null);
@@ -116,7 +123,9 @@ export function ConversationSettingsProvider({
   // in a draft or in a conversation. Opening a conversation or a draft only
   // reads choices and leaves the browser's alone.
   function remember(next: Resolution) {
-    if (next.settings_compatible !== false && !next.model_unavailable) {
+    // A save on a departed conversation can finish after the next draft
+    // has picked its own choices. Its response belongs to the old view.
+    if (mounted.current && next.settings_compatible !== false && !next.model_unavailable) {
       rememberConversationDraft(scope, next.settings);
     }
   }
@@ -202,11 +211,19 @@ export function ConversationSettingsProvider({
 
   function update(patch: Partial<Settings>) {
     if (running) return Promise.resolve();
+    const { mcp_server_states, capability_states, require_tool_approval } = patch;
+    const toolChange = {
+      ...(mcp_server_states && { mcp_server_states }),
+      ...(capability_states && { capability_states }),
+      ...(require_tool_approval !== undefined && { require_tool_approval })
+    };
+    const changesTools = Object.keys(toolChange).length > 0;
+    if (changesTools) setPendingToolChanges((changes) => [...changes, toolChange]);
     return enqueue(async () => {
       if (!current.current || current.current.settings_compatible === false) return;
       fail(null);
       refuse(null);
-      const settings = withPatch(current.current.settings, patch);
+      const settings = applyConversationSettingsPatch(current.current.settings, patch);
       try {
         if (sessionId.current) {
           const state = await unwrap(
@@ -227,6 +244,10 @@ export function ConversationSettingsProvider({
       } catch (cause) {
         if (cause instanceof EneoApiError && cause.code === PERSONAL_SKILLS_REJECTED) refuse(cause);
         else fail(cause);
+      }
+    }).finally(() => {
+      if (changesTools && mounted.current) {
+        setPendingToolChanges((changes) => changes.filter((pending) => pending !== toolChange));
       }
     });
   }
@@ -254,17 +275,40 @@ export function ConversationSettingsProvider({
 
   // Remembered only once leaving is confirmed: a cancelled leave keeps the old start choices.
   const startConversation = onNewConversation
-    ? (patch: Partial<Settings>) =>
+    ? (patch: Partial<Settings>, onStay?: () => void) =>
         onNewConversation(() => {
           if (current.current)
-            rememberConversationDraft(scope, withPatch(current.current.settings, patch));
-        })
+            rememberConversationDraft(
+              scope,
+              applyConversationSettingsPatch(current.current.settings, patch)
+            );
+        }, onStay)
     : null;
+
+  // Keep quick edits based on the user's latest intent. Sends and writes
+  // keep using the authoritative snapshot and its revision.
+  const pendingTools = pendingToolChanges.reduce<Settings>(applyConversationSettingsPatch, {});
+  const shownResolution =
+    resolution && pendingToolChanges.length
+      ? {
+          ...resolution,
+          settings: applyConversationSettingsPatch(resolution.settings, pendingTools),
+          mcp_servers: resolution.mcp_servers?.map((server) => ({
+            ...server,
+            selected: pendingTools.mcp_server_states?.[server.id] ?? server.selected
+          })),
+          capabilities: resolution.capabilities?.map((capability) => ({
+            ...capability,
+            selected: pendingTools.capability_states?.[capability.purpose] ?? capability.selected
+          }))
+        }
+      : resolution;
 
   return (
     <Context
       value={{
-        resolution,
+        choiceScope,
+        resolution: shownResolution,
         busy,
         error,
         refusal,
@@ -315,14 +359,20 @@ export function useSettledConversationModel(): (() => Promise<string | undefined
   return async () => (await settled()).resolution?.effective_model?.id ?? undefined;
 }
 
-/** Interactive views outside a conversation always ask before executing a tool. */
-export function useAutomaticConversationTools() {
+/** Only a revision from saved, usable settings authorizes automatic view calls. */
+export function useAutomaticToolSettingsRevision(): number | undefined {
   const context = useContext(Context);
-  return Boolean(
-    context?.resolution &&
-    !context.busy &&
-    !context.error &&
-    context.resolution.settings_compatible !== false &&
-    context.resolution.settings.require_tool_approval === false
-  );
+  const resolution = context?.resolution;
+  if (
+    !context ||
+    !resolution ||
+    context.busy ||
+    context.error ||
+    resolution.settings_compatible === false ||
+    resolution.model_unavailable ||
+    resolution.settings.require_tool_approval !== false ||
+    resolution.revision <= 0
+  )
+    return undefined;
+  return resolution.revision;
 }

@@ -476,6 +476,8 @@
       return m.storage_connection_error_http_title();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_title();
+    if (code === "object_store_probe_keeps_versions")
+      return m.storage_connection_error_versions_title();
     if (code === "object_store_probe_integrity_failed")
       return m.storage_connection_error_integrity_title();
     if (code === "object_store_credential_encryption_unavailable")
@@ -513,6 +515,8 @@
       return m.storage_connection_error_http_description();
     if (code === "object_store_probe_binding_mismatch")
       return m.storage_connection_error_binding_description();
+    if (code === "object_store_probe_keeps_versions")
+      return m.storage_connection_error_versions_description();
     if (code === "object_store_probe_integrity_failed")
       return m.storage_connection_error_integrity_description();
     if (code === "object_store_credential_encryption_unavailable")

@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
@@ -13,6 +14,7 @@ from eneo.integration.infrastructure.content_service.sync_state import (
     SyncStateRecorder,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 if TYPE_CHECKING:
     from eneo.info_blobs.info_blob_service import InfoBlobService
@@ -84,7 +86,9 @@ class ConfluenceContentService:
                 started_at=started_at,
                 metadata={"trigger": "manual"},
             )
-            logger.error(f"Error in Confluence pull_content: {e}", exc_info=True)
+            log_error(
+                logger, logging.ERROR, "Error in Confluence pull_content", error=e
+            )
             raise
 
     async def _pull_content(

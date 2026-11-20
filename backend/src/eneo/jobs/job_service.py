@@ -6,8 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
-from eneo.jobs.job_models import KNOWLEDGE_TASKS, Job, JobInDb, JobUpdate, Task
-from eneo.jobs.job_repo import JobRepository
+from eneo.jobs.job_models import (
+    KNOWLEDGE_TASKS,
+    Job,
+    JobFailureCode,
+    JobInDb,
+    JobUpdate,
+    Task,
+)
+from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
     TaskParams,
@@ -154,14 +161,18 @@ class JobService:
 
         return await self.job_repo.update_job(job_id, job_update)
 
-    async def fail_job(self, job_id: UUID, error_message: str | None = None):
+    async def fail_job(self, job_id: UUID, *, failure_code: JobFailureCode):
+        """Fail an active job. Store only the code since an error can quote
+        the job's input."""
         job_update = JobUpdate(
             status=Status.FAILED,
             finished_at=datetime.now(timezone.utc),
-            result_location=error_message,
+            result_location=None,
+            failure_code=failure_code,
         )
-
-        return await self.job_repo.update_job(job_id, job_update)
+        return await self.job_repo.update_job(
+            job_id, job_update, from_statuses=ACTIVE_JOB_STATUSES
+        )
 
     async def get_running_jobs(self):
         return await self.job_repo.get_running_jobs(self.user.id)

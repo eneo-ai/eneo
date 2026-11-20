@@ -173,13 +173,9 @@ function Harness({
 }
 
 /**
- * Sends wait for the conversation's choices. Send is never disabled, so the
- * tools fieldset tells: it is enabled and idle once the choices have loaded.
+ * Flush the mocked settings read before tests that exercise another part of sending.
  */
-const settingsLoaded = () =>
-  waitFor(() =>
-    expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
-  );
+const settingsLoaded = () => act(async () => {});
 
 /** Lays out the region around the conversation and its side panel, as a browser measures it. */
 function layOutConversation(width: number) {
@@ -439,8 +435,7 @@ describe("ChatView composer drafts", () => {
 
     // The composer is empty and nothing has left yet: a reload would end the question.
     expect(unloadAsks()).toBe(true);
-    // The question already carries the settings revision: the tools hold still.
-    expect(document.querySelector("fieldset[aria-busy]")?.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Stoppa generering" })).toBeTruthy();
 
     // Saved: the question goes (and, with no transport in jsdom, comes back to the composer).
     await act(async () => {
@@ -649,7 +644,7 @@ describe("ChatView conversation", () => {
     // The composer shell's click-to-focus must not take the switch's focus.
     expect(document.activeElement).toBe(diarium);
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
-    expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("true");
+    expect(diarium.closest("[aria-busy]")?.getAttribute("aria-busy")).toBe("true");
     expect(trigger.hasAttribute("disabled")).toBe(false);
     expect(diarium.hasAttribute("disabled")).toBe(false);
     expect(document.activeElement).toBe(diarium);
@@ -661,7 +656,7 @@ describe("ChatView conversation", () => {
       })
     );
     await waitFor(() =>
-      expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("false")
+      expect(diarium.closest("[aria-busy]")?.getAttribute("aria-busy")).toBe("false")
     );
     expect(document.activeElement).toBe(diarium);
     expect((diarium as HTMLInputElement).checked).toBe(false);

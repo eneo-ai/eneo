@@ -1,79 +1,104 @@
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Button } from "@astryxdesign/core/Button";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
 import { notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import type { ChatPartner } from "@/lib/chat/types";
 import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
-import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { useConversationSettings } from "@/features/chat/conversation-settings";
-import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
+import { queuePartnerUpdate } from "@/features/chat/partner-updates";
+import { ModelReasoningPicker } from "@/features/chat/model-reasoning-picker";
 import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
 
-/** The composer's compact (ghost) trigger look, shared by the model and reasoning pickers. */
-const COMPOSER_PICKER_CLASS =
-  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
-
-function ModelSwitcher() {
+function ComposerPickers() {
   const { tenant } = useAppContext();
-  const { resolution, update, running, hasMessages, startConversation } = useConversationSettings();
+  const { choiceScope, resolution, update, running, hasMessages, startConversation } =
+    useConversationSettings();
   const t = useTranslations();
   const [pendingId, setPendingId] = useState<string | null>(null);
-  const models = resolution?.available_models ?? [];
-  const choice = (id: string) => ({ completion_model_id: id, reasoning_effort: null });
+  const waitMessageId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const rescue = useFocusRescue();
+  const restoreTrigger = () => rescue(() => trigger.current);
+  const close = () => {
+    setPendingId(null);
+    restoreTrigger();
+  };
+  if (!resolution) return null;
+  const modelChoice = (id: string) => ({ completion_model_id: id, reasoning_effort: null });
+
   return (
     <>
-      <ModelSelector
-        models={models}
+      <ModelReasoningPicker
+        ownerId={choiceScope}
+        models={resolution.available_models ?? []}
         selectedId={
-          resolution?.settings.completion_model_id ?? resolution?.effective_model?.id ?? null
+          resolution.settings.completion_model_id ?? resolution.effective_model?.id ?? null
         }
-        onSelect={(id) => {
-          if (hasMessages) setPendingId(id);
-          else return update(choice(id));
-        }}
-        locked={resolution?.model_locked ? (resolution.effective_model ?? null) : null}
-        // The trigger shows its own spinner while a choice saves; disabling
-        // it would drop keyboard focus.
-        disabled={running || !resolution || resolution.settings_compatible === false}
-        size="sm"
+        locked={resolution.model_locked ? (resolution.effective_model ?? null) : null}
         showPricing={tenant.show_model_pricing}
-        className={COMPOSER_PICKER_CLASS}
+        storedLevel={resolution.settings.reasoning_effort ?? null}
+        policyDefaultLevel={resolution.default_reasoning_effort ?? null}
+        currentReasoningOptions={resolution.reasoning_effort_options ?? []}
+        levelConfigurable={resolution.reasoning_effort_user_configurable ?? false}
+        triggerRef={trigger}
+        disabled={running || resolution.settings_compatible === false}
+        resetLevelOnModelChange
+        onModelChoice={(id) => {
+          if (!hasMessages) return true;
+          setPendingId(id);
+          return false;
+        }}
+        onSave={({ modelId, level }) =>
+          update(
+            modelId
+              ? { ...modelChoice(modelId), reasoning_effort: level ?? null }
+              : { reasoning_effort: level }
+          )
+        }
       />
       <Dialog
         isOpen={pendingId !== null}
         onOpenChange={(open) => {
-          if (!open) setPendingId(null);
+          if (!open) close();
         }}
       >
         <DialogHeader title={t("personal_chat_model_change_title")} />
         <p>{t("personal_chat_model_change_description")}</p>
+        {running && (
+          <p id={waitMessageId} className="text-ax-text-secondary mt-2 text-sm">
+            {t("personal_chat_model_change_wait")}
+          </p>
+        )}
         <div className="mt-4 flex flex-wrap justify-end gap-2">
-          <Button label={t("cancel")} variant="secondary" onClick={() => setPendingId(null)} />
+          <Button label={t("cancel")} variant="secondary" onClick={close} />
           <Button
             label={t("personal_chat_model_change_anyway")}
             variant="secondary"
+            aria-disabled={running || undefined}
+            aria-describedby={running ? waitMessageId : undefined}
             onClick={() => {
-              if (pendingId) void update(choice(pendingId));
-              setPendingId(null);
+              if (!pendingId || running) return;
+              void queuePartnerUpdate(() => update(modelChoice(pendingId)));
+              close();
             }}
           />
           {startConversation && (
             <Button
               label={t("personal_chat_model_new_conversation")}
               onClick={() => {
-                if (pendingId) startConversation(choice(pendingId));
+                if (pendingId) startConversation(modelChoice(pendingId), restoreTrigger);
                 setPendingId(null);
               }}
             />
@@ -81,33 +106,6 @@ function ModelSwitcher() {
         </div>
       </Dialog>
     </>
-  );
-}
-
-function ReasoningSwitcher() {
-  const { resolution, update, running } = useConversationSettings();
-  const options = resolution?.reasoning_effort_options ?? [];
-  if (options.length === 0) return null;
-  return (
-    <fieldset disabled={running || resolution?.settings_compatible === false}>
-      <ReasoningEffortSelector
-        options={options}
-        stored={resolution?.settings.reasoning_effort ?? null}
-        policyDefault={resolution?.default_reasoning_effort ?? null}
-        onSelect={(effort) => update({ reasoning_effort: effort })}
-        className={COMPOSER_PICKER_CLASS}
-      />
-    </fieldset>
-  );
-}
-
-/** The personal assistant's composer pickers: model, then reasoning effort when the model offers it. */
-function ComposerPickers() {
-  return (
-    <span className="flex min-w-0 items-center gap-0.5">
-      <ModelSwitcher />
-      <ReasoningSwitcher />
-    </span>
   );
 }
 
@@ -289,7 +287,7 @@ export function SpaceChat() {
         activeId: partner.id
       })}
       modelSelector={partner.type === "default-assistant" ? <ComposerPickers /> : undefined}
-      skills={partner.type === "default-assistant" && space.personal ? <ChatSkills /> : undefined}
+      withSkills={partner.type === "default-assistant" && space.personal}
       editHref={editHref}
       buildSessionUrl={(nextSessionId) => {
         const params = new URLSearchParams(query);

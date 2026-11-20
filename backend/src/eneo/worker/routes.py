@@ -251,7 +251,7 @@ async def recalculate_usage_stats(container: Container) -> bool:
     return await recalculate_all_tenants_usage_stats(container=container)
 
 
-@worker.function(with_user=False)
+@worker.function(with_user=False, keep_result=0)
 async def log_audit_event(
     job_id: UUID, params: dict[str, object], container: Container
 ):
@@ -300,7 +300,7 @@ async def export_audit_logs(
     )
 
 
-@worker.function()
+@worker.function(keep_result=0)
 async def analyze_conversation_insights(
     job_id: UUID,
     params: AnalyzeConversationInsightsTask,

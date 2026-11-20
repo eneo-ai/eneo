@@ -5,15 +5,16 @@ from unittest.mock import patch
 
 import pytest
 
-from eneo.files import file_size_service
 from eneo.files.file_size_service import FileSizeService
+from eneo.main import process_scratch
 
 
 @pytest.fixture
 def mock_settings(monkeypatch, tmp_path):
     settings = SimpleNamespace(upload_tmp_dir=tmp_path)
-    monkeypatch.setattr(file_size_service, "get_settings", lambda: settings)
-    return settings
+    monkeypatch.setattr(process_scratch, "get_settings", lambda: settings)
+    yield settings
+    process_scratch.stop()
 
 
 async def test_save_file_to_disk_uses_default_tmp_dir():
@@ -67,6 +68,21 @@ async def test_save_file_to_disk_cleans_up_on_write_failure(mock_settings, tmp_p
         with pytest.raises(IOError, match="disk full"):
             await FileSizeService.save_file_to_disk(file)
 
-    # No leftover files in the tmp directory
-    remaining = list(tmp_path.iterdir())
-    assert remaining == []
+    # Nothing left beside the directory's own lock marker
+    remaining = [path.name for path in process_scratch.directory().iterdir()]
+    assert remaining == ["owner.lock"]
+
+
+async def test_a_saved_upload_is_in_the_scratch_of_this_process(
+    mock_settings, tmp_path
+):
+    """A crash between saving and removing leaves the upload where the next
+    start reclaims it once this process is gone."""
+    file = SpooledTemporaryFile()
+    file.write(b"hello")
+    file.seek(0)
+
+    destination = await FileSizeService.save_file_to_disk(file)
+
+    assert Path(destination).parent == process_scratch.directory()
+    assert process_scratch.directory().parent == tmp_path / "eneo-scratch"

@@ -191,6 +191,7 @@ class ConversationSettingsResolution(BaseModel):
     supports_tool_calling: bool = False
     effective_reasoning_effort: str | None = None
     default_reasoning_effort: str | None = None
+    reasoning_effort_user_configurable: bool = False
     reasoning_effort_options: list[str] = Field(default_factory=list[str])
     mcp_servers: list[ConversationMcpServer] = Field(
         default_factory=list[ConversationMcpServer]

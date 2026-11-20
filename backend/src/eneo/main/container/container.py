@@ -398,6 +398,7 @@ from eneo.transcription_models.domain.transcription_model_service import (
 from eneo.transcription_models.infrastructure import TranscriptionModelEnableService
 from eneo.user_groups.user_groups_repo import UserGroupsRepository
 from eneo.user_groups.user_groups_service import UserGroupsService
+from eneo.users.identity_binding_repo import IdentityBindingRepository
 from eneo.users.user import UserInDB
 from eneo.users.user_assembler import UserAssembler
 from eneo.users.user_repo import UsersRepository
@@ -685,6 +686,9 @@ class Container(containers.DeclarativeContainer):
 
     # Repositories
     user_repo = providers.Factory(UsersRepository, session=session)
+    identity_binding_repo = providers.Factory(
+        IdentityBindingRepository, session=session
+    )
     tenant_repo: providers.Factory[TenantRepository] = providers.Factory(
         TenantRepository, session=session, encryption_service=encryption_service
     )
@@ -1485,6 +1489,7 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         session=session,
         browser_session_service=browser_session_service,
+        identity_binding_repo=identity_binding_repo,
     )
     widget_authentication_service = providers.Factory(
         WidgetAuthenticationService,
@@ -1517,6 +1522,8 @@ class Container(containers.DeclarativeContainer):
         user_repo=user_repo,
         tenant_service=tenant_service,
         user_service=user_service,
+        identity_binding_repo=identity_binding_repo,
+        audit_service=audit_service,
         api_key_scope_revoker=api_key_scope_revoker,
     )
     service_service = providers.Factory(

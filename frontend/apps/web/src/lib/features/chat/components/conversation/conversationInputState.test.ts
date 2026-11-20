@@ -44,22 +44,18 @@ describe("toolSelectionUpdate", () => {
     { id: "capability:web_search", selected: true }
   ];
 
-  it("writes only the tools whose state changed and keeps earlier explicit choices", () => {
+  it("includes only the tools changed by this interaction", () => {
     expect(
-      toolSelectionUpdate(
-        { mcp_server_states: { "server-c": false }, capability_states: { charts: true } },
-        tools,
-        new Set(["server-a", "server-b", "capability:web_search"])
-      )
+      toolSelectionUpdate(tools, new Set(["server-a", "server-b", "capability:web_search"]))
     ).toEqual({
-      mcp_server_states: { "server-c": false, "server-a": false },
-      capability_states: { charts: true, web_search: false }
+      mcp_server_states: { "server-a": false },
+      capability_states: { web_search: false }
     });
   });
 
   it("leaves an untouched tool absent so it keeps following the admin default", () => {
-    expect(toolSelectionUpdate(undefined, tools, new Set(["server-b"]))).toBeNull();
-    expect(toolSelectionUpdate({}, tools, new Set())).toEqual({
+    expect(toolSelectionUpdate(tools, new Set(["server-b"]))).toBeNull();
+    expect(toolSelectionUpdate(tools, new Set())).toEqual({
       mcp_server_states: { "server-b": true },
       capability_states: {}
     });

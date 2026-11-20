@@ -473,6 +473,12 @@ and ordinary tool parts.
 
 Several approvals can occur in one turn (one part each, distinct ids).
 
+Bundled interactive views include `automatic_settings_revision` in their
+tool-call request when the saved conversation allows automatic calls. A
+`409` with Eneo code `9065` means the automatic call was refused before
+execution. The host asks the user to approve that concrete call and omits
+the revision if the user confirms. External views always ask.
+
 ## What the client treats as failure
 
 Never shown as a finished answer (`status: "error"`, `onFinish.isError`):

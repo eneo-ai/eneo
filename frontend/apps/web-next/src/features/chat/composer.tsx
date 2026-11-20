@@ -226,10 +226,8 @@ export type ComposerProps = {
   onOpenFileDialog: () => void;
   knowledge?: KnowledgeOrigin[];
   knowledgeMode?: ChatPartner["knowledgeMode"];
-  /** Verktyg pill: the popover with a switch per capability and MCP server. */
+  /** Verktyg pill: a switch per capability and MCP server, and the personal chat's Skills. */
   tools?: ReactNode;
-  /** Personal chat: the Skills pill beside Verktyg. */
-  skills?: ReactNode;
   /** Group chats: @-mention picker. */
   mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
@@ -333,7 +331,6 @@ export function Composer({
   knowledge = [],
   knowledgeMode,
   tools,
-  skills,
   mention,
   modelSelector,
   partnerToken,
@@ -441,13 +438,7 @@ export function Composer({
             />
           }
           footerActions={
-            // Propagation control only, not an interaction of its own: the
-            // controls inside keep their native keyboard behaviour.
-            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
-            <div
-              className="flex min-w-0 flex-wrap items-center gap-1"
-              onClick={keepFocusInsideLayers}
-            >
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
               {/* Not on a phone: its header already carries this switcher, and the pill only
                   took footer width the other controls need. */}
               {partnerToken && <span className="contents max-md:hidden">{partnerToken}</span>}
@@ -467,7 +458,6 @@ export function Composer({
               )}
               <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
-              {skills}
               {mention}
             </div>
           }

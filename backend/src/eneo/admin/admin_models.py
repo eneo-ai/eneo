@@ -1,9 +1,16 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Generic, Optional, TypeVar
+from typing import Annotated, Generic, Optional, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import (
+    AfterValidator,
+    AwareDatetime,
+    BaseModel,
+    Field,
+    HttpUrl,
+    field_validator,
+)
 
 from eneo.authentication.auth_models import (
     ApiKeyOwnership,
@@ -255,3 +262,77 @@ class PaginatedUsersResponse(BaseModel, Generic[T]):
     metadata: PaginationMetadata = Field(
         description="Pagination metadata for navigation"
     )
+
+
+# An open allowance or window lets an email address bind a new identity to an
+# account that already has one: the one path by which a recycled address
+# could take the account over. So both end on their own, and an admin who
+# needs longer must renew deliberately.
+IDENTITY_REBINDING_MAX_AHEAD = timedelta(days=30)
+
+
+def _ends_within_reach(moment: datetime) -> datetime:
+    now = datetime.now(timezone.utc)
+    if not now < moment <= now + IDENTITY_REBINDING_MAX_AHEAD:
+        raise ValueError("must be in the future and at most 30 days ahead")
+    return moment
+
+
+RebindingEnd = Annotated[AwareDatetime, AfterValidator(_ends_within_reach)]
+
+
+class IdentityBindingPublic(BaseModel):
+    issuer: str
+    audience: str = Field(
+        description="The client id of a browser sign-in, or the accepted API "
+        "audience of a provider's access token."
+    )
+    subject_claim: str = Field(
+        description="The token claim the subject was read from; a sign-in "
+        "under another subject claim does not match this binding."
+    )
+    subject: str
+    created_at: datetime
+
+
+class AccountIdentity(BaseModel):
+    """The provider identities that sign in to one account."""
+
+    bindings: list[IdentityBindingPublic]
+    rebinding_allowed_until: Optional[datetime] = Field(
+        description="While set, the account's next sign-in by email binds the "
+        "identity it presents, replacing the account's subject under that issuer "
+        "and audience if it has one. Single use."
+    )
+
+
+class IdentityRebindingAllowance(BaseModel):
+    allowed_until: RebindingEnd = Field(
+        description="When the allowance ends: in the future, at most 30 days ahead."
+    )
+
+
+class IdentityMigrationWindowCreate(BaseModel):
+    """While open, an account bound under the from pair also binds under the
+    to pair by its email. Its from binding stays. A window from a pair to
+    itself is for a change of subject claim: an account bound there before
+    the window opened has its subject replaced once, found by its email or
+    by the new subject under another audience."""
+
+    from_issuer: str = Field(min_length=1)
+    from_audience: str = Field(min_length=1)
+    to_issuer: str = Field(min_length=1)
+    to_audience: str = Field(min_length=1)
+    closes_at: RebindingEnd = Field(
+        description="When the window closes: in the future, at most 30 days ahead."
+    )
+
+
+class IdentityMigrationWindowPublic(BaseModel):
+    id: UUID
+    from_issuer: str
+    from_audience: str
+    to_issuer: str
+    to_audience: str
+    closes_at: datetime
+    created_at: datetime

@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
+import time
+from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from uuid import uuid4
@@ -15,6 +18,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ResponseType,
 )
+from eneo.audit.domain.action_types import ActionType
 from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
@@ -30,6 +34,8 @@ from eneo.main import stream_lifecycle
 from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
@@ -37,6 +43,9 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from eneo.widgets.application import widget_ask_service
+from eneo.widgets.domain.widget import Widget, WidgetPrivacy
+from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
 class _AsyncChunkStream:
@@ -540,6 +549,55 @@ async def test_provider_connectivity_failure_returns_unreachable_error(
     span.record_exception.assert_called_once()
 
 
+def _unreachable_error() -> RuntimeError:
+    """A provider that cannot be reached, its errors quoting `SENTINEL`."""
+    try:
+        try:
+            raise httpx.ConnectError(f"cannot reach {SENTINEL}")
+        except httpx.ConnectError as cause:
+            raise RuntimeError(f"failed on {SENTINEL}") from cause
+    except RuntimeError as error:
+        return error
+
+
+class _FailingStream:
+    def __aiter__(self) -> "_FailingStream":
+        return self
+
+    async def __anext__(self) -> object:
+        raise chained_error()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    ["completion", "provider_unavailable", "stream_preparation", "stream_iteration"],
+)
+async def test_a_failed_response_logs_the_kind_of_error_not_its_text(path: str):
+    """A provider's error can echo the prompt it was sent. Mutant: one of the
+    failure paths logs it with its message or a traceback that ends in it."""
+    adapter = _make_completion_adapter()
+    error = _unreachable_error() if path == "provider_unavailable" else chained_error()
+
+    with (
+        emitted(tenant_model_adapter.logger) as records,
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=error),
+        ),
+        suppress(Exception),
+    ):
+        if path == "stream_preparation":
+            await adapter.prepare_streaming(context=SimpleNamespace(), model_kwargs={})
+        elif path == "stream_iteration":
+            await _collect(adapter, _FailingStream())
+        else:
+            await adapter.get_response(context=SimpleNamespace(), model_kwargs={})
+
+    chain = "RuntimeError <- ConnectError" if path == "provider_unavailable" else CHAIN
+    assert logged_errors(records, chain), [record.getMessage() for record in records]
+
+
 @pytest.mark.asyncio
 async def test_wrapped_provider_failure_returns_unreachable_error():
     adapter = _make_completion_adapter()
@@ -672,6 +730,34 @@ async def test_non_streaming_supports_multiple_tool_rounds():
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
+
+
+async def test_non_streaming_never_logs_the_answer_or_its_reasoning(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Retention can remove a conversation; a log line would keep a copy of it."""
+    adapter = _make_completion_adapter()
+    monkeypatch.setattr(
+        tenant_model_adapter, "logger", logging.getLogger("eneo.test.model_adapter")
+    )
+    caplog.set_level(logging.DEBUG, logger="eneo.test.model_adapter")
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            return_value=_response(
+                content="private answer", reasoning_content="private reasoning"
+            )
+        ),
+    ):
+        completion = await adapter.get_response(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+
+    assert completion.text == "private answer"
+    assert caplog.records
+    assert "private answer" not in caplog.text
+    assert "private reasoning" not in caplog.text
 
 
 class _ErrorSecondRoundMCPProxy(_FakeMCPProxy):
@@ -1049,7 +1135,8 @@ async def test_iterate_stream_forwards_the_arguments_of_a_pending_call_in_pieces
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_emits_pending_per_parallel_tool_call():
+@pytest.mark.parametrize("second_id", ["call_2", "call_1"], ids=["distinct", "reused"])
+async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
@@ -1062,10 +1149,10 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
             ),
             _tool_call_delta_chunk(index=0, arguments='{"q":"a"}'),
             _tool_call_delta_chunk(
-                index=1, tool_call_id="call_2", tool_name="server__tool"
+                index=1, tool_call_id=second_id, tool_name="server__tool"
             ),
             _tool_call_delta_chunk(
-                index=1, arguments='{"q":"b"}', finish_reason="tool_calls"
+                index=1, arguments='{"other":"b"}', finish_reason="tool_calls"
             ),
         ],
         eneo_context={
@@ -1094,10 +1181,105 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
         for e in _tool_call_events(completions)
         if e.tool_calls_metadata[0].result_status == "pending"
     ]
-    assert pending_ids == ["call_1", "call_2"]
+    assert pending_ids == ["call_1", second_id]
     assert mcp_proxy.calls == [
-        [("server__tool", {"q": "a"}), ("server__tool", {"q": "b"})]
+        [("server__tool", {"q": "a"}), ("server__tool", {"other": "b"})]
     ]
+    results = [
+        call
+        for event in _tool_call_events(completions)
+        for call in event.tool_calls_metadata
+        if call.result_status == "succeeded"
+    ]
+    assert [(call.tool_call_id, call.arguments) for call in results] == [
+        ("call_1", {"q": "a"}),
+        (second_id, {"other": "b"}),
+    ]
+
+
+async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
+    monkeypatch,
+):
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
+    )
+    widget.id = uuid4()
+    widget.privacy = WidgetPrivacy(retention_days=0)
+    server_id = uuid4()
+    server = MCPServer(
+        id=server_id,
+        tenant_id=widget.tenant_id,
+        name="server",
+        http_url="https://server.invalid/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name="tool",
+                description="Test tool",
+                input_schema={
+                    "type": "object",
+                    "properties": {"lookup_topic": {"type": "string"}},
+                },
+            )
+        ],
+    )
+    proxy = mcp_proxy_session.MCPProxySession([server])
+    monkeypatch.setitem(
+        mcp_proxy_session._CIRCUIT_BREAKER_STATE,
+        server_id,
+        {"failures": 1, "open_until": time.time() + 60},
+    )
+    client = AsyncMock()
+    monkeypatch.setattr(proxy, "_get_or_create_client", AsyncMock(return_value=client))
+    monkeypatch.setattr(
+        tenant_model_adapter,
+        "_acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    )
+    sink = AsyncMock()
+    # A failed enqueue exercises the audit payload and its fallback in the same turn.
+    sink.log_async.return_value = None
+    audit = widget_ask_service.ExternalToolCallAudit(
+        sink,
+        widget,
+        visitor_id=uuid4(),
+        session_id=uuid4(),
+        question_id=None,
+        preview=False,
+    )
+    arguments = {"lookup_topic": "synthetic-visitor-value", SENTINEL: "extra"}
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_call_chunk(arguments=json.dumps(arguments))]),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+    )
+    with emitted(widget_ask_service.logger) as records:
+        async for event in _make_adapter().iterate_stream(stream):
+            await audit.observe(event)
+        await audit.settle()
+
+    client.call_tool.assert_not_awaited()
+    sink.log_async.assert_awaited_once()
+    entry = sink.log_async.await_args.kwargs
+    assert entry["action"] == ActionType.WIDGET_EXTERNAL_TOOL_CALLED
+    assert "attempted" in entry["description"]
+    assert (entry["metadata"]["tool_call_id"], entry["metadata"]["result_status"]) == (
+        "call_1",
+        "failed",
+    )
+    [fallback] = [record for record in records if "not enqueued" in record.getMessage()]
+    assert vars(fallback)["result_status"] == "failed"
+    for logged in (repr(entry), fallback.getMessage(), repr(vars(fallback))):
+        assert "lookup_topic" not in logged
+        assert SENTINEL not in logged
+        assert "synthetic-visitor-value" not in logged
+    assert "temporarily unavailable" in next(
+        msg["content"] for msg in stream.messages if msg["role"] == "tool"
+    )
 
 
 @pytest.mark.asyncio

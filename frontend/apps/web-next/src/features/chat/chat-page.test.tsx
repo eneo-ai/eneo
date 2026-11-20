@@ -203,9 +203,7 @@ function composer() {
  * once the conversation's choices are in (until then Send holds the question back).
  */
 async function askWithKeyboard(question: string) {
-  await waitFor(() =>
-    expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
-  );
+  await act(async () => {});
   const textarea = composer();
   textarea.focus();
   fireEvent.change(textarea, { target: { value: question } });
@@ -311,6 +309,17 @@ describe("ChatPage", () => {
     renderPage("s-untitled");
     await screen.findByRole("log", { name: "Konversation" });
     expect(h1Texts()).toEqual(["Ny konversation", "Ny konversation"]);
+  });
+
+  it("names an untitled conversation when asking to delete it", async () => {
+    renderPage("s-untitled");
+    await screen.findByRole("log", { name: "Konversation" });
+    const [more] = screen.getAllByRole("button", { name: "Fler alternativ" });
+    fireEvent.click(more!);
+    const menu = document.getElementById(more!.getAttribute("aria-controls") ?? "")!;
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort konversationen" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    expect(within(dialog).getByText("Namnlös")).toBeTruthy();
   });
 
   it("shows each answer's stored rating when a conversation opens", async () => {

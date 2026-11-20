@@ -13,6 +13,7 @@ from eneo.conversations.application.conversation_service import ConversationServ
 from eneo.main.exceptions import (
     BadRequestException,
     ConversationSettingsConflictException,
+    ModelNotAvailableException,
     NotFoundException,
     UnauthorizedException,
 )
@@ -22,6 +23,7 @@ from eneo.sessions.conversation_settings import (
 )
 from eneo.sessions.session import SessionAdd, SessionContext, SessionInDB
 from eneo.sessions.session_service import SessionService
+from eneo.spaces.space import Space
 from tests.fixtures import TEST_USER
 
 
@@ -128,6 +130,15 @@ def service_with_policy():
         get_completion_model=lambda id: model if id == model.id else old_model,
         validate_model_security_compatibility=lambda _model: None,
     )
+    space.can_ask_assistant = (
+        lambda assistant, completion_model: Space.can_ask_assistant(
+            space, assistant, completion_model
+        )
+    )
+    space.can_use_knowledge = lambda _knowledge: True
+    assistant.collections = []
+    assistant.websites = []
+    assistant.integration_knowledge_list = []
     assistant_service = SimpleNamespace(
         user=TEST_USER,
         get_preflight_target=AsyncMock(
@@ -201,6 +212,8 @@ async def test_group_settings_reject_controls_that_belong_to_responding_assistan
         await service.validate_settings(
             choices, assistant_id=None, group_chat_id=uuid4()
         )
+    with pytest.raises(BadRequestException, match="Group chats"):
+        await service.resolve_settings(group_chat_id=uuid4(), settings=choices)
 
 
 @pytest.mark.asyncio
@@ -317,7 +330,6 @@ async def test_settings_cannot_be_written_by_another_session_owner():
         api_key_id=None,
         assistant_id=None,
         group_chat_id=None,
-        space_id=None,
         settings=None,
     )
     service = SessionService(
@@ -440,7 +452,6 @@ async def test_metadata_access_preserves_user_and_service_key_ownership(
         api_key_id=(owner if same_owner else other) if service_key else None,
         assistant_id=None,
         group_chat_id=None,
-        space_id=None,
         settings=None,
     )
     repo = AsyncMock()
@@ -487,6 +498,7 @@ async def test_settings_update_rechecks_access_to_the_current_chat_partner(group
 @pytest.mark.parametrize("blocked_by", ["policy", "access", "security", "deleted"])
 async def test_resolve_preserves_unavailable_choice_and_offers_recovery(blocked_by):
     service, assistant, model, server, policy = service_with_policy()
+    policy.reasoning_effort_user_configurable = True
     space = service.assistant_service.get_preflight_target.return_value.space
     settings = ConversationSettings(
         completion_model_id=model.id,
@@ -510,6 +522,8 @@ async def test_resolve_preserves_unavailable_choice_and_offers_recovery(blocked_
     result = await service.resolve_settings(
         assistant_id=assistant.id, settings=settings
     )
+    assert result.reasoning_effort_user_configurable is True
+    assert result.reasoning_effort_options == []
     assert result.model_unavailable
     assert result.effective_model is None
     assert [item.id for item in result.available_models] == [
@@ -539,7 +553,6 @@ async def test_saved_settings_resolve_again_after_policy_is_restored():
         user_id=None,
         api_key_id=None,
         group_chat_id=None,
-        space_id=None,
         settings=ConversationSettingsState(revision=4, settings=settings),
     )
     policy.available_models = []
@@ -755,7 +768,6 @@ async def test_future_settings_are_readable_but_block_updates_and_new_turns(grou
         api_key_id=None,
         assistant_id=None if group_chat else assistant.id,
         group_chat_id=uuid4() if group_chat else None,
-        space_id=None,
         settings=state,
     )
     resolved = await service.resolve_settings(session_id=session_id)
@@ -877,7 +889,11 @@ async def test_resolve_rejects_a_model_choice_for_an_ordinary_assistant():
 
 def _titled_session(assistant, state):
     return SimpleNamespace(
-        id=uuid4(), assistant=SimpleNamespace(id=assistant.id), settings=state
+        group_chat_id=None,
+        id=uuid4(),
+        assistant=SimpleNamespace(id=assistant.id),
+        settings=state,
+        history_revision=4,
     )
 
 
@@ -925,4 +941,32 @@ async def test_title_is_not_generated_when_the_saved_model_is_no_longer_allowed(
     policy.available_models = []
     with pytest.raises(BadRequestException, match="policy"):
         await service.set_title_of_conversation(uuid4())
+    service.completion_service.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_title_keeps_history_from_an_unavailable_implicit_model():
+    service, assistant, _, _, policy = service_with_policy()
+    policy.models_enforced = False
+    space = service.assistant_service.get_preflight_target.return_value.space
+    space.is_completion_model_available = lambda _id: False
+    service.completion_service = SimpleNamespace(get_response=AsyncMock())
+    service.session_service.get_session_by_uuid.return_value = _titled_session(
+        assistant, None
+    )
+    with pytest.raises(ModelNotAvailableException):
+        await service.set_title_of_conversation(uuid4())
+    service.completion_service.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_group_chat_title_is_refused_before_inference():
+    service, assistant, *_ = service_with_policy()
+    session = _titled_session(assistant, None)
+    session.group_chat_id = uuid4()
+    session.assistant = None
+    service.session_service.get_session_by_uuid.return_value = session
+    service.completion_service = SimpleNamespace(get_response=AsyncMock())
+    with pytest.raises(BadRequestException, match="assistant conversation"):
+        await service.set_title_of_conversation(session.id)
     service.completion_service.get_response.assert_not_awaited()

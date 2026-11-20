@@ -41,6 +41,26 @@ const ACTION_MESSAGES = {
     name: m.audit_action_session_extended,
     description: m.audit_action_session_extended_description
   },
+  identity_bound: {
+    name: m.audit_action_identity_bound,
+    description: m.audit_action_identity_bound_description
+  },
+  identity_conflict: {
+    name: m.audit_action_identity_conflict,
+    description: m.audit_action_identity_conflict_description
+  },
+  identity_rebinding_updated: {
+    name: m.audit_action_identity_rebinding_updated,
+    description: m.audit_action_identity_rebinding_updated_description
+  },
+  identity_migration_window_updated: {
+    name: m.audit_action_identity_migration_window_updated,
+    description: m.audit_action_identity_migration_window_updated_description
+  },
+  user_access_token_issued: {
+    name: m.audit_action_user_access_token_issued,
+    description: m.audit_action_user_access_token_issued_description
+  },
   role_created: {
     name: m.audit_action_role_created,
     description: m.audit_action_role_created_description
@@ -688,6 +708,14 @@ const ACTION_MESSAGES = {
   widget_budget_exhausted: {
     name: m.audit_action_widget_budget_exhausted,
     description: m.audit_action_widget_budget_exhausted_description
+  },
+  widget_preview_token_minted: {
+    name: m.audit_action_widget_preview_token_minted,
+    description: m.audit_action_widget_preview_token_minted_description
+  },
+  widget_external_tool_called: {
+    name: m.audit_action_widget_external_tool_called,
+    description: m.audit_action_widget_external_tool_called_description
   },
   widget_template_created: {
     name: m.audit_action_widget_template_created,

@@ -249,10 +249,20 @@ class FileUsageRepository:
         )
 
     @staticmethod
-    def _aged_root(older_than: timedelta) -> sa.ColumnElement[bool]:
+    def _created_before(
+        older_than: timedelta, now: datetime | None
+    ) -> sa.ColumnElement[bool]:
+        """Older than ``older_than`` at ``now``, or by the database's clock."""
+        if now is None:
+            return Files.created_at < sa.func.now() - older_than
+        return Files.created_at < now - older_than
+
+    @classmethod
+    def _aged_root(
+        cls, older_than: timedelta, now: datetime | None = None
+    ) -> sa.ColumnElement[bool]:
         return sa.and_(
-            Files.parent_file_id.is_(None),
-            Files.created_at < sa.func.now() - older_than,
+            Files.parent_file_id.is_(None), cls._created_before(older_than, now)
         )
 
     @classmethod
@@ -269,6 +279,7 @@ class FileUsageRepository:
         *,
         after: tuple[datetime, UUID] | None,
         older_than: timedelta,
+        now: datetime | None = None,
     ) -> tuple[datetime, UUID, bool] | None:
         """The next aged root by keyset, with its own direct usage, unlocked.
 
@@ -278,7 +289,9 @@ class FileUsageRepository:
         The usage flag is a prefilter only; ``delete_unused_root`` decides under
         its locks, including uses of derived Files.
         """
-        query = sa.select(Files.created_at, Files.id).where(self._aged_root(older_than))
+        query = sa.select(Files.created_at, Files.id).where(
+            self._aged_root(older_than, now)
+        )
         if after is not None:
             query = query.where(
                 sa.tuple_(Files.created_at, Files.id)
@@ -317,6 +330,7 @@ class FileUsageRepository:
         max_files: int,
         max_family_rows: int,
         older_than: timedelta | None = None,
+        now: datetime | None = None,
     ) -> FileRetentionResult:
         """Prove and release a bounded family in the caller's transaction.
 
@@ -384,9 +398,7 @@ class FileUsageRepository:
         # A late attachment that committed before the member lock is visible in
         # this fresh statement; one that starts after it must wait for commit.
         old_enough = (
-            sa.true()
-            if older_than is None
-            else Files.created_at < sa.func.now() - older_than
+            sa.true() if older_than is None else self._created_before(older_than, now)
         )
         fresh = (
             (

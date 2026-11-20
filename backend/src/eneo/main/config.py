@@ -18,7 +18,11 @@ from pydantic import (
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
+from eneo.main.removed_env import (
+    OIDC_STORED_MODE_GUIDE_URL,
+    UPGRADE_GUIDE_URL,
+    check_removed_variables,
+)
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -508,6 +512,7 @@ class Settings(BaseSettings):
     retention_empty_sessions_enabled: bool = True
     retention_unused_files_enabled: bool = True
     retention_job_history_enabled: bool = True
+    retention_derived_copies_enabled: bool = True
     retention_overdue_window_days: int = Field(default=1, ge=1, le=365)
     retention_overdue_max_rows: int = Field(default=1000, gt=0)
     retention_max_rows_per_run: int = Field(default=50_000, gt=0)
@@ -561,7 +566,7 @@ class Settings(BaseSettings):
     oidc_accepted_audience: Optional[str] = None
     oidc_jwks_cache_ttl_seconds: int = 3600
 
-    # Generic OIDC config (renamed from MOBILITYGUARD_*)
+    # Global OIDC sign-in (FEDERATION_ENABLED=false)
     oidc_discovery_endpoint: Optional[str] = None
     oidc_client_id: Optional[str] = None
     oidc_client_secret: Optional[str] = None
@@ -668,12 +673,6 @@ class Settings(BaseSettings):
             )
         return self
 
-    # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)
-    mobilityguard_discovery_endpoint: Optional[str] = None
-    mobilityguard_client_id: Optional[str] = None
-    mobilityguard_client_secret: Optional[str] = None
-    mobilityguard_tenant_id: Optional[str] = None
-
     # Visual content in document attachments (PDF pages with images/graphics,
     # DOCX/PPTX embedded images) is extracted as derived image files so vision
     # models can read it (capped per document to bound token cost)
@@ -754,7 +753,10 @@ class Settings(BaseSettings):
     # TTL, after which the visitor's stored key re-mints with a fresh proof.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
-    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # The preview token is a bearer in the admin page's DOM and iframe URL;
+    # the preview re-mints it before it expires, so it lives no longer than
+    # a visitor token.
+    widget_preview_token_ttl_seconds: int = Field(default=900, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is
     # 16**len(key_prefix) * cost iterations and the attempt count is
@@ -1072,6 +1074,34 @@ class Settings(BaseSettings):
         return self
 
     @model_validator(mode="after")
+    def warn_about_ignored_sign_in_variables(self):
+        """Name the OIDC_* sign-in variables that FEDERATION_ENABLED ignores.
+
+        Browser sign-in then reads only the provider stored in Eneo, and these
+        values are never a fallback. Runs after the flag alias is resolved and
+        logs names only, never values.
+        """
+        if not self.federation_enabled:
+            return self
+        ignored = {
+            "OIDC_DISCOVERY_ENDPOINT": self.oidc_discovery_endpoint,
+            "OIDC_CLIENT_ID": self.oidc_client_id,
+            "OIDC_CLIENT_SECRET": self.oidc_client_secret,
+            # Access tokens read the stored provider's domains too.
+            "OIDC_ALLOWED_DOMAINS": self.oidc_allowed_domains,
+        }
+        names = [name for name, value in ignored.items() if value]
+        if names:
+            logging.warning(
+                "FEDERATION_ENABLED is true. Browser sign-in uses the identity "
+                "provider stored in Eneo and ignores %s; they are no fallback. "
+                "Remove them once the settings are stored in Eneo. See %s",
+                ", ".join(names),
+                OIDC_STORED_MODE_GUIDE_URL,
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_encryption_key_requirements(self):
         """
         Validate that encryption_key is present and valid when features requiring it are enabled.
@@ -1114,32 +1144,6 @@ class Settings(BaseSettings):
             )
 
         return self
-
-    @model_validator(mode="before")
-    @classmethod
-    def migrate_legacy_vars(cls, values: dict[str, object]) -> dict[str, object]:
-        """Auto-migrate legacy env vars with deprecation warnings.
-
-        MOBILITYGUARD_* → OIDC_*
-        """
-        migrations = [
-            ("oidc_discovery_endpoint", "mobilityguard_discovery_endpoint"),
-            ("oidc_client_id", "mobilityguard_client_id"),
-            ("oidc_client_secret", "mobilityguard_client_secret"),
-            ("oidc_tenant_id", "mobilityguard_tenant_id"),
-        ]
-
-        for new_name, old_name in migrations:
-            # If new value not set but old value exists
-            if not values.get(new_name) and values.get(old_name):
-                values[new_name] = values[old_name]
-                logging.warning(
-                    f"DEPRECATION: Using {old_name.upper()}. "
-                    f"Please update to {new_name.upper()} in your .env file. "
-                    f"Legacy variables will be removed in v3.0"
-                )
-
-        return values
 
     @model_validator(mode="before")
     @classmethod
@@ -1493,6 +1497,20 @@ class Settings(BaseSettings):
             )
 
         return self
+
+
+def has_env_oidc_client(settings: Settings) -> bool:
+    """Whether the OIDC_* settings name a whole client.
+
+    Sign-in needs the discovery URL, the client ID and the secret. With any of
+    them missing, env sign-in is neither offered nor resolved, and there is
+    nothing to move into Eneo.
+    """
+    return bool(
+        settings.oidc_discovery_endpoint
+        and settings.oidc_client_id
+        and settings.oidc_client_secret
+    )
 
 
 _settings: Optional[Settings] = None

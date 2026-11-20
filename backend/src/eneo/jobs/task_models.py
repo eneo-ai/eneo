@@ -90,7 +90,9 @@ def validate_dispatch_envelope(value: object) -> DispatchEnvelope:
 
 
 class AnalyzeConversationInsightsTask(TaskParams):
-    question: str
+    # The question lives in the analysis job record. Jobs queued by earlier
+    # releases still carry it here; the task ignores this field.
+    question: str | None = None
     from_date: str
     to_date: str
     include_followups: bool = False

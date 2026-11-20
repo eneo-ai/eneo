@@ -7,9 +7,15 @@ const script = readInstanceScript(new URL("./+page.svelte", import.meta.url));
 
 function loginBrowser(
   response: Response,
-  options: { message?: string; mode?: "single" | "multi"; rememberedTenant?: string } = {}
+  options: {
+    message?: string;
+    mode?: "single" | "multi";
+    rememberedTenant?: string;
+    // An action result with data; the real one needs the app's decoders.
+    actionResult?: unknown;
+  } = {}
 ) {
-  const { message, mode = "single", rememberedTenant } = options;
+  const { message, mode = "single", rememberedTenant, actionResult } = options;
   const route = {
     url: new URL("https://eneo.example/login?next=%2Fmodule-login%3Fstate%3Da%252526b")
   };
@@ -47,7 +53,9 @@ function loginBrowser(
     ].join("\n"),
     modules: {
       "$app/state": { page: route },
-      "$app/forms": { deserialize },
+      "$app/forms": {
+        deserialize: actionResult === undefined ? deserialize : () => actionResult
+      },
       "$app/navigation": { goto: async () => undefined },
       "$app/environment": { browser: true },
       svelte: {
@@ -136,6 +144,14 @@ describe("login initiation client transport", () => {
     );
     await expect(browser.flow.begin()).resolves.toBe(true);
     expect(browser.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  test("an initiation refused because sign-in is unavailable says so", async () => {
+    const browser = loginBrowser(new Response(), {
+      actionResult: { type: "failure", status: 503, data: { oidcFailed: true, unavailable: true } }
+    });
+    await expect(browser.flow.begin()).resolves.toBe(false);
+    expect(browser.flow.state().error).toBe("oidc_error_login_unavailable");
   });
 
   test.each([

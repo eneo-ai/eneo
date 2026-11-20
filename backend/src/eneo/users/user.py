@@ -16,7 +16,7 @@ from pydantic import (
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyV2InDB,
-    JWTPayload,
+    CredentialFacts,
 )
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
@@ -255,6 +255,8 @@ class UserUpdate(BaseModel):
     credential_version: Optional[int] = Field(default=None, ge=0)
     password_changed_at: Optional[datetime] = None
     password_change_required: Optional[bool] = None
+    # Set to None to clear: an administrator reactivating a removed account.
+    deleted_at: Optional[datetime] = None
 
     roles: Optional[list[ModelId]] = None
 
@@ -303,13 +305,9 @@ class UserInDB(UserInDBBase):
     # Set only on the synthetic visitor user built for the anonymous widget
     # surface; never persisted and never present on a real user.
     active_widget: Optional[WidgetVisitorContext] = None
-    # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
+    # How the request authenticated, set where its credential was resolved.
     # Request-scoped like active_api_key; never persisted or returned.
-    session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
-    # The verified claims of the browser session (a token with ``sid``,
-    # eneo.authentication.browser_session_service) the request was admitted
-    # under, request-scoped in the same way.
-    browser_session: Optional[JWTPayload] = Field(
+    credential: Optional[CredentialFacts] = Field(
         default=None, exclude=True, repr=False
     )
     roles: list[RoleInDB] = []

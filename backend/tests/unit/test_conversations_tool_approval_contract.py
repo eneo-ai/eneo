@@ -19,6 +19,7 @@ from eneo.conversations.conversations_router import (
     get_tool_call_result,
 )
 from eneo.conversations.document_export import DocumentExportUnavailable
+from eneo.files.file_models import File
 from eneo.main.exceptions import NotFoundException, UnauthorizedException
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalContext,
@@ -733,7 +734,8 @@ async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
     container.session = lambda: None
     container.tenant = lambda: None
     server_id = uuid4()
-    file = SimpleNamespace(id=uuid4(), name="kostnader.csv")
+    name = "Utredning Anna Svensson.pdf"
+    file = File.model_construct(id=uuid4(), name=name)
     result = SimpleNamespace(
         mcp_server_id=server_id,
         tool_name="query_table",
@@ -771,3 +773,5 @@ async def test_link_signed_again_for_a_view_is_audited_as_a_mint():
     assert minted.kwargs["entity_type"] == EntityType.FILE
     assert minted.kwargs["entity_id"] == file.id
     assert "mcp_app_view" in str(minted.kwargs["metadata"])
+    assert name not in minted.kwargs["description"]
+    assert name not in str(minted.kwargs["metadata"])

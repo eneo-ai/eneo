@@ -19,12 +19,16 @@ async def test_concurrent_settings_writes_have_one_winner(
     async with db_container() as container:
         saved = await container.session_service().create_session(name="Settings")
         other = await container.session_service().create_session(name="Other")
+        tenant_id = container.user().tenant_id
+        context = await container.session_service().get_context(saved.id)
     if initial_revision:
         async with db_session() as session:
             await SessionRepository(session).update_settings(
-                saved.id, ConversationSettings(), 0
+                context, tenant_id, ConversationSettings(), 0
             )
 
+    async with db_container() as container:
+        context = await container.session_service().get_context(saved.id)
     server_id = uuid4()
     choices = [
         ConversationSettings(mcp_server_states={server_id: enabled})
@@ -35,7 +39,7 @@ async def test_concurrent_settings_writes_have_one_winner(
         try:
             async with db_session() as session:
                 return await SessionRepository(session).update_settings(
-                    saved.id, settings, initial_revision
+                    context, tenant_id, settings, initial_revision
                 )
         except ConversationSettingsConflictException:
             return None
@@ -47,14 +51,20 @@ async def test_concurrent_settings_writes_have_one_winner(
     assert winners[0].revision == initial_revision + 1
 
     async with db_session() as session:
-        stored = await session.scalar(
-            sa.select(Sessions.settings).where(Sessions.id == saved.id)
-        )
+        stored, updated_at = (
+            await session.execute(
+                sa.select(Sessions.settings, Sessions.updated_at).where(
+                    Sessions.id == saved.id
+                )
+            )
+        ).one()
         untouched = await session.scalar(
             sa.select(Sessions.settings).where(Sessions.id == other.id)
         )
     assert stored == winners[0].model_dump(mode="json")
     assert untouched is None
+    assert saved.updated_at is not None
+    assert updated_at == saved.updated_at
 
     async with db_container() as container:
         await container.session_service().delete(saved.id)

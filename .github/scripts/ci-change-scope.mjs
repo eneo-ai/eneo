@@ -78,7 +78,6 @@ export function planCi(files, eventName, { publication = false } = {}) {
     expected_jobs: {
       changes: true,
       security: true,
-      "user-facing": eventName === "pull_request",
       "backend-quality": scope.backend,
       "backend-tests": scope.backend,
       frontend: scope.frontend,

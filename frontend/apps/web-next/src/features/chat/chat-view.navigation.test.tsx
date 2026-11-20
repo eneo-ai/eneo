@@ -25,6 +25,10 @@ vi.mock("@/features/workspace/preview/load-preview", () => ({
   loadPreview: vi.fn(),
   PreviewTooLargeError: class extends Error {}
 }));
+// The document editor (TipTap, ProseMirror) loads on demand, and its first load
+// takes about a second on a busy runner. Load it while the file is collected,
+// as the idle prefetch would, so opening the document times the panel only.
+await import("./side-panel/file-panel");
 afterEach(() => vi.restoreAllMocks());
 const file = { id: "file-1", name: "Plan.md", mimetype: "text/markdown", size: 10 };
 const messages: EneoUIMessage[] = [
@@ -165,9 +169,7 @@ it("asks before leaving while a question waits for a Skills save, and sends noth
         createRoute({ getParentRoute: () => root, path: "/done", component: () => <h1>Done</h1> })
       ]
     });
-    await waitFor(() =>
-      expect(document.querySelector('fieldset[aria-busy="false"]:not([disabled])')).not.toBeNull()
-    );
+    await act(async () => {});
     const field = screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Fråga Assistant" });
     fireEvent.change(field, { target: { value: "Skicka när modellen är sparad" } });
     fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));

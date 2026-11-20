@@ -15,6 +15,7 @@ from eneo.assistants.api.assistant_models import AssistantResponse
 from eneo.assistants.api.assistant_protocol import (
     to_ask_conversation_response,
     to_conversation_response,
+    to_response,
     to_sse_response,
 )
 from eneo.files.file_models import File, FileType
@@ -39,34 +40,39 @@ async def test_conversation_stream_emits_settings_ids_before_the_answer():
     async def answer():
         yield Completion(response_type=ResponseType.TEXT, text="pong")
 
-    response = await to_conversation_response(
-        AssistantResponse(
-            question="ping",
-            files=[],
-            session=SessionInDB(id=uuid4(), name="Conversation", settings=settings),
-            answer=answer(),
-            info_blobs=[],
-            tools=UseTools(assistants=[]),
-            completion_model=CompletionModelPublic(
-                id=model_id,
-                name="test",
-                max_input_tokens=1000,
-                max_output_tokens=1000,
-                is_deprecated=False,
-                vision=False,
-                reasoning=False,
-            ),
-            question_id=uuid4(),
-            created_at=None,
-            updated_at=None,
+    source = AssistantResponse(
+        question="ping",
+        files=[],
+        session=SessionInDB(id=uuid4(), name="Conversation", settings=settings),
+        answer=answer(),
+        info_blobs=[],
+        tools=UseTools(assistants=[]),
+        completion_model=CompletionModelPublic(
+            id=model_id,
+            name="test",
+            max_input_tokens=1000,
+            max_output_tokens=1000,
+            is_deprecated=False,
+            vision=False,
+            reasoning=False,
         ),
-        stream=True,
+        question_id=uuid4(),
+        created_at=None,
+        updated_at=None,
     )
+    response = await to_conversation_response(source, stream=True)
     events = [event async for event in response.body_iterator]
     assert events[0].event == ResponseType.FIRST_CHUNK.value
     assert json.loads(events[0].data)["settings"] == settings.model_dump(mode="json")
     assert events[1].event == ResponseType.TEXT.value
     assert json.loads(events[1].data)["answer"] == "pong"
+
+    legacy = await to_response(
+        source.model_copy(update={"answer": answer()}), stream=True
+    )
+    legacy_text = [json.loads(event) async for event in legacy.body_iterator]
+    assert [chunk["answer"] for chunk in legacy_text] == ["pong"]
+    assert all("settings" not in chunk for chunk in legacy_text)
 
 
 def test_non_streaming_conversation_response_includes_mcp_references():

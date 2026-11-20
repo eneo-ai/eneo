@@ -45,9 +45,9 @@ test("a shared-space viewer can read the space but cannot create assistants or m
   );
   await expectOk(addViewerResponse, "adding viewer to shared space");
 
-  await page.goto("/logout");
-  await page.getByRole("button", { name: /^(Logga ut|Logout)$/ }).click();
-  await expect(page).toHaveURL(/\/login/);
+  // Drop the admin's cookies without signing out: a sign-out would end the
+  // suite's shared session on the server for every later test.
+  await page.context().clearCookies();
   await loginViaUi(page, viewerEmail, viewerPassword);
 
   // An admin-created account chooses its own password before anything else.

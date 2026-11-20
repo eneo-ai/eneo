@@ -6,6 +6,7 @@ import {
   type Conversation,
   type ConversationSparse,
   type ConversationSettings,
+  type ConversationSettingsState,
   type Eneo,
   type Paginated,
   type SSE,
@@ -1048,6 +1049,61 @@ describe("ChatService saved conversation choices", () => {
     expect(updateSettings.mock.lastCall?.[2]).toBe(3);
   });
 
+  it("applies a queued toggle to the tool choices just saved in another tab", async () => {
+    const initial = {
+      revision: 1,
+      settings: { mcp_server_states: { dormant: false }, capability_states: { charts: true } }
+    };
+    const remote = {
+      revision: 3,
+      settings: {
+        mcp_server_states: { dormant: false, first: false, remote: true },
+        capability_states: { charts: false }
+      }
+    };
+    const firstWrite = Promise.withResolvers<void>();
+    const updateSettings = vi
+      .fn()
+      .mockImplementationOnce(async (_conversation, settings: ConversationSettings) => {
+        await firstWrite.promise;
+        return { revision: 2, settings };
+      })
+      .mockImplementation(async (_conversation, settings, revision) => ({
+        revision: revision + 1,
+        settings
+      }));
+    const chat = chatService(vi.fn(), {
+      initialConversation: { id: "saved", name: "Saved", messages: [], settings: initial },
+      updateSettings,
+      resolveSettings: vi
+        .fn()
+        .mockResolvedValueOnce(initial)
+        .mockResolvedValueOnce(remote)
+        .mockImplementation(
+          async ({ conversation }: { conversation: Conversation }) => conversation.settings
+        )
+    });
+    await chat.loadSettings();
+    const first = chat.updateSettings({ mcp_server_states: { first: false } });
+    const second = chat.updateSettings({
+      mcp_server_states: { second: false },
+      capability_states: { web_search: false }
+    });
+    expect(chat.settings?.mcp_server_states).toEqual({
+      dormant: false,
+      first: false,
+      second: false
+    });
+    firstWrite.resolve();
+    await Promise.all([first, second]);
+    const expected = {
+      mcp_server_states: { dormant: false, first: false, remote: true, second: false },
+      capability_states: { charts: false, web_search: false }
+    };
+    expect(updateSettings).toHaveBeenLastCalledWith(expect.anything(), expected, 3);
+    expect(chat.currentConversation.settings).toEqual({ revision: 4, settings: expected });
+  });
+
   it("does not leak a late save into the next conversation", async () => {
     let finish!: (value: { revision: number; settings: ConversationSettings }) => void;
     const chat = chatService(vi.fn(), {
@@ -1112,6 +1168,65 @@ describe("ChatService saved conversation choices", () => {
     await vi.waitFor(() => expect(chat.settingsBusy).toBe(false));
     await chat.askQuestion("hello again");
     expect(ask).toHaveBeenCalledTimes(2);
+  });
+
+  async function savedChatWithDelayedRefresh() {
+    const saved = { revision: 2, settings: { require_tool_approval: false } };
+    const refresh = Promise.withResolvers<ConversationSettingsState>();
+    const resolveSettings = vi
+      .fn()
+      .mockResolvedValueOnce(saved)
+      .mockReturnValueOnce(refresh.promise);
+    const ask = completedAsk();
+    const chat = chatService(vi.fn(), {
+      ask,
+      resolveSettings,
+      initialConversation: { id: "session-1", name: "Saved", messages: [], settings: saved }
+    });
+    await chat.loadSettings();
+    return { chat, ask, resolveSettings, refresh, saved };
+  }
+
+  it("takes the next question during a refresh and keeps the choices if it fails", async () => {
+    const { chat, ask, resolveSettings, refresh, saved } = await savedChatWithDelayedRefresh();
+    resolveSettings.mockRejectedValueOnce(new Error("Offline"));
+    const first = chat.askQuestion("First");
+    try {
+      await vi.waitFor(() => expect(resolveSettings).toHaveBeenCalledTimes(2));
+      expect(chat.askQuestion.isLoading).toBe(false);
+      expect(chat.settingsBusy).toBe(false);
+      await chat.askQuestion("Next");
+      expect(ask).toHaveBeenLastCalledWith(expect.objectContaining({ settingsRevision: 2 }));
+    } finally {
+      refresh.resolve(saved);
+      await first;
+    }
+    expect(chat.settingsError).toBeNull();
+    expect(chat.currentConversation.settings).toEqual(saved);
+  });
+
+  it("keeps a foreground reload failure when an older background read succeeds", async () => {
+    const { chat, resolveSettings, refresh, saved } = await savedChatWithDelayedRefresh();
+    await chat.askQuestion("First");
+    const offline = new Error("Offline");
+    resolveSettings.mockRejectedValueOnce(offline);
+    await chat.loadSettings(true);
+    refresh.resolve({ revision: 3, settings: { require_tool_approval: true } });
+    await refresh.promise;
+    expect(chat.settingsError).toBe(offline);
+    expect(chat.currentConversation.settings).toEqual(saved);
+  });
+
+  it("keeps a newer settings save when the previous turn's refresh returns late", async () => {
+    const { chat, resolveSettings, refresh, saved } = await savedChatWithDelayedRefresh();
+    await chat.askQuestion("First");
+    const confirmed = { revision: 3, settings: { require_tool_approval: true } };
+    resolveSettings.mockResolvedValueOnce(confirmed);
+    await chat.updateSettings({ require_tool_approval: true });
+    refresh.resolve(saved);
+    await refresh.promise;
+    expect(chat.currentConversation.settings).toEqual(confirmed);
+    expect(chat.settingsError).toBeNull();
   });
 
   it("shows a change while it is saved and falls back when the save fails", async () => {
@@ -1357,7 +1472,7 @@ describe("ChatService saved conversation choices", () => {
     await chat.askQuestion("hello");
     expect(ask).toHaveBeenCalledOnce();
     // The settings read after the turn retires the notice.
-    expect(chat.settingsRefusal).toBeNull();
+    await vi.waitFor(() => expect(chat.settingsRefusal).toBeNull());
 
     await chat.updateSettings({ completion_model_id: "model-2", reasoning_effort: null });
     expect(chat.settingsRefusal).toBe(refusal);

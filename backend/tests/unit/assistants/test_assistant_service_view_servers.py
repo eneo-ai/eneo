@@ -8,9 +8,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import pytest
+
 from eneo.assistants.assistant_service import AssistantService
+from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.application.capability_resolver import CapabilityResolution
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+from eneo.sessions.conversation_settings import ConversationSettings
 
 
 def _server(**kwargs) -> MCPServer:
@@ -104,6 +108,8 @@ async def test_enforced_policy_servers_replace_the_assistants_own():
             mcp_enforced=True,
             available_mcp_servers=[enforced],
             enabled_capabilities=[],
+            default_disabled_mcp_server_ids=[],
+            default_disabled_capabilities=[],
         )
     )
 
@@ -171,3 +177,38 @@ async def test_assistant_without_the_capability_has_no_provider():
     )
 
     assert found is None
+
+
+@pytest.mark.parametrize("purpose", ["general", "file_analysis"])
+async def test_view_obeys_current_default_and_explicit_conversation_switch(purpose):
+    server = _server(purpose=purpose)
+    assistant = _assistant(server)
+    service = _service(assistant)
+    config = SimpleNamespace(
+        default_disabled_mcp_server_ids=[server.id] if purpose == "general" else [],
+        default_disabled_capabilities=[purpose] if purpose != "general" else [],
+    )
+    service._servers_a_turn_reaches = AsyncMock(
+        return_value=(assistant, [server], config)
+    )
+
+    async def resolve(choices):
+        return await service.mcp_server_for_view(
+            assistant_id=assistant.id, mcp_server_id=server.id, settings=choices
+        )
+
+    with pytest.raises(BadRequestException, match="switched off"):
+        await resolve(ConversationSettings())
+
+    def switched(enabled):
+        return (
+            ConversationSettings(mcp_server_states={server.id: enabled})
+            if purpose == "general"
+            else ConversationSettings(capability_states={purpose: enabled})
+        )
+
+    assert await resolve(switched(True)) is server
+    config.default_disabled_mcp_server_ids = []
+    config.default_disabled_capabilities = []
+    with pytest.raises(BadRequestException, match="switched off"):
+        await resolve(switched(False))

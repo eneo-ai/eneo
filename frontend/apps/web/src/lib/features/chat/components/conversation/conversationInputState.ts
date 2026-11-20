@@ -26,19 +26,15 @@ export function settingsControlsDisabled(state: {
 }
 
 /**
- * The settings update for a tool selection. Only tools whose state differs
- * from what is selected now are written: a tool the user never touched
- * stays absent and keeps following the admin default, and explicit choices
- * already saved are kept. Null when nothing changed.
+ * Only the changes made in this interaction. ChatService applies them to the
+ * latest saved choices when this update reaches the front of its queue.
  */
 export function toolSelectionUpdate(
-  settings:
-    Pick<ConversationSettings, "mcp_server_states" | "capability_states"> | null | undefined,
   tools: ReadonlyArray<{ id: string; selected: boolean }>,
   disabledIds: ReadonlySet<string>
 ): ToolSelectionUpdate | null {
-  const mcp_server_states = { ...settings?.mcp_server_states };
-  const capability_states = { ...settings?.capability_states };
+  const mcp_server_states: Record<string, boolean> = {};
+  const capability_states: Record<string, boolean> = {};
   let changed = false;
   for (const tool of tools) {
     const on = !disabledIds.has(tool.id);

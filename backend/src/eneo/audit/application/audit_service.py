@@ -180,7 +180,7 @@ class AuditService:
 
             actor_id, actor_type = audit_actor_for(user)
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
         filled_ip, filled_agent, request_id = _fill_request_context(
@@ -346,7 +346,7 @@ class AuditService:
 
             actor_id, actor_type = audit_actor_for(user)
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type.requires_actor_id and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
 
         # Validate

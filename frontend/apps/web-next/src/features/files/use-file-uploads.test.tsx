@@ -57,7 +57,10 @@ it("releases previews on failed upload", async () => {
   await act(() => result.current.add([file()]));
   expect(result.current.files).toEqual([]);
   expect(URL.revokeObjectURL).toHaveBeenCalledExactlyOnceWith("blob:preview");
-  expect(errors).toHaveBeenCalledTimes(1);
+  // The server's message does not name the file; the toast does.
+  expect(errors).toHaveBeenCalledExactlyOnceWith(expect.any(Error), expect.any(Function), {
+    fileName: "notes.txt"
+  });
 });
 
 it("transfers files to a submitted resource without deleting them on unmount", async () => {

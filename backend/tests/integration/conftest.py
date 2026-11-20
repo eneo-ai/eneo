@@ -736,6 +736,16 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
+@pytest.fixture
+async def raw_client(app) -> AsyncGenerator[AsyncClient, None]:
+    """A client that receives the 500 instead of the server's exception."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test.local",
+    ) as client:
+        yield client
+
+
 # Database session fixtures
 
 
@@ -1032,6 +1042,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
         auth_method=None,
+        derived_from=None,
     ) -> str:
         return original_create_token(
             self,
@@ -1043,6 +1054,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             else test_settings.jwt_expiry_time,
             extra_claims=extra_claims,
             auth_method=auth_method,
+            derived_from=derived_from,
         )
 
     def patched_get_jwt_payload(
@@ -1067,45 +1079,22 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
 
 
 @pytest.fixture
-def jwks_mock(monkeypatch):
-    """Stub out PyJWKClient so tests never fetch real JWKS documents.
+def fake_idp(monkeypatch):
+    """Start providers that sign real ID tokens (tests/fake_oidc_provider.py).
 
-    Patches both jwt.PyJWKClient and the federation_router's JWKClient alias
-    to ensure the mock is used even though the module has already imported and bound the name.
+    Each call adds one; all of them answer from then on.
     """
-    import jwt as jwt_lib
+    from tests.fake_oidc_provider import FakeOidcProvider, install
 
-    def _configure(
-        signing_keys: dict[str, str] | None = None,
-        default_key: str = "test-signing-key",
-    ):
-        keys = signing_keys or {}
+    started: list[FakeOidcProvider] = []
 
-        class _Key:
-            def __init__(self, key: str):
-                self.key = key
+    def _start(**settings: Any) -> FakeOidcProvider:
+        provider = FakeOidcProvider(**settings)
+        started.append(provider)
+        install(monkeypatch, *started)
+        return provider
 
-        class _FakePyJWKClient:
-            def __init__(self, jwks_uri: str):  # noqa: D401 - signature matches real class
-                self.jwks_uri = jwks_uri
-
-            def get_signing_key_from_jwt(self, token: str):
-                return _Key(keys.get(token, default_key))
-
-        # Patch the jwt module's PyJWKClient
-        monkeypatch.setattr(jwt_lib, "PyJWKClient", _FakePyJWKClient)
-
-        # CRITICAL: Also patch the federation_router's module-level JWKClient alias
-        # The router does: from jwt import PyJWKClient as _PyJWKClient; JWKClient = _PyJWKClient
-        # Since it's already bound at import time, we must patch the alias directly
-        monkeypatch.setattr(
-            "eneo.authentication.federation_router.JWKClient",
-            _FakePyJWKClient,
-        )
-
-        return _FakePyJWKClient
-
-    return _configure
+    return _start
 
 
 @pytest.fixture
@@ -1136,10 +1125,17 @@ def oidc_mock(monkeypatch):
         request_log: list[tuple[str, str]] = []
         token_clients: list[str | None] = []
 
+        from tests.fake_oidc_provider import _Body
+
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.content_length = None
+
+            @property
+            def content(self) -> _Body:
+                return _Body(json.dumps(self._payload).encode())
 
             async def __aenter__(self):
                 return self
@@ -1179,23 +1175,12 @@ def oidc_mock(monkeypatch):
                 payload, status = token_map[key]
                 return _FakeResponse(payload, status)
 
-        fake_client = _FakeClient()
+        from eneo.authentication.oidc import profile
+        from eneo.main.aiohttp_client import aiohttp_client
 
-        def _client_factory():
-            return fake_client
-
-        import eneo.main.aiohttp_client as aiohttp_client_module
-
-        monkeypatch.setattr(aiohttp_client_module, "aiohttp_client", _client_factory)
-        monkeypatch.setattr(
-            "eneo.authentication.federation_router.aiohttp_client",
-            _client_factory,
-        )
-        monkeypatch.setattr(
-            "eneo.users.user_router.aiohttp_client",
-            _client_factory,
-            raising=False,
-        )
+        # Every module calls the one shared client, so its session is the seam.
+        monkeypatch.setattr(aiohttp_client, "session", _FakeClient())
+        monkeypatch.setattr(profile, "_discovery_cache", {})
 
         def _summary() -> dict[str, list[Any]]:
             return {"requests": request_log, "token_clients": token_clients}

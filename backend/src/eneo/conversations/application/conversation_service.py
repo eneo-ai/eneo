@@ -29,6 +29,7 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import (
     BadRequestException,
     ConversationSettingsConflictException,
+    NotFoundException,
 )
 from eneo.mcp_servers.application.capability_resolver import (
     meets_security_classification,
@@ -99,6 +100,21 @@ class ConversationService:
         self.completion_service = completion_service
         self.file_service = file_service
 
+    async def _get_session_context(self, session_id: "UUID") -> "SessionContext":
+        """Explain a removed copy only to an owner with current partner access."""
+        try:
+            return await self.session_service.get_context(session_id)
+        except NotFoundException:
+            owner = await self.session_service.get_session_ownership(session_id)
+            if owner.group_chat_id is not None:
+                await self.group_chat_service.get_group_chat(owner.group_chat_id)
+            elif owner.assistant_id is not None:
+                await self.assistant_service.get_preflight_target(owner.assistant_id)
+            else:
+                raise
+            await self.session_service.refuse_removed_copy(session_id)
+            raise
+
     async def settings_defaults(
         self,
         *,
@@ -108,7 +124,7 @@ class ConversationService:
         context: "AssistantPreflightTarget | None" = None,
     ) -> ConversationSettings:
         if session_id is not None:
-            session = await self.session_service.get_context(session_id)
+            session = await self._get_session_context(session_id)
             group_chat_id = session.group_chat_id
             assistant_id = session.assistant_id
         if group_chat_id is not None:
@@ -182,7 +198,7 @@ class ConversationService:
         revision = 0
         compatible = True
         if session_id is not None:
-            session = await self.session_service.get_context(session_id)
+            session = await self._get_session_context(session_id)
             assistant_id, group_chat_id = session.assistant_id, session.group_chat_id
             if session.settings:
                 compatible = session.settings.is_compatible
@@ -194,6 +210,8 @@ class ConversationService:
                 raise ConversationSettingsConflictException()
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
+            if session_id is None and settings is not None:
+                self._validate_group_settings(settings)
             return ConversationSettingsResolution(
                 revision=revision,
                 settings=settings or ConversationSettings(),
@@ -227,6 +245,9 @@ class ConversationService:
             current_model=assistant.completion_model, effective_config=config
         )
         if personal:
+            result.reasoning_effort_user_configurable = bool(
+                config and config.reasoning_effort_user_configurable
+            )
             result.model_locked = bool(
                 config and config.models_enforced and config.locked_model
             )
@@ -288,7 +309,7 @@ class ConversationService:
                 stored_effort=settings.reasoning_effort,
                 effective_config=config,
             )
-        if model and config and config.reasoning_effort_user_configurable:
+        if model and config and result.reasoning_effort_user_configurable:
             capability = model.get_supported_model_kwargs().reasoning_effort
             if capability.supported and capability.control == "select":
                 result.reasoning_effort_options = capability.options or []
@@ -355,6 +376,17 @@ class ConversationService:
             )
         return result
 
+    @staticmethod
+    def _validate_group_settings(settings: ConversationSettings) -> None:
+        if (
+            settings.completion_model_id is not None
+            or settings.reasoning_effort is not None
+            or settings.require_tool_approval
+        ):
+            raise BadRequestException(
+                "Group chats use each responding assistant's model and do not support tool approval."
+            )
+
     async def validate_settings(
         self,
         settings: ConversationSettings,
@@ -373,14 +405,7 @@ class ConversationService:
         """
         if group_chat_id is not None:
             await self.group_chat_service.get_group_chat(group_chat_id)
-            if (
-                settings.completion_model_id is not None
-                or settings.reasoning_effort is not None
-                or settings.require_tool_approval
-            ):
-                raise BadRequestException(
-                    "Group chats use each responding assistant's model and do not support tool approval."
-                )
+            self._validate_group_settings(settings)
             return
         if assistant_id is None:
             raise BadRequestException("A conversation target is required.")
@@ -461,7 +486,7 @@ class ConversationService:
     async def update_settings(
         self, session_id: "UUID", settings: ConversationSettings, expected_revision: int
     ) -> ConversationSettingsState:
-        session = await self.session_service.get_context(session_id)
+        session = await self._get_session_context(session_id)
         if session.settings:
             session.settings.require_supported()
         context = (
@@ -505,7 +530,7 @@ class ConversationService:
     ) -> "AssistantResponse":
         state = None
         if session_id is not None:
-            session = await self.session_service.get_context(session_id)
+            session = await self._get_session_context(session_id)
             assert session is not None
             assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
@@ -547,9 +572,7 @@ class ConversationService:
                     # one that sent no revision continues with the state that won.
                     if settings_revision is not None:
                         raise
-                    state = (
-                        await self.session_service.get_context(session_id)
-                    ).settings
+                    state = (await self._get_session_context(session_id)).settings
                     if state is None:
                         raise
             else:
@@ -617,7 +640,7 @@ class ConversationService:
         """
         session = None
         if session_id is not None:
-            session = await self.session_service.get_context(session_id)
+            session = await self._get_session_context(session_id)
             assistant_id = session.assistant_id
             group_chat_id = session.group_chat_id
             revision = session.settings.revision if session.settings else 0
@@ -838,7 +861,7 @@ class ConversationService:
             )
         if session_id:
             if session is None:
-                session = await self.session_service.get_context(session_id)
+                session = await self._get_session_context(session_id)
             assert session is not None
             if session.group_chat_id:
                 if completion_model_id is not None:
@@ -1027,7 +1050,10 @@ class ConversationService:
     ) -> "SessionInDB | None":
         session = await self.session_service.get_session_by_uuid(session_id)
         assert session is not None
-        assert session.assistant is not None
+        if session.group_chat_id is not None or session.assistant is None:
+            raise BadRequestException(
+                "Automatic titles require an assistant conversation."
+            )
         if session.settings is not None:
             session.settings.require_supported()
         context = await self.assistant_service.get_preflight_target(
@@ -1039,6 +1065,7 @@ class ConversationService:
         if model is None:
             raise BadRequestException("No model is available for this conversation.")
 
+        context.space.can_ask_assistant(context.assistant, completion_model=model)
         response = await self.completion_service.get_response(
             text_input="Please set the title of the conversation",
             model=model,  # pyright: ignore[reportArgumentType]  # domain CompletionModel aliases ai_models one
@@ -1047,5 +1074,6 @@ class ConversationService:
         )
 
         return await self.session_service.update_session(
-            SessionUpdate(id=session_id, name=response.completion.text)  # type: ignore[union-attr]
+            SessionUpdate(id=session_id, name=response.completion.text),  # type: ignore[union-attr]
+            title_from_turns_at=session.history_revision,
         )

@@ -1,13 +1,46 @@
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
+
+import pytest
 
 from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.users import user_router
-from eneo.users.user import PropUserInvite, PropUserUpdate, UserState
+from eneo.users.user import PropUserInvite, PropUserUpdate, UserProvision, UserState
 from tests.fixtures import TEST_USER
+
+
+def test_provision_route_is_deprecated_in_the_openapi_schema():
+    from eneo.server.main import app
+
+    operation = app.openapi()["paths"]["/api/v1/users/provision/"]["post"]
+
+    assert operation["deprecated"] is True
+
+
+async def test_each_provision_call_logs_a_deprecation_warning_without_the_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    warning = Mock()
+    monkeypatch.setattr(user_router.logger, "warning", warning)
+    # The request container has no provisioning service; the warning comes first.
+    container = SimpleNamespace(
+        user_creation_service=Mock(side_effect=AttributeError("user_creation_service"))
+    )
+    body = UserProvision(zitadel_token="zitadel-access-token-value")
+
+    for _ in range(2):
+        with pytest.raises(AttributeError):
+            await user_router.provision_user(user_provision=body, container=container)
+
+    assert warning.call_count == 2
+    message = warning.call_args.args[0]
+    assert "deprecated" in message
+    assert "removed in the next release" in message
+    assert "#migrate-from-the-zitadel-settings" in message
+    assert "zitadel-access-token-value" not in repr(warning.call_args_list)
 
 
 async def test_invite_user_passes_tenant_to_service():
