@@ -536,6 +536,140 @@ async def test_a_rendered_document_is_stored_recorded_and_served_by_a_signed_lin
     assert recorded_level == 0
 
 
+async def test_a_run_delivers_each_marked_document_under_its_own_name(
+    client: AsyncClient,
+    flow_process_auth_headers: Mapping[str, str],
+    flow_broker_worker_seam: FlowBrokerWorkerSeam,
+) -> None:
+    # Two Word steps are marked as deliverables and a text step comes last:
+    # the run lists both documents, named from the form, while its result
+    # stays the last step's text.
+    headers = flow_process_auth_headers
+    suffix = uuid4().hex[:8]
+    space = await client.post(
+        "/api/v1/spaces/", json={"name": f"deliverables-{suffix}"}, headers=headers
+    )
+    assert space.status_code == 201, space.text
+    flow_name = f"Veckomöte {suffix}"
+    created = await client.post(
+        "/api/v1/flows/",
+        json={"space_id": space.json()["id"], "name": flow_name},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    flow_id = created.json()["id"]
+    assistant = await client.post(
+        f"/api/v1/flows/{flow_id}/assistants/",
+        json={"name": f"Deliverables {suffix}"},
+        headers=headers,
+    )
+    assert assistant.status_code == 201, assistant.text
+    assistant_id = assistant.json()["id"]
+
+    def step(order: int, name: str, output_mode: str, output_type: str, config):
+        return {
+            "assistant_id": assistant_id,
+            "step_order": order,
+            "user_description": name,
+            "input_source": "flow_input" if order == 1 else "previous_step",
+            "input_type": "text",
+            "output_mode": output_mode,
+            "output_type": output_type,
+            **({} if config is None else {"output_config": config}),
+        }
+
+    updated = await client.patch(
+        f"/api/v1/flows/{flow_id}/",
+        json={
+            "name": flow_name,
+            "metadata_json": {
+                "form_schema": {
+                    "fields": [
+                        {"name": "Team", "type": "text"},
+                        {"name": "Anteckning", "type": "text"},
+                    ]
+                }
+            },
+            "steps": [
+                step(
+                    1,
+                    "Protokoll",
+                    "render_verbatim",
+                    "docx",
+                    {
+                        "deliverable": {
+                            "label": "Protokoll",
+                            "file_name": "Protokoll {{ flow_input.Team }}",
+                        }
+                    },
+                ),
+                step(
+                    2,
+                    "Sammanfattning",
+                    "render_verbatim",
+                    "docx",
+                    {"deliverable": {"label": "Sammanfattning"}},
+                ),
+                step(3, "Svar", "compose_text", "text", None),
+            ],
+        },
+        headers=headers,
+    )
+    assert updated.status_code == 200, updated.text
+    published = await client.post(f"/api/v1/flows/{flow_id}/publish/", headers=headers)
+    assert published.status_code == 200, published.text
+    contract = await client.get(
+        f"/api/v1/flows/{flow_id}/run-contract/", headers=headers
+    )
+    assert contract.status_code == 200, contract.text
+    assert [
+        (item["step_order"], item["label"]) for item in contract.json()["deliverables"]
+    ] == [(1, "Protokoll"), (2, "Sammanfattning")]
+    assert contract.json()["final_output"]["output_type"] == "text"
+
+    await flow_broker_worker_seam.start_worker()
+    run = await client.post(
+        f"/api/v1/flows/{flow_id}/runs/",
+        json={
+            "expected_flow_version": published.json()["published_version"],
+            "input_payload_json": {"Team": "Eneo", "Anteckning": "Beslut om lokaler."},
+        },
+        headers={**headers, "Idempotency-Key": f"deliverables:{uuid4().hex}"},
+    )
+    assert run.status_code == 201, run.text
+    completed, _ = await flow_broker_worker_seam.wait_for_public_run_status(
+        client=client,
+        headers=headers,
+        flow_id=flow_id,
+        run_id=run.json()["id"],
+        expected_status="completed",
+        timeout_seconds=60,
+    )
+
+    run_day = (
+        datetime.fromisoformat(str(completed["created_at"]))
+        .astimezone(timezone.utc)
+        .date()
+        .isoformat()
+    )
+    assert [
+        (
+            item["step_order"],
+            item["label"],
+            [(file["name"], file["source"]) for file in item["files"]],
+        )
+        for item in completed["deliverables"]
+    ] == [
+        (1, "Protokoll", [(f"Protokoll Eneo {run_day}.docx", "declared_artifact")]),
+        (
+            2,
+            "Sammanfattning",
+            [(f"{flow_name} Sammanfattning {run_day}.docx", "declared_artifact")],
+        ),
+    ]
+    assert completed["result"]["kind"] == "inline_text"
+
+
 async def test_a_run_cancelled_while_queued_starts_no_step_when_its_delivery_arrives(
     client: AsyncClient,
     db_container,

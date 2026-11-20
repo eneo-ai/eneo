@@ -2267,6 +2267,7 @@ async def test_template_resumed_after_recovery_cannot_publish_file_content(
                             flow_name="Terminalization",
                             steps=(),
                             run_created_at=run.created_at,
+                            form_values={},
                         ),
                     ),
                 )

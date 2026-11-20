@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import math
+import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from functools import cached_property
+from typing import cast
 
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.step_deliverable import (
+    file_name_expressions,
+    form_field_read_by,
+)
 from eneo.flows.domain.step_output import utf8_prefix
+from eneo.flows.flow_run_redaction import redact_string
+from eneo.flows.variable_resolver import TEMPLATE_VARIABLE_PATTERN
 
 # NTFS allows 255 UTF-16 units in a name, ext4 and APFS 255 bytes; no
 # character takes more UTF-16 units than UTF-8 bytes, so 255 UTF-8 bytes fits
@@ -43,6 +52,10 @@ class GeneratedFileNames:
     every document of that type carries ``Steg <n>`` too. Both are decided from
     the whole definition, so a document's name does not depend on which steps
     have rendered so far.
+
+    A step whose deliverable has a file name of its own is named by it, filled
+    in from the run's form, instead of by the flow's and the step's names; the
+    day and the numbering apply as to any other document.
     """
 
     flow_name: str
@@ -50,6 +63,9 @@ class GeneratedFileNames:
     step_names: Mapping[int, str]
     # The step orders producing each document type.
     documents: Mapping[str, tuple[int, ...]]
+    # Each step's own file name, filled in and cleaned; a step without one, or
+    # whose own name holds nothing a file name can keep, is not listed.
+    own_names: Mapping[int, str]
 
     @classmethod
     def for_run(
@@ -58,6 +74,7 @@ class GeneratedFileNames:
         flow_name: str,
         steps: Sequence[RuntimeStep],
         run_created_at: datetime,
+        form_values: Mapping[str, object],
         run_label: str | None = None,
         run_date: date | None = None,
     ) -> GeneratedFileNames:
@@ -75,6 +92,13 @@ class GeneratedFileNames:
                     step.step_order for step in steps if step.output_type == output_type
                 )
                 for output_type in _DOCUMENT_TYPES
+            },
+            own_names={
+                step.step_order: own_name
+                for step in steps
+                if step.deliverable is not None
+                and step.deliverable.file_name is not None
+                and (own_name := _own_name(step.deliverable.file_name, form_values))
             },
         )
 
@@ -103,8 +127,9 @@ class GeneratedFileNames:
         return frozenset(numbered)
 
     def _stem(self, step_order: int, output_type: str, *, numbered: bool) -> str:
-        words = [_clean(self.flow_name) or _FALLBACK_FLOW_NAME]
-        if len(self.documents.get(output_type, ())) > 1:
+        own_name = self.own_names.get(step_order)
+        words = [own_name or _clean(self.flow_name) or _FALLBACK_FLOW_NAME]
+        if own_name is None and len(self.documents.get(output_type, ())) > 1:
             words.append(
                 _clean(self.step_names.get(step_order, "")) or f"Steg {step_order}"
             )
@@ -121,6 +146,56 @@ class GeneratedFileNames:
         while stem.partition(".")[0].rstrip(" ").upper() in _WINDOWS_DEVICE_NAMES:
             stem = " ".join(stem.replace(".", " ", 1).split())
         return stem
+
+
+def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
+    """``file_name`` with each `{{ flow_input.<field> }}` filled in from the
+    run's form, cleaned and cut to a file name's length; empty when nothing is
+    left. Anything else between `{{ }}`, and a name with a stray brace, fill in
+    nothing: publish refuses them, and a run must never fail on its name."""
+    if file_name_expressions(file_name) is None:
+        return ""
+
+    def fill(match: re.Match[str]) -> str:
+        field = form_field_read_by(match.group(1))
+        if field is None:
+            return ""
+        return _form_value_text(form_values.get(field), field=field)
+
+    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)
+    # A value clean on its own can complete a credential with the fixed text
+    # around it (`token={{ flow_input.x }}`).
+    if redact_string(filled, key=None) != filled:
+        return ""
+    return _clean(utf8_prefix(_clean(filled), max_bytes=MAX_FILE_NAME_BYTES))
+
+
+def _form_value_text(value: object, *, field: str) -> str:
+    """A form value as it is written into a file name: empty when masking would
+    change it, so a credential typed into the form never names a file."""
+    text = _scalar_text(value)
+    if text is None and isinstance(value, (list, tuple)):
+        items = (_scalar_text(item) for item in cast(Sequence[object], value))
+        text = ", ".join(item for item in items if item)
+    if not text or redact_string(text, key=field) != text:
+        return ""
+    return text
+
+
+def _scalar_text(value: object) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return ""
+    if isinstance(value, float):
+        return str(value) if math.isfinite(value) else ""
+    if isinstance(value, int):
+        try:
+            return str(value)
+        except ValueError:
+            # Past Python's digit limit for int-to-text conversion.
+            return ""
+    return None
 
 
 def _clean(text: str) -> str:

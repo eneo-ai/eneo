@@ -920,6 +920,34 @@ them. Fetch each one with its `file_id` as in step 11.
 - `result` and `result_files` are unchanged, so a client that reads only the
   last document keeps working.
 
+To mark a step, set `output_config.deliverable` on a Word or PDF step:
+
+```json
+{
+  "output_config": {
+    "deliverable": {
+      "label": "Standup",
+      "file_name": "Standup {{ flow_input.Team }}"
+    }
+  }
+}
+```
+
+- `label` is one line of at most 120 characters, shown as written.
+- `file_name` is optional: one line of at most 200 characters of fixed text
+  and `{{ flow_input.<field> }}` for fields of the flow's form. Nothing else
+  between `{{ }}` is allowed, nor a field whose name marks it as sensitive,
+  such as `password` or `token`, nor the form's run-date field: the run's day
+  is already in every name.
+- The run's day is added after the name, as for every document:
+  `Standup Eneo 2026-11-19.docx`. Characters a file name cannot hold become
+  spaces, and a value that credential masking would change is left out, as is
+  a whole name that masking would change. When nothing is left, the document
+  keeps its usual name.
+- Documents of one type that would share a name all carry `Steg <n>`.
+- Saving a step whose output is not a document removes the key; publishing
+  or importing one refuses it.
+
 ### 10. List and filter step output
 
 There is no single-step GET for run steps. Call the list endpoint and filter the list by `step_id` for the final DOCX step.

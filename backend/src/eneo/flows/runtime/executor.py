@@ -118,6 +118,7 @@ from eneo.flows.flow_run_error import (
     after_possible_tool_call,
     tool_call_possible,
 )
+from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
 from eneo.flows.flow_run_provenance import (
     FlowResolvedInputEdge,
     FlowResolvedInputEdgeGrouping,
@@ -936,6 +937,7 @@ class FlowRunExecutor:
                 flow_name=published_definition.name,
                 steps=steps,
                 run_created_at=run.created_at,
+                form_values=read_semantic_flow_input_payload(run.input_payload_json),
                 run_label=run.run_label,
                 run_date=run.run_date,
             )
