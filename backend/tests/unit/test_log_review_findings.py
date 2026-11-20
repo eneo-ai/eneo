@@ -7,6 +7,7 @@ tested there instead.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterator
 from contextlib import asynccontextmanager, contextmanager
@@ -14,13 +15,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from types import ModuleType, SimpleNamespace
-from typing import Any
 from unittest.mock import AsyncMock, patch
 from uuid import UUID, uuid4
 
 import anyio
 import pytest
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
@@ -40,6 +41,7 @@ from eneo.conversations.conversation_models import ConversationRequest
 from eneo.database import database
 from eneo.database.database import DatabaseSessionManager
 from eneo.main.config import get_settings
+from eneo.main.logging import OTELJSONFormatter
 from eneo.server.middleware import request_context
 from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.worker.worker import _log_arq_records_once
@@ -240,14 +242,19 @@ async def test_the_audit_settings_read_joins_a_transaction_that_is_open():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("actor_was_deleted", [False, True])
 async def test_a_lost_audit_event_is_logged_with_its_action(
     caplog: pytest.LogCaptureFixture,
+    actor_was_deleted: bool,
 ):
     # The job is not retried and the worker's own lines carry only a job id,
     # so nothing said which event a failed insert lost.
-    async def failing_insert(*args: Any, **kwargs: Any):
-        del args, kwargs
-        raise RuntimeError("insert failed")
+    failures: list[Exception] = [RuntimeError("insert failed")]
+    if actor_was_deleted:
+        failures.insert(
+            0, IntegrityError(None, None, RuntimeError("audit_logs_actor_id_fkey"))
+        )
+    failing_insert = AsyncMock(side_effect=failures)
 
     params = {
         "tenant_id": str(uuid4()),
@@ -279,6 +286,7 @@ async def test_a_lost_audit_event_is_logged_with_its_action(
         )
 
     [record] = [r for r in caplog.records if "Audit event not stored" in r.message]
+    assert failing_insert.await_count == len(failures)
     assert "action=api_key_updated" in record.message
     assert "insert failed" not in record.getMessage()
 
@@ -286,19 +294,26 @@ async def test_a_lost_audit_event_is_logged_with_its_action(
 # --- logs that held what they should not -----------------------------------
 
 
-def test_the_database_log_line_does_not_carry_the_password(
+@pytest.mark.parametrize("separator", ["-", "@", "%40"])
+def test_database_pool_diagnostics_keep_connection_secrets_out_of_logs(
+    separator: str,
     caplog: pytest.LogCaptureFixture,
 ):
     manager = DatabaseSessionManager()
-    url = "postgresql+asyncpg://eneo:s3cr3t-value@db:5432/eneo"
+    password = f"pool-test-left{separator}pool-test-right"
+    url = f"postgresql+asyncpg://eneo:{password}@db:5432/eneo?sslkey=pool-test-option"
 
     with _logs_of(database, caplog, logging.DEBUG):
         manager.init(url)
 
-    logged = "\n".join(record.getMessage() for record in caplog.records)
-    assert "Database connected to" in logged
-    assert "@db:5432/eneo" in logged
-    assert "s3cr3t-value" not in logged
+    formatter = OTELJSONFormatter()
+    logged = "\n".join(formatter.format(record) for record in caplog.records)
+    assert manager.initialized
+    assert "Database connection budget" in logged
+    assert all(
+        part not in logged
+        for part in ("pool-test-left", "pool-test-right", "pool-test-option")
+    )
 
 
 def test_a_completion_request_is_logged_by_shape_not_with_its_tool_definitions():
@@ -373,6 +388,22 @@ async def test_a_cancelled_request_still_closes_its_session():
 
     assert scope.cancelled_caught
     assert session.closed
+
+
+async def test_session_close_deadline_is_reported(caplog, monkeypatch):
+    manager = DatabaseSessionManager()
+    monkeypatch.setattr(database, "_SESSION_CLOSE_BUDGET_SECONDS", 0.01)
+    with (
+        patch.object(
+            manager,
+            "_sessionmaker",
+            return_value=SimpleNamespace(close=asyncio.Event().wait),
+        ),
+        _logs_of(database, caplog, logging.WARNING),
+    ):
+        async with asyncio.timeout(2), manager.session():
+            pass
+    assert "Closing a database session exceeded" in caplog.text
 
 
 # --- a turn's estimate against its first request ---------------------------
@@ -510,3 +541,16 @@ def test_an_arq_record_is_written_once_when_only_arq_has_a_handler(arq_logging):
 
     assert len(arq_logger.handlers) == 1
     assert not arq_logger.propagate
+
+
+def test_arq_keeps_its_own_destination_when_propagation_is_disabled(
+    arq_logging, caplog
+):
+    arq_logger, root = arq_logging
+    arq_logger.handlers[:] = [caplog.handler]
+    arq_logger.propagate = False
+    root.handlers[:] = [logging.NullHandler()]
+    with caplog.at_level(logging.INFO, logger="arq"):
+        _log_arq_records_once()
+        arq_logger.info("custom ARQ destination")
+    assert [record.message for record in caplog.records] == ["custom ARQ destination"]

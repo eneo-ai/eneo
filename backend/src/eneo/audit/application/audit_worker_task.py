@@ -34,6 +34,35 @@ class AuditLogTaskResult(TypedDict, total=False):
     reason: str
 
 
+async def _store_event(session: AsyncSession, audit_log: AuditLog) -> AuditLog | None:
+    """Store the event, dropping a deleted actor reference. A deleted tenant is skipped."""
+    repository = AuditLogRepositoryImpl(session)
+
+    try:
+        return await _create_in_savepoint(session, repository, audit_log)
+    except IntegrityError as e:
+        error_detail = str(e)
+        # Gracefully handle case where tenant doesn't exist (during registration or after deletion)
+        if "audit_logs_tenant_id_fkey" in error_detail:
+            logger.warning(
+                f"Skipping audit log for non-existent tenant. "
+                f"tenant_id={audit_log.tenant_id}, action={audit_log.action.value}, "
+                f"entity_type={audit_log.entity_type.value}. "
+                f"Tenant may have been deleted or not yet created."
+            )
+            return None
+        if not any(name in error_detail for name in _ACTOR_FOREIGN_KEYS):
+            raise
+        # The actor's user or key row was deleted after the event was enqueued.
+        # The FK columns would have been set NULL by that deletion anyway; the
+        # actor block captured at enqueue keeps who acted.
+        return await _create_in_savepoint(
+            session,
+            repository,
+            replace(audit_log, actor_id=None, actor_api_key_id=None),
+        )
+
+
 async def log_audit_event_task(
     job_id: UUID,
     params: AuditLogTaskParams | dict[str, Any],
@@ -72,32 +101,8 @@ async def log_audit_event_task(
         error_message=task_params.error_message,
     )
 
-    # Persist to database
-    repository = AuditLogRepositoryImpl(session)
-
     try:
-        created_log = await _create_in_savepoint(session, repository, audit_log)
-    except IntegrityError as e:
-        error_detail = str(e)
-        # Gracefully handle case where tenant doesn't exist (during registration or after deletion)
-        if "audit_logs_tenant_id_fkey" in error_detail:
-            logger.warning(
-                f"Skipping audit log for non-existent tenant. "
-                f"tenant_id={audit_log.tenant_id}, action={audit_log.action.value}, "
-                f"entity_type={audit_log.entity_type.value}. "
-                f"Tenant may have been deleted or not yet created."
-            )
-            return {"skipped": True, "reason": "tenant_not_found"}
-        if not any(name in error_detail for name in _ACTOR_FOREIGN_KEYS):
-            raise
-        # The actor's user or key row was deleted after the event was enqueued.
-        # The FK columns would have been set NULL by that deletion anyway; the
-        # actor block captured at enqueue keeps who acted.
-        created_log = await _create_in_savepoint(
-            session,
-            repository,
-            replace(audit_log, actor_id=None, actor_api_key_id=None),
-        )
+        created_log = await _store_event(session, audit_log)
     except Exception as error:
         # The job is not retried, so this line is the only trace of the event.
         log_error(
@@ -115,6 +120,9 @@ async def log_audit_event_task(
             },
         )
         raise
+
+    if created_log is None:
+        return {"skipped": True, "reason": "tenant_not_found"}
 
     logger.info(
         "Audit log created",

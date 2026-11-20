@@ -135,10 +135,10 @@ def _log_arq_records_once() -> None:
     any.
     """
     arq_logger = logging.getLogger("arq")
-    if logging.getLogger().handlers:
-        arq_logger.handlers.clear()
-    else:
+    if not logging.getLogger().handlers:
         arq_logger.propagate = False
+    elif arq_logger.propagate:
+        arq_logger.handlers.clear()
 
 
 class Worker:
