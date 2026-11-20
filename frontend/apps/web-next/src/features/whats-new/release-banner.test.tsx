@@ -63,7 +63,9 @@ describe("WhatsNewBanner", () => {
   it("tells about the release once, without blocking the page", async () => {
     const { container } = renderBanner();
 
-    expect(banner()?.textContent).toContain(`${count} nyheter sedan du var här senast.`);
+    expect(banner()?.textContent).toContain(
+      `${count} ${count === 1 ? "nyhet" : "nyheter"} sedan du var här senast.`
+    );
     expect(screen.getByRole("link", { name: `Alla ${count} nyheter` }).getAttribute("href")).toBe(
       "/whats-new"
     );

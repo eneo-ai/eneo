@@ -67,7 +67,7 @@ code .
 ```
 
 The DevContainer includes:
-- Python 3.11 with uv (backend dependencies installed with `uv sync`)
+- Python 3.11.5 or later in the 3.11 series with uv (backend dependencies installed with `uv sync`)
 - Bun for the frontend workspace (`bun run setup` installs and builds the packages)
 - PostgreSQL with pgvector and Redis as sidecar containers
 - `backend/.env` and `frontend/apps/web/.env` created from their templates, plus a generated development `ENCRYPTION_KEY`
@@ -88,7 +88,7 @@ cd backend && uv run worker              # Terminal 3: Worker
 If you prefer manual setup or need more control:
 
 **Requirements:**
-- Python 3.11 (the backend is pinned to `>=3.11,<3.12`) and [uv](https://docs.astral.sh/uv/)
+- Python 3.11 (the backend is pinned to `>=3.11.5,<3.12`) and [uv](https://docs.astral.sh/uv/)
 - Bun 1.3
 - PostgreSQL with the pgvector extension and Redis (for example in Docker)
 - `libmagic` and `ffmpeg` system packages
