@@ -30,16 +30,13 @@ from eneo.worker import task_manager
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
-@pytest.mark.parametrize("terminal", [Status.COMPLETE, Status.FAILED])
-async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
-    terminal,
+@pytest.fixture
+async def recovery_recording(
     client,
     admin_user_api_key,
     db_container,
     completion_model_factory,
     transcription_model_factory,
-    redis_client,
-    monkeypatch,
 ):
     async with db_container() as container:
         session = container.session()
@@ -71,6 +68,20 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         headers=headers,
     )
     assert upload.status_code == 200, upload.text
+    return app_url, upload.json()["id"], recording.getvalue()
+
+
+@pytest.mark.parametrize("terminal", [Status.COMPLETE, Status.FAILED])
+async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
+    terminal,
+    client,
+    admin_user_api_key,
+    recovery_recording,
+    redis_client,
+    monkeypatch,
+):
+    headers = {"X-API-Key": admin_user_api_key.key}
+    app_url, file_id, recording = recovery_recording
 
     async def complete(self, *, model, transcription_inputs, **kwargs):
         assert transcription_inputs == ["meeting transcript"]
@@ -105,7 +116,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
     request = asyncio.create_task(
         client.post(
             f"{app_url}runs/",
-            json={"files": [{"id": upload.json()["id"]}]},
+            json={"files": [{"id": file_id}]},
             headers=headers,
         )
     )
@@ -179,11 +190,56 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
             downloaded = await client.get(signed.json()["url"])
             assert downloaded.status_code == 200, downloaded.text
             assert downloaded.headers["content-disposition"].startswith("attachment")
-            assert downloaded.content == recording.getvalue()
+            assert downloaded.content == recording
         finally:
             release_terminal_publish.set()
             succeeded = await asyncio.wait_for(running, timeout=5)
         assert succeeded is (terminal == Status.COMPLETE)
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+async def test_app_dispatch_error_fails_only_an_unclaimed_run(
+    claimed,
+    db_session,
+    client,
+    admin_user_api_key,
+    recovery_recording,
+    monkeypatch,
+):
+    headers = {"X-API-Key": admin_user_api_key.key}
+    app_url, file_id, _ = recovery_recording
+    enqueue = job_manager.enqueue
+    delivery = asyncio.get_running_loop().create_future()
+    async with db_session() as worker:
+
+        async def lose_acknowledgement(task, job_id, params):
+            if task != Task.RUN_APP:
+                return await enqueue(task, job_id, params)
+            if claimed:
+                assert await JobRepository(worker).mark_job_started(job_id)
+            delivery.set_result((job_id, params, asyncio.current_task()))
+            raise ConnectionError("queue unavailable")
+
+        monkeypatch.setattr(job_manager, "enqueue", lose_acknowledgement)
+        response = await client.post(
+            f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
+        )
+        assert response.status_code == 203, response.text
+        job_id, params, callback = await asyncio.wait_for(delivery, 5)
+        await asyncio.wait_for(asyncio.shield(callback), 5)
+
+    detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["status"] == (Status.IN_PROGRESS if claimed else Status.FAILED)
+    async with db_session() as session:
+        job = await session.get(Jobs, job_id)
+        assert job is not None
+        if claimed:
+            assert job.failure_code is None
+        else:
+            assert job.failure_code == JobFailureCode.DISPATCH_FAILED
+            assert job.finished_at is not None
+            assert not await JobRepository(session).mark_job_started(job_id)
 
 
 @pytest.fixture

@@ -4,6 +4,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from eneo.database.database import sessionmanager
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import (
@@ -28,6 +29,25 @@ from eneo.main.models import Status
 from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -> None:
+    try:
+        await job_manager.enqueue(task, job_id, params)
+    except Exception:
+        logger.exception(
+            "Committed job could not be queued",
+            extra={"job_id": str(job_id), "task": task.value},
+        )
+        if task == Task.RUN_APP:
+            try:
+                async with sessionmanager.session() as session, session.begin():
+                    await JobRepository(session).fail_app_dispatch_if_unclaimed(job_id)
+            except Exception:
+                logger.exception(
+                    "Could not record app dispatch failure",
+                    extra={"job_id": str(job_id)},
+                )
 
 
 class JobService:
@@ -85,16 +105,10 @@ class JobService:
             await job_manager.enqueue(task, job_id, task_params)
             return
 
-        async def dispatch() -> None:
-            try:
-                await job_manager.enqueue(task, job_id, task_params)
-            except Exception:
-                logger.exception(
-                    "Job dispatch after commit failed; the stale-job reaper fails it",
-                    extra={"job_id": str(job_id), "task": task.value},
-                )
-
-        after_outer_transaction(session.sync_session, on_commit=dispatch)
+        after_outer_transaction(
+            session.sync_session,
+            on_commit=lambda: _enqueue_committed_job(task, job_id, task_params),
+        )
 
     async def queue_durable_knowledge_job(
         self,
