@@ -1334,6 +1334,37 @@ describe("FlowStepEditor", () => {
     });
   }, 20_000);
 
+  it.each([
+    ["answered", () => ({ body: { success: false, status_code: 401, response_preview: null } })],
+    ["refused", () => ({ status: 500, body: { message: "Internal error", error_id: "error-1" } })]
+  ])(
+    "sends a typed credential with the HTTP test but keeps it out of React Query when %s",
+    async (_outcome, answer) => {
+      const secret = "sk-synthetic-test-token-4711";
+      const path = "/api/v1/flows/{id}/http-test";
+      api.routes[`POST ${path}`] = answer;
+      const { container, queryClient } = renderEditor(
+        httpFlow({ mode: "bearer_token", token: { $secret: "stored" } })
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Ersätt: Token" }));
+      const token = container.querySelector("input[type=password]") as HTMLInputElement;
+      fireEvent.change(token, { target: { value: secret } });
+      fireEvent.click(screen.getByRole("button", { name: messages.http_test_button }));
+
+      await waitFor(() =>
+        expect(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .some((mutation) => ["success", "error"].includes(mutation.state.status))
+        ).toBe(true)
+      );
+      expect(JSON.stringify(api.stub.calls.filter((call) => call.path === path))).toContain(secret);
+      expect(cachedText(queryClient)).not.toContain(secret);
+    },
+    20_000
+  );
+
   it("sets a tool step's arguments, one whole reference or a typed value each", async () => {
     api.routes["GET /api/v1/flows/{id}/tool-options"] = () => ({
       body: {
