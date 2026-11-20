@@ -11,7 +11,6 @@ from eneo.flows.enums import (
     FlowInputType,
     FlowOutputMode,
     FlowOutputType,
-    flow_output_mode_uses_completion_model,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
@@ -45,12 +44,13 @@ def provider_backed_model_required(step_order: int) -> FlowStepValidationError:
 
 
 def require_completion_model_for_step(
-    *, step_order: int, output_mode: str, has_completion_model: bool
+    *, step_order: int, calls_completion_model: bool, has_completion_model: bool
 ) -> None:
-    """Refuse a step whose output mode calls a completion model while its
-    assistant has none. A run uses only the model the published step binds,
-    so publishing and the run's preflight both ask this before any step runs."""
-    if has_completion_model or not flow_output_mode_uses_completion_model(output_mode):
+    """Refuse a step that calls a completion model (``step_calls_completion_model``)
+    while its assistant has none. A run uses only the model the published step
+    binds, so publishing and the run's preflight both ask this before any step
+    runs."""
+    if has_completion_model or not calls_completion_model:
         return
     raise provider_backed_model_required(step_order)
 

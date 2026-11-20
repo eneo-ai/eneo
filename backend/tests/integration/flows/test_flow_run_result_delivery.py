@@ -28,6 +28,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
+    FlowStepAttempts,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_run_contract_models import FlowRunOutboundHttpResultPublic
@@ -626,3 +627,45 @@ async def test_markdown_beyond_the_inline_limit_fails_the_run_and_is_never_cut(
             FlowRunWebhookDeliveries.flow_run_id == run.id
         )
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_markdown_near_the_inline_limit_is_sent_whole_beside_a_prompt(
+    setup_database,
+    object_content_runtime_ready,
+    queued_long_markdown_then_post_run,
+    monkeypatch,
+):
+    """The POST step's assistant keeps an instruction, but the step asks its
+    model nothing: the instruction is not filled in, does not count against
+    the inline limit, and its attempt names no model."""
+    markdown = "# Lång\n\n" + "x" * 200
+    monkeypatch.setattr(
+        get_settings(), "flow_max_inline_text_bytes", len(markdown.encode()) + 5
+    )
+    run = await queued_long_markdown_then_post_run()
+    sent: list[bytes] = []
+
+    async def _receive(_self, **kwargs):
+        sent.append(kwargs["body_bytes"])
+        return _response(200)
+
+    async def _answer(_self, **_kwargs):
+        return SimpleNamespace(completion=markdown, total_token_count=1)
+
+    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
+
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
+    await _run_outbox()
+
+    [body] = [json.loads(item) for item in sent]
+    assert body["text"] == markdown
+    attempt = await _read_one(
+        sa.select(FlowStepAttempts.requested_model, FlowStepAttempts.provider).where(
+            FlowStepAttempts.flow_run_id == run.id, FlowStepAttempts.step_order == 2
+        )
+    )
+    assert attempt.requested_model is None
+    assert attempt.provider is None

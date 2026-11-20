@@ -37,7 +37,7 @@ from eneo.flows.flow_resource_bindings import (
     ResourceSlotRef,
 )
 from eneo.flows.flow_review_policy import FlowStepReviewMode, FlowStepReviewPolicy
-from eneo.flows.http_transport import SECRET_SENTINEL
+from eneo.flows.http_transport import SECRET_SENTINEL, step_calls_completion_model
 from eneo.flows.variable_resolver import iter_template_expressions
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED
@@ -896,6 +896,8 @@ async def test_publish_flow_accepts_reads_the_run_collects(
     [
         "no_model",
         "no_model_no_ai_mode",
+        "no_model_http_post",
+        "no_model_run_result",
         "missing",
         "missing_id",
         "missing_type",
@@ -914,6 +916,21 @@ async def test_publish_flow_requires_provider_binding(user, binding):
     if binding == "no_model_no_ai_mode":
         step = step.model_copy(
             update={"output_mode": "render_verbatim", "output_type": "pdf"}
+        )
+    if binding in {"no_model_http_post", "no_model_run_result"}:
+        # An ordinary POST step sends what its model answers; a step that
+        # sends the run's result calls no model.
+        body = {"mode": "run_result" if binding == "no_model_run_result" else "auto"}
+        step = step.model_copy(
+            update={
+                "output_mode": "http_post",
+                "output_type": "text",
+                "output_config": {
+                    "url": "https://receiver.example.org/results",
+                    "auth": {"mode": "none"},
+                    "body": body,
+                },
+            }
         )
     flow = Flow(
         id=uuid4(),
@@ -945,12 +962,12 @@ async def test_publish_flow_requires_provider_binding(user, binding):
         get_model_route=lambda: "openai/model-a",
         security_classification=None,
     )
-    if binding in {"no_model", "no_model_no_ai_mode"}:
+    if binding.startswith("no_model"):
         assistant.completion_model = None
     service.assistant_service.get_assistant.side_effect = None
     service.assistant_service.get_assistant.return_value = (assistant, [])
 
-    if binding == "no_model_no_ai_mode":
+    if binding in {"no_model_no_ai_mode", "no_model_run_result"}:
         await service.publish_flow(flow_id=flow.id)
         version_repo.create.assert_awaited_once()
     elif binding == "provider_backed":
@@ -995,7 +1012,7 @@ def test_only_a_model_step_without_a_model_is_refused(
     check = partial(
         require_completion_model_for_step,
         step_order=2,
-        output_mode=output_mode.value,
+        calls_completion_model=step_calls_completion_model(output_mode.value, None),
         has_completion_model=has_completion_model,
     )
     if refused:

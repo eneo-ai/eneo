@@ -2133,6 +2133,27 @@ def test_runtime_step_identifies_completion_provider_calling_modes(
     assert step.may_call_completion_provider is expected
 
 
+def test_a_step_that_sends_the_run_result_calls_no_completion_provider():
+    """The POST step sends the text it reads; its model is never asked."""
+    step = replace(
+        _step_for_execute_step(),
+        output_mode="http_post",
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+
+    assert step.may_call_completion_provider is False
+    assert (
+        replace(
+            step, output_config={**step.output_config, "body": {"mode": "auto"}}
+        ).may_call_completion_provider
+        is True
+    )
+
+
 @pytest.mark.asyncio
 async def test_zero_call_compose_failure_has_no_provider_work_disclosure(user):
     executor, _, flow_run_repo, _ = _build_executor(user)

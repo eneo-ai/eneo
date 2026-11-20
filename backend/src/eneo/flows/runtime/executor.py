@@ -3533,7 +3533,7 @@ class FlowRunExecutor:
             )
             require_completion_model_for_step(
                 step_order=step.step_order,
-                output_mode=step.output_mode,
+                calls_completion_model=step.may_call_completion_provider,
                 has_completion_model=assistant.completion_model is not None,
             )
 

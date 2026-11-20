@@ -102,6 +102,7 @@ from eneo.flows.http_transport import (
     is_authored_config,
     merge_secrets_on_update,
     protect_authored_secrets,
+    step_calls_completion_model,
     templated_step_credentials,
     unprotected_persisted_secret_fields,
     unresolved_secret_sentinel_fields,
@@ -1632,7 +1633,9 @@ class FlowService:
             raise provider_backed_model_required(step.step_order)
         require_completion_model_for_step(
             step_order=step.step_order,
-            output_mode=step.output_mode,
+            calls_completion_model=step_calls_completion_model(
+                step.output_mode, step.output_config
+            ),
             has_completion_model=model is not None,
         )
         assistant_snapshot = build_assistant_execution_snapshot(
