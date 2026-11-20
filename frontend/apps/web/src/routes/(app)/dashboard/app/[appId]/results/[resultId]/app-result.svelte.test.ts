@@ -86,8 +86,13 @@ it.each([
       createWritable: async () => ({ write, close: async () => {} })
     }));
     api.sign.mockResolvedValue({ url: "/original.wav" });
-    api.get.mockResolvedValue(run(status, "Mötesanteckningar"));
-    const result = run(status, "Mötesanteckningar");
+    const saved = run(status, "Mötesanteckningar");
+    const result = status === "in progress" ? run(status) : saved;
+    if (status === "in progress") {
+      vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+      api.get.mockResolvedValueOnce(result);
+    }
+    api.get.mockResolvedValue(saved);
     if (surface === "dashboard") {
       show(result);
     } else {
@@ -102,12 +107,17 @@ it.each([
       };
       render(SpaceResultPage, { data: data as SpaceResultData });
     }
-    await page
-      .getByRole(surface === "dashboard" ? "button" : "tab", {
-        name: m.transcription(),
-        exact: true
-      })
-      .click();
+    const transcription = page.getByRole(surface === "dashboard" ? "button" : "tab", {
+      name: m.transcription(),
+      exact: true
+    });
+    if (status === "in progress") {
+      await vi.waitFor(() => expect(api.get).toHaveBeenCalledTimes(1));
+      expect(transcription.query()).toBeNull();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(api.get).toHaveBeenCalledTimes(2);
+    }
+    await transcription.click();
     await page
       .getByRole("button", {
         name: m.download_type_raw_text({ type: m.transcription().toLocaleLowerCase() })
