@@ -54,7 +54,7 @@ from eneo.flows.api.flow_run_concurrency_response import (
     flow_run_concurrency_limit_response,
 )
 from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
-from eneo.flows.api.flow_run_response import started_run_public
+from eneo.flows.api.flow_run_response import read_run_public, started_run_public
 from eneo.flows.api.flow_run_started_by import (
     started_by_for_run,
     started_by_for_runs,
@@ -930,14 +930,7 @@ async def cancel_flow_run(
                 )
             )
     if completed_run_view is not None:
-        return FlowAssembler().to_run_public(
-            completed_run_view.run,
-            result_files=completed_run_view.result_files,
-            token_usage=completed_run_view.token_usage,
-            transcription_usage=completed_run_view.transcription_usage,
-            final_output=completed_run_view.final_output,
-            started_by=started_by,
-        )
+        return read_run_public(completed_run_view, started_by=started_by)
     return FlowAssembler().to_run_public(run, started_by=started_by)
 
 
@@ -1085,14 +1078,7 @@ async def redispatch_flow_run(
     started_by = await started_by_for_run(container, run)
     assembler = FlowAssembler()
     public_run = (
-        assembler.to_run_public(
-            completed_run_view.run,
-            result_files=completed_run_view.result_files,
-            token_usage=completed_run_view.token_usage,
-            transcription_usage=completed_run_view.transcription_usage,
-            final_output=completed_run_view.final_output,
-            started_by=started_by,
-        )
+        read_run_public(completed_run_view, started_by=started_by)
         if completed_run_view is not None
         else assembler.to_run_public(run, started_by=started_by)
     )

@@ -1279,6 +1279,58 @@ async def test_cancel_flow_run_uses_terminalizer_audit_only(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_cancel_of_a_completed_run_returns_its_result(monkeypatch):
+    container = MagicMock()
+    _stub_run_starters(container)
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={
+            "status": FlowRunStatus.COMPLETED,
+            "output_payload_json": {"text": "Already finished"},
+        }
+    )
+    events: list[str] = []
+    run_service = AsyncMock()
+    run_service.cancel_run.return_value = run
+    run_service.enrich_run_with_result_files_and_usage.return_value = (
+        FlowRunWithResultFilesAndUsage(
+            run=run,
+            result_files=(),
+            token_usage=None,
+            final_output=FlowFinalOutputContractPublic(
+                step_id=uuid4(),
+                step_order=1,
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.PASS_THROUGH,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            ),
+        )
+    )
+    container.flow_run_service.return_value = run_service
+    container.user.return_value = user
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
+
+    response = await cancel_flow_run(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response.result is not None
+    assert response.result.kind == "inline_text"
+    assert response.result.text == "Already finished"
+    run_service.enrich_run_with_result_files_and_usage.assert_awaited_once_with(run=run)
+
+
+@pytest.mark.asyncio
 async def test_redispatch_flow_run_uses_run_scoped_dispatch_and_audits(
     monkeypatch,
 ):
