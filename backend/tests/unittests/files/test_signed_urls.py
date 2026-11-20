@@ -1,12 +1,14 @@
 import time
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
 
 from eneo.authentication.signed_urls import verify_signed_token
+from eneo.files import signed_urls as signed_urls_module
 from eneo.files.file_models import ContentDisposition, SignedURLRequest
-from eneo.files.signed_urls import build_signed_download_response
+from eneo.files.signed_urls import build_signed_download_response, public_api_origin
 
 
 @pytest.mark.parametrize("expires_in", [0, -1, 86401])
@@ -82,3 +84,95 @@ def test_build_signed_download_response_rejects_cross_tenant_round_trip() -> Non
     token = response.url.split("token=", 1)[1]
 
     assert verify_signed_token(token, expected_tenant_id=uuid4()) is None
+
+
+def _settings(**overrides: object) -> SimpleNamespace:
+    return SimpleNamespace(
+        **{"api_prefix": "/api/v1", "public_origin": None, **overrides}
+    )
+
+
+def test_build_signed_download_response_keeps_the_default_prefix_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(signed_urls_module, "get_settings", lambda: _settings())
+    file_id = uuid4()
+
+    response = build_signed_download_response(
+        base_url="https://app.example.com/",
+        file_id=file_id,
+        tenant_id=uuid4(),
+        signed_url_request=SignedURLRequest(expires_in=60),
+        now=0,
+    )
+
+    assert response.url.startswith(
+        f"https://app.example.com/api/v1/files/{file_id}/download/?token="
+    )
+
+
+def test_build_signed_download_response_follows_the_configured_api_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        signed_urls_module, "get_settings", lambda: _settings(api_prefix="/eneo/api")
+    )
+    file_id = uuid4()
+
+    response = build_signed_download_response(
+        base_url="https://app.example.com",
+        file_id=file_id,
+        tenant_id=uuid4(),
+        signed_url_request=SignedURLRequest(expires_in=60),
+        now=0,
+    )
+
+    assert response.url.startswith(
+        f"https://app.example.com/eneo/api/files/{file_id}/download/?token="
+    )
+
+
+def test_public_api_origin_prefers_the_tenant_canonical_origin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        signed_urls_module,
+        "get_settings",
+        lambda: _settings(public_origin="https://eneo.example.org"),
+    )
+    tenant = SimpleNamespace(
+        federation_config={"canonical_public_origin": "https://tenant.example.org"}
+    )
+
+    assert public_api_origin(tenant) == "https://tenant.example.org"
+
+
+@pytest.mark.parametrize("federation_config", [{}, {"canonical_public_origin": ""}])
+def test_public_api_origin_falls_back_to_the_public_origin(
+    monkeypatch: pytest.MonkeyPatch, federation_config: dict[str, object]
+) -> None:
+    monkeypatch.setattr(
+        signed_urls_module,
+        "get_settings",
+        lambda: _settings(
+            public_origin="https://eneo.example.org",
+            file_reference_base_url="http://backend:8000",
+        ),
+    )
+
+    assert (
+        public_api_origin(SimpleNamespace(federation_config=federation_config))
+        == "https://eneo.example.org"
+    )
+
+
+def test_public_api_origin_is_none_when_nothing_is_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        signed_urls_module,
+        "get_settings",
+        lambda: _settings(file_reference_base_url="http://backend:8000"),
+    )
+
+    assert public_api_origin(SimpleNamespace(federation_config={})) is None

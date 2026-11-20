@@ -1,15 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Annotated, NoReturn, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
-from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.access_denial_code import AccessDenialCode
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -38,6 +35,9 @@ from eneo.flows.api.flow_runtime_paths import (
 )
 from eneo.flows.application.flow_run_evidence_snapshot import (
     flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_run_file_download import (
+    log_run_file_download_minted,
 )
 from eneo.flows.application.flow_trace_audit import (
     FLOW_EVIDENCE_READ_ON_GET,
@@ -95,29 +95,6 @@ The file_id must reference an artifact that was actually produced by a step in t
 
 Service-key principals are supported for their own runtime artifacts in v1.
     """
-
-
-async def _log_required_run_file_access(
-    *,
-    container: Container,
-    file: FileMetadata,
-    description: str,
-    extra: Mapping[str, object],
-) -> None:
-    user = container.user()
-    (file_info,) = await container.file_repo().get_infos_by_ids([file.id])
-    await container.audit_service().log(
-        tenant_id=user.tenant_id,
-        user=user,
-        action=ActionType.FILE_SIGNED_URL_MINTED,
-        entity_type=EntityType.FILE,
-        entity_id=file.id,
-        description=description,
-        metadata=AuditMetadata.standard(
-            actor=user, target=file, extra={**extra, "size_bytes": file_info.size}
-        ),
-        required=True,
-    )
 
 
 def _raise_run_file_access_audit_unavailable(
@@ -482,9 +459,11 @@ async def generate_flow_run_artifact_signed_url(
                 history=True,
             )
             audit_tenant_id = container.user().tenant_id
-            await _log_required_run_file_access(
-                container=container,
+            await log_run_file_download_minted(
+                audit_service=container.audit_service(),
+                file_repo=container.file_repo(),
                 file=file,
+                actor=container.user(),
                 description=f"Minted a download URL for Flow run artifact '{file.name}'",
                 extra={
                     "flow_id": str(id),
@@ -616,9 +595,11 @@ async def generate_flow_run_input_file_signed_url(
                 history=True,
             )
             audit_tenant_id = container.user().tenant_id
-            await _log_required_run_file_access(
-                container=container,
+            await log_run_file_download_minted(
+                audit_service=container.audit_service(),
+                file_repo=container.file_repo(),
                 file=file,
+                actor=container.user(),
                 description=f"Minted a download URL for Flow run input '{file.name}'",
                 extra={
                     "flow_id": str(id),
