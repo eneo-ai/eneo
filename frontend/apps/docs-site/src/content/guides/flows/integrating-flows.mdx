@@ -2084,22 +2084,23 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
   matches its checksum, is never sent in part: the delivery ends in dead
   letter without a request.
 - Text longer than a step result keeps inline (`FLOW_MAX_INLINE_TEXT_BYTES`)
-  is never cut: the sending step cannot read it whole, and the run fails with
-  `typed_io_input_too_large`.
+  is never cut: the sending step cannot read it whole, and the run fails at
+  that step with `typed_io_input_too_large`.
 - Headers may read run data; the address may not. Content-Type is set by the
   mode and cannot be authored.
 
 **Receiver contract.** Answer `2xx` once the result is stored. Delivery is at
 least once: the same result can arrive again with the same `Idempotency-Key`,
-so store by that key. Any other answer, or no answer within the step's
-timeout, is retried: five attempts in all, waiting 30, 120, 300 and 900
-seconds between them. After the last failed attempt the delivery ends in dead
-letter. An audit row is written before every attempt, with the receiver's host
+so store by that key. A `4xx` other than `408` and `429` refuses the result:
+the delivery ends in dead letter at once. A `5xx`, `408`, `429`, a redirect
+(it is not followed), or no answer within the step's timeout is retried: five
+attempts in all, waiting 30, 120, 300 and 900 seconds between them. After the
+last failed attempt the delivery ends in dead letter. An audit row is written before every attempt, with the receiver's host
 and the file ids, never the content.
 
 **Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
 `delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
-lists each attempt. A dead-lettered result can be sent again with
+lists each delivery with its number of attempts. A dead-lettered result can be sent again with
 `POST /api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/`
 and the body `{"expected_dead_lettered_at": "<dead_lettered_at from the run>"}`.
 It needs edit access to the flow and returns the delivery, now pending again

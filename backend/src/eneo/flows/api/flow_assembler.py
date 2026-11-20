@@ -256,6 +256,17 @@ class FlowAssembler:
         started_by: FlowRunStartedByPublic | None = None,
         evidence_access: FlowRunEvidenceAccess,
     ) -> FlowRunDetailPublic:
+        final_output = outputs.final_output if outputs is not None else None
+        # The deliveries are in step and attempt order: the last one of the
+        # final step is where its result stands.
+        final_delivery_status = next(
+            (
+                delivery.delivery_status
+                for delivery in reversed(webhook_deliveries)
+                if final_output is not None and delivery.step_id == final_output.step_id
+            ),
+            None,
+        )
         run_payload = self.to_run_public(
             run,
             result_files=result_files,
@@ -263,6 +274,7 @@ class FlowAssembler:
             transcription_usage=transcription_usage,
             outputs=outputs,
             started_by=started_by,
+            final_delivery_status=final_delivery_status,
         ).model_dump()
         return FlowRunDetailPublic.model_validate(
             {

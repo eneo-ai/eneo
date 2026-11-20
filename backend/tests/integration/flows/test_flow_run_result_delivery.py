@@ -26,6 +26,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunWebhookDeliveries,
 )
+from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_run_contract_models import FlowRunOutboundHttpResultPublic
 from eneo.flows.api.flow_run_response import read_run_public
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
@@ -294,11 +295,25 @@ async def _result_delivery_status(run, *, admin_user, test_tenant) -> str:
             user=providers.Object(admin_user),
             tenant=providers.Object(test_tenant),
         )
-        view = await container.flow_run_service().get_run_with_result_files_and_usage(
+        service = container.flow_run_service()
+        view = await service.get_run_with_result_files_and_usage(
             flow_id=run.flow_id, run_id=run.id
+        )
+        detail_view = await service.get_run_detail_with_result_files_and_usage(
+            flow_id=run.flow_id, run_id=run.id
+        )
+        detail = FlowAssembler().to_run_detail_public(
+            detail_view.run,
+            result_files=detail_view.result_files,
+            outputs=detail_view.outputs,
+            webhook_deliveries=detail_view.webhook_deliveries,
+            evidence_access=await service.evidence_access(detail_view.run),
         )
     result = read_run_public(view, started_by=None).result
     assert isinstance(result, FlowRunOutboundHttpResultPublic)
+    # The run page reads the detail; it must say the same.
+    assert isinstance(detail.result, FlowRunOutboundHttpResultPublic)
+    assert detail.result.delivery_status == result.delivery_status
     return result.delivery_status
 
 
@@ -414,6 +429,9 @@ async def test_a_template_delivery_for_a_completed_run_is_refused_as_before(
 
 
 MARKDOWN = "# Möte\n\n- Beslut: klart"
+# The form holds only the decision and the first step composes the markdown,
+# so a POST step that read the form would send something else.
+FORM_DECISION = "Beslut: klart"
 
 
 @pytest.fixture
@@ -443,11 +461,16 @@ def queued_markdown_documents_then_post_run(
                     ),
                     ("render_verbatim", "docx", {"deliverable": {"label": "Kopia"}}),
                 ),
+                first_step_question="# Möte\n\n- {{flow.input.question}}",
+                # As authored by default: the step reads the step before it.
+                webhook_question=None,
             )
             await session.execute(
                 sa.update(FlowRuns)
                 .where(FlowRuns.id == run.id)
-                .values(input_payload_json={"question": MARKDOWN, "case_id": "c-1"})
+                .values(
+                    input_payload_json={"question": FORM_DECISION, "case_id": "c-1"}
+                )
             )
             await session.commit()
         return run
@@ -501,7 +524,8 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
 def queued_long_markdown_then_post_run(
     admin_user, completion_model_factory, space_factory, assistant_factory
 ):
-    """Markdown longer than a step result keeps inline, then the POST step."""
+    """A step whose answer is longer than a step result keeps inline, then
+    the POST step reading it."""
 
     async def create():
         async with sessionmanager.session() as session:
@@ -514,12 +538,7 @@ def queued_long_markdown_then_post_run(
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
                 include_prior_step=True,
-                prior_step_output=("compose_text", "text", None),
-            )
-            await session.execute(
-                sa.update(FlowRuns)
-                .where(FlowRuns.id == run.id)
-                .values(input_payload_json={"question": "# Lång\n\n" + "x" * 200})
+                webhook_question=None,
             )
             await session.commit()
         return run
@@ -543,6 +562,11 @@ async def test_markdown_beyond_the_inline_limit_fails_the_run_and_is_never_cut(
     send = AsyncMock(return_value=_response(200))
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
 
+    async def _long_answer(_self, **_kwargs):
+        return SimpleNamespace(completion="# Lång\n\n" + "x" * 200, total_token_count=1)
+
+    monkeypatch.setattr(CompletionService, "get_response", _long_answer)
+
     await _execute(run)
     await _run_outbox()
 
@@ -552,6 +576,8 @@ async def test_markdown_beyond_the_inline_limit_fails_the_run_and_is_never_cut(
     )
     assert state.status == FlowRunStatus.FAILED.value
     assert state.error_json["code"] == "typed_io_input_too_large"
+    # The long text was written: it is the POST step that could not read it.
+    assert state.error_json["step_order"] == 2
     assert not await _read(
         sa.select(FlowRunWebhookDeliveries.id).where(
             FlowRunWebhookDeliveries.flow_run_id == run.id

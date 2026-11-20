@@ -1159,6 +1159,7 @@ class FlowRunService:
             token_usage=run_view.token_usage,
             transcription_usage=run_view.transcription_usage,
             outputs=run_view.outputs,
+            final_delivery_status=run_view.final_delivery_status,
             webhook_deliveries=tuple(webhook_deliveries),
         )
 

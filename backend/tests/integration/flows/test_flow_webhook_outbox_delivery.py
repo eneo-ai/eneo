@@ -103,6 +103,8 @@ def _build_flow(
         None,
     ),
     later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
+    first_step_question: str = "{{flow.input.question}}",
+    webhook_question: str | None = "{{flow.input.question}}",
 ) -> Flow:
     webhook_step_order = (2 if include_prior_step else 1) + len(later_prior_steps)
     steps = (
@@ -120,7 +122,7 @@ def _build_flow(
                 output_mode=prior_step_output[0],
                 output_type=prior_step_output[1],
                 output_contract=None,
-                input_bindings={"question": "{{flow.input.question}}"},
+                input_bindings={"question": first_step_question},
                 output_config=prior_step_output[2],
                 output_classification_override=None,
                 input_config=None,
@@ -166,7 +168,9 @@ def _build_flow(
             output_mode="http_post",
             output_type="text",
             output_contract=None,
-            input_bindings={"question": "{{flow.input.question}}"},
+            input_bindings=(
+                None if webhook_question is None else {"question": webhook_question}
+            ),
             output_config=output_config
             or {
                 "url": "https://example.org/hook/{{flow_input.case_id}}",
@@ -225,6 +229,8 @@ async def _create_queued_webhook_run(
         None,
     ),
     later_prior_steps: tuple[tuple[str, str, dict[str, object] | None], ...] = (),
+    first_step_question: str = "{{flow.input.question}}",
+    webhook_question: str | None = "{{flow.input.question}}",
 ):
     """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
@@ -247,6 +253,8 @@ async def _create_queued_webhook_run(
             include_prior_step=include_prior_step,
             prior_step_output=prior_step_output,
             later_prior_steps=later_prior_steps,
+            first_step_question=first_step_question,
+            webhook_question=webhook_question,
         ),
         tenant_id=admin_user.tenant_id,
     )
