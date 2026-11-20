@@ -258,7 +258,9 @@ function HttpTest({
     mutationFn: (testVariables: Record<string, unknown>) =>
       testHttp(flowId, {
         step_id: stepId,
-        config,
+        // The generated type predates the `run_result` body mode (`HttpBodyMode`);
+        // the core decides whether it can test one.
+        config: config as Parameters<typeof testHttp>[1]["config"],
         direction,
         method: direction === "input" ? "GET" : "POST",
         test_variables: testVariables

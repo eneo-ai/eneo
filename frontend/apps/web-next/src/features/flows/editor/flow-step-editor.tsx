@@ -40,7 +40,10 @@ import {
 import { StepAdvancedSection, parseContract, type ContractDrafts } from "./step-advanced-section";
 import { StepAiSection } from "./step-ai-section";
 import {
+  DELIVERABLE_FILE_NAME_MAX,
+  DELIVERABLE_LABEL_MAX,
   httpUrlProblem,
+  readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
   readToolConfig
@@ -741,6 +744,25 @@ function StepEditorSession({
           problem === "missing"
             ? t("flow_step_editor_http_url_missing")
             : t("flow_step_editor_http_url_invalid");
+      }
+    }
+    const deliverable = readDeliverable(current.output_config);
+    if (deliverable) {
+      if (!deliverable.label.trim()) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_required"
+        );
+      } else if (deliverable.label.length > DELIVERABLE_LABEL_MAX) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_too_long",
+          { max: DELIVERABLE_LABEL_MAX }
+        );
+      }
+      if ((deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
+        problems["output_config.deliverable.file_name"] = t(
+          "flow_step_editor_deliverable_file_name_too_long",
+          { max: DELIVERABLE_FILE_NAME_MAX }
+        );
       }
     }
     if (current.input_source === "tool" && readToolConfig(current.input_config) === null) {

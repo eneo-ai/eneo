@@ -8,7 +8,7 @@ import {
   draftStep,
   stepChanges
 } from "./step-draft";
-import { applyOutputModeChange } from "./step-rules";
+import { applyOutputModeChange, applyOutputTypeChange } from "./step-rules";
 import { assistantConfigOf, stepConfigOf } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
@@ -164,6 +164,31 @@ describe("buildEditorUpdate", () => {
 });
 
 describe("classificationPreviewRequest", () => {
+  it("leaves out the deliverable of a document step turned to text or outbound delivery", () => {
+    const document = makeStep({
+      input_type: "json",
+      output_type: "docx",
+      output_config: { deliverable: { label: "Eneo" }, future: true }
+    });
+    const flow = makeFlow({ steps: [document] });
+    for (const draft of [
+      applyOutputTypeChange(stepConfigOf(document), "text"),
+      applyOutputModeChange(stepConfigOf(document), "http_post")
+    ]) {
+      const request = classificationPreviewRequest({
+        flow,
+        stepId: "step-1",
+        draft,
+        assistantId: "assistant-1",
+        assistant: null,
+        savedAssistant: null
+      });
+      const [step] = request.steps as unknown as { output_config: Record<string, unknown> }[];
+      expect(step?.output_config).toMatchObject({ future: true });
+      expect(step?.output_config).not.toHaveProperty("deliverable");
+    }
+  });
+
   it("puts the draft in place of its step and leaves the other steps as saved", () => {
     const second = makeStep({
       id: "step-2",

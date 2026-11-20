@@ -52,7 +52,8 @@ const HTTP_BODY_KEYS: Record<HttpConfig["body"]["mode"], string> = {
   auto: "flow_step_editor_http_body_auto",
   json_template: "flow_step_editor_http_body_json",
   text_template: "flow_step_editor_http_body_text",
-  none: "flow_step_editor_http_body_none"
+  none: "flow_step_editor_http_body_none",
+  run_result: "flow_step_editor_http_body_run_result"
 };
 
 export function httpBodyModeLabel(mode: HttpConfig["body"]["mode"], t: T): string {
