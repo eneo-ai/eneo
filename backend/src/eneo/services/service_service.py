@@ -156,9 +156,9 @@ class ServiceService:
 
         return service_in_db, permissions
 
-    async def get_service(
+    async def _get_service_and_space(
         self, service_id: UUID
-    ) -> tuple[Service, list[ResourcePermission]]:
+    ) -> tuple[Service, "Space", list[ResourcePermission]]:
         space = await self.space_repo.get_space_by_service(service_id=service_id)
         service = space.get_service(service_id=service_id)
 
@@ -170,7 +170,24 @@ class ServiceService:
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
 
+        return service, space, permissions
+
+    async def get_service(
+        self, service_id: UUID
+    ) -> tuple[Service, list[ResourcePermission]]:
+        service, _space, permissions = await self._get_service_and_space(service_id)
+
         return service, permissions
+
+    async def get_runnable_service(self, service_id: UUID) -> Service:
+        service, space, _permissions = await self._get_service_and_space(service_id)
+
+        if not space.can_use_service(service):
+            raise UnauthorizedException(
+                "This service cannot be run in the current space configuration."
+            )
+
+        return service
 
     async def get_services(self, name: str | None = None) -> list[Service | None]:
         return await self.repo.get_for_user(self.user.id, search_query=name)

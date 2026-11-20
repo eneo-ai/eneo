@@ -14,7 +14,7 @@ async def get_runner_from_service(
     id: Annotated[UUID, Path()],
     container: Annotated[Container, Depends(get_container(with_user=True))],
 ):
-    service, _permissions = await container.service_service().get_service(id)
+    service = await container.service_service().get_runnable_service(id)
 
     return get_service_runner(container=container, service=service)
 
