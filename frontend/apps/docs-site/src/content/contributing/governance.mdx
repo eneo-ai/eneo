@@ -260,6 +260,15 @@ publish container images, and deployments consume those images. Keeping write
 access with one accountable team protects every organisation that runs Eneo.
 Working from a fork gives you the same ability to propose and test changes.
 
+### Can colleagues at our organisation share branches?
+
+Yes. Fork `eneo-ai/eneo` once into your organisation's GitHub account and give
+your developers write access to that fork. You share branches there and open
+pull requests into `eneo-ai/eneo` as usual, and a Core Maintainer reviews and
+merges them. Maintainers cannot push fixes to branches in an organisation's
+fork, so they suggest changes in the review instead. The steps are in
+[Working as a team at a partner organisation](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#working-as-a-team-at-a-partner-organisation).
+
 ### Why is my push to `eneo-ai/eneo` refused with 403?
 
 GitHub refuses a push to `eneo-ai/eneo` from everyone without write access.
@@ -267,8 +276,9 @@ That includes Collaborators, also if you could push branches here before. You ar
 and of your team.
 
 Push your branch to a fork and open the pull request from there. In a clone of
-`eneo-ai/eneo`, `gh repo fork --remote` creates the fork, makes it `origin` and
-keeps this repository as `upstream`. The steps are in
+`eneo-ai/eneo`, `gh repo fork --remote` creates a fork in your personal
+account, makes it `origin` and keeps this repository as `upstream`. If your
+organisation shares a fork, make that fork `origin` instead. The steps are in
 [Fork and set up](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment).
 
 ### Can I review other people's pull requests?
