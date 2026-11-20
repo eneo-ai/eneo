@@ -5,7 +5,13 @@ import type { Permission } from "@eneo/eneo-js";
 import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { releases, releasesForVersion, visibleEntries, type Locale } from "@eneo/whats-new";
+import {
+  compareVersions,
+  releases,
+  releasesForVersion,
+  visibleEntries,
+  type Locale
+} from "@eneo/whats-new";
 import { getLocale, localizeHref, overwriteGetLocale } from "$lib/paraglide/runtime";
 import { m } from "$lib/paraglide/messages";
 import { announcementSummary } from "$lib/features/whats-new/announcement";
@@ -69,13 +75,13 @@ vi.mock("$lib/features/whats-new/whatsNewStore", async () => {
   const { writable } = await import("svelte/store");
   return {
     getWhatsNewStore: () => ({
-      releases: releasesForVersion(state.installedVersion),
+      releases: bundledReleases(),
       markLatestSeen: state.markSeen,
       seenVersion: writable(null),
       resetState: vi.fn(),
       enabled: writable(state.enabled),
       hasUnseen: writable(state.enabled),
-      pendingAnnouncement: () => releasesForVersion(state.installedVersion)[0],
+      pendingAnnouncement: () => bundledReleases()[0],
       markLatestAnnounced: state.markAnnounced,
       snoozeLatest: state.snooze
     })
@@ -91,6 +97,13 @@ import WhatsNewPage from "./+page.svelte";
 import WhatsNewAnnouncement from "$lib/features/whats-new/WhatsNewAnnouncement.svelte";
 
 const release = releases.find((release) => release.version === "2.3.0")!;
+
+// The 2.3.0 installation in this fixture only ships notes up to its own version.
+function bundledReleases() {
+  return releasesForVersion(state.installedVersion).filter(
+    (entry) => compareVersions(entry.version, state.installedVersion) <= 0
+  );
+}
 
 const resolveLocale = getLocale;
 afterEach(() => {
