@@ -8,7 +8,11 @@ import pytest
 from arq.worker import Function, create_worker
 
 from eneo.apps.app_runs.app_run_dispatch import claim_app_job
-from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.jobs.job_manager import (
+    CRAWLER_QUEUE_NAME,
+    DEFAULT_QUEUE_NAME,
+    DURABLE_APP_FUNCTION,
+)
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
@@ -54,10 +58,14 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.functions["crawl"].keep_result_s == 0
 
 
-def test_arq_does_not_rerun_app_jobs_after_a_worker_crash() -> None:
-    general = create_worker(WorkerSettings)
+@pytest.mark.parametrize("name", [Task.RUN_APP.value, DURABLE_APP_FUNCTION])
+def test_arq_registers_app_deliveries_without_replay_or_result_retention(
+    name: str,
+) -> None:
+    function = create_worker(WorkerSettings).functions[name]
 
-    assert general.functions[Task.RUN_APP.value].max_tries == 1
+    assert function.max_tries == 1
+    assert function.keep_result_s == 0
 
 
 async def test_crawler_startup_cleans_orphans_before_runtime_start(

@@ -291,7 +291,7 @@ async def test_committed_run_recovers_without_its_api_callback(
     maintenance = next(
         t
         for t in app_run_worker.worker.cron_jobs
-        if t.name == "cron:fail_expired_app_runs"
+        if t.name == "cron:reconcile_app_run_jobs"
     )
     await asyncio.gather(maintenance.coroutine({}), maintenance.coroutine({}))
     assert await job_manager.get_job_status(job_id, Task.RUN_APP) == JobStatus.queued
@@ -513,7 +513,7 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
     cron = next(
         task
         for task in app_run_worker.worker.cron_jobs
-        if task.name == "cron:fail_expired_app_runs"
+        if task.name == "cron:reconcile_app_run_jobs"
     )
     async with redis_client.pubsub() as subscription:
         await subscription.subscribe(channel.channel_string)
@@ -556,10 +556,11 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
 
 
 async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery(
-    app_run_fixture, db_session, monkeypatch
+    app_run_fixture, db_session, monkeypatch, client, admin_user_api_key
 ):
-    job_id, _, _ = await app_run_fixture(age=timedelta(minutes=6))
-    now = datetime.now(timezone.utc)
+    job_id, params, _ = await app_run_fixture(age=timedelta(minutes=6))
+    deadline = datetime.now(timezone.utc) - timedelta(seconds=1)
+    now = deadline - timedelta(minutes=10)
     async with db_session() as session:
         await session.execute(
             sa.update(Jobs)
@@ -577,23 +578,22 @@ async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery
     attempt.assert_awaited_once()
     attempt.side_effect = None
     async with db_session() as session:
-        assert await reconcile_app_runs(session, now=now + timedelta(minutes=6)) == []
+        assert (
+            await reconcile_app_runs(session, now=deadline - timedelta(minutes=1)) == []
+        )
     assert attempt.await_count == 2
     async with db_session() as session:
-        await session.execute(
-            sa.update(Jobs)
-            .where(Jobs.id == job_id)
-            .values(
-                created_at=now - timedelta(hours=2, seconds=1),
-                updated_at=now - timedelta(minutes=6),
-            )
-        )
         assert not await claim_app_job(JobRepository(session), job_id)
-        assert await reconcile_app_runs(session, now=now) == [job_id]
+        assert await reconcile_app_runs(session, now=deadline) == [job_id]
         assert await session.scalar(
             sa.select(Jobs.dispatch_envelope.is_(None)).where(Jobs.id == job_id)
         )
     assert attempt.await_count == 2
+    detail = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert detail.status_code == 200
+    assert detail.json()["status"] == Status.FAILED
 
 
 @pytest.mark.parametrize("removed", [False, True], ids=["invalid-file", "deleted-run"])
@@ -817,8 +817,9 @@ async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
     assert await app_run_worker.run_app({"job_id": job_id}, info.args[0])
 
 
-async def test_app_enqueue_returns_its_connection_after_a_broker_stall(
-    test_settings, redis_client, monkeypatch
+@pytest.mark.parametrize("redispatch", [False, True], ids=["submission", "recovery"])
+async def test_app_delivery_returns_its_connection_after_a_broker_stall(
+    test_settings, redis_client, monkeypatch, redispatch
 ):
     from redis.asyncio.client import Pipeline
 
@@ -850,9 +851,12 @@ async def test_app_enqueue_returns_its_connection_after_a_broker_stall(
         # Pause the test Redis after WATCH so both the enqueue and its pipeline cleanup stall.
         with monkeypatch.context() as stop:
             stop.setattr(Pipeline, "watch", pause_after_watch)
-            request = asyncio.create_task(
-                manager.enqueue(Task.RUN_APP, uuid4(), params)
+            delivery = (
+                manager.redispatch_app(uuid4(), params)
+                if redispatch
+                else manager.enqueue(Task.RUN_APP, uuid4(), params)
             )
+            request = asyncio.create_task(delivery)
             try:
                 await asyncio.wait_for(paused.wait(), 5)
                 done, _ = await asyncio.wait([request], timeout=4)

@@ -59,7 +59,7 @@ async def run_app(
 
 
 @worker.cron_job(manages_own_session=True, run_at_startup=True)
-async def fail_expired_app_runs(container: Container) -> None:
+async def reconcile_app_run_jobs(container: Container) -> None:
     session = cast(AsyncSession, container.session())
     async with session.begin():
         failed_ids = await reconcile_app_runs(session)
