@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import time
 from dataclasses import replace
 from datetime import date, datetime, timezone
 from pathlib import PureWindowsPath
@@ -369,12 +370,18 @@ def test_a_long_own_name_is_cut_to_255_bytes() -> None:
         ("{{ flow_input.Team", {"Team": "Eneo"}),
     ],
 )
-def test_an_own_name_that_holds_nothing_falls_back_to_the_flows(
+def test_an_own_name_that_holds_nothing_falls_back_to_its_label(
     file_name: str, form_values: dict[str, object]
 ) -> None:
-    names = _own_names(_own(1, "pdf", file_name), form_values=form_values)
+    names = _own_names(_own(1, "pdf", file_name, "Protokoll"), form_values=form_values)
 
-    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_label_that_holds_nothing_falls_back_to_neutral_words() -> None:
+    names = _own_names(_own(1, "pdf", "{{ flow_input.Team }}", "///"))
+
+    assert names.name(step_order=1, output_type="pdf") == "Dokument 2026-09-23.pdf"
 
 
 @pytest.mark.parametrize(
@@ -485,9 +492,63 @@ def test_a_clean_value_that_completes_a_credential_never_reaches_a_name() -> Non
     # Each value is clean on its own; with the fixed text around it, the name
     # reads as a credential.
     names = _own_names(
-        _own(1, "pdf", "token={{ flow_input.Team }}"),
+        _own(1, "pdf", "token={{ flow_input.Team }}", "Protokoll"),
         form_values={"Team": SECRET_MARKER},
     )
 
     assert redact_string(SECRET_MARKER, key="Team") == SECRET_MARKER
-    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "value"),
+    [
+        # Masked as written; cleaning would turn the separator into a space.
+        ("password:{{ flow_input.Team }}", SECRET_MARKER),
+        # Clean as written; cleaning makes them a credential.
+        ("{{ flow_input.Team }}", f"Bearer/{SECRET_MARKER}"),
+        ("{{ flow_input.Team }}", f"password\u200b={SECRET_MARKER}"),
+    ],
+)
+def test_a_name_masking_would_change_before_or_after_cleaning_takes_the_label(
+    file_name: str, value: str
+) -> None:
+    # The run's own name can be the same form value; the label is fixed text.
+    names = GeneratedFileNames.for_run(
+        flow_name="Möte",
+        steps=(_own(1, "pdf", file_name, "Protokoll"),),
+        run_created_at=RUN_CREATED_AT,
+        form_values={"Team": value},
+        run_label=value,
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+    assert names.stem(step_order=1, output_type="pdf") == "Protokoll 2026-09-23"
+
+
+def test_a_credential_starting_before_the_length_limit_takes_the_label() -> None:
+    # The cut at 255 bytes would keep only "toke", which masking leaves alone.
+    value = "x" * 250 + f" token={SECRET_MARKER}"
+    names = _own_names(
+        _own(1, "pdf", "{{ flow_input.Team }}", "Protokoll"),
+        form_values={"Team": value},
+    )
+
+    assert len(" ".join(["x" * 250, "toke"]).encode("utf-8")) == MAX_FILE_NAME_BYTES
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_megabyte_form_value_is_named_in_well_under_a_second() -> None:
+    # The masking patterns take time quadratic in a long run of word
+    # characters; only the start of a value can reach a name.
+    value = "token" * 200_000
+    steps = (_own(1, "pdf", "Möte {{ flow_input.Team }} {{ flow_input.Team }}"),)
+
+    started = time.perf_counter()
+    names = _own_names(*steps, form_values={"Team": value})
+    elapsed = time.perf_counter() - started
+
+    assert elapsed < 1.0
+    name = names.name(step_order=1, output_type="pdf")
+    assert name.startswith("Möte tokentoken")
+    assert len(name.encode("utf-8")) <= MAX_FILE_NAME_BYTES

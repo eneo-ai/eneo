@@ -4492,6 +4492,10 @@ def test_deliverable_on_a_step_that_delivers_no_artifact_is_refused(
         ("{{ flow_input.password }}", "sensitive"),
         ("Standup {{ flow_input.Team", "unmatched"),
         ("Standup }}", "unmatched"),
+        ("Basic plan {{ flow_input.Team }}", "reads as a credential"),
+        ("Weekly digest {{ flow_input.Team }}", "reads as a credential"),
+        ("token={{ flow_input.Team }}", "reads as a credential"),
+        ("Bearer/{{ flow_input.Team }}", "reads as a credential"),
     ],
 )
 def test_deliverable_file_name_reads_only_fields_of_the_form(

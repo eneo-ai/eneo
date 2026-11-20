@@ -132,6 +132,7 @@ from eneo.flows.output_processing import (
     validate_against_contract,
     validate_schema_syntax,
 )
+from eneo.flows.runtime.generated_file_names import file_name_reads_as_credential
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.source_identity import has_required_runtime_managed_source_fields
 from eneo.flows.step_chain_rules import iter_step_chain_violations
@@ -1130,6 +1131,13 @@ def _validate_deliverable(
                 "name stays visible in lists and downloads. Use another field.",
                 path=_DELIVERABLE_FILE_NAME_PATH,
             )
+    if file_name_reads_as_credential(deliverable.file_name):
+        raise refuse(
+            "reads as a credential (such as `Basic …`, `Bearer …` or "
+            "`token=…`) whatever the form holds, so a run never names a "
+            "document by it and uses the label instead. Reword the fixed text.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
 
 
 def _validate_retrieval_policy(step: FlowStepValidationView) -> None:

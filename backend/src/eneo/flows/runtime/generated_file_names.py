@@ -27,6 +27,13 @@ MAX_FILE_NAME_BYTES = 255
 _DOCUMENT_TYPES = frozenset({"pdf", "docx"})
 # For a flow name that holds nothing a file name can keep.
 _FALLBACK_FLOW_NAME = "Dokument"
+# Only a name's first 255 bytes are kept, but a credential starting in them can
+# end after them, so masking judges a longer start. A value and the filled-in
+# name are cut to it first: the masking patterns take time quadratic in a long
+# run of word characters, and a form value has no length limit of its own.
+_MASKED_PREFIX_CHARS = 1000
+# What publishing puts in place of each expression to judge the fixed text.
+_PLAIN_VALUE = "x"
 # Refused by Windows in names; "/" also separates directories everywhere else.
 _RESERVED_CHARACTERS = frozenset('\\/:*?"<>|')
 # Controls, invisible format characters (bidirectional overrides, zero-width
@@ -55,7 +62,10 @@ class GeneratedFileNames:
 
     A step whose deliverable has a file name of its own is named by it, filled
     in from the run's form, instead of by the flow's and the step's names; the
-    day and the numbering apply as to any other document.
+    day and the numbering apply as to any other document. When the filled-in
+    name holds nothing, or masking would change it, the deliverable's label
+    names the document: it is fixed text, while the run's own name can be the
+    very form value masking refused.
     """
 
     flow_name: str
@@ -63,8 +73,8 @@ class GeneratedFileNames:
     step_names: Mapping[int, str]
     # The step orders producing each document type.
     documents: Mapping[str, tuple[int, ...]]
-    # Each step's own file name, filled in and cleaned; a step without one, or
-    # whose own name holds nothing a file name can keep, is not listed.
+    # Each step's own file name, filled in and cleaned, or its label in its
+    # place; a step without a file name of its own is not listed.
     own_names: Mapping[int, str]
 
     @classmethod
@@ -94,11 +104,12 @@ class GeneratedFileNames:
                 for output_type in _DOCUMENT_TYPES
             },
             own_names={
-                step.step_order: own_name
+                step.step_order: _own_name(step.deliverable.file_name, form_values)
+                or _clean(step.deliverable.label)
+                or _FALLBACK_FLOW_NAME
                 for step in steps
                 if step.deliverable is not None
                 and step.deliverable.file_name is not None
-                and (own_name := _own_name(step.deliverable.file_name, form_values))
             },
         )
 
@@ -148,11 +159,23 @@ class GeneratedFileNames:
         return stem
 
 
+def file_name_reads_as_credential(file_name: str) -> bool:
+    """Whether masking changes ``file_name``'s fixed text, each expression
+    standing for a plain word: no run could then be named by it."""
+    sample = TEMPLATE_VARIABLE_PATTERN.sub(_PLAIN_VALUE, file_name)
+    return _masked(sample) or _masked(_clean(sample))
+
+
+def _masked(text: str) -> bool:
+    return redact_string(text, key=None) != text
+
+
 def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
     """``file_name`` with each `{{ flow_input.<field> }}` filled in from the
     run's form, cleaned and cut to a file name's length; empty when nothing is
-    left. Anything else between `{{ }}`, and a name with a stray brace, fill in
-    nothing: publish refuses them, and a run must never fail on its name."""
+    left or masking would change it, as written or cleaned. Anything else
+    between `{{ }}`, and a name with a stray brace, fill in nothing: publish
+    refuses them, and a run must never fail on its name."""
     if file_name_expressions(file_name) is None:
         return ""
 
@@ -162,12 +185,16 @@ def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
             return ""
         return _form_value_text(form_values.get(field), field=field)
 
-    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)
+    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)[:_MASKED_PREFIX_CHARS]
     # A value clean on its own can complete a credential with the fixed text
-    # around it (`token={{ flow_input.x }}`).
-    if redact_string(filled, key=None) != filled:
+    # around it (`token={{ flow_input.x }}`), and cleaning can make one
+    # (`Bearer/<token>` becomes `Bearer <token>`); a separator cleaning turns
+    # into a space (`password:<value>`) is judged as written. The name is cut
+    # only after it is judged, so a credential running past the cut counts.
+    cleaned = _clean(filled)
+    if _masked(filled) or _masked(cleaned):
         return ""
-    return _clean(utf8_prefix(_clean(filled), max_bytes=MAX_FILE_NAME_BYTES))
+    return _clean(utf8_prefix(cleaned, max_bytes=MAX_FILE_NAME_BYTES))
 
 
 def _form_value_text(value: object, *, field: str) -> str:
@@ -177,7 +204,10 @@ def _form_value_text(value: object, *, field: str) -> str:
     if text is None and isinstance(value, (list, tuple)):
         items = (_scalar_text(item) for item in cast(Sequence[object], value))
         text = ", ".join(item for item in items if item)
-    if not text or redact_string(text, key=field) != text:
+    if not text:
+        return ""
+    text = text[:_MASKED_PREFIX_CHARS]
+    if redact_string(text, key=field) != text:
         return ""
     return text
 

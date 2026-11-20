@@ -987,19 +987,28 @@ def test_a_masked_form_value_reaches_no_name_title_or_export() -> None:
     )
     name = names.name(step_order=15, output_type="pdf")
     title = names.stem(step_order=15, output_type="pdf")
+    by_order = {step.step_order: step for step in steps}
     # A row stored before the rule, with a credential in its name.
     stored_before = f"Bearer {_MARKER}{_MARKER}{_MARKER}.pdf"
     files = [
-        file.model_copy(update={"name": name})
-        if file.step_order == 15
-        else file.model_copy(update={"name": stored_before})
-        if file.step_order == 17
-        else file
-        for file in _result_files(steps)
+        _attempt_file(
+            by_order[order], attempt_no=1, source="declared_artifact", name=file_name
+        )
+        for order, file_name in ((15, name), (17, stored_before))
     ]
+    history = (
+        [_step_result(by_order[order], current_attempt_no=1) for order in (15, 17)],
+        [_attempt(by_order[order], attempt_no=1, failed=False) for order in (15, 17)],
+        files,
+    )
 
-    redacted = _evidence_export(version, steps, redacted=True, history=([], [], files))
+    redacted = _evidence_export(version, steps, redacted=True, history=history)
 
+    # The export lists both current documents, so the check below sees them.
+    assert [
+        [file["file_id"] for file in item["files"]]
+        for item in redacted["summary"]["deliverables"]
+    ] == [[str(file.file_id)] for file in files]
     assert _MARKER not in name
     assert _MARKER not in title
     assert name.startswith("Brukarversion ")
