@@ -32,6 +32,15 @@ from eneo.worker import task_manager
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
 
 
+async def _run_app_maintenance():
+    cron = next(
+        task
+        for task in app_run_worker.worker.cron_jobs
+        if task.name == "cron:reconcile_app_run_jobs"
+    )
+    await cron.coroutine({})
+
+
 @pytest.fixture
 async def recovery_recording(
     client,
@@ -288,12 +297,7 @@ async def test_committed_run_recovers_without_its_api_callback(
         await job_manager._redis.set(
             result_key_prefix + str(job_id), b"old result", ex=3600
         )
-    maintenance = next(
-        t
-        for t in app_run_worker.worker.cron_jobs
-        if t.name == "cron:reconcile_app_run_jobs"
-    )
-    await asyncio.gather(maintenance.coroutine({}), maintenance.coroutine({}))
+    await asyncio.gather(_run_app_maintenance(), _run_app_maintenance())
     assert await job_manager.get_job_status(job_id, Task.RUN_APP) == JobStatus.queued
     assert job_manager._redis is not None
     delivery = ArqJob(str(job_id), redis=job_manager._redis)
@@ -348,6 +352,61 @@ async def app_run_fixture(
         )
 
     return create
+
+
+async def test_poll_observes_status_and_summary_from_the_same_commit(
+    app_run_fixture, client, db_session, admin_user_api_key
+):
+    job_id, params, _ = await app_run_fixture(status=Status.IN_PROGRESS)
+    url = f"/api/v1/app-runs/{params.id}/"
+    headers = {"X-API-Key": admin_user_api_key.key}
+
+    async def finish_run(_driver):
+        async with db_session() as writer:
+            await writer.execute(
+                sa.update(AppRuns)
+                .where(AppRuns.id == params.id)
+                .values(output_text="summary")
+            )
+            await writer.execute(
+                sa.update(Jobs)
+                .where(Jobs.id == job_id)
+                .values(status=Status.COMPLETE.value)
+            )
+
+    committed = False
+
+    def commit_after_read(conn, cursor, statement, parameters, context, executemany):
+        nonlocal committed
+        # Finish the run after PostgreSQL has read the output, before ORM relationship loads.
+        if (
+            not committed
+            and statement.startswith("SELECT")
+            and "app_runs.output_text" in statement
+        ):
+            committed = True
+            conn.connection.dbapi_connection.run_async(finish_run)
+
+    async with db_session() as session:
+        engine = session.bind.sync_engine
+        sa.event.listen(engine, "after_cursor_execute", commit_after_read)
+        try:
+            first = await client.get(url, headers=headers)
+        finally:
+            sa.event.remove(engine, "after_cursor_execute", commit_after_read)
+    assert committed
+    assert first.status_code == 200, first.text
+    assert (first.json()["status"], first.json()["output"]) == (
+        Status.IN_PROGRESS,
+        None,
+    )
+
+    latest = await client.get(url, headers=headers)
+    assert latest.status_code == 200, latest.text
+    assert (latest.json()["status"], latest.json()["output"]) == (
+        Status.COMPLETE,
+        "summary",
+    )
 
 
 async def test_app_worker_loss_before_completion_does_not_replay_started_work(
@@ -509,18 +568,12 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
 
     monkeypatch.setattr(app_run_worker, "publish_task_status", publish_and_wait)
 
-    # Invoke the registered maintenance entry point with its actual session wrapper.
-    cron = next(
-        task
-        for task in app_run_worker.worker.cron_jobs
-        if task.name == "cron:reconcile_app_run_jobs"
-    )
     async with redis_client.pubsub() as subscription:
         await subscription.subscribe(channel.channel_string)
         await subscription.get_message(timeout=2)  # Acknowledge subscription.
         async with db_session() as running:
             assert await JobRepository(running).mark_job_started(active)
-            reaping = asyncio.create_task(cron.coroutine({}))
+            reaping = asyncio.create_task(_run_app_maintenance())
             try:
                 event = await subscription.get_message(timeout=5)
                 assert event is not None
@@ -614,9 +667,10 @@ async def test_recovery_rejects_missing_source_without_republishing(
             await session.execute(sa.delete(AppRuns).where(AppRuns.id == params.id))
     broker = AsyncMock()
     monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    await _run_app_maintenance()
     async with db_session() as session:
-        assert await reconcile_app_runs(session) == [job_id]
         job = await session.get(Jobs, job_id)
+        assert job.status == Status.FAILED
         assert job.failure_code == JobFailureCode.INVALID_JOB_PAYLOAD
         assert job.dispatch_envelope is None
     broker.assert_not_awaited()

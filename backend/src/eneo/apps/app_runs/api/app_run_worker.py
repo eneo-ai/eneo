@@ -68,7 +68,9 @@ async def reconcile_app_run_jobs(container: Container) -> None:
 
         targets = await container.app_run_repo().get_update_targets_for_jobs(failed_ids)
 
-    logger.warning("Expired app runs failed", extra={"count": len(failed_ids)})
+    logger.warning(
+        "App run reconciliation marked jobs failed", extra={"count": len(failed_ids)}
+    )
     for run_id, user_id, app_id, space_id, personal in targets:
         await publish_task_status(
             Channel(type=ChannelType.APP_RUN_UPDATES, user_id=user_id),
