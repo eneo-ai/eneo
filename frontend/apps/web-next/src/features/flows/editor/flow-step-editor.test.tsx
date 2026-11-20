@@ -2334,7 +2334,15 @@ describe("FlowStepEditor deliverables", () => {
           details: {
             errors: [
               {
-                location: "body.step_edits.0.changes.output_config.deliverable.file_name",
+                location: [
+                  "body",
+                  "step_edits",
+                  0,
+                  "changes",
+                  "output_config",
+                  "deliverable",
+                  "file_name"
+                ],
                 message: "x"
               }
             ]
