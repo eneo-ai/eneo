@@ -25,6 +25,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunWebhookDeliveries,
     Flows,
     FlowStepAttempts,
+    FlowVersions,
 )
 from eneo.flows import FlowRepository
 from eneo.flows.application.flow_webhook_delivery_policy import (
@@ -410,11 +411,16 @@ async def _redelivery_audits(run_id: UUID) -> list:
     )
 
 
+@pytest.mark.parametrize(
+    "failed_log",
+    [AsyncMock(return_value=None), AsyncMock(side_effect=RuntimeError("down"))],
+    ids=["not_written", "raised"],
+)
 async def test_a_failed_audit_refuses_the_redelivery(
-    setup_database, client, admin_token, dead_lettered_run, monkeypatch
+    setup_database, client, admin_token, dead_lettered_run, monkeypatch, failed_log
 ):
     run, delivery_id, at = await dead_lettered_run()
-    monkeypatch.setattr(AuditService, "log", AsyncMock(return_value=None))
+    monkeypatch.setattr(AuditService, "log", failed_log)
 
     response = await client.post(
         _path(run, delivery_id),
@@ -535,3 +541,29 @@ async def test_a_redelivery_that_wins_keeps_the_run_from_the_purge(
 
     assert result.counts.flow_runs_purged == 0
     assert (await _delivery(delivery_id)).delivery_status == "pending"
+
+
+async def test_a_pinned_definition_that_fails_its_checksum_keeps_its_own_error(
+    setup_database, client, admin_token, dead_lettered_run
+):
+    """Only writing and committing the audit row answers that the audit is
+    unavailable; a damaged pinned version says what it is."""
+    run, delivery_id, at = await dead_lettered_run()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(FlowVersions.flow_id == run.flow_id)
+            .values(definition_checksum="0" * 64)
+        )
+
+    response = await client.post(
+        _path(run, delivery_id),
+        json={"expected_dead_lettered_at": at.isoformat()},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["code"] == "flow_definition_checksum_mismatch"
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "dead_lettered"
+    assert await _redelivery_audits(run.id) == []

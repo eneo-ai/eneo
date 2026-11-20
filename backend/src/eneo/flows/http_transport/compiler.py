@@ -54,8 +54,9 @@ class EffectiveHttpRequest:
     method: HttpMethod
     url: str
     headers: dict[str, str] = field(repr=False)
-    body: bytes | None
-    json_body: JsonValue | None
+    # The body may carry file content: never in a repr.
+    body: bytes | None = field(repr=False)
+    json_body: JsonValue | None = field(repr=False)
     timeout: float
     secret_header_names: frozenset[str]
     secret_values: frozenset[str] = field(repr=False)

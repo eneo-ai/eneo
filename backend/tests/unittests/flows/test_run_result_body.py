@@ -15,6 +15,8 @@ from eneo.files.file_models import FileType
 from eneo.flows.api.flow_run_contract_models import FlowRunDeliverablePublic
 from eneo.flows.enums import FlowOutputType
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.http_transport import EffectiveHttpRequest
+from eneo.flows.runtime.flow_webhook_delivery import WebhookDeliveryPayload
 from eneo.flows.runtime.run_result_body import (
     RUN_RESULT_MAX_FILE_BYTES,
     check_run_result_files,
@@ -164,3 +166,32 @@ def test_a_deliverable_without_a_file_refuses_the_body() -> None:
     assert str(empty.step_id) in str(refused.value)
     # A run that marks no document sends its text alone.
     check_run_result_files([])
+
+
+def test_a_body_with_file_content_never_appears_in_a_repr() -> None:
+    """A request or payload that reaches a log or an error report through its
+    repr carries no file content."""
+    body = {"content_base64": base64.b64encode(CONTENT).decode()}
+    request = EffectiveHttpRequest(
+        method="POST",
+        url="https://receiver.example.org/results",
+        headers={},
+        body=CONTENT,
+        json_body=body,
+        timeout=5,
+        secret_header_names=frozenset(),
+        secret_values=frozenset(),
+    )
+    payload = WebhookDeliveryPayload(
+        run=SimpleNamespace(),  # type: ignore[arg-type]
+        step=SimpleNamespace(),  # type: ignore[arg-type]
+        step_result=SimpleNamespace(),  # type: ignore[arg-type]
+        text_payload="",
+        context={},
+        audit_actor=None,
+        run_result_body=body,
+    )
+
+    for text in (repr(request), repr(payload)):
+        assert MARKER.decode() not in text
+        assert body["content_base64"] not in text

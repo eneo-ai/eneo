@@ -94,7 +94,11 @@ async def redeliver_run_result(
     The run is locked first, so a redelivery and the run's history purge have
     one winner: a purge that wins leaves nothing to find (404), and a
     redelivery that wins leaves a pending delivery the purge keeps. The caller
-    wakes the outbox after the commit."""
+    wakes the outbox after the commit. Only writing and committing the audit
+    row answers that the audit is unavailable; every other error keeps its own."""
+    # Set once the audit row is being written: from then on a failure, the
+    # commit's included, means the redelivery could not be audited.
+    auditing = False
     try:
         async with sessionmanager.session() as session:
             container = Container(session=providers.Object(session))
@@ -152,6 +156,7 @@ async def redeliver_run_result(
                 )
                 if reset is None:
                     raise _refuse("dead_lettered_at_changed", delivery_id=delivery_id)
+                auditing = True
                 audit_log = await container.audit_service().log(
                     tenant_id=tenant_id,
                     actor_id=actor_id,
@@ -175,9 +180,11 @@ async def redeliver_run_result(
                 )
                 if audit_log is None:
                     raise _audit_unavailable()
-    except (AuditLoggingUnavailableException, ConflictException, NotFoundException):
+    except AuditLoggingUnavailableException:
         raise
     except Exception as exc:
+        if not auditing:
+            raise
         logger.exception(
             "Required Flow run redelivery audit transaction failed",
             extra={"run_id": str(run_id), "tenant_id": str(tenant_id)},
