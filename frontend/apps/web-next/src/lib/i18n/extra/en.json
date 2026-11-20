@@ -1,4 +1,5 @@
 {
+  "personal_chat_model_change_wait": "Wait for the current reply to finish or stop it before changing the model in this conversation.",
   "widget_admin_assistant_notice_body": "This assistant serves a public widget. Changes to MCP servers and tools save automatically and apply to anonymous visitors on their next question, within your organisation’s widget policy. Check what a tool can read or change before enabling it.",
   "access_disabled": "Your access to Eneo has been temporarily disabled. Please contact your administrator to regain access for your organisation.",
   "activation_failed": "Activation failed — your account could not be created yet. Ask your administrator to create an invitation for your email address, then try again.",

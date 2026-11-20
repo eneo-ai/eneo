@@ -24,6 +24,7 @@ import {
   useState,
   type ClipboardEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type Ref
 } from "react";
@@ -297,6 +298,18 @@ function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
 }
 
 /**
+ * The Astryx shell focuses its input on any click in its body that is not on
+ * a button or link, so a switch, option or field inside a popover opened from
+ * the footer would hand focus to the textarea on every toggle (WCAG 2.4.3).
+ * Layers listen on the document in the capture phase, so stopping the bubble
+ * here does not affect their dismissal.
+ */
+function keepFocusInsideLayers(event: MouseEvent<HTMLElement>) {
+  if ((event.target as Element).closest('[role="dialog"], [role="listbox"], input, label'))
+    event.stopPropagation();
+}
+
+/**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
  * a textarea, and a row with attach, the knowledge pill (accent tint, clearly
  * lighter than Send), tools, the model picker and send/stop. Files
@@ -337,8 +350,13 @@ export function Composer({
   const unavailableId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   const fieldRef = useMergedRefs(field, textareaRef);
-  // What stopped the last send, shown at the field until the draft changes.
-  const [problem, setProblem] = useState<string | null>(null);
+  // What stopped the last send, shown at the field until the draft changes;
+  // the caller's reason goes as soon as it no longer holds (a save that landed),
+  // and a later one is said only when the user tries again.
+  const [stopped, setStopped] = useState<"empty" | "blocked" | null>(null);
+  if (stopped === "blocked" && !sendBlocked) setStopped(null);
+  const problem =
+    stopped === "empty" ? t("chat_composer_empty") : stopped === "blocked" ? sendBlocked : null;
   const canAttach = attachments.maxFiles !== 0;
   const { dragging, handlers } = useFileDrop((files) => void attachments.addFiles(files), {
     enabled: canAttach && attachments.canAddMore
@@ -346,7 +364,7 @@ export function Composer({
   const hasAttachments = attachments.attachments.length > 0;
 
   const change = (next: string) => {
-    setProblem(null);
+    setStopped(null);
     onChange(next);
   };
 
@@ -360,14 +378,15 @@ export function Composer({
       announce(unavailable);
       return;
     }
-    const missing = value.trim() === "" ? t("chat_composer_empty") : sendBlocked;
+    const empty = value.trim() === "";
+    const missing = empty ? t("chat_composer_empty") : sendBlocked;
     if (missing) {
       // Rendered first, so the field is read with its new description.
-      revealProblems(() => setProblem(missing), field.current);
+      revealProblems(() => setStopped(empty ? "empty" : "blocked"), field.current);
       announce(missing);
       return;
     }
-    setProblem(null);
+    setStopped(null);
     onSubmit();
   };
 
@@ -442,7 +461,14 @@ export function Composer({
               {mention}
             </div>
           }
-          sendActions={modelSelector}
+          sendActions={
+            // The model picker opens a layer inside the composer: its clicks
+            // must not reach the shell's textarea-focus handler.
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+            <span className="contents" onClick={keepFocusInsideLayers}>
+              {modelSelector}
+            </span>
+          }
           sendButton={
             <Button
               label={busy ? t("stop_generating") : t("send_message")}

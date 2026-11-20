@@ -418,9 +418,12 @@ organisation's Skills keep running and the user's choices are kept:
 | A Skill is too large on demand | Choose **Always** for it, or turn it off                                    |
 | Crowds out the organisation's  | Turn one of their own Skills off                                            |
 
-Turning a Skill off is always accepted, so a user can recover from a paused
-state themselves. A model switch that would pause Skills that were running is
-refused.
+Each conversation runs the user's Skills on its own model, so the composer
+shows them as that model runs them and judges a change against it. Turning a
+Skill off is always accepted, so a user can recover from a paused state
+themselves. In a saved conversation, a model switch that would pause Skills
+that run there is refused: the model stays and the reason is shown. In a new
+conversation the switch is made and the Skills show as paused.
 
 Personal Chat pins the exact version the user chose. After a Skill is edited,
 its page says which version Personal Chat uses and offers **Use the latest

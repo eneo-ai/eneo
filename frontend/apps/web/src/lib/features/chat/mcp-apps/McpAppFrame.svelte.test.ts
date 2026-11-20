@@ -2,6 +2,7 @@ import { page } from "vitest/browser";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { writable } from "svelte/store";
+import { EneoError } from "@eneo/eneo-js";
 import { m } from "$lib/paraglide/messages";
 import type { McpAppBridgeOptions } from "./bridge";
 import McpAppFrame from "./McpAppFrame.svelte";
@@ -14,6 +15,8 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../ChatService.svelte", () => ({
   getChatService: () => ({
+    currentConversation: { id: "session-1" },
+    settingsResolution: { revision: 4, settings: { require_tool_approval: false } },
     partialInputOf: () => undefined,
     getToolCallOutcome: async () => null,
     callToolFromView: mocks.callTool
@@ -25,7 +28,6 @@ vi.mock("./McpAppUrlService.svelte", () => ({
   })
 }));
 vi.mock("$lib/core/theme", () => ({ getThemeStore: () => writable("light") }));
-vi.mock("../toolApprovalPreference", () => ({ toolsRunAutomatically: () => true }));
 vi.mock("./bridge", () => ({
   McpAppBridge: class {
     constructor(options: McpAppBridgeOptions) {
@@ -121,6 +123,23 @@ describe("McpAppFrame", () => {
     await expect.poll(() => mocks.options.length).toBe(1);
     await mocks.options[0].onCallTool!("read", { page: 2 });
     expect(mocks.callTool).toHaveBeenCalledTimes(1);
+    expect(mocks.callTool).toHaveBeenCalledWith(
+      expect.objectContaining({ automaticSettingsRevision: 4 })
+    );
     expect(page.getByRole("alertdialog").elements()).toHaveLength(0);
+  });
+
+  it("asks before retrying a bundled call when another tab changed its settings", async () => {
+    mocks.callTool.mockRejectedValueOnce(new EneoError("Settings changed", "RESPONSE", 409, 9065));
+    render(McpAppFrameHarness, { call: { ...call, is_bundled: true } });
+    await expect.poll(() => mocks.options.length).toBe(1);
+    const result = mocks.options[0].onCallTool!("read", { page: 2 });
+    await expect.element(page.getByRole("alertdialog")).toBeVisible();
+    expect(mocks.callTool).toHaveBeenCalledTimes(1);
+    await page.getByRole("button", { name: m.tool_accept(), exact: true }).click();
+    await result;
+    expect(mocks.callTool.mock.calls.map(([request]) => request.automaticSettingsRevision)).toEqual(
+      [4, undefined]
+    );
   });
 });

@@ -119,6 +119,20 @@ async def test_a_removed_source_makes_the_copy_unreadable_at_once(
     await removal(client, owner_token, copy, retention_session)
 
     _assert_removed_source(
+        await client.post(
+            "/api/v1/conversations/settings/resolve/",
+            json={"session_id": str(copy.copy_session)},
+            headers=auth(owner_token),
+        )
+    )
+    _assert_removed_source(
+        await client.patch(
+            f"/api/v1/conversations/{copy.copy_session}/settings/",
+            json={"expected_revision": 0, "settings": {"require_tool_approval": True}},
+            headers=auth(owner_token),
+        )
+    )
+    _assert_removed_source(
         await client.get(
             f"/api/v1/conversations/{copy.copy_session}/", headers=auth(owner_token)
         )

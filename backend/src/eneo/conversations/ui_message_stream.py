@@ -289,6 +289,11 @@ async def _ui_message_chunks(
         "type": "data-session",
         "data": {
             "session_id": str(response.session.id),
+            **(
+                {"settings": response.session.settings.model_dump(mode="json")}
+                if response.session.settings
+                else {}
+            ),
             "completion_model": (
                 json.loads(model.model_dump_json()) if model else None
             ),

@@ -466,7 +466,7 @@ async def list_assistant_skill_bindings(
 @router.get(
     "/{space_id}/assistants/{assistant_id}/skills/configuration/",
     response_model=AssistantSkillConfigurationPublic,
-    responses=responses.get_responses([403, 404]),
+    responses=responses.get_responses([400, 403, 404]),
 )
 @endpoint_access(
     authentication=Authentication.SESSION,
@@ -478,10 +478,21 @@ async def get_assistant_skill_configuration(
     space_id: UUID,
     assistant_id: UUID,
     container: _ContainerWithUser,
+    conversation_model_id: Annotated[
+        UUID | None,
+        Query(
+            description=(
+                "Personal chat only: the model of a conversation, to show the "
+                "configuration as that conversation's turns run it. A model the "
+                "personal chat can no longer use is ignored."
+            ),
+        ),
+    ] = None,
 ) -> AssistantSkillConfigurationPublic:
     configuration = await container.assistant_service().get_skill_configuration(
         space_id=space_id,
         assistant_id=assistant_id,
+        conversation_model_id=conversation_model_id,
     )
     return container.skill_assembler().assistant_configuration_to_public(configuration)
 

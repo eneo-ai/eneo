@@ -106,6 +106,7 @@ def to_ask_response(
         files=[FilePublic(**file.model_dump()) for file in files],
         generated_files=[FilePublic(**file.model_dump()) for file in generated_files],
         session_id=session.id,
+        settings=session.settings,
         answer=answer,
         references=[
             InfoBlobAskAssistantPublic(
@@ -164,6 +165,7 @@ def to_ask_conversation_response(
         created_at=created_at,
         updated_at=updated_at,
         session_id=session.id,
+        settings=session.settings,
         id=question_id,
         completion_model=public_model,
         files=[FilePublic(**file.model_dump()) for file in files],
@@ -398,7 +400,7 @@ async def to_response(
                             completion_model=response.completion_model,
                             show_pricing=show_pricing,
                             tools=response.tools,
-                        ).model_dump_json()
+                        ).model_dump_json(exclude={"settings"})
 
         return ClosingEventSourceResponse(
             event_stream(), ping=15, closes=[response.answer]

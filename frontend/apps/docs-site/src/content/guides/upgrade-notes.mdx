@@ -128,6 +128,7 @@ flowchart TB
 | Change | Who | Do |
 |---|---|---|
 | [One error format](#error-envelope) | API consumers, generated clients | Read `code` and `message` |
+| [Conversation settings follow each chat](/docs/api#conversation-settings) | Clients that continue a user's conversations or host interactive tool views | Use streaming when the chat requires approval. Reload choices after a settings conflict. Send the saved revision for automatic view calls and ask for confirmation on `409`. |
 | [Icons](#icons) | Icon API consumers, multi-tenant administrators | Deploy backend and both frontends together |
 | The audit action `user_access_token_issued` records each token the operator takes for a user with the super API key, always and before the token is issued | Clients with a fixed list of audit actions | Accept the new value |
 | [API keys that should have expired stop working](#api-keys-expire) | Integrations and modules with API keys; tenants with the unused-key policy | Replace the keys; check the policy's days |

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type Ref,
   type ReactNode
 } from "react";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
@@ -176,6 +177,8 @@ export function ComposerPanel({
   face,
   name,
   busy = false,
+  disabled = false,
+  triggerRef,
   label,
   open,
   onOpenChange,
@@ -188,6 +191,8 @@ export function ComposerPanel({
   name: string;
   /** A choice made in the panel is still being saved. */
   busy?: boolean;
+  disabled?: boolean;
+  triggerRef?: Ref<HTMLButtonElement>;
   /** Names the popover and the sheet. */
   label: string;
   open: boolean;
@@ -203,7 +208,7 @@ export function ComposerPanel({
   const [pillElement, setPillElement] = useState<HTMLButtonElement | null>(null);
   // The sheet gives focus back to the pill when it closes (Safari would leave it elsewhere).
   const pillRef = useRef<HTMLButtonElement>(null);
-  const pillRefs = useMergedRefs(pillRef, setPillElement);
+  const pillRefs = useMergedRefs(pillRef, setPillElement, triggerRef);
   const phone = usePhoneScreen();
   const [openedAsSheet, setOpenedAsSheet] = useState<boolean | null>(null);
   // Latched in render, as the panel opens and closes, so the opening render has its surface.
@@ -219,6 +224,7 @@ export function ComposerPanel({
       aria-expanded={open}
       aria-label={name}
       aria-busy={busy || undefined}
+      aria-disabled={disabled || undefined}
       className={PILL_CLASS}
       {...props}
     >
@@ -243,7 +249,9 @@ export function ComposerPanel({
     return (
       <Popover
         isOpen={open}
-        onOpenChange={onOpenChange}
+        onOpenChange={(next) => {
+          if (!next || !disabled) onOpenChange(next);
+        }}
         placement="above"
         alignment={alignment}
         width={width}
@@ -261,10 +269,16 @@ export function ComposerPanel({
   }
   return (
     <>
-      {pill({ onClick: () => onOpenChange(true) })}
+      {pill({
+        onClick: () => {
+          if (!disabled) onOpenChange(true);
+        }
+      })}
       <BottomSheet
         isOpen={open}
-        onOpenChange={onOpenChange}
+        onOpenChange={(next) => {
+          if (!next || !disabled) onOpenChange(next);
+        }}
         label={label}
         height={sheetHeight}
         padding={0}

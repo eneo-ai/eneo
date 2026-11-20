@@ -127,6 +127,9 @@ class VisitorView:
         """
         return response.model_copy(
             update={
+                "session": SessionInDB(
+                    id=response.session.id, name=response.session.name
+                ),
                 "completion_model": None,
                 "info_blobs": [],
                 "tools": UseTools(assistants=[]),
@@ -248,8 +251,14 @@ class VisitorView:
     # --- sessions -----------------------------------------------------------
 
     def session(self, session: SessionInDB) -> SessionInDB:
-        return session.model_copy(
-            update={"questions": [self._question(q) for q in session.questions]}
+        return SessionInDB(
+            id=session.id,
+            name=session.name,
+            created_at=session.created_at,
+            updated_at=session.updated_at,
+            feedback_value=session.feedback_value,
+            feedback_text=session.feedback_text,
+            questions=[self._question(q) for q in session.questions],
         )
 
     def _question(self, question: Question) -> Question:

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { getAppContext } from "$lib/core/AppContext";
   import { formatRelativeTime } from "$lib/core/formatting/dateTime";
   import { Button } from "$lib/components/ui/button/index.js";
   import { pushState, replaceState } from "$app/navigation";
@@ -14,13 +15,17 @@
 
   let { data } = $props();
 
-  const chat = untrack(() => initChatService(data));
+  const { user, tenant } = getAppContext();
+  const chat = untrack(() =>
+    initChatService({ ...data, draftOwner: { userId: user.id, tenantId: tenant.id } })
+  );
 
   let showHistory = $state(false);
 
   $effect(() => {
-    // Re-init if rout param changes
-    chat.init(data);
+    // Route data owns initialization; streaming state must not re-run it.
+    const initial = data;
+    untrack(() => chat.init(initial));
   });
 
   // Keep a confirmed replacement session reloadable without restarting its stream.

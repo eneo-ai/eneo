@@ -1,11 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { runViewToolWithApproval } from "@eneo/eneo-js/conversations/view-tool-approval";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
   import { getThemeStore } from "$lib/core/theme";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getChatService } from "../ChatService.svelte";
-  import { toolsRunAutomatically } from "../toolApprovalPreference";
   import { McpAppBridge, type McpAppToolResult, type McpAppToolState } from "./bridge";
   import { hostContext } from "./hostContext";
   import { getMcpAppPane } from "./McpAppPane.svelte";
@@ -170,8 +170,7 @@
     return true;
   }
 
-  function permissionToRunTools(name: string, args: Record<string, unknown>): Promise<boolean> {
-    if (call.is_bundled === true && toolsRunAutomatically()) return Promise.resolve(true);
+  function askPermission(name: string, args: Record<string, unknown>): Promise<boolean> {
     // Concurrent requests cannot share the approval of another call.
     if (asking) return Promise.resolve(false);
     return new Promise((resolve) => {
@@ -187,14 +186,37 @@
   }
 
   async function callTool(name: string, args: Record<string, unknown>): Promise<McpAppToolResult> {
-    if (!(await permissionToRunTools(name, args))) {
-      throw new Error("The user did not allow the tool call");
-    }
-    const result = await chat.callToolFromView({
+    const sessionId = chat.currentConversation.id;
+    const source = bridge;
+    const request = {
       toolCallId: call.tool_call_id,
       viewId: call.view.viewId,
       name,
       arguments: args
+    };
+    const stillHere = () =>
+      source !== null &&
+      bridge === source &&
+      chat.currentConversation.id === sessionId &&
+      call.tool_call_id === request.toolCallId &&
+      call.view.viewId === request.viewId;
+    const resolution = chat.settingsResolution;
+    const automaticRevision =
+      call.is_bundled &&
+      resolution &&
+      resolution.settings_compatible !== false &&
+      resolution.settings.require_tool_approval === false &&
+      !chat.settingsBusy &&
+      !chat.settingsError
+        ? resolution.revision
+        : undefined;
+    const result = await runViewToolWithApproval({
+      automaticRevision,
+      invoke: (revision) => {
+        if (!stillHere()) throw new Error("The view is no longer open");
+        return chat.callToolFromView({ ...request, automaticSettingsRevision: revision });
+      },
+      confirm: async () => stillHere() && (await askPermission(name, args))
     });
     return {
       content: (result.content ?? []).map((block) => ({ type: "text", text: block.text })),
@@ -225,6 +247,7 @@
 
   function attachBridge(iframe: HTMLIFrameElement) {
     bridge?.destroy();
+    asking?.decide(false);
     enlargeable = false;
     if (loadedFrame === iframe) {
       bridge = null;
@@ -265,6 +288,7 @@
       asking?.decide(false);
       link?.decide(false);
       bridge?.destroy();
+      bridge = null;
     };
   });
 </script>

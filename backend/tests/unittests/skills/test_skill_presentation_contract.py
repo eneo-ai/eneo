@@ -721,7 +721,14 @@ def test_assistant_binding_summary_exposes_mode_without_broadening_shared_summar
 
 
 @pytest.mark.asyncio
-async def test_assistant_skill_configuration_returns_modes_and_exact_runtime():
+@pytest.mark.parametrize(
+    "conversation_model_id",
+    [None, uuid4()],
+    ids=["assistant-model", "conversation-model"],
+)
+async def test_assistant_skill_configuration_returns_modes_and_exact_runtime(
+    conversation_model_id,
+):
     binding = replace(
         _binding(position=0),
         activation_mode=SkillActivationMode.ON_DEMAND,
@@ -760,11 +767,13 @@ async def test_assistant_skill_configuration_returns_modes_and_exact_runtime():
         space_id=space_id,
         assistant_id=assistant_id,
         container=container,
+        conversation_model_id=conversation_model_id,
     )
 
     assistant_service.get_skill_configuration.assert_awaited_once_with(
         space_id=space_id,
         assistant_id=assistant_id,
+        conversation_model_id=conversation_model_id,
     )
     assert response.bindings[0].activation_mode is SkillActivationMode.ON_DEMAND
     assert response.runtime is not None

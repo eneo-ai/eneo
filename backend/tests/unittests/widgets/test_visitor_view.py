@@ -31,6 +31,10 @@ from eneo.questions.question import (
     ToolCallInfo,
     UseTools,
 )
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import SessionInDB
 from eneo.sessions.session_protocol import to_session_public
 from eneo.skills.domain.skill import SkillExecutionReference
@@ -117,10 +121,16 @@ def _sse(chunk: Completion) -> dict:
 # --- first chunk ------------------------------------------------------------
 
 
+def _private_settings() -> ConversationSettingsState:
+    return ConversationSettingsState(
+        revision=2, settings=ConversationSettings(completion_model_id=uuid4())
+    )
+
+
 @pytest.mark.parametrize("show_sources", [True, False])
 def test_first_chunk_names_no_model_assistant_or_retrieved_document(show_sources):
     response = AssistantResponse(
-        session=SessionInDB(id=uuid4(), name="s"),
+        session=SessionInDB(id=uuid4(), name="s", settings=_private_settings()),
         question="Öppettider?",
         question_id=uuid4(),
         files=[],
@@ -142,6 +152,8 @@ def test_first_chunk_names_no_model_assistant_or_retrieved_document(show_sources
         question_id=visible.question_id,
     ).model_dump(mode="json")
 
+    assert "settings" not in first
+    assert response.session.settings is not None
     assert first["completion_model"] is None
     assert first["references"] == []
     assert first["tools"] == {"assistants": []}
@@ -521,7 +533,9 @@ def _stored_session() -> SessionInDB:
         ],
     )
     question.assistant_name = "Intern assistent"
-    return SessionInDB(id=uuid4(), name="s", questions=[question])
+    return SessionInDB(
+        id=uuid4(), name="s", questions=[question], settings=_private_settings()
+    )
 
 
 def _restored(**widget_overrides) -> dict:
@@ -534,7 +548,9 @@ def _restored(**widget_overrides) -> dict:
     [{}, {"show_sources": False}, {"show_tool_activity": False}],
 )
 def test_restored_messages_never_carry_internal_data(overrides):
-    [message] = _restored(**overrides)["messages"]
+    restored = _restored(**overrides)
+    assert "settings" not in restored
+    [message] = restored["messages"]
     payload = json.dumps(message)
 
     assert message["completion_model"] is None

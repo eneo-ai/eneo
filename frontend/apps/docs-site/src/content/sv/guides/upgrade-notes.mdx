@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@975cd4811b68
+translationSource: guides/upgrade-notes.mdx@9032b3bc8a55
 ---
 
 import { Callout } from "nextra/components";
@@ -133,6 +133,7 @@ flowchart TB
 | Ändring | Vem | Gör |
 |---|---|---|
 | [Ett felformat](#error-envelope) | API-konsumenter, genererade klienter | Läs `code` och `message` |
+| [Varje chatt sparar sina inställningar](/docs/api#conversation-settings) | Klienter som fortsätter en befintlig chatt eller visar interaktiva verktygsvyer | Använd strömning när chatten kräver godkännande. Läs in inställningarna igen vid en konflikt. Skicka den sparade revisionen vid automatiska verktygsanrop från en vy och be användaren bekräfta anropet vid `409`. |
 | [Ikoner](#icons) | API-konsumenter för ikoner, administratörer med flera organisationer | Driftsätt backend och båda frontends tillsammans |
 | Granskningshändelsen `user_access_token_issued` registrerar varje token som driftansvarig tar ut för en användare med super-API-nyckeln, alltid och innan tokenet lämnas ut | Klienter med en fast lista över granskningshändelser | Godta det nya värdet |
 | [API-nycklar som borde ha gått ut slutar fungera](#api-keys-expire) | Integrationer och moduler med API-nycklar; organisationer med policyn för oanvända nycklar | Ersätt nycklarna; kontrollera policyns antal dagar |

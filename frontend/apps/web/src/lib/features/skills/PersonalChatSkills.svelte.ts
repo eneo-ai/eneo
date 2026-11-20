@@ -34,7 +34,7 @@ type Sources = {
   listLibrary: ListSkills;
   /** Queues a save; `bindings` builds the full ordered list when its turn comes. */
   save: (bindings: () => Promise<Bindings>) => Promise<void>;
-  /** Settles once every queued default-assistant update has. */
+  /** Settles once every queued save the next turn depends on has. */
   settled: () => Promise<void>;
 };
 

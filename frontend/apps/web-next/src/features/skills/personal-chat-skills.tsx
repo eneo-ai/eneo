@@ -17,6 +17,11 @@ import { useTranslations } from "use-intl";
 import { useRef, useState, type RefObject } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useAppContext } from "@/components/providers/app-context";
+import {
+  PERSONAL_SKILLS_REJECTED,
+  useConversationModel,
+  useSettledConversationModel
+} from "@/features/chat/conversation-settings";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
@@ -68,8 +73,6 @@ export type PersonalSkillRow = {
   usedVia?: string[];
 };
 
-/** ErrorCodes.PERSONAL_SKILLS_REJECTED: the save would not run as configured. */
-const PERSONAL_SKILLS_REJECTED = 9080;
 /** Own Skills per library page, as on the Skills page. */
 const LIBRARY_PAGE = 25;
 /** Beyond this many own Skills the list gets a search field. */
@@ -106,7 +109,7 @@ function isReason(value: unknown): value is Reason {
 }
 
 /** A refused save in the words of the layer's reasons, or the general failure. */
-function saveFailureText(error: unknown, t: Translate): string {
+export function personalSkillsRefusalText(error: unknown, t: Translate): string {
   if (error instanceof EneoApiError) {
     const details = (error.details ?? {}) as { reason?: unknown; detail?: unknown };
     if (error.code === PERSONAL_SKILLS_REJECTED && isReason(details.reason))
@@ -127,7 +130,14 @@ function applyChange(bindings: Binding[], change: PersonalSkillChange): Binding[
   ];
 }
 
-type ConfigurationOwner = { spaceId: string; assistantId: string | null; modelId: string | null };
+type ConfigurationOwner = {
+  spaceId: string;
+  assistantId: string | null;
+  /** The model the configuration is judged against. */
+  modelId: string | null;
+  /** A conversation's model, which then judges it (see useConversationModel). */
+  conversationModelId?: string | null;
+};
 
 function readConfiguration(
   owner: ConfigurationOwner,
@@ -135,7 +145,12 @@ function readConfiguration(
 ): Promise<Configuration> {
   return unwrap(
     browserApi.GET("/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/", {
-      params: { path: { space_id: owner.spaceId, assistant_id: owner.assistantId! } },
+      params: {
+        path: { space_id: owner.spaceId, assistant_id: owner.assistantId! },
+        ...(owner.conversationModelId
+          ? { query: { conversation_model_id: owner.conversationModelId } }
+          : {})
+      },
       signal
     })
   );
@@ -146,9 +161,15 @@ export function personalChatSkillsConfigurationQueryOptions(owner: Configuration
   return queryOptions({
     queryKey: [
       ...skillQueryKey({ type: "space", spaceId: owner.spaceId }),
-      { personalChat: owner.assistantId, model: owner.modelId }
+      {
+        personalChat: owner.assistantId,
+        model: owner.modelId,
+        // Nothing is read while the conversation's model loads, and no
+        // configuration cached under the same model stands in for it.
+        ...(owner.conversationModelId === null && { awaitingConversation: true })
+      }
     ],
-    enabled: owner.assistantId !== null,
+    enabled: owner.assistantId !== null && owner.conversationModelId !== null,
     placeholderData: keepPreviousData,
     queryFn: ({ signal }) => readConfiguration(owner, signal)
   });
@@ -186,14 +207,18 @@ export function usePersonalChatSkills({
   const spaceSkillsKey = skillQueryKey({ type: "space", spaceId: space.id });
   // A model switch can pause or resume the layer, so the model is part of the
   // key; the scope (without it) covers the configuration under every model.
+  // In a conversation its turns run the Skills on its own model, so that one
+  // judges them, and a change is saved against it.
   const configurationScope = [...spaceSkillsKey, { personalChat: assistantId }];
+  const conversationModelId = useConversationModel();
+  const settledConversationModel = useSettledConversationModel();
   const owner = {
     spaceId: space.id,
     assistantId,
-    modelId: assistant?.completion_model?.id ?? null
+    modelId: conversationModelId ?? assistant?.completion_model?.id ?? null,
+    conversationModelId
   };
   const mutationKey = ["personal-chat-skills", assistantId];
-  const readSaved = () => readConfiguration(owner);
   const configuration = useQuery(personalChatSkillsConfigurationQueryOptions(owner));
 
   const library = useInfiniteQuery({
@@ -224,16 +249,23 @@ export function usePersonalChatSkills({
     mutationKey,
     mutationFn: (change: PersonalSkillChange) =>
       queuePartnerUpdate(async () => {
+        // A model switch still being saved decides which model judges the change.
+        const modelId = await settledConversationModel?.();
         // Read when this change's turn comes. The cache may miss an earlier
         // change (its refresh failed, or nothing on screen reads it any more),
         // and a list built from it would undo that change. Unread, nothing is sent.
-        const saved = await readSaved().catch(() => {
-          throw new Error("The personal chat's saved Skills could not be read");
-        });
+        const saved = await readConfiguration({ ...owner, conversationModelId: modelId }).catch(
+          () => {
+            throw new Error("The personal chat's saved Skills could not be read");
+          }
+        );
         await unwrap(
           browserApi.POST("/api/v1/assistants/{id}/", {
             params: { path: { id: assistantId! } },
-            body: { skill_bindings: applyChange(bindingsFromSummaries(saved.bindings), change) }
+            body: {
+              skill_bindings: applyChange(bindingsFromSummaries(saved.bindings), change),
+              ...(modelId ? { conversation_model_id: modelId } : {})
+            }
           })
         );
       }),
@@ -251,7 +283,7 @@ export function usePersonalChatSkills({
     onSuccess: () => queryClient.invalidateQueries({ queryKey: configurationScope }),
     onError: (error, change, attempt) => {
       if (newestAttempt.current.get(change.skillId) !== attempt) return;
-      const message = saveFailureText(error, t);
+      const message = personalSkillsRefusalText(error, t);
       setFailures((current) => ({ ...current, [change.skillId]: message }));
       announce(message);
     }

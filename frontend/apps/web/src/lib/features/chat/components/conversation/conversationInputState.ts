@@ -1,6 +1,53 @@
-import { EneoError } from "@eneo/eneo-js";
+import { EneoError, type ConversationSettings } from "@eneo/eneo-js";
 
 const QUERY_ERROR_CODE = 9003;
+const CAPABILITY_ID_PREFIX = "capability:";
+
+type ToolSelectionUpdate = Required<
+  Pick<ConversationSettings, "mcp_server_states" | "capability_states">
+>;
+
+/**
+ * Which settings controls are disabled. A save in flight disables nothing:
+ * the control the user just operated keeps focus (WCAG 2.4.3) and a change
+ * made meanwhile waits for its turn in ChatService.
+ */
+export function settingsControlsDisabled(state: {
+  hasSettings: boolean;
+  /** A turn is streaming. */
+  isLoading: boolean;
+  settingsCompatible: boolean;
+  modelUnavailable: boolean;
+}): { model: boolean; modelDependent: boolean } {
+  const model = !state.hasSettings || state.isLoading || !state.settingsCompatible;
+  // Every save but the pick of a replacement model is rejected while the
+  // saved model is unavailable.
+  return { model, modelDependent: model || state.modelUnavailable };
+}
+
+/**
+ * Only the changes made in this interaction. ChatService applies them to the
+ * latest saved choices when this update reaches the front of its queue.
+ */
+export function toolSelectionUpdate(
+  tools: ReadonlyArray<{ id: string; selected: boolean }>,
+  disabledIds: ReadonlySet<string>
+): ToolSelectionUpdate | null {
+  const mcp_server_states: Record<string, boolean> = {};
+  const capability_states: Record<string, boolean> = {};
+  let changed = false;
+  for (const tool of tools) {
+    const on = !disabledIds.has(tool.id);
+    if (on === tool.selected) continue;
+    changed = true;
+    if (tool.id.startsWith(CAPABILITY_ID_PREFIX)) {
+      capability_states[tool.id.slice(CAPABILITY_ID_PREFIX.length)] = on;
+    } else {
+      mcp_server_states[tool.id] = on;
+    }
+  }
+  return changed ? { mcp_server_states, capability_states } : null;
+}
 
 type ContextErrorInfo = {
   used?: number;

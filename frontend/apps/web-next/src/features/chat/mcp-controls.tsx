@@ -6,7 +6,6 @@ import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";
-import type { ChatPartner, ConversationBody } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import type { ChatCapability } from "./chat-capabilities";
 import { ComposerPanel } from "./composer-panel";
@@ -14,7 +13,7 @@ import { ComposerPanel } from "./composer-panel";
 export type McpServerSummary = Pick<
   Schema<"MCPServerPublicDict">,
   "id" | "name" | "description" | "icon_url"
-> & { is_enabled?: boolean };
+> & { is_enabled?: boolean; available?: boolean; reason?: string | null };
 
 /**
  * Why a server cannot be used in this conversation, or null. An administrator
@@ -24,30 +23,10 @@ export type McpServerSummary = Pick<
 export function mcpServerUnavailableReason(
   server: McpServerSummary,
   modelSupportsTools: boolean
-): "server_disabled" | "model_no_tool_calling" | null {
+): string | null {
+  if (server.available === false) return server.reason ?? "no_active_provider";
   if (server.is_enabled === false) return "server_disabled";
   return modelSupportsTools ? null : "model_no_tool_calling";
-}
-
-export function chatPartnerMcpServers(partner: ChatPartner): McpServerSummary[] {
-  if (partner.effectiveConfig?.mcp_enforced) {
-    return (partner.effectiveConfig.available_mcp_servers ?? []).filter(
-      (server) => server.purpose === "general"
-    );
-  }
-  return (partner.mcpServers ?? []).filter((server) => server.purpose === "general");
-}
-
-export function defaultDisabledMcpServerIds(partner: ChatPartner): string[] {
-  return partner.effectiveConfig?.default_disabled_mcp_server_ids ?? [];
-}
-
-export function pruneDisabledMcpServerIds(
-  disabledServerIds: Set<string>,
-  servers: McpServerSummary[]
-): Set<string> {
-  const validIds = new Set(servers.map((server) => server.id));
-  return new Set([...disabledServerIds].filter((id) => validIds.has(id)));
 }
 
 /** Capabilities that will be offered: switched on and available. */
@@ -71,32 +50,6 @@ export function activeMcpServerCount(
       !disabledServerIds.has(server.id) &&
       mcpServerUnavailableReason(server, modelSupportsTools) === null
   ).length;
-}
-
-export function mcpConversationOptions({
-  servers,
-  capabilities,
-  disabledServerIds,
-  autoAcceptTools,
-  supportsToolApproval
-}: {
-  servers: McpServerSummary[];
-  /** Web search, image generation, …: external tools the backend asks approval for too. */
-  capabilities: ChatCapability[];
-  disabledServerIds: Set<string>;
-  autoAcceptTools: boolean;
-  supportsToolApproval: boolean;
-}): Pick<ConversationBody, "require_tool_approval" | "disabled_mcp_server_ids"> {
-  const disabledIds = [...disabledServerIds].filter((id) =>
-    servers.some((server) => server.id === id)
-  );
-  return {
-    require_tool_approval:
-      supportsToolApproval && servers.length + capabilities.length > 0 && !autoAcceptTools
-        ? true
-        : undefined,
-    disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
-  };
 }
 
 /**
@@ -130,6 +83,10 @@ export type ChatToolsProps = {
   servers?: McpServerSummary[];
   disabledServerIds?: Set<string>;
   autoAcceptTools: boolean;
+  supportsToolApproval?: boolean;
+  disabled?: boolean;
+  busy?: boolean;
+  onSelectionChange?: (servers: Set<string>, capabilities: Set<Capability>) => void;
   /** Whether the partner's model can call tools at all; false renders every row unavailable. */
   modelSupportsTools?: boolean;
   onDisabledCapabilitiesChange?: (next: Set<Capability>) => void;
@@ -171,6 +128,10 @@ export function ToolsPanel({
   onDisabledCapabilitiesChange,
   onDisabledServerIdsChange,
   onAutoAcceptToolsChange,
+  onSelectionChange,
+  supportsToolApproval = true,
+  disabled = false,
+  busy = false,
   stacked,
   tabbed = false,
   onClose
@@ -208,28 +169,30 @@ export function ToolsPanel({
 
   // All-on / all-off only sweeps the rows that can be used.
   function setAll(enabled: boolean) {
-    if (capabilities.length > 0) {
-      const next = new Set(disabledCapabilities);
-      for (const capability of capabilities) {
-        if (!capability.available) continue;
-        if (enabled) next.delete(capability.purpose);
-        else next.add(capability.purpose);
-      }
-      onDisabledCapabilitiesChange?.(next);
+    const nextCapabilities = new Set(disabledCapabilities);
+    const nextServers = new Set(disabledServerIds);
+    for (const capability of capabilities) {
+      if (!capability.available) continue;
+      if (enabled) nextCapabilities.delete(capability.purpose);
+      else nextCapabilities.add(capability.purpose);
     }
-    if (servers.length > 0) {
-      const next = new Set(disabledServerIds);
-      for (const server of servers) {
-        if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
-        if (enabled) next.delete(server.id);
-        else next.add(server.id);
-      }
-      onDisabledServerIdsChange?.(next);
+    for (const server of servers) {
+      if (mcpServerUnavailableReason(server, modelSupportsTools) !== null) continue;
+      if (enabled) nextServers.delete(server.id);
+      else nextServers.add(server.id);
+    }
+    if (onSelectionChange) onSelectionChange(nextServers, nextCapabilities);
+    else {
+      onDisabledCapabilitiesChange?.(nextCapabilities);
+      onDisabledServerIdsChange?.(nextServers);
     }
   }
 
   return (
-    <div className={cn("flex min-h-0 flex-col", tabbed ? "flex-auto" : stacked && "p-4")}>
+    <div
+      aria-busy={busy}
+      className={cn("flex min-h-0 min-w-0 flex-col", tabbed ? "flex-auto" : stacked && "p-4")}
+    >
       <div className="border-ax-border flex shrink-0 flex-col gap-1 border-b pb-2">
         {!tabbed && (
           <div className="flex items-center justify-between gap-3">
@@ -247,19 +210,20 @@ export function ToolsPanel({
         <div className="text-ax-text-secondary flex items-center justify-between gap-2 text-xs">
           <span>{t("mcp_servers_active_count", { active, total })}</span>
           {total > 1 && modelSupportsTools && (
-            // Never disabled: a button that disables itself when pressed
-            // would drop keyboard focus. Pressing it again changes nothing.
+            // A save leaves both actions available so a focused button stays focused.
             <span className="flex items-center gap-1">
               <Button
                 label={t("mcp_all_on")}
                 variant="ghost"
                 size="sm"
+                isDisabled={disabled}
                 onClick={() => setAll(true)}
               />
               <Button
                 label={t("mcp_all_off")}
                 variant="ghost"
                 size="sm"
+                isDisabled={disabled}
                 onClick={() => setAll(false)}
               />
             </span>
@@ -300,7 +264,7 @@ export function ToolsPanel({
                     labelSpacing="spread"
                     size="sm"
                     value={capability.available && !disabledCapabilities.has(capability.purpose)}
-                    isDisabled={!capability.available}
+                    isDisabled={disabled || !capability.available}
                     onChange={(value) => setCapability(capability.purpose, value)}
                   />
                 </li>
@@ -335,7 +299,7 @@ export function ToolsPanel({
                     labelSpacing="spread"
                     size="sm"
                     value={reason === null && !disabledServerIds.has(server.id)}
-                    isDisabled={reason !== null}
+                    isDisabled={disabled || reason !== null}
                     onChange={(value) => setServer(server.id, value)}
                   />
                 </li>
@@ -345,7 +309,7 @@ export function ToolsPanel({
         )}
       </div>
 
-      {modelSupportsTools && (
+      {modelSupportsTools && supportsToolApproval && (
         <div className="border-ax-border flex shrink-0 items-start gap-2.5 border-t pt-2">
           <ShieldCheck
             aria-hidden="true"
@@ -359,6 +323,7 @@ export function ToolsPanel({
               labelSpacing="spread"
               size="sm"
               value={autoAcceptTools}
+              isDisabled={disabled}
               onChange={onAutoAcceptToolsChange}
             />
           </div>

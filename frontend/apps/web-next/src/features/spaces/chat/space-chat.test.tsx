@@ -1,12 +1,19 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
-import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "@/features/chat/partner-updates";
+import { awaitPartnerUpdates } from "@/features/chat/partner-updates";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
+  unavailableModel: false,
+  lockedModel: false,
+  reasoningConfigurable: true,
+  /** A second model to switch to, beside the assistant's own. */
+  otherModel: false,
+  extraModel: null as typeof reasoningModel | null,
   space: {
     id: "space-1",
     name: "Upphandling",
@@ -15,14 +22,74 @@ const route = vi.hoisted(() => ({
     security_classification: null,
     default_assistant: null as unknown,
     completion_models: []
-  }
+  },
+  /** The conversation detail GET answers with a saved conversation. */
+  savedSession: false
 }));
+const forbidden = vi.hoisted(
+  () => async (path: string, init?: { params?: { path?: { session_id?: string } } }) => {
+    if (path === "/api/v1/conversations/{session_id}/" && route.savedSession)
+      return {
+        data: {
+          id: init?.params?.path?.session_id,
+          name: "Samtal om gränser",
+          feedback: null,
+          messages: [
+            {
+              id: "m-1",
+              question: "Vilken gräns gäller?",
+              answer: "Gränsen är 700 000 kr.",
+              references: [],
+              files: [],
+              generated_files: [],
+              tools: { assistants: [] },
+              feedback: null
+            }
+          ]
+        },
+        response: new Response()
+      };
+    return {
+      data: undefined,
+      error: { message: "Forbidden" },
+      response: new Response(null, { status: 403 })
+    };
+  }
+);
+const answer = vi.hoisted(
+  () => async (path: string, init?: { body?: unknown; signal?: AbortSignal }) => ({
+    data: path.includes("settings/resolve")
+      ? {
+          revision: (init?.body as { session_id?: string })?.session_id ? 1 : 0,
+          settings: {
+            completion_model_id: route.unavailableModel ? "removed" : "model-1",
+            ...(init?.body as { settings?: object })?.settings
+          },
+          reasoning_effort_user_configurable: route.reasoningConfigurable,
+          reasoning_effort_options: route.reasoningConfigurable ? ["low", "medium", "high"] : [],
+          default_reasoning_effort: "medium",
+          available_models: route.otherModel
+            ? [reasoningModel, ...(route.extraModel ? [route.extraModel] : [otherModel])]
+            : [reasoningModel],
+          effective_model:
+            (init?.body as { settings?: { completion_model_id?: string } })?.settings
+              ?.completion_model_id === "model-2"
+              ? (route.extraModel ?? otherModel)
+              : reasoningModel,
+          model_unavailable: route.unavailableModel,
+          model_locked: route.lockedModel
+        }
+      : init?.body,
+    response: new Response()
+  })
+);
 const api = vi.hoisted(() => ({
   GET: vi.fn(),
-  POST: vi.fn(async (_path: string, init?: { body?: unknown; signal?: AbortSignal }) => ({
-    data: init?.body,
+  PATCH: vi.fn(async (_path: string, init: { body: { settings: object } }) => ({
+    data: { revision: 2, settings: init.body.settings },
     response: new Response()
-  }))
+  })),
+  POST: vi.fn(answer)
 }));
 
 /** A personal space whose assistant runs a model that offers reasoning levels. */
@@ -36,6 +103,14 @@ const reasoningModel = {
   supported_model_kwargs: {
     reasoning_effort: { supported: true, control: "select", options: ["low", "medium", "high"] }
   }
+};
+const otherModel = {
+  id: "model-2",
+  name: "claude-sonnet",
+  nickname: "Claude Sonnet",
+  org: "Anthropic",
+  max_input_tokens: 200000,
+  reasoning: false
 };
 const personalSpace = {
   ...route.space,
@@ -71,11 +146,9 @@ vi.mock("@/features/spaces/use-space", () => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 beforeEach(() => {
-  api.GET.mockImplementation(async () => ({
-    data: undefined,
-    error: { message: "Forbidden" },
-    response: new Response(null, { status: 403 })
-  }));
+  localStorage.clear();
+  sessionStorage.clear();
+  api.GET.mockImplementation(forbidden);
 });
 
 afterEach(async () => {
@@ -84,10 +157,14 @@ afterEach(async () => {
   await awaitPartnerUpdates();
   api.GET.mockClear();
   api.POST.mockReset();
-  api.POST.mockImplementation(async (_path, init) => ({
-    data: init?.body,
-    response: new Response()
-  }));
+  api.POST.mockImplementation(answer);
+  api.PATCH.mockClear();
+  route.unavailableModel = false;
+  route.lockedModel = false;
+  route.reasoningConfigurable = true;
+  route.otherModel = false;
+  route.extraModel = null;
+  route.savedSession = false;
   route.space.personal = false;
   route.space.completion_models = [];
   route.space.default_assistant = null;
@@ -101,6 +178,30 @@ function renderRoute(url = "/spaces/space-1/chat", permissions: string[] = []) {
 }
 
 describe("SpaceChat", () => {
+  it("keeps the picker usable when the saved model is unavailable and only one replacement remains", async () => {
+    Object.assign(route.space, personalSpace);
+    route.unavailableModel = true;
+    renderRoute("/spaces/personal/chat");
+    await screen.findByText("Den sparade modellen är inte tillgänglig");
+    const picker = await screen.findByRole("button", { name: /^Chattmodell:/ });
+    fireEvent.click(picker);
+    const option = await screen.findByRole("radio", { name: /GPT-5/ });
+    route.unavailableModel = false;
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: null }
+        }
+      })
+    );
+    // The polite live region can retain its announcement after the notice goes.
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Läs in sparade val" })).toBeNull()
+    );
+  });
+
   it("offers a retry when an assistant in the space can't be loaded", async () => {
     renderRoute("/spaces/space-1/chat?type=assistant&id=assistant-9");
     expect(await screen.findByText("Det gick inte att öppna chatten")).toBeTruthy();
@@ -211,6 +312,7 @@ describe("SpaceChat", () => {
             resolve: (data) => resolve({ data, response: new Response() })
           });
         });
+      if (path === "/api/v1/conversations/settings/resolve/") return answer(path, init);
       bindings = [];
       return { data: init?.body, response: new Response() };
     });
@@ -266,7 +368,7 @@ describe("SpaceChat", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
   });
 
-  it("lets the personal assistant's reasoning effort be picked in the model picker and saves it on the assistant", async () => {
+  it("lets the personal assistant's reasoning effort be picked in the model picker and keeps it in the conversation draft", async () => {
     Object.assign(route.space, personalSpace);
     renderRoute("/spaces/personal/chat");
 
@@ -277,20 +379,19 @@ describe("SpaceChat", () => {
     fireEvent.click(within(levels).getByRole("radio", { name: "Hög" }));
 
     await waitFor(() =>
-      expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-        params: { path: { id: "assistant-1" } },
-        body: { completion_model_kwargs: { reasoning_effort: "high" } }
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: { completion_model_id: "model-1", reasoning_effort: "high" }
+        }
       })
     );
   });
 
   it("saves a model and a level chosen together in one update", async () => {
-    Object.assign(route.space, personalSpace, {
-      completion_models: [
-        reasoningModel,
-        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
-      ]
-    });
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.extraModel = { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" };
     renderRoute("/spaces/personal/chat");
 
     fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
@@ -298,51 +399,58 @@ describe("SpaceChat", () => {
     fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
     fireEvent.click(within(panel).getByRole("radio", { name: "Hög" }));
 
-    const saves = () => api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
-    await waitFor(() => expect(saves()).toHaveLength(1));
-    expect(saves()).toEqual([
-      [
-        "/api/v1/assistants/{id}/",
-        {
-          params: { path: { id: "assistant-1" } },
-          body: {
-            completion_model: { id: "model-2" },
-            completion_model_kwargs: { reasoning_effort: "high" }
+    const writes = () =>
+      api.POST.mock.calls.filter(
+        ([path, init]) =>
+          path === "/api/v1/conversations/settings/resolve/" &&
+          (init?.body as { settings?: object })?.settings
+      );
+    await waitFor(() =>
+      expect(writes()).toEqual([
+        [
+          "/api/v1/conversations/settings/resolve/",
+          {
+            body: {
+              assistant_id: "assistant-1",
+              settings: { completion_model_id: "model-2", reasoning_effort: "high" }
+            }
           }
-        }
-      ]
-    ]);
+        ]
+      ])
+    );
   });
 
-  it("holds the save queue, and so a question sent meanwhile, until a picked model is saved", async () => {
-    Object.assign(route.space, personalSpace, {
-      completion_models: [
-        reasoningModel,
-        { ...reasoningModel, id: "model-2", name: "o4", nickname: "O4" }
-      ]
-    });
-    let land!: () => void;
-    const landed = new Promise<void>((resolve) => (land = resolve));
-    api.POST.mockImplementation(async (path, init) => {
-      if (path === "/api/v1/assistants/{id}/") await landed;
-      return { data: init?.body, response: new Response() };
-    });
+  it("validates a model change after the earlier Skills save", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    let finishSkills!: () => void;
+    const skills = new Promise<void>((resolve) => (finishSkills = resolve));
+    void queuePartnerUpdate(() => skills);
     try {
       renderRoute("/spaces/personal/chat");
-
       fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
       const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
-      fireEvent.click(within(panel).getByRole("radio", { name: /O4/ }));
-      await waitFor(() =>
-        expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", expect.anything())
-      );
-      // Past the rest the picker's own place in the queue is let go: only the save holds it now.
-      expect(hasPendingPartnerUpdates()).toBe(true);
+      fireEvent.click(within(panel).getByRole("radio", { name: /Claude Sonnet/ }));
+      fireEvent.keyDown(panel, { key: "Escape" });
+      await act(async () => {});
+      const request = [
+        "/api/v1/conversations/settings/resolve/",
+        {
+          body: {
+            assistant_id: "assistant-1",
+            settings: { completion_model_id: "model-2", reasoning_effort: null }
+          }
+        }
+      ] as const;
+      expect(api.POST).not.toHaveBeenCalledWith(...request);
 
-      await act(async () => land());
-      await waitFor(() => expect(hasPendingPartnerUpdates()).toBe(false));
+      await act(async () => finishSkills());
+      await waitFor(() => expect(api.POST).toHaveBeenCalledWith(...request));
+      expect(
+        await screen.findByRole("button", { name: "Chattmodell: Claude Sonnet" })
+      ).toBeTruthy();
     } finally {
-      land();
+      finishSkills();
     }
   });
 
@@ -357,19 +465,121 @@ describe("SpaceChat", () => {
     expect(within(composer).getByRole("button", { name: /^Skills/ })).toBe(skills);
   });
 
-  it("shows no reasoning picker when the policy keeps the level fixed", async () => {
-    Object.assign(route.space, personalSpace, {
-      default_assistant: {
-        ...personalSpace.default_assistant,
-        effective_config: {
-          ...personalSpace.default_assistant.effective_config,
-          reasoning_effort_user_configurable: false
-        }
-      }
+  it("shows the model the policy pins as a read-only field instead of a picker", async () => {
+    Object.assign(route.space, personalSpace);
+    route.lockedModel = true;
+    renderRoute("/spaces/personal/chat");
+    fireEvent.click(await screen.findByRole("button", { name: "Chattmodell: GPT-5" }));
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    expect(within(panel).getByText("GPT-5")).toBeTruthy();
+    expect(within(panel).getByText("Låst av administratör")).toBeTruthy();
+    expect(within(panel).queryByRole("radiogroup", { name: "Chattmodell" })).toBeNull();
+  });
+
+  it("starts a new conversation with the picked model from the model-change dialog", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.savedSession = true;
+    window.history.replaceState(null, "", "/spaces/space-1/chat?session_id=s-1");
+    renderRoute("/spaces/personal/chat?session_id=s-1");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    expect(within(log).getByText("Gränsen är 700 000 kr.")).toBeTruthy();
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Claude Sonnet/ }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Byta modell i den här konversationen?"
     });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta ny konversation" }));
+
+    await waitFor(() => expect(log.isConnected).toBe(false));
+    expect(window.location.pathname + window.location.search).toBe("/spaces/space-1/chat");
+    // The saved conversation keeps its model; the draft starts with the picked one.
+    expect(api.PATCH).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/conversations/settings/resolve/", {
+        body: {
+          assistant_id: "assistant-1",
+          settings: expect.objectContaining({
+            completion_model_id: "model-2",
+            reasoning_effort: null
+          })
+        }
+      })
+    );
+    expect(await screen.findByRole("button", { name: /^Chattmodell: Claude Sonnet/ })).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("textbox", { name: "Fråga Personlig assistent" })
+      )
+    );
+  });
+
+  it("holds the model and reasoning still while a question waits for a Skills save", async () => {
+    Object.assign(route.space, personalSpace);
+    renderRoute("/spaces/personal/chat");
+    await screen.findByRole("button", { name: "Chattmodell: GPT-5" });
+    // Read anew: the waiting question takes the view from the start state to the conversation.
+    const held = () =>
+      screen.getByRole("button", { name: "Chattmodell: GPT-5" }).getAttribute("aria-disabled");
+    expect(held()).toBeNull();
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Personlig assistent" }), {
+      target: { value: "Skicka när Skills är sparade" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The waiting question already carries the conversation's settings revision.
+    expect(held()).toBe("true");
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+    });
+  });
+
+  it("keeps the next conversation's model when leaving an unsent question is cancelled", async () => {
+    Object.assign(route.space, personalSpace);
+    route.otherModel = true;
+    route.savedSession = true;
+    window.history.replaceState(null, "", "/spaces/space-1/chat?session_id=s-1");
+    renderRoute("/spaces/personal/chat?session_id=s-1");
+    const log = await screen.findByRole("log", { name: "Konversation" });
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Personlig assistent" }), {
+      target: { value: "Unsent follow-up" }
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
+    fireEvent.click(await screen.findByRole("radio", { name: /Claude Sonnet/ }));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Byta modell i den här konversationen?"
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Starta ny konversation" }));
+    const leave = await screen.findByRole("alertdialog", { name: "Lämna chatten?" });
+    fireEvent.click(within(leave).getByRole("button", { name: "Avbryt" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(log.isConnected).toBe(true);
+    // Focus goes back to the picker the change started from (WCAG 2.4.3).
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /^Chattmodell: GPT-5/ })
+      )
+    );
+    const stored = Array.from({ length: localStorage.length }, (_, index) =>
+      localStorage.getItem(localStorage.key(index)!)
+    ).join();
+    expect(stored).not.toContain("model-2");
+  });
+
+  it("uses the settings response to hide reasoning even if the cached assistant allows it", async () => {
+    Object.assign(route.space, personalSpace);
+    route.reasoningConfigurable = false;
     renderRoute("/spaces/personal/chat");
     fireEvent.click(await screen.findByRole("button", { name: /^Chattmodell: GPT-5/ }));
-    await screen.findByRole("option", { name: /GPT-5/ });
-    expect(screen.queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
+    const panel = await screen.findByRole("dialog", { name: "Chattmodell" });
+    expect(within(panel).getByRole("radio", { name: /GPT-5/ })).toBeTruthy();
+    expect(within(panel).queryByRole("radiogroup", { name: "Resonemangsnivå" })).toBeNull();
   });
 });

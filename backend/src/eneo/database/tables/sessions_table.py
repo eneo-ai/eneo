@@ -4,6 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import TIMESTAMP, CheckConstraint, ForeignKey, Index, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
@@ -28,6 +29,7 @@ class Sessions(BasePublic):
     api_key_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey(ApiKeysV2.id, ondelete="SET NULL"), nullable=True
     )
+    settings: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     # Widget sessions: the principal is the widget plus a pseudonymous
     # visitor id; neither a user nor an API key is involved.
     widget_id: Mapped[Optional[UUID]] = mapped_column(

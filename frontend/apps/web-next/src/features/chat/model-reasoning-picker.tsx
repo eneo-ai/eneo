@@ -3,7 +3,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { ChevronDown, Lock, Search, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type Ref } from "react";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { TextInput } from "@/components/astryx/text-input";
 import {
@@ -38,11 +38,12 @@ const SEARCH_FROM = 8;
 
 /** The model and the level as one choice; the level is null for the organisation's default. */
 type Choice = { modelId: string | null; level: string | null };
+type SaveChoice = () => void | Promise<unknown>;
 /** What a save changes: only the parts the person changed. */
 export type ModelReasoningChange = { modelId?: string; level?: string | null };
 
 /**
- * A choice still saving, per assistant. It is kept here rather than in the
+ * A choice still saving, per settings owner. It is kept here rather than in the
  * picker because it outlives the picker: the first question moves the
  * composer, which mounts the picker anew while the save is on its way.
  */
@@ -56,7 +57,7 @@ type Saving = {
 };
 const saving = new Map<string, Saving>();
 const savingListeners = new Set<() => void>();
-// One count for every assistant, so an older save never ends a newer choice's wait.
+// One count for every settings owner, so an older save never ends a newer choice's wait.
 let lastChoiceId = 0;
 
 function subscribeSaving(listener: () => void) {
@@ -64,9 +65,9 @@ function subscribeSaving(listener: () => void) {
   return () => void savingListeners.delete(listener);
 }
 
-function setSaving(assistantId: string, next: Saving | null) {
-  if (next) saving.set(assistantId, next);
-  else saving.delete(assistantId);
+function setSaving(ownerId: string, next: Saving | null) {
+  if (next) saving.set(ownerId, next);
+  else saving.delete(ownerId);
   for (const listener of savingListeners) listener();
 }
 
@@ -81,19 +82,16 @@ function setSaving(assistantId: string, next: Saving | null) {
  * id), is never sent: its part is never chosen. Only the save of the latest
  * choice ends the waiting state, so an older save that settles late never
  * shows an older choice. A rejected save falls back to the saved choice (the
- * caller reports the failure). What is still saving is kept per assistant,
+ * caller reports the failure). What is still saving is kept per settings owner,
  * outside the picker, until the latest save settles.
  */
 function useRestedChoice(
-  assistantId: string,
+  ownerId: string,
   saved: Choice,
   save: (change: ModelReasoningChange) => void | Promise<unknown>,
   levelsOf: (modelId: string | null) => string[]
 ) {
-  const latest = useSyncExternalStore(
-    subscribeSaving,
-    () => saving.get(assistantId)?.latest ?? null
-  );
+  const latest = useSyncExternalStore(subscribeSaving, () => saving.get(ownerId)?.latest ?? null);
   // What was shown when the rest began (a save still under way included), what
   // is chosen now, and the place it holds in the save queue.
   const resting = useRef<{
@@ -101,7 +99,8 @@ function useRestedChoice(
     id: number;
     from: Choice;
     choice: Choice;
-    rested: () => void;
+    startSave: (save: SaveChoice | null) => void;
+    saved: Promise<unknown>;
   } | null>(null);
   const shown = latest?.choice ?? saved;
   // A choice still resting when the picker goes is saved, so its place in the queue is let go.
@@ -114,8 +113,8 @@ function useRestedChoice(
     resting.current = null;
     window.clearTimeout(rest.timer);
     // The rest's choice is the latest, so its record is there; were it not, the queue is still let go.
-    const record = saving.get(assistantId);
-    if (!record) return rest.rested();
+    const record = saving.get(ownerId);
+    if (!record) return rest.startSave(null);
     const { id, from, choice } = rest;
     const carried = record.unsettled;
     // A rest that ends where it began changes nothing, whatever is still on its way.
@@ -133,12 +132,13 @@ function useRestedChoice(
     }
     if (moved && Object.keys(change).length > 0) {
       for (const key of Object.keys(change) as (keyof Choice)[]) carried.add(key);
-      record.lastSave = Promise.resolve(save(change)).catch(() => {});
+      record.lastSave = rest.saved.catch(() => {});
+      rest.startSave(() => save(change));
+    } else {
+      rest.startSave(null);
     }
-    // Queued behind its place, the save now holds the questions sent meanwhile.
-    rest.rested();
     void record.lastSave.finally(() => {
-      if (saving.get(assistantId)?.latest.id === id) setSaving(assistantId, null);
+      if (saving.get(ownerId)?.latest.id === id) setSaving(ownerId, null);
     });
   };
   useEffect(() => {
@@ -151,17 +151,17 @@ function useRestedChoice(
       const id = ++lastChoiceId;
       const from = resting.current?.from ?? shown;
       const choice = { ...(resting.current?.choice ?? shown), ...part };
-      let rested = resting.current?.rested;
+      let startSave = resting.current?.startSave;
+      let saved = resting.current?.saved;
       if (resting.current) window.clearTimeout(resting.current.timer);
-      else {
-        // A question sent while the choice rests (Send pressed with the panel
-        // open, before the panel closes) waits for its save, not just for
-        // saves already made.
-        const place = new Promise<void>((resolve) => (rested = resolve));
-        void queuePartnerUpdate(() => place);
+      if (!saved) {
+        // Reserve the save's place as soon as the model changes. A Skills
+        // edit behind it reads the new model, and a question waits for both.
+        const choiceReady = new Promise<SaveChoice | null>((resolve) => (startSave = resolve));
+        saved = queuePartnerUpdate(async () => (await choiceReady)?.());
       }
-      const record = saving.get(assistantId);
-      setSaving(assistantId, {
+      const record = saving.get(ownerId);
+      setSaving(ownerId, {
         latest: { id, choice },
         unsettled: record?.unsettled ?? new Set(),
         lastSave: record?.lastSave ?? Promise.resolve()
@@ -170,7 +170,8 @@ function useRestedChoice(
         id,
         from,
         choice,
-        rested: rested!,
+        startSave: startSave!,
+        saved,
         timer: window.setTimeout(commit, SAVE_DELAY_MS)
       };
     },
@@ -209,8 +210,8 @@ function bringChosenIntoView(list: HTMLDivElement | null) {
 }
 
 export type ModelReasoningPickerProps = {
-  /** The assistant the choice is saved on: a choice still saving is kept per assistant. */
-  assistantId: string;
+  /** Identifies the settings owner across composer remounts. */
+  ownerId: string;
   models: CompletionModel[];
   selectedId: string | null | undefined;
   /** A model the governance policy pins: shown read-only, with a lock. */
@@ -221,6 +222,14 @@ export type ModelReasoningPickerProps = {
   storedLevel: string | null;
   /** The organisation policy's default level, if any. */
   policyDefaultLevel: string | null;
+  /** The server's allowed levels for the resolved model. */
+  currentReasoningOptions?: string[];
+  levelConfigurable?: boolean;
+  disabled?: boolean;
+  triggerRef?: Ref<HTMLButtonElement>;
+  resetLevelOnModelChange?: boolean;
+  /** Return false to handle the model choice outside the picker. */
+  onModelChoice?: (id: string) => boolean;
   /**
    * Saves what changed in one update: the model, the level (null for the
    * organisation default), or both. A rejected save shows the stored choice again.
@@ -240,13 +249,19 @@ export type ModelReasoningPickerProps = {
  * so, so the panel does not change shape between models.
  */
 export function ModelReasoningPicker({
-  assistantId,
+  ownerId,
   models,
   selectedId,
   locked = null,
   showPricing = true,
   storedLevel,
   policyDefaultLevel,
+  currentReasoningOptions,
+  levelConfigurable = true,
+  disabled = false,
+  triggerRef,
+  resetLevelOnModelChange = false,
+  onModelChoice,
   onSave
 }: ModelReasoningPickerProps) {
   const t = useTranslations();
@@ -256,11 +271,17 @@ export function ModelReasoningPicker({
 
   const sorted = useMemo(() => sortModels(models), [models]);
   const byId = useMemo(() => new Map(sorted.map((item) => [item.id, item])), [sorted]);
+  const savedId = locked?.id ?? selectedId ?? null;
+  const levelsOf = (id: string | null) => {
+    if (!levelConfigurable) return [];
+    if (id === savedId && currentReasoningOptions) return currentReasoningOptions;
+    return reasoningEffortOptions(id ? byId.get(id) : undefined);
+  };
   const choice = useRestedChoice(
-    assistantId,
-    { modelId: locked ? locked.id : (selectedId ?? null), level: storedLevel },
+    ownerId,
+    { modelId: savedId, level: storedLevel },
     onSave,
-    (id) => reasoningEffortOptions(id ? byId.get(id) : undefined)
+    levelsOf
   );
   const shownId = choice.shown.modelId;
   const shown = shownId ? byId.get(shownId) : undefined;
@@ -272,7 +293,7 @@ export function ModelReasoningPicker({
         ? t("unsupported_model_selected")
         : t("select_a_model");
 
-  const levels = reasoningEffortOptions(shown);
+  const levels = levelsOf(shownId);
   const chosenLevel = choice.shown.level;
   // The organisation's default, when the shown model offers it: named on the
   // default's row, which follows the organisation when it changes its level.
@@ -380,8 +401,14 @@ export function ModelReasoningPicker({
                 label={label}
                 isLabelHidden
                 value={shownId ?? ""}
+                isDisabled={disabled}
                 onChange={(next) => {
-                  if (next !== shownId) choice.choose({ modelId: next });
+                  if (next === shownId) return;
+                  if (onModelChoice?.(next) === false) {
+                    changeOpen(false);
+                    return;
+                  }
+                  choice.choose({ modelId: next, ...(resetLevelOnModelChange && { level: null }) });
                 }}
                 size="sm"
                 width="100%"
@@ -414,49 +441,56 @@ export function ModelReasoningPicker({
         )}
       </div>
 
-      <div
-        className={cn(
-          "border-ax-border flex shrink-0 flex-col gap-1",
-          stacked ? "border-t pt-3" : "w-48 border-s ps-4"
-        )}
-      >
-        {levels.length > 0 ? (
-          <RadioList
-            label={t("reasoning_effort")}
-            value={ownLevel ?? DEFAULT_LEVEL}
-            onChange={(next) => {
-              // The default is saved as no level of one's own, so it follows the organisation's.
-              const picked = next === DEFAULT_LEVEL ? null : next;
-              if (picked !== ownLevel) choice.choose({ level: picked });
-            }}
-            size="sm"
-            width="100%"
-          >
-            {/* The organisation's level, named; without one the model offers, the model's own behaviour. */}
-            <RadioListItem
-              value={DEFAULT_LEVEL}
-              label={
-                <span className="flex items-baseline gap-2">
-                  {t("default_behavior")}
-                  {policyLevel && (
-                    <span className="text-ax-text-secondary text-xs">
-                      {reasoningEffortLabel(policyLevel, t)}
-                    </span>
-                  )}
-                </span>
-              }
-            />
-            {levels.map((option) => (
-              <RadioListItem key={option} value={option} label={reasoningEffortLabel(option, t)} />
-            ))}
-          </RadioList>
-        ) : (
-          <>
-            <p className="text-sm font-medium">{t("reasoning_effort")}</p>
-            <p className="text-ax-text-secondary text-xs">{t("reasoning_effort_not_offered")}</p>
-          </>
-        )}
-      </div>
+      {levelConfigurable && (
+        <div
+          className={cn(
+            "border-ax-border flex shrink-0 flex-col gap-1",
+            stacked ? "border-t pt-3" : "w-48 border-s ps-4"
+          )}
+        >
+          {levels.length > 0 ? (
+            <RadioList
+              label={t("reasoning_effort")}
+              value={ownLevel ?? DEFAULT_LEVEL}
+              isDisabled={disabled}
+              onChange={(next) => {
+                // The default is saved as no level of one's own, so it follows the organisation's.
+                const picked = next === DEFAULT_LEVEL ? null : next;
+                if (picked !== ownLevel) choice.choose({ level: picked });
+              }}
+              size="sm"
+              width="100%"
+            >
+              {/* The organisation's level, named; without one the model offers, the model's own behaviour. */}
+              <RadioListItem
+                value={DEFAULT_LEVEL}
+                label={
+                  <span className="flex items-baseline gap-2">
+                    {t("default_behavior")}
+                    {policyLevel && (
+                      <span className="text-ax-text-secondary text-xs">
+                        {reasoningEffortLabel(policyLevel, t)}
+                      </span>
+                    )}
+                  </span>
+                }
+              />
+              {levels.map((option) => (
+                <RadioListItem
+                  key={option}
+                  value={option}
+                  label={reasoningEffortLabel(option, t)}
+                />
+              ))}
+            </RadioList>
+          ) : (
+            <>
+              <p className="text-sm font-medium">{t("reasoning_effort")}</p>
+              <p className="text-ax-text-secondary text-xs">{t("reasoning_effort_not_offered")}</p>
+            </>
+          )}
+        </div>
+      )}
     </PickerPanel>
   );
 
@@ -490,10 +524,12 @@ export function ModelReasoningPicker({
       }
       name={name}
       busy={choice.busy}
+      disabled={disabled}
+      triggerRef={triggerRef}
       label={label}
       open={open}
       onOpenChange={changeOpen}
-      width={520}
+      width={levelConfigurable ? 520 : 320}
       alignment="end"
       // A search field brings up the keyboard: only a tall sheet makes room for it.
       // Without one (a pinned model has none) the sheet is as tall as its content.

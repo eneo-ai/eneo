@@ -4,7 +4,6 @@ import { useFileUploads, type FileUpload } from "@/features/files/use-file-uploa
 export { releasePreviews } from "@/features/files/use-file-uploads";
 import type { ChatPartner } from "@/lib/chat/types";
 import { toast } from "@/lib/toast";
-import { chatCapabilities } from "./chat-capabilities";
 import {
   type ChatAttachmentRejection,
   type ChatAttachmentUploaded,
@@ -14,6 +13,7 @@ import {
 export type Attachment = FileUpload;
 
 export type UseAttachmentsOptions = {
+  imageGenerationAvailable?: boolean;
   /**
    * A file already on the server that a picked file is a copy of, e.g. one
    * sent earlier in the conversation. It is attached again without an upload.
@@ -61,17 +61,16 @@ function toastRejections(
  * without another upload, uploads the rest through the proxy and exposes the
  * uploaded file ids for the conversation request.
  */
-export function useAttachments(partner: ChatPartner, { findExisting }: UseAttachmentsOptions = {}) {
+export function useAttachments(
+  partner: ChatPartner,
+  { findExisting, imageGenerationAvailable = false }: UseAttachmentsOptions = {}
+) {
   const t = useTranslations();
-  const { limits, can } = useAppContext();
+  const { limits } = useAppContext();
   const uploads = useFileUploads({ previews: true });
   const attachments = uploads.files;
 
-  const vision =
-    (partner.completionModel?.vision ?? false) ||
-    chatCapabilities(partner, can).some(
-      (capability) => capability.purpose === "image_generation" && capability.available
-    );
+  const vision = (partner.completionModel?.vision ?? false) || imageGenerationAvailable;
   const formats = limits.attachments.formats.filter((format) => !format.vision || vision);
   const acceptString = formats.map((format) => format.mimetype).join(",");
   const maxFiles = partner.allowedAttachments?.limit.max_files ?? Infinity;

@@ -211,6 +211,11 @@ export function personalSkillLayerMessage({
     : m.personal_chat_skills_save_failed();
 }
 
+/** Whether a save was refused because it would pause the person's own Skills. */
+export function isPersonalSkillsRejection(error: unknown): error is EneoError {
+  return error instanceof EneoError && error.code === PERSONAL_SKILLS_REJECTED;
+}
+
 export function personalSkillsSaveErrorMessage(error: unknown): string {
   if (error instanceof EneoError) {
     if (error.code === PERSONAL_SKILLS_REJECTED) {

@@ -1,4 +1,5 @@
 {
+  "personal_chat_model_change_wait": "Vänta tills svaret är klart eller stoppa det innan du byter modell i den här konversationen.",
   "widget_admin_assistant_notice_body": "Den här assistenten används i en publik widget. Ändringar av MCP-servrar och verktyg sparas automatiskt och gäller från besökarens nästa fråga, inom organisationens widgetpolicy. Kontrollera vad ett verktyg kan läsa eller ändra innan du slår på det.",
   "access_disabled": "Din åtkomst till Eneo har tillfälligt inaktiverats. Kontakta din administratör för att återfå åtkomsten för din organisation.",
   "activation_failed": "Aktiveringen misslyckades – ditt konto kunde inte skapas ännu. Be din administratör skapa en inbjudan för din e-postadress och försök sedan igen.",

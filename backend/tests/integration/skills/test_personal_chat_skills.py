@@ -7,17 +7,23 @@ that do not hold `assistants`, which is how the feature is meant to be used.
 """
 
 from unittest.mock import AsyncMock, patch
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.skill_table import SkillRuntimePolicies
 from eneo.database.tables.users_table import users_roles_table
 from eneo.main.exceptions import ErrorCodes
 from eneo.roles.permissions import Permission
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.skills.domain.skill import (
     MAX_SKILL_ATTACHMENT_LIMIT,
     SkillBindingIntent,
@@ -510,6 +516,372 @@ async def test_a_model_switch_that_would_pause_running_skills_is_refused(
     configuration = await _configuration(client, headers, space_id, default_id)
     assert configuration["personal_layer"]["status"] == "applied"
     assert configuration["runtime"]["effective_model_id"] == tools_model_id
+
+
+async def _conversation(
+    client, db_container, headers, default_id, model_id: str | None
+) -> str:
+    """A saved personal chat conversation that runs this model (None: the default)."""
+    me = await client.get("/api/v1/users/me/", headers=headers)
+    assert me.status_code == 200, me.text
+    state = ConversationSettingsState(
+        revision=1,
+        settings=ConversationSettings(
+            completion_model_id=UUID(model_id) if model_id else None
+        ),
+    )
+    async with db_container() as container:
+        session = Sessions(
+            user_id=UUID(me.json()["id"]),
+            assistant_id=UUID(default_id),
+            name="Egen modell",
+            settings=state.to_storage(),
+        )
+        container.session().add(session)
+        await container.session().flush()
+        return str(session.id)
+
+
+async def _configuration_for(client, headers, space_id, default_id, model_id) -> dict:
+    response = await client.get(
+        f"/api/v1/spaces/{space_id}/assistants/{default_id}/skills/configuration/",
+        params={"conversation_model_id": model_id},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_own_skills_are_judged_by_the_conversations_model(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    skill = await _own_skill(client, headers, space_id)
+    on_demand = _binding(skill, mode="on_demand")
+
+    # The assistant's own model cannot call tools; this conversation's can.
+    refused = await _save(client, headers, default_id, {"skill_bindings": [on_demand]})
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["eneo_error_code"] == ErrorCodes.PERSONAL_SKILLS_REJECTED
+    saved = await _save(
+        client,
+        headers,
+        default_id,
+        {"skill_bindings": [on_demand], "conversation_model_id": tools_model_id},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["completion_model"]["id"] == plain_model_id
+
+    running = await _configuration_for(
+        client, headers, space_id, default_id, tools_model_id
+    )
+    assert running["personal_layer"]["status"] == "applied"
+    assert running["runtime"]["effective_model_id"] == tools_model_id
+    for paused in (
+        await _configuration_for(client, headers, space_id, default_id, plain_model_id),
+        await _configuration(client, headers, space_id, default_id),
+    ):
+        assert paused["personal_layer"]["status"] == "suspended"
+        assert paused["personal_layer"]["reason"] == "on_demand_unavailable"
+        assert paused["runtime"]["effective_model_id"] == plain_model_id
+
+    # A conversation's model comes with own Skills alone, never with a model change.
+    combined = await _save(
+        client,
+        headers,
+        default_id,
+        {
+            "completion_model": {"id": tools_model_id},
+            "conversation_model_id": tools_model_id,
+        },
+    )
+    assert combined.status_code == 400, combined.text
+    # A model the personal chat cannot use (here none at all) leaves the
+    # assistant's model to judge, as outside a conversation.
+    unknown = await _configuration_for(
+        client, headers, space_id, default_id, str(uuid4())
+    )
+    assert unknown["runtime"]["effective_model_id"] == plain_model_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_conversation_model_comes_with_own_skills_alone(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container,
+        user_factory,
+        admin_user.tenant_id,
+        [*PERSONAL, Permission.ASSISTANTS],
+    )
+    space_id, default_id, _ = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    skill = await _own_skill(client, headers, space_id)
+    skills_change = {
+        "skill_bindings": [_binding(skill, mode="on_demand")],
+        "conversation_model_id": tools_model_id,
+    }
+
+    # Any other field would be judged against a model the assistant does not
+    # have, so not even someone who may edit all of it can send one along.
+    for payload in (
+        {"conversation_model_id": tools_model_id},
+        {**skills_change, "name": "Ett annat namn"},
+        {**skills_change, "completion_model_kwargs": {"reasoning_effort": "low"}},
+        {**skills_change, "document_template": {"mode": "default"}},
+    ):
+        refused = await _save(client, headers, default_id, payload)
+        assert refused.status_code == 400, refused.text
+        assert "own Skills and nothing else" in refused.json()["message"]
+    assert await _bound_ids(client, headers, space_id, default_id) == []
+    space = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+    assert space.json()["default_assistant"]["name"] != "Ett annat namn"
+
+    saved = await _save(client, headers, default_id, skills_change)
+    assert saved.status_code == 200, saved.text
+    assert await _bound_ids(client, headers, space_id, default_id) == [skill["id"]]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_conversation_model_switch_that_would_pause_running_skills_is_refused(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    skill = await _own_skill(client, headers, space_id)
+    saved = await _save(
+        client,
+        headers,
+        default_id,
+        {
+            "skill_bindings": [_binding(skill, mode="on_demand")],
+            "conversation_model_id": tools_model_id,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    session_id = await _conversation(
+        client, db_container, headers, default_id, tools_model_id
+    )
+
+    async def switch(model_id, **choices):
+        return await client.patch(
+            f"/api/v1/conversations/{session_id}/settings/",
+            json={
+                "expected_revision": 1,
+                "settings": {"completion_model_id": model_id, **choices},
+            },
+            headers=headers,
+        )
+
+    refused = await switch(plain_model_id)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["eneo_error_code"] == ErrorCodes.PERSONAL_SKILLS_REJECTED
+    assert refused.json()["details"] == {
+        "reason": "on_demand_unavailable",
+        "detail": "model_lacks_tool_calling",
+    }
+    # Other choices on the same model never meet the rule.
+    kept = await switch(tools_model_id, require_tool_approval=True)
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["settings"]["completion_model_id"] == tools_model_id
+
+    # A conversation whose own Skills are already paused may switch freely.
+    paused_id = await _conversation(
+        client, db_container, headers, default_id, plain_model_id
+    )
+    resumed = await client.patch(
+        f"/api/v1/conversations/{paused_id}/settings/",
+        json={
+            "expected_revision": 1,
+            "settings": {"completion_model_id": tools_model_id},
+        },
+        headers=headers,
+    )
+    assert resumed.status_code == 200, resumed.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_leaving_a_default_model_that_is_gone_is_never_refused_for_own_skills(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    moved = await _save(
+        client, headers, default_id, {"completion_model": {"id": tools_model_id}}
+    )
+    assert moved.status_code == 200, moved.text
+    skill = await _own_skill(client, headers, space_id)
+    saved = await _save(
+        client, headers, default_id, {"skill_bindings": [_binding(skill, "on_demand")]}
+    )
+    assert saved.status_code == 200, saved.text
+    session_id = await _conversation(client, db_container, headers, default_id, None)
+    # The default model is switched off: the conversation cannot run, so its
+    # own Skills run nowhere and moving to another model pauses nothing.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == UUID(tools_model_id))
+            .values(is_enabled=False)
+        )
+    resolved = await client.post(
+        "/api/v1/conversations/settings/resolve/",
+        json={"session_id": session_id},
+        headers=headers,
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["model_unavailable"] is True
+
+    switched = await client.patch(
+        f"/api/v1/conversations/{session_id}/settings/",
+        json={
+            "expected_revision": 1,
+            "settings": {"completion_model_id": plain_model_id},
+        },
+        headers=headers,
+    )
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["settings"]["completion_model_id"] == plain_model_id
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_conversation_without_saved_choices_switches_away_from_its_defaults(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    moved = await _save(
+        client, headers, default_id, {"completion_model": {"id": tools_model_id}}
+    )
+    assert moved.status_code == 200, moved.text
+    skill = await _own_skill(client, headers, space_id)
+    saved = await _save(
+        client, headers, default_id, {"skill_bindings": [_binding(skill, "on_demand")]}
+    )
+    assert saved.status_code == 200, saved.text
+    # A conversation from before choices were saved runs on the defaults.
+    me = await client.get("/api/v1/users/me/", headers=headers)
+    async with db_container() as container:
+        session = Sessions(
+            user_id=UUID(me.json()["id"]),
+            assistant_id=UUID(default_id),
+            name="Före sparade val",
+            # SQL NULL, as the migration leaves it; None would store JSON null.
+            settings=sa.null(),
+        )
+        container.session().add(session)
+        await container.session().flush()
+        session_id = str(session.id)
+
+    async def switch(model_id):
+        return await client.patch(
+            f"/api/v1/conversations/{session_id}/settings/",
+            json={
+                "expected_revision": 0,
+                "settings": {"completion_model_id": model_id},
+            },
+            headers=headers,
+        )
+
+    refused = await switch(plain_model_id)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["eneo_error_code"] == ErrorCodes.PERSONAL_SKILLS_REJECTED
+    kept = await switch(tools_model_id)
+    assert kept.status_code == 200, kept.text
+    assert kept.json()["revision"] == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_conversation_model_gone_since_it_was_read_leaves_the_assistants_model_to_judge(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    admin_user,
+    user_factory,
+    completion_model_factory,
+):
+    _, headers = await _person(
+        db_container, user_factory, admin_user.tenant_id, PERSONAL
+    )
+    space_id, default_id, plain_model_id = await _personal_chat(client, headers)
+    tools_model_id = await _tool_model(db_container, completion_model_factory)
+    skill = await _own_skill(client, headers, space_id)
+    saved = await _save(
+        client,
+        headers,
+        default_id,
+        {
+            "skill_bindings": [_binding(skill, mode="on_demand")],
+            "conversation_model_id": tools_model_id,
+        },
+    )
+    assert saved.status_code == 200, saved.text
+    # Switched off while the chat that read it is still open.
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(CompletionModels)
+            .where(CompletionModels.id == UUID(tools_model_id))
+            .values(is_enabled=False)
+        )
+
+    shown = await _configuration_for(
+        client, headers, space_id, default_id, tools_model_id
+    )
+    assert shown["runtime"]["effective_model_id"] == plain_model_id
+    assert shown["personal_layer"]["status"] == "suspended"
+    turned_off = await _save(
+        client,
+        headers,
+        default_id,
+        {"skill_bindings": [], "conversation_model_id": tools_model_id},
+    )
+    assert turned_off.status_code == 200, turned_off.text
+    assert await _bound_ids(client, headers, space_id, default_id) == []
 
 
 @pytest.mark.integration

@@ -1,146 +1,111 @@
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Button } from "@astryxdesign/core/Button";
+import { useId, useRef, useState } from "react";
 import { notFound } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import type { ChatPartner } from "@/lib/chat/types";
-import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { chatPartnerSwitcherItems } from "@/features/chat/partner-switcher";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
+import { useConversationSettings } from "@/features/chat/conversation-settings";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
-import {
-  ModelReasoningPicker,
-  type ModelReasoningChange
-} from "@/features/chat/model-reasoning-picker";
+import { ModelReasoningPicker } from "@/features/chat/model-reasoning-picker";
 import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
 
-/** The composer's compact (ghost) trigger look of the model picker. */
-const COMPOSER_PICKER_CLASS =
-  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
-
-/**
- * The personal chat's model and reasoning-level choices, with their saves.
- * Both are stored on the personal space's default assistant, a global change
- * (see the "personal chat model is global" contract): the model as
- * `completion_model`, the level as `completion_model_kwargs.reasoning_effort`
- * (null = the organisation default), exactly as the Svelte app does. The
- * backend reads them from the stored assistant when it answers, so nothing
- * travels with the question itself. The admin governance policy is honoured:
- * a pinned model is locked, an enforced allow-list filters the list, and the
- * effective pick is resolved when the saved one is disallowed.
- */
-function usePersonalChatModel() {
-  const t = useTranslations();
-  const { space, routeId } = useSpace();
-  const queryClient = useQueryClient();
-  const assistant = space.default_assistant;
-  const config = assistant?.effective_config ?? null;
-
-  const update = useMutation({
-    mutationFn: (body: {
-      completion_model?: { id: string };
-      completion_model_kwargs?: { reasoning_effort: string | null };
-    }) =>
-      unwrap(
-        // RB-5(b): assistants use POST-as-update.
-        browserApi.POST("/api/v1/assistants/{id}/", {
-          params: { path: { id: assistant!.id } },
-          body
-        })
-      ),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] }),
-    onError: (error) => toastApiError(error, t)
-  });
-  // Queued as the save is made, not when the mutation starts a tick later:
-  // a question sent right after waits for it. The queue holds until the space
-  // has been fetched again (mutateAsync waits for onSuccess), so the pill shows
-  // the saved choice as its waiting ends and never flashes back to the old one.
-  const save = (body: Parameters<typeof update.mutateAsync>[0]) =>
-    queuePartnerUpdate(() => update.mutateAsync(body));
-
-  if (!assistant) return null;
-
-  const lockedModel =
-    config?.models_enforced && config.locked_model
-      ? (space.completion_models.find((model) => model.id === config.locked_model!.id) ??
-        config.locked_model)
-      : null;
-  const allowedIds = config?.models_enforced
-    ? new Set(config.available_models.map((model) => model.id))
-    : null;
-
-  return {
-    assistantId: assistant.id,
-    models: allowedIds
-      ? space.completion_models.filter((model) => allowedIds.has(model.id))
-      : space.completion_models,
-    selectedId:
-      selectEffectiveModelId(assistant.completion_model?.id, config) ??
-      assistant.completion_model?.id ??
-      null,
-    lockedModel,
-    // The picker shows the new choice while it saves and keeps focus; a
-    // disabled trigger would drop focus to the page.
-    selectModel: (id: string) => save({ completion_model: { id } }),
-    /** Whether the governance policy lets people choose the reasoning level. */
-    levelConfigurable: config?.reasoning_effort_user_configurable ?? false,
-    storedLevel: assistant.completion_model_kwargs?.reasoning_effort ?? null,
-    policyDefaultLevel: config?.default_reasoning_effort ?? null,
-    /**
-     * What the picker changed, in one update: the backend checks a level against
-     * the model sent with it, and the picker sends the model again with a level
-     * chosen while that model's save is on its way. The kwargs hold the level
-     * alone: any other field makes it a change only an assistant's editor may make.
-     */
-    saveChoice: ({ modelId, level }: ModelReasoningChange) =>
-      save({
-        ...(modelId !== undefined && { completion_model: { id: modelId } }),
-        ...(level !== undefined && { completion_model_kwargs: { reasoning_effort: level } })
-      })
-  };
-}
-
-/**
- * The personal assistant's composer picker: the model, and in the same
- * control the reasoning level where the governance policy lets people choose it.
- */
 function ComposerPickers() {
   const { tenant } = useAppContext();
-  const choice = usePersonalChatModel();
-  if (!choice) return null;
+  const { choiceScope, resolution, update, running, hasMessages, startConversation } =
+    useConversationSettings();
+  const t = useTranslations();
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const waitMessageId = useId();
+  const trigger = useRef<HTMLButtonElement>(null);
+  const rescue = useFocusRescue();
+  const restoreTrigger = () => rescue(() => trigger.current);
+  const close = () => {
+    setPendingId(null);
+    restoreTrigger();
+  };
+  if (!resolution) return null;
+  const modelChoice = (id: string) => ({ completion_model_id: id, reasoning_effort: null });
 
-  if (choice.levelConfigurable) {
-    return (
-      <ModelReasoningPicker
-        assistantId={choice.assistantId}
-        models={choice.models}
-        selectedId={choice.selectedId}
-        locked={choice.lockedModel}
-        showPricing={tenant.show_model_pricing}
-        storedLevel={choice.storedLevel}
-        policyDefaultLevel={choice.policyDefaultLevel}
-        onSave={choice.saveChoice}
-      />
-    );
-  }
   return (
-    <ModelSelector
-      models={choice.models}
-      selectedId={choice.selectedId}
-      onSelect={choice.selectModel}
-      locked={choice.lockedModel}
-      size="sm"
-      showPricing={tenant.show_model_pricing}
-      className={COMPOSER_PICKER_CLASS}
-    />
+    <>
+      <ModelReasoningPicker
+        ownerId={choiceScope}
+        models={resolution.available_models ?? []}
+        selectedId={
+          resolution.settings.completion_model_id ?? resolution.effective_model?.id ?? null
+        }
+        locked={resolution.model_locked ? (resolution.effective_model ?? null) : null}
+        showPricing={tenant.show_model_pricing}
+        storedLevel={resolution.settings.reasoning_effort ?? null}
+        policyDefaultLevel={resolution.default_reasoning_effort ?? null}
+        currentReasoningOptions={resolution.reasoning_effort_options ?? []}
+        levelConfigurable={resolution.reasoning_effort_user_configurable ?? false}
+        triggerRef={trigger}
+        disabled={running || resolution.settings_compatible === false}
+        resetLevelOnModelChange
+        onModelChoice={(id) => {
+          if (!hasMessages) return true;
+          setPendingId(id);
+          return false;
+        }}
+        onSave={({ modelId, level }) =>
+          update(
+            modelId
+              ? { ...modelChoice(modelId), reasoning_effort: level ?? null }
+              : { reasoning_effort: level }
+          )
+        }
+      />
+      <Dialog
+        isOpen={pendingId !== null}
+        onOpenChange={(open) => {
+          if (!open) close();
+        }}
+      >
+        <DialogHeader title={t("personal_chat_model_change_title")} />
+        <p>{t("personal_chat_model_change_description")}</p>
+        {running && (
+          <p id={waitMessageId} className="text-ax-text-secondary mt-2 text-sm">
+            {t("personal_chat_model_change_wait")}
+          </p>
+        )}
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
+          <Button label={t("cancel")} variant="secondary" onClick={close} />
+          <Button
+            label={t("personal_chat_model_change_anyway")}
+            variant="secondary"
+            aria-disabled={running || undefined}
+            aria-describedby={running ? waitMessageId : undefined}
+            onClick={() => {
+              if (!pendingId || running) return;
+              void queuePartnerUpdate(() => update(modelChoice(pendingId)));
+              close();
+            }}
+          />
+          {startConversation && (
+            <Button
+              label={t("personal_chat_model_new_conversation")}
+              onClick={() => {
+                if (pendingId) startConversation(modelChoice(pendingId), restoreTrigger);
+                setPendingId(null);
+              }}
+            />
+          )}
+        </div>
+      </Dialog>
+    </>
   );
 }
 

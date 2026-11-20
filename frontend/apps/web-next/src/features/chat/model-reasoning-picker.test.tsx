@@ -54,7 +54,7 @@ function renderPicker(props: Partial<ModelReasoningPickerProps> = {}) {
   const onSave = vi.fn<(change: ModelReasoningChange) => Promise<void>>(() => Promise.resolve());
   renderInApp(
     <ModelReasoningPicker
-      assistantId={anotherAssistant()}
+      ownerId={anotherAssistant()}
       models={MODELS}
       selectedId="model-a"
       storedLevel={null}
@@ -125,10 +125,10 @@ describe("ModelReasoningPicker", () => {
 
   it("tells an own level that equals the default apart, and lets it go back to following the default", async () => {
     const onSave = vi.fn(() => Promise.resolve());
-    const assistantId = anotherAssistant();
+    const ownerId = anotherAssistant();
     const picker = (storedLevel: string | null, policyDefaultLevel: string) => (
       <ModelReasoningPicker
-        assistantId={assistantId}
+        ownerId={ownerId}
         models={MODELS}
         selectedId="model-a"
         storedLevel={storedLevel}
@@ -176,7 +176,7 @@ describe("ModelReasoningPicker", () => {
 
     // Closing saves it there and then, not after the rest.
     fireEvent.keyDown(panel, { key: "Escape" });
-    expect(onSave.mock.calls).toEqual([[{ modelId: "model-b" }]]);
+    await waitFor(() => expect(onSave.mock.calls).toEqual([[{ modelId: "model-b" }]]));
   });
 
   it("keeps the level's place and says so for a model without levels", async () => {
@@ -297,7 +297,7 @@ describe("ModelReasoningPicker", () => {
     renderInApp(
       <div id="chat-panel-chat">
         <ModelReasoningPicker
-          assistantId={anotherAssistant()}
+          ownerId={anotherAssistant()}
           models={MODELS}
           selectedId="model-a"
           storedLevel={null}
@@ -396,10 +396,10 @@ describe("ModelReasoningPicker", () => {
         vi.useFakeTimers({ shouldAdvanceTime: true });
         const saves = [deferred(), deferred()];
         const onSave = vi.fn(() => saves[onSave.mock.calls.length - 1]!.promise);
-        const assistantId = anotherAssistant();
+        const ownerId = anotherAssistant();
         const picker = (selectedId: string) => (
           <ModelReasoningPicker
-            assistantId={assistantId}
+            ownerId={ownerId}
             models={RACE_MODELS}
             selectedId={selectedId}
             storedLevel={null}
@@ -415,13 +415,14 @@ describe("ModelReasoningPicker", () => {
         await act(() => vi.advanceTimersByTimeAsync(300));
         await choose(panel, /Enkel/);
         await act(() => vi.advanceTimersByTimeAsync(300));
-        expect(onSave.mock.calls).toEqual([[{ modelId: "delta" }], [{ modelId: "plain" }]]);
+        expect(onSave.mock.calls).toEqual([[{ modelId: "delta" }]]);
 
         await act(async () => {
           if (outcome === "lands") saves[0]!.resolve();
           else saves[0]!.reject(new Error("refused"));
           await saves[0]!.promise.catch(() => {});
         });
+        expect(onSave.mock.calls).toEqual([[{ modelId: "delta" }], [{ modelId: "plain" }]]);
         // A save that lands refetches the chat: its model is then the one stored.
         if (outcome === "lands") rerender(picker("delta"));
         // The older save is done: the newer choice is still shown, still saving.
@@ -478,21 +479,23 @@ describe("ModelReasoningPicker", () => {
       await act(() => vi.advanceTimersByTimeAsync(300));
       await choose(panel, "Hög");
       await act(() => vi.advanceTimersByTimeAsync(300));
-      // Were the model's save refused, the level is still checked against Modell C, not stored on Modell A.
+      expect(onSave.mock.calls).toEqual([[{ modelId: "model-c" }]]);
+      await act(async () => {
+        saves[0]!.reject(new Error("refused"));
+        await saves[0]!.promise.catch(() => {});
+      });
+      // The model was refused, so send the intended model again with its level.
       expect(onSave.mock.calls).toEqual([
         [{ modelId: "model-c" }],
         [{ modelId: "model-c", level: "high" }]
       ]);
-      await act(async () => {
-        saves[0]!.reject(new Error("refused"));
-        saves[1]!.resolve();
-        await saves[1]!.promise;
-      });
+      await act(async () => saves[1]!.resolve());
     });
 
     it("sends the level with the model chosen last while two model saves are open", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      const first = deferred();
+      const onSave = vi.fn(() => Promise.resolve()).mockReturnValueOnce(first.promise);
       renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
       const panel = await openPanel();
       await choose(panel, /Modell C/);
@@ -501,24 +504,28 @@ describe("ModelReasoningPicker", () => {
       await act(() => vi.advanceTimersByTimeAsync(300));
       await choose(panel, "Hög");
       await act(() => vi.advanceTimersByTimeAsync(300));
+      await act(async () => first.resolve());
       expect(onSave.mock.calls.at(-1)).toEqual([{ modelId: "model-a", level: "high" }]);
     });
 
     it("never sends a pinned model, also with a level's save open", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      const first = deferred();
+      const onSave = vi.fn(() => Promise.resolve()).mockReturnValueOnce(first.promise);
       renderPicker({ models: LEVEL_MODELS, locked: MODELS[0], storedLevel: "low", onSave });
       const panel = await openPanel();
       await choose(panel, "Hög");
       await act(() => vi.advanceTimersByTimeAsync(300));
       await choose(panel, "Medel");
       await act(() => vi.advanceTimersByTimeAsync(300));
+      await act(async () => first.resolve());
       expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ level: "medium" }]]);
     });
 
     it("sends nothing for a rest that ends where it began, also with a model's save open", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      const first = deferred();
+      const onSave = vi.fn(() => Promise.resolve()).mockReturnValueOnce(first.promise);
       renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
       const panel = await openPanel();
       await choose(panel, /Modell C/);
@@ -527,6 +534,7 @@ describe("ModelReasoningPicker", () => {
       await choose(panel, "Låg");
       await act(() => vi.advanceTimersByTimeAsync(300));
       expect(onSave.mock.calls).toEqual([[{ modelId: "model-c" }]]);
+      await act(async () => first.resolve());
     });
 
     it("with no save open, a rest sends only what it changed", async () => {
@@ -562,12 +570,15 @@ describe("ModelReasoningPicker", () => {
       });
       await choose(panel, /Modell A/);
       await act(() => vi.advanceTimersByTimeAsync(300));
+      await act(async () => saves[1]!.resolve());
       expect(onSave.mock.calls.at(-1)).toEqual([{ modelId: "model-a", level: "high" }]);
+      await act(async () => saves[2]!.resolve());
     });
 
     it("carries only what a save sent, not a model chosen and let go within a rest", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
-      const onSave = vi.fn(() => new Promise<void>(() => {}));
+      const first = deferred();
+      const onSave = vi.fn(() => Promise.resolve()).mockReturnValueOnce(first.promise);
       renderPicker({ models: LEVEL_MODELS, storedLevel: "low", onSave });
       const panel = await openPanel();
       await choose(panel, "Hög");
@@ -578,15 +589,17 @@ describe("ModelReasoningPicker", () => {
       await act(() => vi.advanceTimersByTimeAsync(300));
       await choose(panel, "Medel");
       await act(() => vi.advanceTimersByTimeAsync(300));
+      await act(async () => first.resolve());
       expect(onSave.mock.calls).toEqual([[{ level: "high" }], [{ level: "medium" }]]);
     });
 
     it("keeps a choice still saving to its own assistant", async () => {
       vi.useFakeTimers({ shouldAdvanceTime: true });
+      const first = deferred();
       renderPicker({
         models: LEVEL_MODELS,
         storedLevel: "low",
-        onSave: vi.fn(() => new Promise<void>(() => {}))
+        onSave: vi.fn(() => first.promise)
       });
       await choose(await openPanel(), /Modell C/);
       await act(() => vi.advanceTimersByTimeAsync(300));
@@ -599,6 +612,8 @@ describe("ModelReasoningPicker", () => {
       expect(pill.getAttribute("aria-busy")).toBeNull();
       await choose(await openPanel(), "Hög");
       await act(() => vi.advanceTimersByTimeAsync(300));
+      expect(onSave).not.toHaveBeenCalled();
+      await act(async () => first.resolve());
       expect(onSave.mock.calls).toEqual([[{ level: "high" }]]);
     });
   });

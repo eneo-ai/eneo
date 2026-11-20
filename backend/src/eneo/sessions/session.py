@@ -3,7 +3,7 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 
 from eneo.ai_models.completion_models.completion_model import CompletionModelPublic
 from eneo.files.file_models import FilePublic
@@ -16,6 +16,7 @@ from eneo.questions.question import (
     ToolCallInfo,
     UseTools,
 )
+from eneo.sessions.conversation_settings import ConversationSettingsState
 
 if TYPE_CHECKING:
     from eneo.assistants.api.assistant_models import AssistantSparse
@@ -31,6 +32,12 @@ class SessionBase(BaseModel):
 
 
 class SessionAdd(SessionBase):
+    settings: ConversationSettingsState | None = None
+
+    @field_serializer("settings")
+    def serialize_settings(self, value: ConversationSettingsState | None) -> object:
+        return value.to_storage() if value is not None else None
+
     # Exactly one of user_id (real user) or api_key_id (service-key principal)
     # is set per session. The session_service write paths enforce this invariant.
     user_id: Optional[UUID] = None
@@ -47,6 +54,7 @@ class SessionUpdate(SessionBase):
 
 
 class SessionInDB(SessionBase, InDB):
+    settings: ConversationSettingsState | None = None
     user_id: Optional[UUID] = None
     api_key_id: Optional[UUID] = None
     widget_id: Optional[UUID] = None
@@ -61,6 +69,19 @@ class SessionInDB(SessionBase, InDB):
     group_chat_id: Optional[UUID] = None
 
 
+class SessionContext(BaseModel):
+    """Conversation identity and settings, without history or file content."""
+
+    id: UUID
+    user_id: UUID | None
+    api_key_id: UUID | None
+    widget_id: UUID | None = None
+    visitor_id: UUID | None = None
+    assistant_id: UUID | None
+    group_chat_id: UUID | None
+    settings: ConversationSettingsState | None
+
+
 class SessionUpdateRequest(SessionBase):
     id: UUID
 
@@ -70,6 +91,9 @@ class SessionMetadataPublic(SessionUpdateRequest, DateTimeModelMixin):
 
 
 class SessionPublic(SessionMetadataPublic):
+    settings: ConversationSettingsState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     messages: list[Message]
     feedback: Optional[SessionFeedback] = None
 
@@ -87,6 +111,9 @@ class GroupChatInfo(BaseModel):
 
 
 class AskChatResponse(BaseModel):
+    settings: ConversationSettingsState | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     id: Optional[UUID] = None
     # The protocol helper has always passed these along with the computed
     # pricing-gated completion model, but Pydantic silently dropped them while
@@ -206,6 +233,11 @@ class ViewToolCallRequest(BaseModel):
     """A tool call made by the interactive view (MCP App) of an earlier call."""
 
     view_id: UUID = Field(description="The view shown for the tool call.")
+    automatic_settings_revision: int | None = Field(
+        default=None,
+        ge=0,
+        description="For an automatic call, the conversation settings revision observed by the host. Omit for a user-confirmed call.",
+    )
     name: str = Field(
         min_length=1,
         max_length=256,

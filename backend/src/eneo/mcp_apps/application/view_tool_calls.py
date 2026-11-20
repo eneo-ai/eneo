@@ -32,7 +32,11 @@ from eneo.files.model_file_references import (
     resolve_file_handles,
 )
 from eneo.main.config import get_settings
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConversationSettingsConflictException,
+    NotFoundException,
+)
 from eneo.main.logging import get_logger
 
 if TYPE_CHECKING:
@@ -179,8 +183,21 @@ async def call_tool_from_view(
     proxy_factory: "MCPProxySessionFactory",
     identity_headers: dict[str, str],
     tenant_id: UUID,
+    automatic_settings_revision: int | None = None,
 ) -> ViewToolCallResult:
     """Run ``name`` on the server of the view shown for ``tool_call_id``."""
+    if conversation.settings is not None:
+        conversation.settings.require_supported()
+    if automatic_settings_revision is not None:
+        state = conversation.settings
+        if (
+            state is None
+            or automatic_settings_revision != state.revision
+            or state.settings.require_tool_approval
+        ):
+            raise ConversationSettingsConflictException(
+                "Review the current conversation settings before running this tool."
+            )
     found = originating_call(conversation, tool_call_id, view_id)
     if found is None:
         raise NotFoundException(_NOT_FOUND)
@@ -198,11 +215,12 @@ async def call_tool_from_view(
         raise BadRequestException("The tool arguments are too large")
 
     server = await assistant_service.mcp_server_for_view(
-        assistant_id=assistant_id, mcp_server_id=mcp_server_id
+        assistant_id=assistant_id,
+        mcp_server_id=mcp_server_id,
+        settings=conversation.settings.settings if conversation.settings else None,
     )
     if server is None:
         raise NotFoundException(_NOT_FOUND)
-
     # A historical call is not an enduring grant. Check the current pin and
     # originating tool on every request, including already-open browser views.
     view = await app_view_repo.get_for_tenant(
@@ -210,6 +228,11 @@ async def call_tool_from_view(
     )
     if view is None or view.mcp_server_id != server.id:
         raise NotFoundException(_NOT_FOUND)
+
+    if automatic_settings_revision is not None and not server.is_bundled:
+        raise ConversationSettingsConflictException(
+            "Confirm this external tool call before running it."
+        )
 
     arguments, signed_files = await _with_signed_file_links(
         arguments,

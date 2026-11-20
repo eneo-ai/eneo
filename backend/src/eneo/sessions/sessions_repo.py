@@ -32,17 +32,24 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import Users
+from eneo.database.tables.widgets_table import Widgets
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.unused_file_cleanup import delete_unused_root_files
 from eneo.info_blobs.info_blob_repo import InfoBlobRepository
+from eneo.main.exceptions import ConversationSettingsConflictException
 from eneo.mcp_apps.application.current_views import show_current_views
 from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
     McpAppViewRepo,
 )
 from eneo.questions.question import MessageFeedback
 from eneo.questions.question_file_projection import attach_question_files
+from eneo.sessions.conversation_settings import (
+    ConversationSettings,
+    ConversationSettingsState,
+)
 from eneo.sessions.session import (
     SessionAdd,
+    SessionContext,
     SessionFeedback,
     SessionInDB,
     SessionMetadataPublic,
@@ -198,15 +205,19 @@ class SessionRepository:
     def _filter_by_tenant(query: sa.Select[Any], tenant_id: UUID) -> sa.Select[Any]:
         """Restrict a sessions query to a single tenant.
 
-        Sessions.user_id is NULL for service-key sessions (the principal is on
-        api_key_id instead), so an INNER JOIN on Users would silently drop
-        them. We LEFT JOIN both principal tables and match against whichever
-        tenant_id is present.
+        Service-key and widget-visitor sessions have no user row. Match the
+        tenant of whichever principal owns the session.
         """
         return (
             query.outerjoin(Users, Sessions.user_id == Users.id)
             .outerjoin(ApiKeysV2, Sessions.api_key_id == ApiKeysV2.id)
-            .where(sa.func.coalesce(Users.tenant_id, ApiKeysV2.tenant_id) == tenant_id)
+            .outerjoin(Widgets, Sessions.widget_id == Widgets.id)
+            .where(
+                sa.func.coalesce(
+                    Users.tenant_id, ApiKeysV2.tenant_id, Widgets.tenant_id
+                )
+                == tenant_id
+            )
         )
 
     # IMPORTANT: every method in this repo that returns session or question
@@ -282,6 +293,51 @@ class SessionRepository:
             None if updated is None else SessionInDB.model_validate(updated)
         )
 
+    async def update_settings(
+        self,
+        context: SessionContext,
+        tenant_id: UUID,
+        settings: ConversationSettings,
+        expected_revision: int,
+    ) -> ConversationSettingsState:
+        """Compare and swap the same visible session and principal the service read."""
+        previous = context.settings
+        if (previous.revision if previous else 0) != expected_revision:
+            raise ConversationSettingsConflictException()
+        state = (
+            previous.with_settings(settings)
+            if previous
+            else ConversationSettingsState(revision=1, settings=settings)
+        )
+        predicate = (
+            Sessions.settings.is_(None)
+            if expected_revision == 0
+            else Sessions.settings["revision"].as_integer() == expected_revision
+        )
+        visible_ids = self._exclude_helper_run_sessions(
+            self._filter_by_tenant(sa.select(Sessions.id), tenant_id)
+        ).where(Sessions.id == context.id)
+        result = await self.session.scalar(
+            sa.update(Sessions)
+            .where(
+                Sessions.id == context.id,
+                Sessions.id.in_(visible_ids),
+                Sessions.user_id.is_not_distinct_from(context.user_id),
+                Sessions.api_key_id.is_not_distinct_from(context.api_key_id),
+                Sessions.widget_id.is_not_distinct_from(context.widget_id),
+                Sessions.visitor_id.is_not_distinct_from(context.visitor_id),
+                copy_session_valid(Sessions.id.expression),
+                predicate,
+            )
+            .values(settings=state.to_storage(), updated_at=Sessions.updated_at)
+            .returning(Sessions.id)
+        )
+        if result is None:
+            raise ConversationSettingsConflictException(
+                "Conversation settings changed elsewhere. Reload the conversation and try again."
+            )
+        return state
+
     async def add_feedback(
         self,
         feedback: SessionFeedback,
@@ -320,6 +376,24 @@ class SessionRepository:
         return await self._hydrate_optional(
             await self.delegate.get_model_from_query(query)
         )
+
+    async def get_context(self, id: UUID, tenant_id: UUID) -> SessionContext | None:
+        """Read settings for a visible conversation without loading its history."""
+        query = sa.select(
+            Sessions.id,
+            Sessions.user_id,
+            Sessions.api_key_id,
+            Sessions.widget_id,
+            Sessions.visitor_id,
+            Sessions.assistant_id,
+            Sessions.group_chat_id,
+            Sessions.settings,
+        ).where(Sessions.id == id)
+        query = self._exclude_unreadable_copies(
+            self._exclude_helper_run_sessions(self._filter_by_tenant(query, tenant_id))
+        )
+        row = (await self.session.execute(query)).mappings().one_or_none()
+        return SessionContext.model_validate(row) if row is not None else None
 
     async def is_removed_copy(self, id: UUID) -> bool:
         """Whether ``get`` misses this existing session because it is a copy

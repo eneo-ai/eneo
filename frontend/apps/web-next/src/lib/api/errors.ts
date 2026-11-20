@@ -246,6 +246,8 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9082: "eneo_error_9082", // IDENTITY_CONFLICT
   // Governance
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
+  // Conversation settings
+  9065: "eneo_error_9065", // CONVERSATION_SETTINGS_CONFLICT
   // Removed content
   9085: "eneo_error_9085", // DERIVED_SOURCE_REMOVED
   // Retention periods

@@ -462,16 +462,23 @@ export function initSkills(client) {
 
     /**
      * Read an Assistant's saved Skill bindings and exact initial runtime state.
-     * @param {{spaceId: string, assistantId: string}} params
+     * With `conversationModelId`, the personal chat's default Assistant is
+     * read as a conversation on that model runs it.
+     * @param {{spaceId: string, assistantId: string, conversationModelId?: string}} params
      * @returns {Promise<import('../types/resources').AssistantSkillConfiguration>}
      * @throws {EneoError}
      */
-    getAssistantConfiguration: async ({ spaceId, assistantId }) => {
+    getAssistantConfiguration: async ({ spaceId, assistantId, conversationModelId }) => {
       return await client.fetch(
         "/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/",
         {
           method: "get",
-          params: { path: { space_id: spaceId, assistant_id: assistantId } }
+          params: {
+            path: { space_id: spaceId, assistant_id: assistantId },
+            ...(conversationModelId
+              ? { query: { conversation_model_id: conversationModelId } }
+              : {})
+          }
         }
       );
     },
