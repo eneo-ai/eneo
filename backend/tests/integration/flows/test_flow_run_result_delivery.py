@@ -237,7 +237,8 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
         "run_id": str(run.id),
         "run_created_at": finished.created_at.isoformat(),
         "run_completed_at": finished.finished_at.isoformat(),
-        "text": "# Möte\n\nKlart.",
+        # The only step has no step before it to read text from.
+        "text": "",
         "deliverables": [],
     }
 
@@ -373,3 +374,59 @@ async def test_a_template_delivery_for_a_completed_run_is_refused_as_before(
     assert outcome["dead_lettered"] == 1
     assert "no longer running" in error
     send_http_request.assert_not_awaited()
+
+
+@pytest.fixture
+def queued_markdown_then_post_run(
+    admin_user, completion_model_factory, space_factory, assistant_factory
+):
+    """A step that writes markdown, then the run result POST step reading it."""
+
+    async def create():
+        async with sessionmanager.session() as session:
+            enable_autobegin_for_flow_task_session(session)
+            _, run, _ = await _create_queued_webhook_run(
+                session=session,
+                admin_user=admin_user,
+                completion_model_factory=completion_model_factory,
+                space_factory=space_factory,
+                assistant_factory=assistant_factory,
+                output_config=RUN_RESULT_CONFIG,
+                include_prior_step=True,
+            )
+            await session.commit()
+        return run
+
+    return create
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_the_result_text_is_the_markdown_the_post_step_reads(
+    setup_database,
+    object_content_runtime_ready,
+    queued_markdown_then_post_run,
+    monkeypatch,
+):
+    """The body's text is the run's text result: what the POST step reads,
+    not an answer of its own."""
+    run = await queued_markdown_then_post_run()
+    answers = iter(["# Möte\n\n- Beslut: klart", "The POST step's own answer"])
+
+    async def _answer(_self, **_kwargs):
+        return SimpleNamespace(completion=next(answers), total_token_count=1)
+
+    sent: list[bytes] = []
+
+    async def _receive(_self, **kwargs):
+        sent.append(kwargs["body_bytes"])
+        return _response(200)
+
+    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
+
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
+    await _run_outbox()
+
+    [body] = sent
+    assert json.loads(body)["text"] == "# Möte\n\n- Beslut: klart"

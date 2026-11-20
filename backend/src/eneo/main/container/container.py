@@ -1297,6 +1297,9 @@ class Container(containers.DeclarativeContainer):
         api_key_repo=api_key_v2_repo,
         tenant_repo=tenant_repo,
         http_runtime=flow_http_runtime,
+        file_repo=file_repo,
+        # Built only when a run result has files to read.
+        file_content_loader=file_content_loader.provider,
     )
     browser_session_service = providers.Factory(
         BrowserSessionService,

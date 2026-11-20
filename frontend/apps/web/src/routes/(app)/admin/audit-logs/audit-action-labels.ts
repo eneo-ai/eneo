@@ -617,6 +617,10 @@ const ACTION_MESSAGES = {
     name: m.audit_action_flow_run_webhook_redelivered,
     description: m.audit_action_flow_run_webhook_redelivered_description
   },
+  flow_run_result_sending: {
+    name: m.audit_action_flow_run_result_sending,
+    description: m.audit_action_flow_run_result_sending_description
+  },
   flow_run_cancelled: {
     name: m.audit_action_flow_run_cancelled,
     description: m.audit_action_flow_run_cancelled_description

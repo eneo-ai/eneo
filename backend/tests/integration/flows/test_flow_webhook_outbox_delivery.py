@@ -97,6 +97,11 @@ def _build_flow(
     assistant_id: UUID,
     output_config: dict[str, object] | None = None,
     include_prior_step: bool = False,
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
 ) -> Flow:
     webhook_step_order = 2 if include_prior_step else 1
     steps = (
@@ -111,11 +116,11 @@ def _build_flow(
                 input_source="flow_input",
                 input_type="text",
                 input_contract=None,
-                output_mode="pass_through",
-                output_type="text",
+                output_mode=prior_step_output[0],
+                output_type=prior_step_output[1],
                 output_contract=None,
                 input_bindings={"question": "{{flow.input.question}}"},
-                output_config=None,
+                output_config=prior_step_output[2],
                 output_classification_override=None,
                 input_config=None,
             )
@@ -190,6 +195,11 @@ async def _create_queued_webhook_run(
     output_config: dict[str, object] | None = None,
     include_prior_step: bool = False,
     model_name: str = "gpt-4o-mini",
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
 ):
     """A published webhook flow and one queued run of it."""
     model = await completion_model_factory(session, model_name)
@@ -210,6 +220,7 @@ async def _create_queued_webhook_run(
             assistant_id=assistant.id,
             output_config=output_config,
             include_prior_step=include_prior_step,
+            prior_step_output=prior_step_output,
         ),
         tenant_id=admin_user.tenant_id,
     )
@@ -278,6 +289,11 @@ async def _create_running_webhook_run(
     output_config: dict[str, object] | None = None,
     prior_output_payload: dict[str, object] | None = None,
     model_name: str = "gpt-4o-mini",
+    prior_step_output: tuple[str, str, dict[str, object] | None] = (
+        "pass_through",
+        "text",
+        None,
+    ),
 ):
     flow, run, step = await _create_queued_webhook_run(
         session=session,
@@ -288,6 +304,7 @@ async def _create_running_webhook_run(
         output_config=output_config,
         include_prior_step=prior_output_payload is not None,
         model_name=model_name,
+        prior_step_output=prior_step_output,
     )
     run_repo = FlowRunRepository(session=session)
     await session.execute(

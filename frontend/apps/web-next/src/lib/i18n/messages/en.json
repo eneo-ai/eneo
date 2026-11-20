@@ -5400,6 +5400,8 @@
   "audit_action_flow_run_redispatched_description": "A flow run was queued again for processing.",
   "audit_action_flow_run_webhook_redelivered": "Flow Run Result Sent Again",
   "audit_action_flow_run_webhook_redelivered_description": "A flow run's result was queued to be sent again after its delivery failed.",
+  "audit_action_flow_run_result_sending": "Flow Run Result Sending",
+  "audit_action_flow_run_result_sending_description": "A flow run's result and document files were about to be sent to the flow's receiver.",
   "audit_action_flow_run_audit_delivery_redriven": "Flow Run Audit Delivery Redriven",
   "audit_action_flow_run_audit_delivery_redriven_description": "A system operator reset a dead-lettered Flow run audit delivery for worker retry.",
   "audit_action_flow_run_cancelled": "Flow Run Cancelled",

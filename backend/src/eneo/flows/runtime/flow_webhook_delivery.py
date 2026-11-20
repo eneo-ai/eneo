@@ -2,14 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
+from urllib.parse import urlsplit
+from uuid import UUID
 
 from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
+from eneo.files.file_content_loader import FileContentLoader
+from eneo.files.file_repo import FileRepository
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
@@ -31,6 +38,10 @@ from eneo.flows.enums import FlowRunLifecycleSource, is_terminal_flow_run_status
 from eneo.flows.flow_api_error_code import (
     FLOW_RUN_TERMINAL_ERROR_CODES,
     FlowApiErrorCode,
+)
+from eneo.flows.flow_run_contract_service import (
+    build_run_output_contract,
+    project_run_deliverables,
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.http_transport import sends_run_result
@@ -59,16 +70,23 @@ from eneo.flows.runtime.http_orchestration import (
 )
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
+from eneo.flows.runtime.run_result_body import (
+    check_run_result_files,
+    run_result_body,
+    run_result_file_ids,
+)
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.json_types import JsonValue
-from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    TypedIOValidationException,
+)
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
 from eneo.users.user_repo import UsersRepository
 
 logger = logging.getLogger(__name__)
-
-RUN_RESULT_SCHEMA = "eneo.flow_run_result.v1"
 
 # Typed failures that repeat on every attempt, so they are not retried: compiling
 # the delivery from the published definition, and a destination the sender
@@ -139,10 +157,17 @@ class WebhookDeliveryPayload:
     # The document a run_result body sends; None for a template body, which
     # is sent while its run is running.
     run_result_body: JsonValue | None = None
+    # The files that body sends, for the audit row written before each send.
+    run_result_file_ids: tuple[UUID, ...] = ()
 
 
 class WebhookDeliveryClaimLostError(RuntimeError):
     pass
+
+
+class RunResultAuditUnavailableError(RuntimeError):
+    """The audit row a run result needs before it is sent was not written;
+    nothing is sent and the delivery is tried again."""
 
 
 class WebhookDeliveryAttemptBudgetExhaustedError(RuntimeError):
@@ -164,7 +189,11 @@ class FlowRunWebhookDeliveryService:
         api_key_repo: ApiKeysV2Repository,
         tenant_repo: TenantRepository,
         http_runtime: FlowHttpRuntimeHelper,
+        file_repo: FileRepository,
+        file_content_loader: Callable[[], FileContentLoader],
     ) -> None:
+        self.file_repo = file_repo
+        self.file_content_loader = file_content_loader
         self.webhook_delivery_repo = webhook_delivery_repo
         self.flow_repo = flow_repo
         self.flow_run_repo = flow_run_repo
@@ -243,6 +272,8 @@ class FlowRunWebhookDeliveryService:
         try:
             payload = await self._prepare_before_sends_end(row=row, deadline=deadline)
             payload_prepared = True
+            if payload.run_result_body is not None:
+                await self._audit_run_result_send(row=row, payload=payload)
             try:
                 await self._deliver_payload(row=row, payload=payload, deadline=deadline)
             finally:
@@ -510,18 +541,109 @@ class FlowRunWebhookDeliveryService:
         if isinstance(structured, dict | list):
             context["structured"] = structured
 
+        if not run_result:
+            return WebhookDeliveryPayload(
+                run=run,
+                step=step,
+                step_result=step_result,
+                text_payload=text_payload,
+                context=context,
+                audit_actor=audit_actor,
+            )
+        # Every deliverable of the completed run, as its detail lists them.
+        deliverables = project_run_deliverables(
+            status=run.status,
+            outputs=build_run_output_contract(steps),
+            result_files=await self.flow_run_repo.list_result_files_for_runs(
+                run_ids=[run.id], tenant_id=row.tenant_id
+            ),
+        )
+        check_run_result_files(deliverables)
+        file_ids = run_result_file_ids(deliverables)
         return WebhookDeliveryPayload(
             run=run,
             step=step,
             step_result=step_result,
             text_payload=text_payload,
+            # Headers may read run data as for any body; the address may not.
             context=context,
             audit_actor=audit_actor,
-            # Headers may read run data as for any body; the address may not.
-            run_result_body=(
-                _run_result_body(run=run, text=text_payload) if run_result else None
+            run_result_body=run_result_body(
+                run=run,
+                text=_run_result_text(step_order=step.step_order, results=results),
+                deliverables=deliverables,
+                contents=await self._read_file_contents(
+                    file_ids, tenant_id=row.tenant_id
+                ),
             ),
+            run_result_file_ids=tuple(file_ids),
         )
+
+    async def _read_file_contents(
+        self, file_ids: list[UUID], *, tenant_id: UUID
+    ) -> dict[UUID, bytes]:
+        """Each file's stored bytes; a file that cannot be read is left out,
+        which refuses the body."""
+        contents: dict[UUID, bytes] = {}
+        for file_id in file_ids:
+            try:
+                metadata = await self.file_repo.get_by_id(
+                    file_id=file_id, tenant_id=tenant_id
+                )
+            except NotFoundException:
+                continue
+            loaded = (await self.file_content_loader().load([metadata]))[metadata.id]
+            if loaded.blob is not None:
+                contents[file_id] = loaded.blob
+        return contents
+
+    async def _audit_run_result_send(
+        self, *, row: FlowRunWebhookDeliveryRow, payload: WebhookDeliveryPayload
+    ) -> None:
+        """Record, and commit, that the run's result and files are about to
+        leave Eneo, before anything is sent. The row names the files by id
+        and the receiver by its host; it holds no file name or content."""
+        actor = payload.audit_actor
+        try:
+            if self.audit_service is None or actor is None:
+                raise RunResultAuditUnavailableError(
+                    "Run result delivery audit logging is unavailable."
+                )
+            actor_fields = actor.audit_actor_fields()
+            async with self.webhook_delivery_repo.session.begin():
+                await self.audit_service.log(
+                    tenant_id=row.tenant_id,
+                    actor_id=actor_fields["actor_id"],
+                    actor_type=actor_fields["actor_type"],
+                    actor_api_key_id=actor_fields["actor_api_key_id"],
+                    action=ActionType.FLOW_RUN_RESULT_SENDING,
+                    entity_type=EntityType.FLOW_RUN,
+                    entity_id=row.flow_run_id,
+                    description=f"Sending the result of flow run {row.flow_run_id}",
+                    metadata=actor.audit_metadata(
+                        target=payload.run,
+                        extra={
+                            "flow_id": str(row.flow_id),
+                            "run_id": str(row.flow_run_id),
+                            "delivery_id": str(row.id),
+                            "delivery_attempt": row.delivery_attempts,
+                            "url_host": urlsplit(
+                                str((payload.step.output_config or {}).get("url", ""))
+                            ).hostname,
+                            "file_ids": [
+                                str(file_id) for file_id in payload.run_result_file_ids
+                            ],
+                        },
+                    ),
+                    required=True,
+                    record_client=False,
+                )
+        except RunResultAuditUnavailableError:
+            raise
+        except Exception as exc:
+            raise RunResultAuditUnavailableError(
+                "Run result delivery audit logging is unavailable."
+            ) from exc
 
     async def _deliver_payload(
         self,
@@ -758,18 +880,25 @@ class FlowRunWebhookDeliveryService:
         )
 
 
-def _run_result_body(*, run: FlowRun, text: str) -> JsonValue:
-    """The run's finished result, as the receiver gets it."""
-    if run.finished_at is None:
+def _run_result_text(*, step_order: int, results: list[FlowStepResult]) -> str:
+    """The run's text result: the saved text of the step before the sending
+    step, the one it reads by default. A document step before it saves the
+    text it rendered, so documents in between keep that text. The sending
+    step's own model answer is not the result. No step before it: empty."""
+    previous = next(
+        (item for item in results if item.step_order == step_order - 1), None
+    )
+    if previous is None:
+        return ""
+    try:
+        text = interpret_step_text(previous.output_payload_json or {})
+    except StepOutputMetadataError as exc:
         raise ValueError(
-            "Run result delivery found a completed run without a finish time."
+            "Run result delivery found malformed text metadata on the step before it."
+        ) from exc
+    if isinstance(text, FileBackedStepText):
+        raise ValueError(
+            "Run result delivery requires the whole text of the step before it, "
+            "but that text is stored in a generated output file."
         )
-    return {
-        "schema": RUN_RESULT_SCHEMA,
-        "flow_id": str(run.flow_id),
-        "run_id": str(run.id),
-        "run_created_at": run.created_at.isoformat(),
-        "run_completed_at": run.finished_at.isoformat(),
-        "text": text,
-        "deliverables": [],
-    }
+    return text.text

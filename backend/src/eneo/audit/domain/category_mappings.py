@@ -130,6 +130,7 @@ CATEGORY_MAPPINGS = {
     ActionType.FLOW_RUN_CANCELLED.value: "user_actions",
     ActionType.FLOW_RUN_REDISPATCHED.value: "user_actions",
     ActionType.FLOW_RUN_WEBHOOK_REDELIVERED.value: "user_actions",
+    ActionType.FLOW_RUN_RESULT_SENDING.value: "user_actions",
     ActionType.FLOW_RUN_HISTORY_PURGED.value: "system_actions",
     ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN.value: "system_actions",
     ActionType.FLOW_CLASSIFICATION_OVERRIDE.value: "user_actions",

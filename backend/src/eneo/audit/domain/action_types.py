@@ -159,6 +159,7 @@ class ActionType(str, Enum):
     FLOW_RUN_FAILED = "flow_run_failed"
     FLOW_RUN_REDISPATCHED = "flow_run_redispatched"
     FLOW_RUN_WEBHOOK_REDELIVERED = "flow_run_webhook_redelivered"
+    FLOW_RUN_RESULT_SENDING = "flow_run_result_sending"
     FLOW_RUN_CANCELLED = "flow_run_cancelled"
     FLOW_RUN_AUDIT_DELIVERY_REDRIVEN = "flow_run_audit_delivery_redriven"
     FLOW_CLASSIFICATION_OVERRIDE = "flow_classification_override"
