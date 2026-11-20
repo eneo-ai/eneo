@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
+from eneo.database.database import sessionmanager
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import (
@@ -25,6 +26,25 @@ from eneo.main.models import Status
 from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -> None:
+    try:
+        await job_manager.enqueue(task, job_id, params)
+    except Exception:
+        logger.exception(
+            "Committed job could not be queued",
+            extra={"job_id": str(job_id), "task": task.value},
+        )
+        if task == Task.RUN_APP:
+            try:
+                async with sessionmanager.session() as session, session.begin():
+                    await JobRepository(session).fail_app_dispatch_if_unclaimed(job_id)
+            except Exception:
+                logger.exception(
+                    "Could not record app dispatch failure",
+                    extra={"job_id": str(job_id)},
+                )
 
 
 class JobService:
@@ -55,19 +75,11 @@ class JobService:
             return job_in_db
 
         if after_commit:
-
-            async def enqueue_committed_job() -> None:
-                try:
-                    await job_manager.enqueue(task, job_in_db.id, task_params)
-                except Exception:
-                    logger.exception(
-                        "Committed job could not be queued",
-                        extra={"job_id": str(job_in_db.id), "task": task.value},
-                    )
-
             after_outer_transaction(
                 self.job_repo.delegate.session.sync_session,
-                on_commit=enqueue_committed_job,
+                on_commit=lambda: _enqueue_committed_job(
+                    task, job_in_db.id, task_params
+                ),
             )
         else:
             await job_manager.enqueue(task, job_in_db.id, task_params)

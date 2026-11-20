@@ -15,6 +15,7 @@ from eneo.jobs.job_models import (
     JobFailureCode,
     JobInDb,
     JobUpdate,
+    Task,
 )
 from eneo.jobs.task_models import DispatchEnvelope
 from eneo.main.models import Status
@@ -163,6 +164,28 @@ class JobRepository:
             from_statuses=(Status.QUEUED,),
         )
         return started is not None
+
+    async def fail_app_dispatch_if_unclaimed(self, job_id: UUID) -> None:
+        # An enqueue can reach Redis even when its acknowledgement is lost.
+        # A worker holds this row lock until it commits the app result.
+        available = await self.delegate.session.scalar(
+            sa.select(Jobs.id)
+            .where(
+                Jobs.id == job_id,
+                Jobs.task == Task.RUN_APP,
+                Jobs.status == Status.QUEUED,
+            )
+            .with_for_update(skip_locked=True)
+        )
+        if available is not None:
+            await self.update_job(
+                job_id,
+                JobUpdate(
+                    status=Status.FAILED,
+                    failure_code=JobFailureCode.DISPATCH_FAILED,
+                    finished_at=datetime.now(timezone.utc),
+                ),
+            )
 
     async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
         from eneo.main.models import Status
