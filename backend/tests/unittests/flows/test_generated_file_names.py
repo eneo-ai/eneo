@@ -541,9 +541,53 @@ def test_a_credential_starting_before_the_length_limit_takes_the_label() -> None
     assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
 
 
-def test_a_megabyte_form_value_is_named_in_well_under_a_second() -> None:
+# A URL whose user information runs past the first thousand characters: cut
+# there, it loses the `@` that makes masking see a credential.
+LONG_USER_INFO = f"{SECRET_MARKER}{'a' * 1000}"
+LONG_URL = f"https://{LONG_USER_INFO}@example.com/"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "value", "expected"),
+    [
+        ("Möte {{ flow_input.Team }}", LONG_URL, "Möte"),
+        (
+            "Möte https://{{ flow_input.Team }}",
+            f"{LONG_USER_INFO}@example.com/",
+            "Möte https",
+        ),
+        ("Möte {{ flow_input.Team }}", [LONG_URL], "Möte"),
+    ],
+)
+def test_a_value_longer_than_masking_judges_is_left_out(
+    file_name: str, value: object, expected: str
+) -> None:
+    names = _own_names(_own(1, "pdf", file_name), form_values={"Team": value})
+
+    assert redact_string(LONG_URL, key=None) != LONG_URL
+    assert names.name(step_order=1, output_type="pdf") == f"{expected} 2026-09-23.pdf"
+
+
+def test_values_that_make_a_name_longer_than_masking_judges_take_the_label() -> None:
+    # Each value is clean and under the limit on its own; with the fixed text
+    # they make a URL whose `@` lies past it.
+    form_values: dict[str, object] = {
+        "A": f"{SECRET_MARKER}{'a' * 600}",
+        "B": f"{'a' * 600}@example.com/",
+    }
+    names = _own_names(
+        _own(1, "pdf", "https://{{ flow_input.A }}{{ flow_input.B }}", "Protokoll"),
+        form_values=form_values,
+    )
+
+    for field, value in form_values.items():
+        assert redact_string(str(value), key=field) == value
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+
+
+def test_a_megabyte_form_value_is_left_out_in_well_under_a_second() -> None:
     # The masking patterns take time quadratic in a long run of word
-    # characters; only the start of a value can reach a name.
+    # characters, so a value past the limit is never judged, nor written.
     value = "token" * 200_000
     steps = (_own(1, "pdf", "Möte {{ flow_input.Team }} {{ flow_input.Team }}"),)
 
@@ -552,6 +596,4 @@ def test_a_megabyte_form_value_is_named_in_well_under_a_second() -> None:
     elapsed = time.perf_counter() - started
 
     assert elapsed < 1.0
-    name = names.name(step_order=1, output_type="pdf")
-    assert name.startswith("Möte tokentoken")
-    assert len(name.encode("utf-8")) <= MAX_FILE_NAME_BYTES
+    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"

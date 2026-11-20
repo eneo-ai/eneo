@@ -28,9 +28,11 @@ _DOCUMENT_TYPES = frozenset({"pdf", "docx"})
 # For a flow name that holds nothing a file name can keep.
 _FALLBACK_FLOW_NAME = "Dokument"
 # Only a name's first 255 bytes are kept, but a credential starting in them can
-# end after them, so masking judges a longer start. A value and the filled-in
-# name are cut to it first: the masking patterns take time quadratic in a long
-# run of word characters, and a form value has no length limit of its own.
+# end after them, so masking judges the whole filled-in name. The masking
+# patterns take time quadratic in a long run of word characters, and a form
+# value has no length limit of its own, so a value or a filled-in name longer
+# than this is never judged: cut, it could lose what makes it a credential (the
+# `@` after a URL's user information), so it is treated as one.
 _MASKED_PREFIX_CHARS = 1000
 # What publishing puts in place of each expression to judge the fixed text.
 _PLAIN_VALUE = "x"
@@ -173,7 +175,8 @@ def _masked(text: str) -> bool:
 def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
     """``file_name`` with each `{{ flow_input.<field> }}` filled in from the
     run's form, cleaned and cut to a file name's length; empty when nothing is
-    left or masking would change it, as written or cleaned. Anything else
+    left, when it is longer than masking judges, or when masking would change
+    it, as written or cleaned. Anything else
     between `{{ }}`, and a name with a stray brace, fill in nothing: publish
     refuses them, and a run must never fail on its name."""
     if file_name_expressions(file_name) is None:
@@ -185,7 +188,9 @@ def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
             return ""
         return _form_value_text(form_values.get(field), field=field)
 
-    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)[:_MASKED_PREFIX_CHARS]
+    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)
+    if len(filled) > _MASKED_PREFIX_CHARS:
+        return ""
     # A value clean on its own can complete a credential with the fixed text
     # around it (`token={{ flow_input.x }}`), and cleaning can make one
     # (`Bearer/<token>` becomes `Bearer <token>`); a separator cleaning turns
@@ -199,14 +204,14 @@ def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
 
 def _form_value_text(value: object, *, field: str) -> str:
     """A form value as it is written into a file name: empty when masking would
-    change it, so a credential typed into the form never names a file."""
+    change it or it is longer than masking judges, so a credential typed into
+    the form never names a file."""
     text = _scalar_text(value)
     if text is None and isinstance(value, (list, tuple)):
         items = (_scalar_text(item) for item in cast(Sequence[object], value))
         text = ", ".join(item for item in items if item)
-    if not text:
+    if not text or len(text) > _MASKED_PREFIX_CHARS:
         return ""
-    text = text[:_MASKED_PREFIX_CHARS]
     if redact_string(text, key=field) != text:
         return ""
     return text
