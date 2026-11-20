@@ -175,7 +175,9 @@ class ModelProviderRepository:
             raise NotFoundException("ModelProvider", provider_id)
 
     async def count_models_for_provider(self, provider_id: UUID) -> int:
-        """Count how many models are using this provider."""
+        """Count the models that hold this provider back: the ones an admin can still
+        see and remove. Deleted models and models migrated away are hidden in the
+        admin, so they cannot be removed and must not count."""
         from eneo.database.tables.ai_models_table import (
             CompletionModels,
             EmbeddingModels,
@@ -188,33 +190,49 @@ class ModelProviderRepository:
         completion_count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(CompletionModels)
-            .where(CompletionModels.provider_id == provider_id)
+            .where(
+                CompletionModels.provider_id == provider_id,
+                CompletionModels.deleted_at.is_(None),
+                CompletionModels.migrated_to_model_id.is_(None),
+            )
         )
 
         # Count embedding models
         embedding_count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(EmbeddingModels)
-            .where(EmbeddingModels.provider_id == provider_id)
+            .where(
+                EmbeddingModels.provider_id == provider_id,
+                EmbeddingModels.deleted_at.is_(None),
+            )
         )
 
         # Count transcription models
         transcription_count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(TranscriptionModels)
-            .where(TranscriptionModels.provider_id == provider_id)
+            .where(
+                TranscriptionModels.provider_id == provider_id,
+                TranscriptionModels.deleted_at.is_(None),
+                TranscriptionModels.migrated_to_model_id.is_(None),
+            )
         )
 
         image_count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(ImageModels)
-            .where(ImageModels.provider_id == provider_id)
+            .where(
+                ImageModels.provider_id == provider_id, ImageModels.deleted_at.is_(None)
+            )
         )
 
         rerank_count = await self.session.scalar(
             sa.select(sa.func.count())
             .select_from(RerankModels)
-            .where(RerankModels.provider_id == provider_id)
+            .where(
+                RerankModels.provider_id == provider_id,
+                RerankModels.deleted_at.is_(None),
+            )
         )
 
         return (
