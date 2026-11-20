@@ -31,6 +31,8 @@ actual schema on a database copy first. Once verified:
     alembic stamp 202611201000
     alembic upgrade head
 
+The final upgrade installs the activity timestamp trigger for settings-only saves.
+
 For an earlier experimental checkout, verify its actual migration history and
 schema on a database copy before selecting a recovery path.
 

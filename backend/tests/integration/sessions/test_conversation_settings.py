@@ -12,6 +12,31 @@ from eneo.sessions.conversation_settings import ConversationSettings
 from eneo.sessions.sessions_repo import SessionRepository
 
 
+@pytest.mark.parametrize(
+    "change_settings", [False, True], ids=["rename", "rename-and-settings"]
+)
+async def test_renaming_still_advances_activity(
+    db_container, db_session, change_settings
+):
+    async with db_container() as container:
+        saved = await container.session_service().create_session(name="Original")
+
+    async with db_session() as session:
+        # Pin the timestamp so only the database trigger can advance it.
+        statement = (
+            sa.update(Sessions)
+            .where(Sessions.id == saved.id)
+            .values(name="Renamed", updated_at=Sessions.updated_at)
+        )
+        if change_settings:
+            statement = statement.values(settings={"revision": 1, "settings": {}})
+        updated_at = await session.scalar(statement.returning(Sessions.updated_at))
+
+    assert saved.updated_at is not None
+    assert updated_at is not None
+    assert updated_at > saved.updated_at
+
+
 @pytest.mark.parametrize("initial_revision", [0, 1])
 async def test_concurrent_settings_writes_have_one_winner(
     db_container, db_session, initial_revision
