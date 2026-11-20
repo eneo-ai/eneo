@@ -27,10 +27,7 @@ from eneo.flows.http_transport.effective_url import (
 )
 from eneo.flows.http_transport.errors import HttpCredentialTransportError
 from eneo.flows.http_transport.json_template import render_json_template
-from eneo.flows.http_transport.validator import (
-    content_type_header_index,
-    run_result_url_is_fixed,
-)
+from eneo.flows.http_transport.validator import run_result_url_is_fixed
 from eneo.flows.variable_resolver import (
     FlowVariableContext,
     FlowVariableInterpolation,
@@ -175,7 +172,9 @@ def compile_http_config(
                 "without variables.",
                 code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
             )
-        if content_type_header_index(authored) is not None:
+        # Read from the headers as filled: an API key's header name may come
+        # from run data.
+        if any(name.strip().lower() == "content-type" for name in headers):
             raise TypedIOValidationException(
                 "The run result body sets its own Content-Type; remove the "
                 "custom Content-Type header.",

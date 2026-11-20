@@ -620,3 +620,31 @@ def test_publishing_a_run_result_body_on_an_input_names_the_body_mode() -> None:
         "field": "input_config.body.mode",
         "http_error": "HTTP_RUN_RESULT_REQUIRES_HTTP_POST",
     }
+
+
+def test_run_result_body_refuses_content_type_as_the_api_key_header() -> None:
+    config = _run_result_config(
+        auth={"mode": "api_key", "header_name": "content-type", "key": "k"}
+    )
+
+    assert _validate(config) == [HttpTransportError.CONTENT_TYPE_SET_BY_BODY]
+
+
+def test_publishing_content_type_as_the_api_key_header_names_that_field() -> None:
+    with pytest.raises(BadRequestException) as raised:
+        validate_authored_http_config(
+            step_order=2,
+            label="output_config",
+            config={
+                "url": "https://receiver.example.org/eneo/results",
+                "auth": {"mode": "api_key", "header_name": "Content-Type", "key": "k"},
+                "body": {"mode": "run_result"},
+            },
+            method="POST",
+            direction="output",
+        )
+
+    assert raised.value.context == {
+        "field": "output_config.auth.header_name",
+        "http_error": "HTTP_CONTENT_TYPE_SET_BY_BODY",
+    }

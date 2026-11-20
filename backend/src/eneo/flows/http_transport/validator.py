@@ -124,11 +124,18 @@ def run_result_url_is_fixed(url: str) -> bool:
     return True
 
 
-def content_type_header_index(config: HttpAuthoredConfig) -> int | None:
-    """The index of the first sent custom header named Content-Type, in any case."""
+def content_type_field(config: HttpAuthoredConfig) -> str | None:
+    """The config path of the first header the author names Content-Type, in
+    any case: an API key's header name or a sent custom header."""
+    auth = config.auth
+    if (
+        isinstance(auth, HttpAuthApiKey)
+        and auth.header_name.strip().lower() == "content-type"
+    ):
+        return "auth.header_name"
     return next(
         (
-            index
+            f"custom_headers[{index}]"
             for index, header in enumerate(config.custom_headers)
             if header.sent and header.name.strip().lower() == "content-type"
         ),
@@ -146,7 +153,7 @@ def _run_result_errors(
         errors.append(HttpTransportError.RUN_RESULT_TAKES_NO_TEMPLATE)
     if config.url.strip() and not run_result_url_is_fixed(config.url):
         errors.append(HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL)
-    if content_type_header_index(config) is not None:
+    if content_type_field(config) is not None:
         errors.append(HttpTransportError.CONTENT_TYPE_SET_BY_BODY)
     return errors
 
@@ -164,7 +171,7 @@ def error_field(config: HttpAuthoredConfig, error: HttpTransportError) -> str | 
         case HttpTransportError.RUN_RESULT_REQUIRES_FIXED_HTTPS_URL:
             return "url"
         case HttpTransportError.CONTENT_TYPE_SET_BY_BODY:
-            return f"custom_headers[{content_type_header_index(config)}]"
+            return content_type_field(config)
         case _:
             return None
 

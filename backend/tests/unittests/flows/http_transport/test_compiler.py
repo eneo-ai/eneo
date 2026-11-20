@@ -727,3 +727,21 @@ def test_run_result_body_sends_only_to_a_literal_https_url_without_credentials(
         )
 
     assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+
+
+def test_run_result_body_refuses_a_header_name_that_becomes_content_type() -> None:
+    """An API key header name filled from run data is known only at the request."""
+    config = _run_result().model_copy(
+        update={"auth": HttpAuthApiKey(header_name="{{ flow_input.h }}", key="k")}
+    )
+
+    with pytest.raises(TypedIOValidationException) as raised:
+        compile_http_config(
+            config,
+            direction="output",
+            method="POST",
+            interpolate=lambda template, ctx: "content-type",
+            run_result_body={},
+        )
+
+    assert raised.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value

@@ -493,16 +493,6 @@ class FlowRunWebhookDeliveryService:
                 "stored in a generated output file."
             )
         text_payload = text.text
-        if run_result:
-            return WebhookDeliveryPayload(
-                run=run,
-                step=step,
-                step_result=step_result,
-                text_payload=text_payload,
-                context={},
-                audit_actor=audit_actor,
-                run_result_body=_run_result_body(run=run, text=text_payload),
-            )
 
         state = build_run_execution_state(
             steps=steps,
@@ -527,6 +517,10 @@ class FlowRunWebhookDeliveryService:
             text_payload=text_payload,
             context=context,
             audit_actor=audit_actor,
+            # Headers may read run data as for any body; the address may not.
+            run_result_body=(
+                _run_result_body(run=run, text=text_payload) if run_result else None
+            ),
         )
 
     async def _deliver_payload(

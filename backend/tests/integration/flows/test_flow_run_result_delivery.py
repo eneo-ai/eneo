@@ -66,6 +66,10 @@ RUN_RESULT_CONFIG: dict[str, object] = {
     "auth": {"mode": "none"},
     "timeout_seconds": 5,
     "body": {"mode": "run_result"},
+    # Headers may still read run data; only the address may not.
+    "custom_headers": [
+        {"name": "X-Case", "value": "{{ flow_input.case_id }}", "secret": False}
+    ],
 }
 
 
@@ -223,6 +227,7 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
     headers = request["headers"]
     assert isinstance(headers, dict)
     assert headers["Content-Type"] == "application/json; charset=utf-8"
+    assert headers["X-Case"] == "case-123"
     assert len(headers["Idempotency-Key"]) == 64
     body_bytes = request["body_bytes"]
     assert isinstance(body_bytes, bytes)
