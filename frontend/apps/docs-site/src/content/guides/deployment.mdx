@@ -1149,6 +1149,14 @@ For the upgrade to 2.3, also stop every backend and worker replica before
 its migrations and the old Scrapy worker cannot run side by side. Returning to
 2.2 requires restoring the backup taken in the next step.
 
+When upgrading to the release with app run recovery, start the general workers
+before reopening the API. They accept both old and new app jobs. If a new
+submission loses its queue delivery, maintenance offers the same job again
+after five minutes. After two hours an unstarted submission expires. A worker
+that disappears after starting a run leaves it failed on a maintenance pass
+once it has been inactive for five minutes. The user can open the result,
+download any saved transcript and start a new run with the same recording.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database

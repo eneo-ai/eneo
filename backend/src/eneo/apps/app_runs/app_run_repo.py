@@ -1,4 +1,5 @@
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID
 
@@ -16,6 +17,9 @@ from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileInfo
 from eneo.files.file_repo import FileRepository
 from eneo.files.unused_file_cleanup import delete_unused_root_files
+from eneo.jobs.job_models import JobFailureCode, JobUpdate
+from eneo.jobs.job_repo import JobRepository
+from eneo.main.models import Status
 from eneo.skills.domain.skill import SkillExecutionReference
 
 _SKILL_PROVENANCE_ADAPTER = TypeAdapter(tuple[SkillExecutionReference, ...])
@@ -200,5 +204,15 @@ class AppRunRepository:
             )
         )
         stmt = sa.delete(AppRuns).where(AppRuns.id == id)
-        await self.session.execute(stmt)
+        job_id = await self.session.scalar(stmt.returning(AppRuns.job_id))
+        if job_id is not None:
+            await JobRepository(self.session).update_job(
+                job_id,
+                JobUpdate(
+                    status=Status.FAILED,
+                    failure_code=JobFailureCode.CANCELLED,
+                    finished_at=datetime.now(timezone.utc),
+                ),
+                from_statuses=(Status.QUEUED,),
+            )
         await delete_unused_root_files(self.session, file_ids)

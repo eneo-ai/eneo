@@ -11,6 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.job_table import Jobs
+from eneo.jobs.job_models import KNOWLEDGE_TASKS
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
 
@@ -44,7 +45,7 @@ def job_staging_path(job_id: UUID, *, upload_tmp_dir: Path | None = None) -> Pat
 def terminal_staging_jobs_statement():
     return (
         sa.select(Jobs)
-        .where(Jobs.dispatch_envelope.is_not(None))
+        .where(Jobs.dispatch_envelope.is_not(None), Jobs.task.in_(KNOWLEDGE_TASKS))
         .where(Jobs.status.in_(_TERMINAL_STATUS_SQL))
         .where(Jobs.staging_cleaned_at.is_(None))
         .order_by(Jobs.finished_at.asc().nullsfirst(), Jobs.id.asc())

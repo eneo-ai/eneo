@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from arq.worker import Function, create_worker
 
+from eneo.apps.app_runs.app_run_dispatch import claim_app_job
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
@@ -315,7 +316,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     async def body(params, container):
         return "done"
 
-    wrapper = worker.task(after_commit=True)(body)
+    wrapper = worker.task(claim_before_run=claim_app_job)(body)
     params = SimpleNamespace(user_id=uuid4(), id=uuid4())
 
     with pytest.raises(RuntimeError, match="storage quota exceeded"):
@@ -394,9 +395,9 @@ async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
         started.set()
         await asyncio.Event().wait()
 
-    wrapper = worker.task(channel_type=ChannelType.APP_RUN_UPDATES, after_commit=True)(
-        body
-    )
+    wrapper = worker.task(
+        channel_type=ChannelType.APP_RUN_UPDATES, claim_before_run=claim_app_job
+    )(body)
     params = SimpleNamespace(user_id=user_id, id=run_id)
 
     running = asyncio.create_task(wrapper({"job_id": str(job_id)}, params))

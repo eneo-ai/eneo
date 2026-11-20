@@ -23,7 +23,7 @@ async def test_update_tokens_in_run():
         MagicMock(id=1), AsyncMock(), MagicMock(), AsyncMock(), AsyncMock(), AsyncMock()
     )
 
-    app_run = MagicMock(user_id=1, skill_provenance=())
+    app_run = MagicMock(user_id=1, skill_provenance=(), input_text="stored prompt")
     app_run_service.repo.get.return_value = app_run
 
     completion = Completion(text="This is the output!")
@@ -51,7 +51,7 @@ async def test_update_tokens_in_run():
     app_run_service.app_service.run_app.assert_awaited_once_with(
         app_id,
         file_ids=file_ids,
-        text="input",
+        text="stored prompt",
         skill_provenance=(),
     )
 
@@ -118,7 +118,7 @@ def _service_with_real_job_service(
     )
     job_repo = MagicMock()
     job_repo.delegate.session = session
-    job_repo.add_job = AsyncMock(
+    job_repo.add_durable_job = AsyncMock(
         return_value=JobInDb(
             id=job_id,
             user_id=TEST_USER.id,
@@ -164,7 +164,7 @@ async def test_queue_app_run_dispatches_only_after_commit(monkeypatch) -> None:
             user_id=TEST_USER.id,
             file_ids=file_ids,
             app_id=app.id,
-            text="input",
+            text=None,
         ),
     )
 

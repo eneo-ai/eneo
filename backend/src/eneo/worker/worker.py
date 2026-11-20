@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import os
+from collections.abc import Awaitable
+from contextlib import AsyncExitStack
 from functools import wraps
 from typing import Any, Callable, cast
 from uuid import UUID
@@ -26,7 +28,12 @@ from eneo.main.logging import get_logger
 from eneo.main.models import Channel, ChannelType, RedisMessage, Status
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig, publish_task_status
+from eneo.worker.task_manager import (
+    JobCheckpointError,
+    TaskManager,
+    WorkerConfig,
+    publish_task_status,
+)
 
 logger = get_logger(__name__)
 
@@ -234,7 +241,10 @@ class Worker:
         override_user(container=container, user=user)
 
     def _get_kwargs(
-        self, func: Callable[..., Any], task_manager: TaskManager
+        self,
+        func: Callable[..., Any],
+        task_manager: TaskManager,
+        checkpoint: Callable[[], Awaitable[None]],
     ) -> dict[str, Any]:
         sig = inspect.signature(func)
         parameters = {k for k in sig.parameters if k not in {"params", "container"}}
@@ -242,6 +252,8 @@ class Worker:
 
         if "worker_config" in parameters:
             kwargs["worker_config"] = WorkerConfig(task_manager=task_manager)
+        if "checkpoint" in parameters:
+            kwargs["checkpoint"] = checkpoint
 
         return kwargs
 
@@ -404,11 +416,19 @@ class Worker:
         *,
         keep_result: int | None = None,
         max_tries: int | None = None,
-        after_commit: bool = False,
+        claim_before_run: Callable[[JobRepository, UUID], Awaitable[bool]]
+        | None = None,
+        function_alias: str | None = None,
     ):
         """Persist the start before execution for jobs dispatched after commit."""
 
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+            if (
+                "checkpoint" in inspect.signature(func).parameters
+                and claim_before_run is None
+            ):
+                raise ValueError("Job checkpoints require a committed start")
+
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
                 logger.debug(
@@ -421,21 +441,27 @@ class Worker:
                 user_id = params.user_id if with_user else None
 
                 task_manager: TaskManager | None = None
+                after_commit = claim_before_run is not None
                 claim_pending = after_commit
                 try:
-                    if after_commit:
+                    if claim_before_run is not None:
                         async with sessionmanager.session() as start, start.begin():
-                            if not await JobRepository(start).mark_job_started(job_id):
+                            if not await claim_before_run(JobRepository(start), job_id):
                                 return False
                         # Only a confirmed commit lets this delivery fail a running job.
                         claim_pending = False
 
-                    async with sessionmanager.session() as session, session.begin():
+                    async with (
+                        sessionmanager.session() as session,
+                        AsyncExitStack() as transactions,
+                    ):
+                        await transactions.enter_async_context(session.begin())
                         container = await self._create_container(
                             session, user_id=user_id
                         )
                         # Hold the row through completion so recovery skips live work.
-                        if after_commit and not await container.job_repo().touch_job(
+                        repo = container.job_repo()
+                        if claim_before_run is not None and not await repo.touch_job(
                             job_id
                         ):
                             return False
@@ -444,8 +470,26 @@ class Worker:
                             resource_id=params.id,
                             channel_type=channel_type,
                         )
+
+                        async def checkpoint() -> None:
+                            # Commit the finished file before another provider call. Reacquire
+                            # the job on the same session so even a one-slot pool can progress.
+                            try:
+                                # A long provider call can outlive the grace period.
+                                # Refresh with wall-clock time before releasing the lock.
+                                await repo.touch_job(job_id)
+                                await transactions.aclose()
+                                await transactions.enter_async_context(session.begin())
+                                if await repo.touch_job(job_id):
+                                    return
+                            except Exception as exc:
+                                raise JobCheckpointError(
+                                    "Could not save app progress"
+                                ) from exc
+                            raise JobCheckpointError("App job is no longer running")
+
                         optional_kwargs = self._get_kwargs(
-                            func, task_manager=task_manager
+                            func, task_manager, checkpoint
                         )
 
                         async with task_manager.set_status_on_exception(
@@ -484,6 +528,15 @@ class Worker:
                 if keep_result is not None or max_tries is not None
                 else traced
             )
+            if function_alias is not None:
+                self.functions.append(
+                    arq_func(
+                        traced,
+                        name=function_alias,
+                        keep_result=keep_result,
+                        max_tries=max_tries,
+                    )
+                )
             return wrapper
 
         return decorator
