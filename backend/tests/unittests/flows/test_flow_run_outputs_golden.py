@@ -37,11 +37,15 @@ from eneo.flows.domain.flow import (
     FlowPersistedJsonObject,
     FlowRun,
     FlowRunStatus,
+    FlowStepAttempt,
+    FlowStepResult,
     FlowVersion,
 )
 from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
 from eneo.flows.flow_run_contract_service import build_final_output_contract
+from eneo.flows.flow_run_provenance import parse_resolved_input_edges
 from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
     FlowRunStepResultFileSource,
@@ -244,6 +248,217 @@ FROZEN_EVIDENCE_CONTENT_HASHES: dict[str, str] = {
     "redacted": "bb740a598c820dab292d02b2f831356577044aa5f7c55048e186376d6361bcb8",
 }
 
+# A retried last step, below: the run reads each step's current attempt;
+# the export reads every attempt.
+
+FROZEN_RETRIED_RUN_RESULT: dict[str, Any] = {
+    "kind": "artifact",
+    "files": [
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_order": 17,
+            "attempt_no": 2,
+            "file_id": "fda2abac-ec5c-57ff-8ad6-b1b63720b002",
+            "ordinal": 0,
+            "source": "declared_artifact",
+            "name": "lifecare.pdf",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "availability": "available",
+        },
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_order": 17,
+            "attempt_no": 2,
+            "file_id": "78d7ac84-c8ff-539b-99be-ba8c7648103b",
+            "ordinal": 1,
+            "source": "generated_output",
+            "name": "lifecare.txt",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "text/plain",
+            "file_type": "text",
+            "availability": "available",
+        },
+    ],
+}
+
+FROZEN_RETRIED_RUN_RESULT_FILES: list[dict[str, Any]] = [
+    {
+        "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+        "flow_id": "00000000-0000-0000-0000-00000000f100",
+        "tenant_id": "00000000-0000-0000-0000-00000000c100",
+        "step_result_id": "48a64b6c-9cf8-5ead-be59-5317a93a4328",
+        "step_id": "c6bf2667-c951-56b5-9486-372d036f78e3",
+        "step_order": 15,
+        "attempt_no": 1,
+        "file_id": "3f4fb81d-13e5-5085-920c-b5ce1e8fd3e9",
+        "ordinal": 0,
+        "source": "declared_artifact",
+        "name": "brukarversion.pdf",
+        "checksum": "000000000000000000000000000000000000000000000000000000000000000f",
+        "size": 1015,
+        "mimetype": "application/pdf",
+        "file_type": "document",
+        "availability": "available",
+    },
+    {
+        "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+        "flow_id": "00000000-0000-0000-0000-00000000f100",
+        "tenant_id": "00000000-0000-0000-0000-00000000c100",
+        "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+        "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+        "step_order": 17,
+        "attempt_no": 2,
+        "file_id": "fda2abac-ec5c-57ff-8ad6-b1b63720b002",
+        "ordinal": 0,
+        "source": "declared_artifact",
+        "name": "lifecare.pdf",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+        "size": 1017,
+        "mimetype": "application/pdf",
+        "file_type": "document",
+        "availability": "available",
+    },
+    {
+        "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+        "flow_id": "00000000-0000-0000-0000-00000000f100",
+        "tenant_id": "00000000-0000-0000-0000-00000000c100",
+        "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+        "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+        "step_order": 17,
+        "attempt_no": 2,
+        "file_id": "78d7ac84-c8ff-539b-99be-ba8c7648103b",
+        "ordinal": 1,
+        "source": "generated_output",
+        "name": "lifecare.txt",
+        "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+        "size": 1017,
+        "mimetype": "text/plain",
+        "file_type": "text",
+        "availability": "available",
+    },
+]
+
+FROZEN_RETRIED_EVIDENCE_FINAL_OUTPUT: dict[str, Any] = {
+    "kind": "mixed",
+    "text_present": True,
+    "text_preview": {
+        "preview": "LifeCare-versionen av planen.",
+        "truncated": False,
+        "byte_size": 29,
+        "sha256": "e66a9e3b1abab3a5e4897e89c6359ea7910cd1e16d2fbac5659e49cc5180eedc",
+    },
+    "structured_present": False,
+    "artifact_count": 2,
+    "artifact_names": ["lifecare.pdf", "lifecare.txt"],
+    "artifact_details": [
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "file_id": "fda2abac-ec5c-57ff-8ad6-b1b63720b002",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_order": 17,
+            "attempt_no": 2,
+            "ordinal": 0,
+            "source": "declared_artifact",
+            "name": "lifecare.pdf",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "availability": "available",
+        },
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "file_id": "78d7ac84-c8ff-539b-99be-ba8c7648103b",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_order": 17,
+            "attempt_no": 2,
+            "ordinal": 1,
+            "source": "generated_output",
+            "name": "lifecare.txt",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "text/plain",
+            "file_type": "text",
+            "availability": "available",
+        },
+    ],
+}
+
+FROZEN_RETRIED_REDACTED_EVIDENCE_FINAL_OUTPUT: dict[str, Any] = {
+    "kind": "mixed",
+    "text_present": True,
+    "text_preview": {
+        "preview": "LifeCare-versionen av planen.",
+        "truncated": False,
+        "byte_size": 29,
+        "sha256": "e66a9e3b1abab3a5e4897e89c6359ea7910cd1e16d2fbac5659e49cc5180eedc",
+    },
+    "structured_present": False,
+    "artifact_count": 2,
+    "artifact_names": ["lifecare.pdf", "lifecare.txt"],
+    "artifact_details": [
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "file_id": "fda2abac-ec5c-57ff-8ad6-b1b63720b002",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_order": 17,
+            "attempt_no": 2,
+            "ordinal": 0,
+            "source": "declared_artifact",
+            "name": "lifecare.pdf",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "availability": "available",
+        },
+        {
+            "flow_run_id": "00000000-0000-0000-0000-00000000a100",
+            "flow_id": "00000000-0000-0000-0000-00000000f100",
+            "tenant_id": "00000000-0000-0000-0000-00000000c100",
+            "file_id": "78d7ac84-c8ff-539b-99be-ba8c7648103b",
+            "step_id": "688f502b-30b2-5fd5-86be-2778ee6730e7",
+            "step_result_id": "fee6e9c7-17c4-5f85-abcf-60dcd996033b",
+            "step_order": 17,
+            "attempt_no": 2,
+            "ordinal": 1,
+            "source": "generated_output",
+            "name": "lifecare.txt",
+            "checksum": "0000000000000000000000000000000000000000000000000000000000000011",
+            "size": 1017,
+            "mimetype": "text/plain",
+            "file_type": "text",
+            "availability": "available",
+        },
+    ],
+}
+
+FROZEN_RETRIED_EVIDENCE_CONTENT_HASHES: dict[str, str] = {
+    "raw": "49d60a66ef71a23c758b4771f394f1d87234145b280ee2977128c0d3853bb59b",
+    "redacted": "ce1c953c7fdfb9f41e8df681618be43da5dbdf2707470735b978dafe712ea881",
+}
+
 # --- Building the run ----------------------------------------------------
 
 
@@ -369,6 +584,124 @@ def _result_files(steps: tuple[RuntimeStep, ...]) -> list[FlowRunStepResultFile]
     ]
 
 
+# A retried last step: step 15 rendered once; step 17's first attempt failed
+# after storing its document, the second rendered it again and also wrote its
+# full text beside it.
+
+
+def _attempt(step: RuntimeStep, *, attempt_no: int, failed: bool) -> FlowStepAttempt:
+    return FlowStepAttempt(
+        id=_id(f"attempt/{step.step_order}/{attempt_no}"),
+        flow_run_id=_RUN_ID,
+        flow_id=_FLOW_ID,
+        tenant_id=_TENANT_ID,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        attempt_no=attempt_no,
+        status=(
+            FlowStepAttemptStatus.FAILED if failed else FlowStepAttemptStatus.COMPLETED
+        ),
+        error_code="render_failed" if failed else None,
+        started_at=_CREATED_AT,
+        finished_at=_CREATED_AT,
+        created_at=_CREATED_AT,
+        updated_at=_CREATED_AT,
+    )
+
+
+def _step_result(step: RuntimeStep, *, current_attempt_no: int) -> FlowStepResult:
+    return FlowStepResult(
+        id=_id(f"step-result/{step.step_order}"),
+        flow_run_id=_RUN_ID,
+        flow_id=_FLOW_ID,
+        tenant_id=_TENANT_ID,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        current_attempt_no=current_attempt_no,
+        output_payload_json={"text": f"Text för steg {step.step_order}."},
+        status=FlowStepResultStatus.COMPLETED,
+        started_at=_CREATED_AT,
+        finished_at=_CREATED_AT,
+        created_at=_CREATED_AT,
+        updated_at=_CREATED_AT,
+    )
+
+
+def _attempt_file(
+    step: RuntimeStep,
+    *,
+    attempt_no: int,
+    source: FlowRunStepResultFileSource,
+    name: str,
+) -> FlowRunStepResultFile:
+    generated = source == "generated_output"
+    return _result_file(
+        step,
+        source=source,
+        name=name,
+        mimetype="text/plain" if generated else "application/pdf",
+        file_type=FileType.TEXT if generated else FileType.DOCUMENT,
+    ).model_copy(
+        update={
+            "attempt_no": attempt_no,
+            "file_id": _id(f"file/{step.step_order}/{attempt_no}/{source}"),
+            "ordinal": 1 if generated else 0,
+        }
+    )
+
+
+def _retried_history(
+    steps: tuple[RuntimeStep, ...],
+) -> tuple[list[FlowStepResult], list[FlowStepAttempt], list[FlowRunStepResultFile]]:
+    by_order = {step.step_order: step for step in steps}
+    step_15, step_17 = by_order[15], by_order[17]
+    return (
+        [
+            _step_result(step_15, current_attempt_no=1),
+            _step_result(step_17, current_attempt_no=2),
+        ],
+        [
+            _attempt(step_15, attempt_no=1, failed=False),
+            _attempt(step_17, attempt_no=1, failed=True),
+            _attempt(step_17, attempt_no=2, failed=False),
+        ],
+        [
+            _attempt_file(
+                step_15,
+                attempt_no=1,
+                source="declared_artifact",
+                name="brukarversion.pdf",
+            ),
+            _attempt_file(
+                step_17,
+                attempt_no=1,
+                source="declared_artifact",
+                name="lifecare-forsta-forsoket.pdf",
+            ),
+            _attempt_file(
+                step_17,
+                attempt_no=2,
+                source="declared_artifact",
+                name="lifecare.pdf",
+            ),
+            _attempt_file(
+                step_17,
+                attempt_no=2,
+                source="generated_output",
+                name="lifecare.txt",
+            ),
+        ],
+    )
+
+
+def _current_attempt_files(
+    step_results: list[FlowStepResult], files: list[FlowRunStepResultFile]
+) -> list[FlowRunStepResultFile]:
+    """The rows a run's detail reads: each step's current attempt only."""
+    current = {result.step_id: result.current_attempt_no for result in step_results}
+    return [file for file in files if current.get(file.step_id) == file.attempt_no]
+
+
 # Each call below is the one place a later change to the call's shape lands;
 # the frozen values above stay as they are.
 
@@ -379,12 +712,16 @@ def _contract(steps: tuple[RuntimeStep, ...]) -> dict[str, Any]:
     return contract.model_dump(mode="json")
 
 
-def _run_public(steps: tuple[RuntimeStep, ...]) -> dict[str, Any]:
+def _run_public(
+    steps: tuple[RuntimeStep, ...],
+    *,
+    result_files: list[FlowRunStepResultFile] | None = None,
+) -> dict[str, Any]:
     return (
         FlowAssembler()
         .to_run_public(
             _completed_run(),
-            result_files=_result_files(steps),
+            result_files=_result_files(steps) if result_files is None else result_files,
             final_output=build_final_output_contract(steps),
         )
         .model_dump(mode="json")
@@ -408,15 +745,29 @@ def _file_names(
 
 
 def _evidence_export(
-    version: FlowVersion, steps: tuple[RuntimeStep, ...], *, redacted: bool
+    version: FlowVersion,
+    steps: tuple[RuntimeStep, ...],
+    *,
+    redacted: bool,
+    history: tuple[
+        list[FlowStepResult], list[FlowStepAttempt], list[FlowRunStepResultFile]
+    ]
+    | None = None,
 ) -> dict[str, Any]:
+    step_results, step_attempts, result_files = history or (
+        [],
+        [],
+        _result_files(steps),
+    )
     bundle = build_evidence_bundle(
         run=_completed_run(),
         version=version,
-        step_results=[],
-        step_attempts=[],
-        resolved_input_edges_by_attempt_id={},
-        result_files=_result_files(steps),
+        step_results=step_results,
+        step_attempts=step_attempts,
+        resolved_input_edges_by_attempt_id={
+            attempt.id: parse_resolved_input_edges(None) for attempt in step_attempts
+        },
+        result_files=result_files,
     )
     return render_evidence_json_export(
         bundle=redact_evidence_bundle(bundle) if redacted else bundle,
@@ -481,3 +832,28 @@ def test_evidence_export_hashes_the_same_bundle() -> None:
         "raw": raw["manifest"]["content_hash"],
         "redacted": redacted["manifest"]["content_hash"],
     } == FROZEN_EVIDENCE_CONTENT_HASHES
+
+
+def test_a_retried_last_step_returns_and_exports_only_its_current_document() -> None:
+    _, version, steps = _definition()
+    step_results, step_attempts, files = _retried_history(steps)
+
+    run = _run_public(steps, result_files=_current_attempt_files(step_results, files))
+    raw = _evidence_export(
+        version, steps, redacted=False, history=(step_results, step_attempts, files)
+    )
+    redacted = _evidence_export(
+        version, steps, redacted=True, history=(step_results, step_attempts, files)
+    )
+
+    assert run["result"] == FROZEN_RETRIED_RUN_RESULT
+    assert run["result_files"] == FROZEN_RETRIED_RUN_RESULT_FILES
+    assert raw["summary"]["final_output"] == FROZEN_RETRIED_EVIDENCE_FINAL_OUTPUT
+    assert (
+        redacted["summary"]["final_output"]
+        == FROZEN_RETRIED_REDACTED_EVIDENCE_FINAL_OUTPUT
+    )
+    assert {
+        "raw": raw["manifest"]["content_hash"],
+        "redacted": redacted["manifest"]["content_hash"],
+    } == FROZEN_RETRIED_EVIDENCE_CONTENT_HASHES
