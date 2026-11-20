@@ -4,9 +4,12 @@ is committed before each send. The content is stored nowhere but its file."""
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
+import zipfile
 from collections.abc import AsyncIterator
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -23,6 +26,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
+    FlowStepAttempts,
     FlowStepResults,
 )
 from eneo.files.file_models import FileContentVariant, FileType
@@ -43,8 +47,10 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.exceptions import TypedIOValidationException
+from tests.integration.flows import test_flow_consumer_api_contract as consumer
 from tests.integration.flows.test_flow_run_repository import _insert_service_key
 from tests.integration.flows.test_flow_run_result_delivery import RUN_RESULT_CONFIG
+from tests.integration.flows.test_flow_run_result_redelivery import _make_editor
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_running_webhook_run,
     _intent,
@@ -55,6 +61,7 @@ from tests.integration.flows.test_flow_webhook_outbox_delivery import (
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
+admin_token = consumer.admin_token
 
 MARKER = "MARKER-run-result-7f3c"
 DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
@@ -78,7 +85,7 @@ def run_with_a_document(
     """A completed run whose first step delivered a DOCX marked as a
     deliverable and whose last step sends the run result."""
 
-    async def seed():
+    async def seed(content: bytes = CONTENT):
         async with db_container() as container:
             saved = await container.file_service(user=admin_user).save_prepared_file(
                 PreparedFileUpload(
@@ -88,7 +95,7 @@ def run_with_a_document(
                     contents=(
                         PendingFileContent(
                             variant=FileContentVariant.ORIGINAL,
-                            chunks=_chunks(CONTENT),
+                            chunks=_chunks(content),
                             declared_media_type=DOCX,
                             verified_media_type=DOCX,
                         ),
@@ -170,7 +177,7 @@ async def _sending_audits(run_id: UUID) -> list[sa.Row]:
 
 
 async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
-    setup_database, run_with_a_document, monkeypatch, caplog
+    setup_database, run_with_a_document, monkeypatch
 ):
     run, delivery_id, file_id = await run_with_a_document()
     sent: list[dict[str, object]] = []
@@ -181,7 +188,6 @@ async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
         return _response(503)
 
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
-    caplog.set_level(logging.DEBUG)
 
     outcome = await _run_outbox()
 
@@ -201,37 +207,6 @@ async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
     assert audit.log_metadata["extra"]["file_ids"] == [str(file_id)]
     assert audit.log_metadata["extra"]["url_host"] == "receiver.example.org"
     assert audit.log_metadata["extra"]["delivery_attempt"] == 1
-
-    # The content is in the request only: not in the delivery row, its error,
-    # the step results, the audit trail or the logs.
-    encoded = base64.b64encode(CONTENT).decode()
-    stored = json.dumps(
-        [
-            [str(value) for value in row]
-            for row in await _read(
-                sa.select(FlowRunWebhookDeliveries).where(
-                    FlowRunWebhookDeliveries.id == delivery_id
-                )
-            )
-        ]
-        + [
-            [str(value) for value in row]
-            for row in await _read(
-                sa.select(FlowStepResults).where(FlowStepResults.flow_run_id == run.id)
-            )
-        ]
-        + [
-            [str(value) for value in row]
-            for row in await _read(
-                sa.select(AuditLog.description, AuditLog.log_metadata).where(
-                    AuditLog.entity_id == run.id
-                )
-            )
-        ]
-    )
-    for trace in (stored, caplog.text):
-        assert MARKER not in trace
-        assert encoded not in trace
 
 
 async def test_without_the_audit_row_nothing_is_sent_and_it_is_tried_again(
@@ -370,3 +345,94 @@ async def test_a_run_started_with_a_service_key_sends_its_result_as_that_service
     assert audit.actor_type == ActorType.API_KEY.value
     assert audit.actor_api_key_id == key_id
     assert audit.actor_id is None
+
+
+def _docx_with_a_hidden_marker() -> bytes:
+    """A document whose text is plain and whose marker is only in its
+    properties, deflated like every Word file: no step renders it."""
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as docx:
+        docx.writestr("word/document.xml", "<w:document>Dokumentet</w:document>")
+        docx.writestr(
+            "docProps/core.xml",
+            f"<cp:coreProperties><dc:title>{MARKER}</dc:title></cp:coreProperties>",
+        )
+    return buffer.getvalue()
+
+
+async def _stored_columns(run_id: UUID) -> str:
+    """Every column the run's delivery, steps, attempts, run row and audit
+    trail store, as text."""
+    rows: list[object] = []
+    for table, owner in (
+        (FlowRunWebhookDeliveries, FlowRunWebhookDeliveries.flow_run_id),
+        (FlowStepResults, FlowStepResults.flow_run_id),
+        (FlowStepAttempts, FlowStepAttempts.flow_run_id),
+        (FlowRuns, FlowRuns.id),
+        (AuditLog, AuditLog.entity_id),
+    ):
+        found = await _read(sa.select(*table.__table__.columns).where(owner == run_id))
+        assert found, table.__tablename__
+        rows.extend(dict(row._mapping) for row in found)
+    return json.dumps(rows, default=str, ensure_ascii=False)
+
+
+async def test_file_content_leaves_eneo_only_in_the_request(
+    setup_database,
+    # The app starts the byte plane before the document is stored.
+    client,
+    admin_token,
+    run_with_a_document,
+    monkeypatch,
+    caplog,
+    admin_user,
+):
+    """A failed send and then a delivered one: the file's bytes are in the
+    request and nowhere Eneo stores, logs or exports the run."""
+    content = _docx_with_a_hidden_marker()
+    run, delivery_id, _ = await run_with_a_document(content)
+    await _make_editor(run, admin_user.id)
+    sent: list[str] = []
+    answers = iter([_response(503), _response(200)])
+
+    async def _receive(_self, **kwargs):
+        [deliverable] = json.loads(kwargs["body_bytes"])["deliverables"]
+        sent.append(deliverable["files"][0]["content_base64"])
+        return next(answers)
+
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
+    caplog.set_level(logging.DEBUG)
+    now = datetime.now(timezone.utc)
+    await _run_outbox(now=now)
+    # What the failed send stored, its error included, before success clears it.
+    after_failure = await _stored_columns(run.id)
+    failure = await _read_one(
+        sa.select(FlowRunWebhookDeliveries.delivery_last_error).where(
+            FlowRunWebhookDeliveries.id == delivery_id
+        )
+    )
+    assert failure.delivery_last_error
+    await _run_outbox(now=now + timedelta(seconds=2_000))
+
+    # The marker reaches the receiver, inside the file it was put in.
+    assert len(sent) == 2
+    with zipfile.ZipFile(io.BytesIO(base64.b64decode(sent[0]))) as docx:
+        assert MARKER in docx.read("docProps/core.xml").decode()
+    delivery = await _read_one(
+        sa.select(FlowRunWebhookDeliveries.delivery_status).where(
+            FlowRunWebhookDeliveries.id == delivery_id
+        )
+    )
+    assert delivery.delivery_status == "delivered"
+
+    evidence = await client.get(
+        f"/api/v1/flows/{run.flow_id}/runs/{run.id}/evidence/",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert evidence.status_code == 200, evidence.text
+    # Any run of the sent content longer than two slices holds a whole one.
+    slices = [sent[0][at : at + 48] for at in range(0, len(sent[0]) - 48, 48)]
+    traces = (after_failure, await _stored_columns(run.id), evidence.text, caplog.text)
+    for trace in traces:
+        assert MARKER not in trace
+        assert not [piece for piece in slices if piece in trace]
