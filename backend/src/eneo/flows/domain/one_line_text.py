@@ -21,12 +21,12 @@ def _visible_line(text: str) -> str:
     return " ".join(visible.split())
 
 
-def one_line(text: str) -> str | None:
+def one_line(text: str, *, max_chars: int = ONE_LINE_TEXT_MAX_CHARS) -> str | None:
     """``text`` made one short line: whitespace, line breaks included,
     collapses to single spaces and other characters that break the line or
-    cannot be seen go. Left empty or over the bound, it is None."""
+    cannot be seen go. Left empty or over ``max_chars``, it is None."""
     cleaned = _visible_line(text)
-    return cleaned if 0 < len(cleaned) <= ONE_LINE_TEXT_MAX_CHARS else None
+    return cleaned if 0 < len(cleaned) <= max_chars else None
 
 
 def one_line_start(text: str) -> str | None:

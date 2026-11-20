@@ -11,6 +11,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     FlowStepAttemptMappedAdmission,
     FlowStepAttemptStart,
 )
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from eneo.flows.domain.step_output import (
     OUTPUT_TEXT_OVERFLOW_KEY,
     FileBackedStepText,
@@ -111,6 +112,7 @@ class RuntimeStep:
     assistant_snapshot: dict[str, Any] | None = None
     review_policy: FlowStepReviewPolicy | None = None
     retrieval_policy: FlowStepRetrievalPolicy | None = None
+    deliverable: FlowStepDeliverable | None = None
     timeout_seconds: int | None = None
 
     @property

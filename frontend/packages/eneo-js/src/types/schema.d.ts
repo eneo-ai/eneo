@@ -18352,6 +18352,30 @@ export interface components {
       /** Tenant Id */
       tenant_id: string;
     };
+    /** EvidenceDeliverableFileSummary */
+    EvidenceDeliverableFileSummary: {
+      /**
+       * Availability
+       * @enum {string}
+       */
+      availability: "available" | "content_purged";
+      /** File Id */
+      file_id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * EvidenceDeliverableSummary
+     * @description A document the run delivered, as the run's ``deliverables`` lists it.
+     */
+    EvidenceDeliverableSummary: {
+      /** Files */
+      files: components["schemas"]["EvidenceDeliverableFileSummary"][];
+      /** Label */
+      label: string | null;
+      /** Step Order */
+      step_order: number;
+    };
     /** EvidenceExportManifest */
     EvidenceExportManifest: {
       /** Actor */
@@ -18442,6 +18466,11 @@ export interface components {
       };
       /** Completed Steps */
       completed_steps: number;
+      /**
+       * Deliverables
+       * @description Documents the run delivered, in step order, with each step's current document files. Empty until the run has completed. Kept out of the hashed bundle.
+       */
+      deliverables?: components["schemas"]["EvidenceDeliverableSummary"][];
       /** Duration Ms */
       duration_ms?: number | null;
       /** Failed Steps */
@@ -19754,6 +19783,34 @@ export interface components {
        * Format: uuid
        */
       space_id: string;
+    };
+    /**
+     * FlowDeliverableContractPublic
+     * @description A document every successful run of this version delivers.
+     */
+    FlowDeliverableContractPublic: {
+      /** @description How a client receives the document. Always `artifact` today: a file downloaded from the run. Other values may be added later; a client should skip one it does not know. */
+      delivery: components["schemas"]["FlowOutputDelivery"];
+      /**
+       * Label
+       * @description What a client calls the document: the label the author gave it, or for the last step without one, the step's name. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description Output mode of the step, as for `final_output`. */
+      output_mode: components["schemas"]["FlowOutputMode"];
+      /** @description `docx` or `pdf`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that produces the document. Unique in the list; it matches `FlowRunPublic.deliverables[].step_id` and the step of each file in `result_files`.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
     };
     /**
      * FlowDocumentRenderLimitsPublic
@@ -22057,6 +22114,24 @@ export interface components {
      * FlowRunContractPublic
      * @example {
      *       "aggregate_max_files": 1,
+     *       "deliverables": [
+     *         {
+     *           "delivery": "artifact",
+     *           "label": "Summary",
+     *           "output_mode": "render_verbatim",
+     *           "output_type": "pdf",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2
+     *         },
+     *         {
+     *           "delivery": "artifact",
+     *           "label": "Report",
+     *           "output_mode": "pass_through",
+     *           "output_type": "docx",
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 3
+     *         }
+     *       ],
      *       "final_output": {
      *         "delivery": "artifact",
      *         "label": "Create Word report",
@@ -22150,6 +22225,11 @@ export interface components {
        * @description Total number of files a caller may attach across all runtime-input steps for this published flow version. `0` means no published steps currently require runtime files. `null` means at least one runtime file-input step is intentionally unbounded, so clients should enforce the per-step limits in `steps_requiring_input` instead.
        */
       aggregate_max_files?: number | null;
+      /**
+       * Deliverables
+       * @description Documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is a document. Use it to show every document a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers no document.
+       */
+      deliverables?: components["schemas"]["FlowDeliverableContractPublic"][];
       /** @description Published terminal output contract for this flow version. API consumers should use this before starting a run to decide whether their app will display output or offer a generated file download. After success, branch on `FlowRunPublic.result.kind`, including exact `inline_text` and `file_backed_text` for terminal text. */
       final_output?: components["schemas"]["FlowFinalOutputContractPublic"] | null;
       /**
@@ -22781,12 +22861,103 @@ export interface components {
       step_order?: number | null;
     };
     /**
+     * FlowRunDeliverablePublic
+     * @description A document the run delivered, with its files.
+     */
+    FlowRunDeliverablePublic: {
+      /**
+       * Files
+       * @description The document files of the step's current attempt (`source` `declared_artifact`), never a transcript or text written beside them. Download one with its `file_id` through the run's signed-url endpoint while its `availability` is `available`. Empty when the step produced no document file.
+       */
+      files: components["schemas"]["FlowRunStepResultFile"][];
+      /**
+       * Kind
+       * @description Discriminator: `artifact` is a document to download. Other kinds may be added later; a client should skip one it does not know.
+       * @constant
+       */
+      kind: "artifact";
+      /**
+       * Label
+       * @description What a client calls the document, as in the run contract's `deliverables`. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description `docx` or `pdf`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that produced the document. Unique in the list: several files from one step are listed under one entry.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
+    };
+    /**
      * FlowRunDetailPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_attempt_count": 0,
-     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
+     *       "deliverables": [
+     *         {
+     *           "files": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *               "file_id": "00000000-0000-0000-0000-000000000702",
+     *               "file_type": "document",
+     *               "flow_id": "00000000-0000-0000-0000-000000000001",
+     *               "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *               "mimetype": "application/pdf",
+     *               "name": "Summary Alex Example 2026-03-17.pdf",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000102",
+     *               "step_order": 2,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000452",
+     *               "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *             }
+     *           ],
+     *           "kind": "artifact",
+     *           "label": "Summary",
+     *           "output_type": "pdf",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2
+     *         },
+     *         {
+     *           "files": [
+     *             {
+     *               "attempt_no": 1,
+     *               "availability": "available",
+     *               "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *               "file_id": "00000000-0000-0000-0000-000000000703",
+     *               "file_type": "document",
+     *               "flow_id": "00000000-0000-0000-0000-000000000001",
+     *               "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *               "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *               "name": "Report Alex Example 2026-03-17.docx",
+     *               "ordinal": 0,
+     *               "size": 14012,
+     *               "source": "declared_artifact",
+     *               "step_id": "00000000-0000-0000-0000-000000000103",
+     *               "step_order": 3,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *               "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *             }
+     *           ],
+     *           "kind": "artifact",
+     *           "label": "Report",
+     *           "output_type": "docx",
+     *           "step_id": "00000000-0000-0000-0000-000000000103",
+     *           "step_order": 3
+     *         }
+     *       ],
+     *       "dispatch_attempt_count": 1,
+     *       "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+     *       "dispatched_at": "2026-03-17T10:05:01Z",
      *       "evidence_access": {
      *         "can_export_raw": false,
      *         "can_export_redacted": true,
@@ -22795,6 +22966,7 @@ export interface components {
      *         "read_refusal_code": null,
      *         "redacted_export_refusal_code": null
      *       },
+     *       "finished_at": "2026-03-17T10:06:10Z",
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "flow_version": 3,
      *       "id": "00000000-0000-0000-0000-000000000301",
@@ -22804,32 +22976,81 @@ export interface components {
      *       "job_id": "00000000-0000-0000-0000-000000000401",
      *       "principal_type": "user",
      *       "purpose": "production",
-     *       "result_files": [],
+     *       "result": {
+     *         "files": [
+     *           {
+     *             "attempt_no": 1,
+     *             "availability": "available",
+     *             "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *             "file_id": "00000000-0000-0000-0000-000000000703",
+     *             "file_type": "document",
+     *             "flow_id": "00000000-0000-0000-0000-000000000001",
+     *             "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *             "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *             "name": "Report Alex Example 2026-03-17.docx",
+     *             "ordinal": 0,
+     *             "size": 14012,
+     *             "source": "declared_artifact",
+     *             "step_id": "00000000-0000-0000-0000-000000000103",
+     *             "step_order": 3,
+     *             "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *             "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *           }
+     *         ],
+     *         "kind": "artifact"
+     *       },
+     *       "result_files": [
+     *         {
+     *           "attempt_no": 1,
+     *           "availability": "available",
+     *           "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *           "file_id": "00000000-0000-0000-0000-000000000702",
+     *           "file_type": "document",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "mimetype": "application/pdf",
+     *           "name": "Summary Alex Example 2026-03-17.pdf",
+     *           "ordinal": 0,
+     *           "size": 14012,
+     *           "source": "declared_artifact",
+     *           "step_id": "00000000-0000-0000-0000-000000000102",
+     *           "step_order": 2,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000452",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         },
+     *         {
+     *           "attempt_no": 1,
+     *           "availability": "available",
+     *           "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+     *           "file_id": "00000000-0000-0000-0000-000000000703",
+     *           "file_type": "document",
+     *           "flow_id": "00000000-0000-0000-0000-000000000001",
+     *           "flow_run_id": "00000000-0000-0000-0000-000000000301",
+     *           "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+     *           "name": "Report Alex Example 2026-03-17.docx",
+     *           "ordinal": 0,
+     *           "size": 14012,
+     *           "source": "declared_artifact",
+     *           "step_id": "00000000-0000-0000-0000-000000000103",
+     *           "step_order": 3,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *           "tenant_id": "00000000-0000-0000-0000-000000000010"
+     *         }
+     *       ],
      *       "revision": 1,
      *       "run_label": "Case 123",
+     *       "started_at": "2026-03-17T10:05:02Z",
      *       "started_by": {
      *         "display_name": "Alex Example",
      *         "email": "alex.example@example.com",
      *         "id": "00000000-0000-0000-0000-000000000030",
      *         "principal_type": "user"
      *       },
-     *       "status": "queued",
+     *       "status": "completed",
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z",
-     *       "webhook_deliveries": [
-     *         {
-     *           "attempt_no": 1,
-     *           "created_at": "2026-03-17T10:05:30Z",
-     *           "delivered_at": "2026-03-17T10:05:31Z",
-     *           "delivery_attempts": 1,
-     *           "delivery_status": "delivered",
-     *           "id": "00000000-0000-0000-0000-000000000601",
-     *           "step_id": "00000000-0000-0000-0000-000000000101",
-     *           "step_order": 1,
-     *           "updated_at": "2026-03-17T10:05:31Z"
-     *         }
-     *       ]
+     *       "updated_at": "2026-03-17T10:06:10Z",
+     *       "webhook_deliveries": []
      *     }
      */
     FlowRunDetailPublic: {
@@ -22844,6 +23065,11 @@ export interface components {
        * @description When the run row was created.
        */
       created_at: string;
+      /**
+       * Deliverables
+       * @description Every document the run delivered, in step order, each with its label and files: the run contract's `deliverables` for this run. Read it to offer every document a flow makes; read `result` for the terminal output alone. Each entry lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       */
+      deliverables?: components["schemas"]["FlowRunDeliverablePublic"][];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -24474,6 +24700,7 @@ export interface components {
      *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -24961,6 +25188,7 @@ export interface components {
      * FlowRunPublic
      * @example {
      *       "created_at": "2026-03-17T10:05:00Z",
+     *       "deliverables": [],
      *       "dispatch_attempt_count": 0,
      *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -25000,6 +25228,11 @@ export interface components {
        * @description When the run row was created.
        */
       created_at: string;
+      /**
+       * Deliverables
+       * @description Every document the run delivered, in step order, each with its label and files: the run contract's `deliverables` for this run. Read it to offer every document a flow makes; read `result` for the terminal output alone. Each entry lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       */
+      deliverables?: components["schemas"]["FlowRunDeliverablePublic"][];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -25190,6 +25423,7 @@ export interface components {
      *       "redispatched_count": 1,
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 1,
      *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -25567,6 +25801,7 @@ export interface components {
      *       ],
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 1,
      *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -26159,6 +26394,7 @@ export interface components {
      *       },
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -29152,6 +29388,22 @@ export interface components {
       output_config?:
         | ({
             /**
+             * FlowStepDeliverable
+             * @description Marks this step as one of the run's deliverables: a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is a downloadable document can carry it: saving any other step removes the key, and publishing or importing one refuses it.
+             */
+            deliverable?: {
+              /**
+               * File Name
+               * @description Name the document is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               */
+              file_name?: string | null;
+              /**
+               * Label
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               */
+              label: string;
+            };
+            /**
              * FlowStepRetrievalPolicy
              * @description Versioned policy embedded in the existing per-step output config JSON.
              */
@@ -30334,6 +30586,7 @@ export interface components {
      *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
      *       "run": {
      *         "created_at": "2026-03-17T10:05:00Z",
+     *         "deliverables": [],
      *         "dispatch_attempt_count": 0,
      *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
      *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -35614,6 +35867,22 @@ export interface components {
       /** Output Config */
       output_config?:
         | ({
+            /**
+             * FlowStepDeliverable
+             * @description Marks this step as one of the run's deliverables: a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is a downloadable document can carry it: saving any other step removes the key, and publishing or importing one refuses it.
+             */
+            deliverable?: {
+              /**
+               * File Name
+               * @description Name the document is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               */
+              file_name?: string | null;
+              /**
+               * Label
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               */
+              label: string;
+            };
             /**
              * FlowStepRetrievalPolicy
              * @description Versioned policy embedded in the existing per-step output config JSON.
@@ -66369,6 +66638,7 @@ export interface operations {
            *       ],
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 1,
            *         "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:31Z",
@@ -66823,6 +67093,7 @@ export interface operations {
            *       },
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -67381,6 +67652,7 @@ export interface operations {
            *       },
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",
@@ -67775,6 +68047,7 @@ export interface operations {
            *       "first_regenerated_step_id": "00000000-0000-0000-0000-000000000102",
            *       "run": {
            *         "created_at": "2026-03-17T10:05:00Z",
+           *         "deliverables": [],
            *         "dispatch_attempt_count": 0,
            *         "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
            *         "dispatch_pending_since": "2026-03-17T10:05:00Z",

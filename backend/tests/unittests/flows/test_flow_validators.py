@@ -4406,3 +4406,112 @@ def test_publish_accepts_section_step_reading_one_material(
         metadata_json=_audio_metadata(),
         require_complete_template_fill_config=True,
     )
+
+
+_DELIVERABLE_FORM = {
+    "form_schema": {
+        "fields": [
+            {"name": "Team", "type": "text"},
+            {"name": "Mötets namn", "type": "text"},
+            {"name": "Ämnen", "type": "multiselect", "options": ["a", "b"]},
+            {"name": "Dag", "type": "date", "role": "run_date"},
+            {"name": "Annan dag", "type": "date"},
+            {"name": "password", "type": "text"},
+        ]
+    }
+}
+
+
+def _document_step(deliverable: object, **updates) -> FlowStep:
+    return _step(
+        output_mode="render_verbatim",
+        output_type="pdf",
+        output_config={"deliverable": deliverable},
+        **updates,
+    )
+
+
+def _publish(*steps: FlowStep, metadata_json: dict | None = _DELIVERABLE_FORM) -> None:
+    validate_steps(
+        list(steps),
+        metadata_json=metadata_json,
+        require_complete_template_fill_config=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "file_name",
+    [
+        None,
+        "Standup",
+        "Standup {{ flow_input.Team }}",
+        "{{flow_input.Mötets namn}} {{ flow_input.Ämnen }}",
+        "{{ flow_input.Annan dag }}",
+    ],
+)
+def test_deliverable_with_a_file_name_from_form_fields_publishes(
+    file_name: str | None,
+) -> None:
+    deliverable = {"label": "Standup Eneo"}
+    if file_name is not None:
+        deliverable["file_name"] = file_name
+
+    _publish(_document_step(deliverable))
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [("compose_text", "text"), ("pass_through", "json")],
+)
+def test_deliverable_on_a_step_that_delivers_no_artifact_is_refused(
+    output_mode: str, output_type: str
+) -> None:
+    step = _step(
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config={"deliverable": {"label": "Standup"}},
+    )
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert "output_config.deliverable" in str(caught.value)
+    assert caught.value.context["field"] == "output_config.deliverable"
+
+
+@pytest.mark.parametrize(
+    ("file_name", "says"),
+    [
+        ("{{ step_1.output.text }}", "flow_input.<field>"),
+        ("{{ datum }}", "flow_input.<field>"),
+        ("{{ flow.input.Team }}", "flow_input.<field>"),
+        ("{{ flow_input.text }}", "not a field of the form"),
+        ("{{ flow_input.Team.name }}", "flow_input.<field>"),
+        ("{{ flow_input.Saknas }}", "not a field of the form"),
+        ("{{ flow_input.Dag }}", "run's day is already added"),
+        ("{{ flow_input.password }}", "sensitive"),
+        ("Standup {{ flow_input.Team", "unmatched"),
+        ("Standup }}", "unmatched"),
+    ],
+)
+def test_deliverable_file_name_reads_only_fields_of_the_form(
+    file_name: str, says: str
+) -> None:
+    step = _document_step({"label": "Standup", "file_name": file_name})
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert says in str(caught.value)
+    assert "output_config.deliverable.file_name" in str(caught.value)
+    assert caught.value.context["field"] == "output_config.deliverable.file_name"
+
+
+@pytest.mark.parametrize("metadata_json", [None, {}, {"form_schema": {"fields": []}}])
+def test_deliverable_file_name_needs_a_form_that_has_the_field(
+    metadata_json: dict | None,
+) -> None:
+    step = _document_step({"label": "Standup", "file_name": "{{ flow_input.Team }}"})
+
+    with pytest.raises(BadRequestException, match="not a field of the form"):
+        _publish(step, metadata_json=metadata_json)

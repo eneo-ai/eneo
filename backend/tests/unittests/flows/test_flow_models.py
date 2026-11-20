@@ -38,6 +38,10 @@ from eneo.flows.api.flow_models import (
     FormFieldPublic,
     StepRunInput,
 )
+from eneo.flows.api.flow_run_contract_models import (
+    FlowDeliverableContractPublic,
+    FlowRunOutputContract,
+)
 from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
 from eneo.flows.domain.flow import (
     Flow,
@@ -68,6 +72,10 @@ from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.main.exceptions import BadRequestException
 
 _MISSING = object()
+
+
+def _outputs(final_output: FlowFinalOutputContractPublic) -> FlowRunOutputContract:
+    return FlowRunOutputContract(final_output=final_output, deliverables=())
 
 
 def _flow_sparse_domain(flow_id=None) -> FlowSparse:
@@ -648,17 +656,21 @@ def test_run_public_projects_text_and_opaque_structured_results() -> None:
 
     text_public = assembler.to_run_public(
         text_run,
-        final_output=_final_output(
-            output_type=FlowOutputType.TEXT,
-            delivery=FlowOutputDelivery.PAYLOAD,
+        outputs=_outputs(
+            _final_output(
+                output_type=FlowOutputType.TEXT,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            )
         ),
     )
     structured_public = assembler.to_run_public(
         structured_run,
-        final_output=_final_output(
-            output_type=FlowOutputType.JSON,
-            delivery=FlowOutputDelivery.PAYLOAD,
-            output_contract=structured_contract,
+        outputs=_outputs(
+            _final_output(
+                output_type=FlowOutputType.JSON,
+                delivery=FlowOutputDelivery.PAYLOAD,
+                output_contract=structured_contract,
+            )
         ),
     )
 
@@ -709,10 +721,12 @@ def test_run_public_projects_file_backed_text_with_exact_generated_file() -> Non
     public = assembler.to_run_public(
         run,
         result_files=(result_file,),
-        final_output=_final_output(
-            step_id=final_step_id,
-            output_type=FlowOutputType.TEXT,
-            delivery=FlowOutputDelivery.PAYLOAD,
+        outputs=_outputs(
+            _final_output(
+                step_id=final_step_id,
+                output_type=FlowOutputType.TEXT,
+                delivery=FlowOutputDelivery.PAYLOAD,
+            )
         ),
     )
 
@@ -772,10 +786,12 @@ def test_run_public_rejects_overflow_file_from_wrong_owner(
         FlowAssembler().to_run_public(
             run,
             result_files=(result_file,),
-            final_output=_final_output(
-                step_id=final_step_id,
-                output_type=FlowOutputType.TEXT,
-                delivery=FlowOutputDelivery.PAYLOAD,
+            outputs=_outputs(
+                _final_output(
+                    step_id=final_step_id,
+                    output_type=FlowOutputType.TEXT,
+                    delivery=FlowOutputDelivery.PAYLOAD,
+                )
             ),
         )
 
@@ -806,17 +822,21 @@ def test_run_public_projects_current_artifact_metadata_and_outbound_receipt() ->
     artifact_public = assembler.to_run_public(
         artifact_run,
         result_files=(result_file,),
-        final_output=_final_output(
-            step_id=final_step_id,
-            output_type=FlowOutputType.PDF,
-            delivery=FlowOutputDelivery.ARTIFACT,
+        outputs=_outputs(
+            _final_output(
+                step_id=final_step_id,
+                output_type=FlowOutputType.PDF,
+                delivery=FlowOutputDelivery.ARTIFACT,
+            )
         ),
     )
     outbound_public = assembler.to_run_public(
         _completed_run(output_payload_json=None),
-        final_output=_final_output(
-            output_type=FlowOutputType.JSON,
-            delivery=FlowOutputDelivery.OUTBOUND_HTTP,
+        outputs=_outputs(
+            _final_output(
+                output_type=FlowOutputType.JSON,
+                delivery=FlowOutputDelivery.OUTBOUND_HTTP,
+            )
         ),
     )
 
@@ -836,9 +856,11 @@ def test_run_public_fails_explicitly_when_completed_artifact_is_missing() -> Non
     ):
         FlowAssembler().to_run_public(
             _completed_run(output_payload_json=None),
-            final_output=_final_output(
-                output_type=FlowOutputType.DOCX,
-                delivery=FlowOutputDelivery.ARTIFACT,
+            outputs=_outputs(
+                _final_output(
+                    output_type=FlowOutputType.DOCX,
+                    delivery=FlowOutputDelivery.ARTIFACT,
+                )
             ),
         )
 
@@ -1343,4 +1365,125 @@ def test_flow_run_public_dispatch_error_is_strict_and_corruption_is_safe() -> No
                 **invalid.model_dump(mode="json"),
                 "unexpected": "compatibility is not accepted",
             }
+        )
+
+
+def test_flow_step_request_refuses_a_malformed_deliverable() -> None:
+    with pytest.raises(ValidationError, match="output_config.deliverable"):
+        FlowStepCreateRequest.model_validate(
+            _payload(
+                output_mode="render_verbatim",
+                output_type="pdf",
+                output_config={"deliverable": {"label": " Standup"}},
+            )
+        )
+
+
+def test_flow_step_request_leaves_a_deliverable_on_a_text_step_to_the_save() -> None:
+    request = FlowStepCreateRequest.model_validate(
+        _payload(
+            output_mode="compose_text",
+            output_type="text",
+            output_config={"deliverable": {"label": "Standup"}},
+        )
+    )
+
+    assert request.output_config == {"deliverable": {"label": "Standup"}}
+
+
+def test_flow_step_request_schema_documents_deliverable() -> None:
+    schema = FlowStepCreateRequest.model_json_schema()
+    output_config = schema["properties"]["output_config"]["anyOf"][0]
+
+    deliverable = output_config["properties"]["deliverable"]
+    assert set(deliverable["properties"]) == {"label", "file_name"}
+    assert "removes the key" in deliverable["description"]
+
+
+def _document_file(run, *, step_id, availability: str = "available"):
+    return FlowRunStepResultFile(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_result_id=uuid4(),
+        step_id=step_id,
+        step_order=1,
+        attempt_no=1,
+        file_id=uuid4(),
+        ordinal=0,
+        source="declared_artifact",
+        name="plan.pdf",
+        checksum="checksum",
+        size=10,
+        mimetype="application/pdf",
+        file_type=FileType.DOCUMENT,
+        availability=availability,
+    )
+
+
+def _two_document_outputs(first_id, last_id) -> FlowRunOutputContract:
+    def deliverable(step_id, step_order: int) -> FlowDeliverableContractPublic:
+        return FlowDeliverableContractPublic(
+            step_id=step_id,
+            step_order=step_order,
+            label=f"Document {step_order}",
+            output_type=FlowOutputType.PDF,
+            output_mode=FlowOutputMode.RENDER_VERBATIM,
+            delivery=FlowOutputDelivery.ARTIFACT,
+        )
+
+    return FlowRunOutputContract(
+        final_output=_final_output(
+            step_id=last_id,
+            output_type=FlowOutputType.PDF,
+            delivery=FlowOutputDelivery.ARTIFACT,
+        ),
+        deliverables=(deliverable(first_id, 1), deliverable(last_id, 2)),
+    )
+
+
+def test_an_earlier_deliverable_without_a_file_is_listed_empty() -> None:
+    first_id, last_id = uuid4(), uuid4()
+    run = _completed_run(output_payload_json={"text": "rendered"})
+    purged = _document_file(run, step_id=last_id, availability="content_purged")
+
+    public = FlowAssembler().to_run_public(
+        run, result_files=(purged,), outputs=_two_document_outputs(first_id, last_id)
+    )
+
+    assert [(item.step_order, item.files) for item in public.deliverables] == [
+        (1, []),
+        (2, [purged]),
+    ]
+    assert public.deliverables[1].files[0].availability == "content_purged"
+
+
+def test_a_run_that_has_not_completed_lists_no_deliverables() -> None:
+    first_id, last_id = uuid4(), uuid4()
+    run = _completed_run(output_payload_json=None).model_copy(
+        update={"status": FlowRunStatus.RUNNING}
+    )
+
+    public = FlowAssembler().to_run_public(
+        run,
+        result_files=(_document_file(run, step_id=first_id),),
+        outputs=_two_document_outputs(first_id, last_id),
+    )
+
+    assert public.result is None
+    assert public.deliverables == []
+
+
+def test_a_sparse_step_patch_may_carry_only_a_deliverable() -> None:
+    from eneo.flows.api.flow_models import FlowEditorStepPatch
+
+    patch = FlowEditorStepPatch.model_validate(
+        {"output_config": {"deliverable": {"label": "Plan"}}}
+    )
+
+    assert patch.model_fields_set == {"output_config"}
+    assert patch.output_config == {"deliverable": {"label": "Plan"}}
+    with pytest.raises(ValidationError, match="output_config.deliverable"):
+        FlowEditorStepPatch.model_validate(
+            {"output_config": {"deliverable": {"label": "Plan", "kind": "x"}}}
         )

@@ -52,6 +52,10 @@ from eneo.flows.domain.flow import FlowRun
 from eneo.flows.domain.provider_call import ProviderCallEvidencePage
 from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_contract_service import (
+    current_attempt_result_file_records,
+    project_run_deliverables,
+)
 from eneo.flows.flow_run_input_envelope import (
     read_max_speakers,
     read_speaker_labels_choice,
@@ -208,7 +212,7 @@ async def get_flow_run_evidence(
             )
             payload = await presenter.present_evidence(evidence.to_dict())
             projected_result = (
-                FlowAssembler.to_run_result_public(
+                FlowAssembler.to_run_outputs_public(
                     run=run.model_copy(
                         update={
                             "output_payload_json": evidence.run.get(
@@ -216,14 +220,26 @@ async def get_flow_run_evidence(
                             )
                         }
                     ),
-                    final_output=evidence.final_output,
+                    outputs=evidence.outputs,
                     result_files=[
                         FlowRunStepResultFile.model_validate(item)
                         for item in evidence.result_files
                     ],
-                )
-                if evidence.final_output is not None
+                )[0]
+                if evidence.outputs is not None
                 else None
+            )
+            # Evidence holds every attempt's files; a deliverable lists its
+            # step's current attempt, as the run's detail does.
+            deliverables = project_run_deliverables(
+                status=run.status,
+                outputs=evidence.outputs,
+                result_files=[
+                    FlowRunStepResultFile.model_validate(item)
+                    for item in current_attempt_result_file_records(
+                        evidence.result_files, evidence.step_results
+                    )
+                ],
             )
             run_payload = {
                 field_name: evidence.run[field_name]
@@ -242,6 +258,9 @@ async def get_flow_run_evidence(
                 redact_payload(projected_result.model_dump(mode="json"))
                 if projected_result is not None
                 else None
+            )
+            run_payload["deliverables"] = redact_payload(
+                [deliverable.model_dump(mode="json") for deliverable in deliverables]
             )
             payload["run"] = run_payload
             response = FlowRunEvidenceResponse.model_validate(payload)

@@ -34,6 +34,7 @@ from eneo.flows.api.flow_models import (
     FlowRunRedispatchRequest,
     FlowRunReviewCheckpointResumeRequest,
 )
+from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
 from eneo.flows.api.flow_run_lifecycle_router import (
     cancel_flow_run,
     create_flow_run,
@@ -115,6 +116,10 @@ from tests.unittests.spaces.test_space_transcription_services import (
     _connection,
     _space,
 )
+
+
+def _outputs(final_output: FlowFinalOutputContractPublic) -> FlowRunOutputContract:
+    return FlowRunOutputContract(final_output=final_output, deliverables=())
 
 
 class _CommitFailureTransaction:
@@ -674,7 +679,7 @@ async def test_resume_review_replay_projects_completed_run_result(monkeypatch):
             run=run,
             result_files=(),
             token_usage=None,
-            final_output=final_output,
+            outputs=_outputs(final_output),
         )
     )
     review_service = AsyncMock()
@@ -739,12 +744,14 @@ def _completed_document_run_view(
         transcription_usage=FlowRunTranscriptionUsage(
             audio_seconds=51.25, completeness="complete"
         ),
-        final_output=FlowFinalOutputContractPublic(
-            step_id=document.step_id,
-            step_order=document.step_order,
-            output_type=FlowOutputType.PDF,
-            output_mode=FlowOutputMode.RENDER_VERBATIM,
-            delivery=FlowOutputDelivery.ARTIFACT,
+        outputs=_outputs(
+            FlowFinalOutputContractPublic(
+                step_id=document.step_id,
+                step_order=document.step_order,
+                output_type=FlowOutputType.PDF,
+                output_mode=FlowOutputMode.RENDER_VERBATIM,
+                delivery=FlowOutputDelivery.ARTIFACT,
+            )
         ),
     )
 
@@ -1298,12 +1305,14 @@ async def test_cancel_of_a_completed_run_returns_its_result(monkeypatch):
             run=run,
             result_files=(),
             token_usage=None,
-            final_output=FlowFinalOutputContractPublic(
-                step_id=uuid4(),
-                step_order=1,
-                output_type=FlowOutputType.TEXT,
-                output_mode=FlowOutputMode.PASS_THROUGH,
-                delivery=FlowOutputDelivery.PAYLOAD,
+            outputs=_outputs(
+                FlowFinalOutputContractPublic(
+                    step_id=uuid4(),
+                    step_order=1,
+                    output_type=FlowOutputType.TEXT,
+                    output_mode=FlowOutputMode.PASS_THROUGH,
+                    delivery=FlowOutputDelivery.PAYLOAD,
+                )
             ),
         )
     )
@@ -1418,12 +1427,14 @@ async def test_redispatch_flow_run_returns_zero_when_nothing_redispatched(
             run=run,
             result_files=(),
             token_usage=None,
-            final_output=FlowFinalOutputContractPublic(
-                step_id=uuid4(),
-                step_order=1,
-                output_type=FlowOutputType.TEXT,
-                output_mode=FlowOutputMode.PASS_THROUGH,
-                delivery=FlowOutputDelivery.PAYLOAD,
+            outputs=_outputs(
+                FlowFinalOutputContractPublic(
+                    step_id=uuid4(),
+                    step_order=1,
+                    output_type=FlowOutputType.TEXT,
+                    output_mode=FlowOutputMode.PASS_THROUGH,
+                    delivery=FlowOutputDelivery.PAYLOAD,
+                )
             ),
         )
     )

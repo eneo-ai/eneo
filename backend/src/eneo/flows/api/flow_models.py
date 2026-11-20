@@ -48,6 +48,9 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunContractPublic as FlowRunContractPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
+    FlowRunDeliverablePublic as FlowRunDeliverablePublic,
+)
+from eneo.flows.api.flow_run_contract_models import (
     FlowRunResultPublic as FlowRunResultPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
@@ -106,6 +109,11 @@ from eneo.flows.domain.review_reject_reason import (
     normalize_review_reject_reason,
 )
 from eneo.flows.domain.runtime import StepDiagnosticSeverity
+from eneo.flows.domain.step_deliverable import (
+    FLOW_STEP_DELIVERABLE_KEY,
+    FlowStepDeliverable,
+    parse_flow_step_deliverable,
+)
 from eneo.flows.domain.step_output import StepMaterialReference, parse_step_text_aliases
 from eneo.flows.domain.text_processing import TextProcessingConfig
 from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionRevision
@@ -213,6 +221,7 @@ class FlowEvidenceExportTooLargeError(BaseModel):
 
 def _validate_flow_step_output_config(value: object) -> object:
     parse_flow_step_retrieval_policy(value)
+    parse_flow_step_deliverable(value)
     return value
 
 
@@ -223,7 +232,18 @@ FlowStepOutputConfigRequest: TypeAlias = Annotated[
         {
             "type": "object",
             "properties": {
-                "retrieval_policy": FlowStepRetrievalPolicy.model_json_schema()
+                "retrieval_policy": FlowStepRetrievalPolicy.model_json_schema(),
+                FLOW_STEP_DELIVERABLE_KEY: {
+                    **FlowStepDeliverable.model_json_schema(),
+                    "description": (
+                        "Marks this step as one of the run's deliverables: a "
+                        "document a client lists with its label in "
+                        "`deliverables` on the run contract and the run. Only a "
+                        "step whose output is a downloadable document can carry "
+                        "it: saving any other step removes the key, and "
+                        "publishing or importing one refuses it."
+                    ),
+                },
             },
             "additionalProperties": True,
         }
@@ -417,6 +437,7 @@ FLOW_RUN_PUBLIC_EXAMPLE: dict[str, Any] = {
     "max_speakers": None,
     "result": None,
     "result_files": [],
+    "deliverables": [],
     "token_usage": None,
     "transcription_usage": None,
 }
@@ -1811,6 +1832,20 @@ class FlowRunPublic(FlowRunSummaryPublic):
             "using its `file_id`, and only when its `availability` is `available`."
         ),
     )
+    deliverables: list[FlowRunDeliverablePublic] = Field(
+        default_factory=lambda: cast(list[FlowRunDeliverablePublic], []),
+        description=(
+            "Every document the run delivered, in step order, each with its "
+            "label and files: the run contract's `deliverables` for this run. "
+            "Read it to offer every document a flow makes; read `result` for the "
+            "terminal output alone. Each entry lists only the step's document "
+            "files, while `result.files` lists every current file of the last "
+            "step. Download a file with its `file_id` through "
+            "`POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, "
+            "and only when its `availability` is `available`. Empty until the "
+            "run has completed."
+        ),
+    )
     transcription_usage: FlowRunTranscriptionUsagePublic | None = Field(
         default=None,
         description=(
@@ -1986,16 +2021,81 @@ class FlowRunEvidenceAccessPublic(BaseModel):
     )
 
 
+def _completed_run_document_example(
+    *, step: int, file: int, name: str
+) -> dict[str, Any]:
+    return {
+        "flow_run_id": "00000000-0000-0000-0000-000000000301",
+        "flow_id": "00000000-0000-0000-0000-000000000001",
+        "tenant_id": "00000000-0000-0000-0000-000000000010",
+        "step_result_id": f"00000000-0000-0000-0000-00000000045{step}",
+        "step_id": f"00000000-0000-0000-0000-00000000010{step}",
+        "step_order": step,
+        "attempt_no": 1,
+        "file_id": f"00000000-0000-0000-0000-00000000070{file}",
+        "ordinal": 0,
+        "source": "declared_artifact",
+        "name": name,
+        "checksum": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+        "size": 14012,
+        "mimetype": (
+            "application/pdf"
+            if name.endswith(".pdf")
+            else "application/vnd.openxmlformats-officedocument."
+            "wordprocessingml.document"
+        ),
+        "file_type": "document",
+        "availability": "available",
+    }
+
+
+_SUMMARY_DOCUMENT_EXAMPLE = _completed_run_document_example(
+    step=2, file=2, name="Summary Alex Example 2026-03-17.pdf"
+)
+_REPORT_DOCUMENT_EXAMPLE = _completed_run_document_example(
+    step=3, file=3, name="Report Alex Example 2026-03-17.docx"
+)
+
+FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_PUBLIC_EXAMPLE,
+    "status": "completed",
+    "dispatch_pending_since": None,
+    "dispatch_attempt_count": 1,
+    "dispatch_last_attempt_at": "2026-03-17T10:05:01Z",
+    "dispatch_next_attempt_at": None,
+    "dispatched_at": "2026-03-17T10:05:01Z",
+    "started_at": "2026-03-17T10:05:02Z",
+    "finished_at": "2026-03-17T10:06:10Z",
+    "updated_at": "2026-03-17T10:06:10Z",
+    "result": {"kind": "artifact", "files": [_REPORT_DOCUMENT_EXAMPLE]},
+    "result_files": [_SUMMARY_DOCUMENT_EXAMPLE, _REPORT_DOCUMENT_EXAMPLE],
+    "deliverables": [
+        {
+            "kind": "artifact",
+            "step_id": _SUMMARY_DOCUMENT_EXAMPLE["step_id"],
+            "step_order": 2,
+            "label": "Summary",
+            "output_type": "pdf",
+            "files": [_SUMMARY_DOCUMENT_EXAMPLE],
+        },
+        {
+            "kind": "artifact",
+            "step_id": _REPORT_DOCUMENT_EXAMPLE["step_id"],
+            "step_order": 3,
+            "label": "Report",
+            "output_type": "docx",
+            "files": [_REPORT_DOCUMENT_EXAMPLE],
+        },
+    ],
+    "webhook_deliveries": [],
+    "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
+}
+
+
 class FlowRunDetailPublic(FlowRunPublic):
     model_config = ConfigDict(
         from_attributes=True,
-        json_schema_extra={
-            "example": {
-                **FLOW_RUN_PUBLIC_EXAMPLE,
-                "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
-                "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
-            }
-        },
+        json_schema_extra={"example": FLOW_RUN_DETAIL_PUBLIC_EXAMPLE},
     )
 
     webhook_deliveries: list[FlowRunWebhookDeliveryPublic] = Field(
@@ -3292,7 +3392,7 @@ FLOW_RUN_EVIDENCE_EXPORT_BUNDLE_EXAMPLE: dict[str, Any] = {
     "run": {
         key: value
         for key, value in FLOW_RUN_PUBLIC_EXAMPLE.items()
-        if key != "started_by"
+        if key not in {"started_by", "deliverables"}
     },
     "definition_integrity": {
         "status": "verified",

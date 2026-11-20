@@ -13,7 +13,7 @@ from uuid import UUID
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.files.file_repo import FileRepository
-from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -66,7 +66,7 @@ from eneo.flows.flow_input_limits import (
     resolve_flow_input_limits_from_source,
 )
 from eneo.flows.flow_run_contract_service import (
-    build_final_output_contract,
+    build_run_output_contract,
     settle_max_speakers,
     speaker_labels_option,
     speaker_service_gap,
@@ -243,7 +243,7 @@ class FlowRunWithResultFilesAndUsage:
     result_files: Sequence[FlowRunStepResultFile]
     token_usage: FlowRunTokenUsage | None
     transcription_usage: FlowRunTranscriptionUsage | None = None
-    final_output: FlowFinalOutputContractPublic | None = None
+    outputs: FlowRunOutputContract | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1154,7 +1154,7 @@ class FlowRunService:
             result_files=run_view.result_files,
             token_usage=run_view.token_usage,
             transcription_usage=run_view.transcription_usage,
-            final_output=run_view.final_output,
+            outputs=run_view.outputs,
             webhook_deliveries=tuple(webhook_deliveries),
         )
 
@@ -1191,7 +1191,7 @@ class FlowRunService:
             )
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
-        final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
+        outputs_by_version_ref = await self._outputs_for_runs(runs=runs)
         return tuple(
             FlowRunWithResultFilesAndUsage(
                 run=run,
@@ -1201,16 +1201,16 @@ class FlowRunService:
                     usage_by_run_id.get(run.id),
                     recording_seconds_by_run_id.get(run.id),
                 ),
-                final_output=final_output_by_version_ref.get(
+                outputs=outputs_by_version_ref.get(
                     (run.flow_id, run.flow_version)
                 ),
             )
             for run in runs
         )
 
-    async def _final_outputs_for_runs(
+    async def _outputs_for_runs(
         self, *, runs: Sequence[FlowRun]
-    ) -> dict[tuple[UUID, int], FlowFinalOutputContractPublic]:
+    ) -> dict[tuple[UUID, int], FlowRunOutputContract]:
         version_refs = tuple(
             dict.fromkeys(
                 (run.flow_id, run.flow_version)
@@ -1224,7 +1224,7 @@ class FlowRunService:
             version_refs=version_refs,
             tenant_id=self.user.tenant_id,
         )
-        final_outputs: dict[tuple[UUID, int], FlowFinalOutputContractPublic] = {}
+        outputs_by_version_ref: dict[tuple[UUID, int], FlowRunOutputContract] = {}
         for version_ref, flow_version in versions_by_ref.items():
             definition = parse_verified_published_definition(
                 flow_version.definition_json,
@@ -1232,14 +1232,14 @@ class FlowRunService:
                 expected_checksum=flow_version.definition_checksum,
                 flow_version=flow_version.version,
             )
-            final_output = build_final_output_contract(definition.runtime_steps())
-            if final_output is None:
+            outputs = build_run_output_contract(definition.runtime_steps())
+            if outputs is None:
                 raise FlowPublishedDefinitionWithoutExecutableStepsError(
                     flow_id=flow_version.flow_id,
                     flow_version=flow_version.version,
                 )
-            final_outputs[version_ref] = final_output
-        return final_outputs
+            outputs_by_version_ref[version_ref] = outputs
+        return outputs_by_version_ref
 
     async def list_step_results_with_files(
         self,

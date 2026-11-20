@@ -899,3 +899,41 @@ def test_snapshot_copy_input_uses_only_json_input_and_output(input_type, output_
             BadRequestException, match="copy_input.*requires input_type 'json'"
         ):
             parse_runtime_steps(definition)
+
+
+def test_parse_runtime_steps_carries_the_steps_deliverable() -> None:
+    steps = parse_runtime_steps(
+        _definition(
+            _step_snapshot(
+                output_mode="render_verbatim",
+                output_type="pdf",
+                output_config={
+                    "deliverable": {
+                        "label": "Standup Eneo",
+                        "file_name": "Standup {{ flow_input.Team }}",
+                    }
+                },
+            )
+        )
+    )
+
+    assert steps[0].deliverable is not None
+    assert steps[0].deliverable.label == "Standup Eneo"
+    assert steps[0].deliverable.file_name == "Standup {{ flow_input.Team }}"
+
+
+def test_parse_runtime_steps_without_a_deliverable_has_none() -> None:
+    assert parse_runtime_steps(_definition(_step_snapshot()))[0].deliverable is None
+
+
+def test_parse_runtime_steps_refuses_a_malformed_deliverable() -> None:
+    with pytest.raises(BadRequestException, match="output_config.deliverable"):
+        parse_runtime_steps(
+            _definition(
+                _step_snapshot(
+                    output_mode="render_verbatim",
+                    output_type="pdf",
+                    output_config={"deliverable": {"label": ""}},
+                )
+            )
+        )

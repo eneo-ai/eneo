@@ -19,6 +19,10 @@ from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.domain.step_deliverable import (
+    FlowStepDeliverable,
+    parse_flow_step_deliverable,
+)
 from eneo.flows.domain.step_item_map import build_step_item_map_config
 from eneo.flows.domain.tool_input import read_published_tool_input_config
 from eneo.flows.enums import (
@@ -97,6 +101,7 @@ class _StepOutputFields:
     output_contract: FlowPersistedJsonObject | None
     output_classification_override: int | None
     retrieval_policy: FlowStepRetrievalPolicy | None
+    deliverable: FlowStepDeliverable | None
 
 
 @dataclass(frozen=True)
@@ -473,6 +478,7 @@ def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
             raw_output_config,
             output_mode=output_mode,
         )
+        deliverable = parse_flow_step_deliverable(raw_output_config)
     except ValueError as exc:
         raise BadRequestException(str(exc)) from exc
     output_classification_override_raw = item.get("output_classification_override")
@@ -495,6 +501,7 @@ def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
         output_contract=output_contract,
         output_classification_override=output_classification_override,
         retrieval_policy=retrieval_policy,
+        deliverable=deliverable,
     )
 
 
@@ -740,6 +747,7 @@ def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeSt
                 assistant_snapshot=optional_fields.assistant_snapshot,
                 review_policy=review_policy,
                 retrieval_policy=output_fields.retrieval_policy,
+                deliverable=output_fields.deliverable,
                 timeout_seconds=optional_fields.timeout_seconds,
             )
         )

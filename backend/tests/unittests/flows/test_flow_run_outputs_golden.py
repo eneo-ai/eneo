@@ -44,7 +44,7 @@ from eneo.flows.domain.flow import (
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowStepAttemptStatus, FlowStepResultStatus
 from eneo.flows.flow_review_policy import dump_flow_step_review_policy
-from eneo.flows.flow_run_contract_service import build_final_output_contract
+from eneo.flows.flow_run_contract_service import build_run_output_contract
 from eneo.flows.flow_run_provenance import parse_resolved_input_edges
 from eneo.flows.flow_run_step_result_file import (
     FlowRunStepResultFile,
@@ -462,7 +462,9 @@ FROZEN_RETRIED_EVIDENCE_CONTENT_HASHES: dict[str, str] = {
 # --- Building the run ----------------------------------------------------
 
 
-def _definition() -> tuple[str, FlowVersion, tuple[RuntimeStep, ...]]:
+def _definition(
+    deliverables: dict[int, FlowPersistedJsonObject] | None = None,
+) -> tuple[str, FlowVersion, tuple[RuntimeStep, ...]]:
     envelope = read_flow_package(_FIXTURE.read_bytes())
     changeset = compile_flow_draft_changeset(normalize_flow_package_spec(envelope.spec))
     steps: list[FlowPersistedJsonObject] = []
@@ -483,7 +485,14 @@ def _definition() -> tuple[str, FlowVersion, tuple[RuntimeStep, ...]]:
                 "output_mode": step.output_mode.value,
                 "output_type": step.output_type,
                 "output_contract": step.output_contract,
-                "output_config": step.output_config,
+                "output_config": (
+                    {
+                        **(step.output_config or {}),
+                        "deliverable": deliverables[step.step_order],
+                    }
+                    if deliverables and step.step_order in deliverables
+                    else step.output_config
+                ),
                 "review_policy": dump_flow_step_review_policy(step.review_policy),
             }
         )
@@ -707,9 +716,9 @@ def _current_attempt_files(
 
 
 def _contract(steps: tuple[RuntimeStep, ...]) -> dict[str, Any]:
-    contract = build_final_output_contract(steps)
-    assert contract is not None
-    return contract.model_dump(mode="json")
+    outputs = build_run_output_contract(steps)
+    assert outputs is not None
+    return outputs.final_output.model_dump(mode="json")
 
 
 def _run_public(
@@ -722,7 +731,7 @@ def _run_public(
         .to_run_public(
             _completed_run(),
             result_files=_result_files(steps) if result_files is None else result_files,
-            final_output=build_final_output_contract(steps),
+            outputs=build_run_output_contract(steps),
         )
         .model_dump(mode="json")
     )
@@ -857,3 +866,100 @@ def test_a_retried_last_step_returns_and_exports_only_its_current_document() -> 
         "raw": raw["manifest"]["content_hash"],
         "redacted": redacted["manifest"]["content_hash"],
     } == FROZEN_RETRIED_EVIDENCE_CONTENT_HASHES
+
+
+# --- Deliverables beside the frozen values -------------------------------
+
+
+def _deliverables(
+    items: list[dict[str, Any]],
+) -> list[tuple[int, str | None, list[str]]]:
+    return [
+        (item["step_order"], item["label"], [file["name"] for file in item["files"]])
+        for item in items
+    ]
+
+
+def test_an_existing_flow_delivers_its_last_pdf_only() -> None:
+    _, _, steps = _definition()
+
+    outputs = build_run_output_contract(steps)
+
+    assert outputs is not None
+    assert [
+        (item.step_order, item.label, item.delivery.value)
+        for item in outputs.deliverables
+    ] == [(17, "17. Skapa PDF av LifeCare-versionen", "artifact")]
+
+
+def test_a_deliverable_lists_only_its_steps_current_document_files() -> None:
+    _, version, steps = _definition({15: {"label": "Brukarversion"}})
+    step_results, step_attempts, files = _retried_history(steps)
+    history = (step_results, step_attempts, files)
+
+    run = _run_public(steps, result_files=_current_attempt_files(step_results, files))
+    raw = _evidence_export(version, steps, redacted=False, history=history)
+    redacted = _evidence_export(version, steps, redacted=True, history=history)
+
+    expected = [
+        (15, "Brukarversion", ["brukarversion.pdf"]),
+        (17, "17. Skapa PDF av LifeCare-versionen", ["lifecare.pdf"]),
+    ]
+    assert _deliverables(run["deliverables"]) == expected
+    assert _deliverables(raw["summary"]["deliverables"]) == expected
+    assert _deliverables(redacted["summary"]["deliverables"]) == expected
+    # The result keeps every current file of the last step; a deliverable
+    # keeps its documents only.
+    assert [file["name"] for file in run["result"]["files"]] == [
+        "lifecare.pdf",
+        "lifecare.txt",
+    ]
+    assert run["deliverables"][1]["files"][0]["availability"] == "available"
+
+
+def test_deliverables_stay_out_of_the_hashed_evidence_bundle() -> None:
+    _, version, steps = _definition()
+    history = _retried_history(steps)
+
+    raw = _evidence_export(version, steps, redacted=False, history=history)
+    redacted = _evidence_export(version, steps, redacted=True, history=history)
+
+    assert _deliverables(raw["summary"]["deliverables"]) == [
+        (17, "17. Skapa PDF av LifeCare-versionen", ["lifecare.pdf"])
+    ]
+    assert {
+        "raw": raw["manifest"]["content_hash"],
+        "redacted": redacted["manifest"]["content_hash"],
+    } == FROZEN_RETRIED_EVIDENCE_CONTENT_HASHES
+
+
+def test_a_run_that_has_not_completed_delivers_nothing() -> None:
+    _, version, steps = _definition()
+    running = _completed_run().model_copy(
+        update={"status": FlowRunStatus.RUNNING, "output_payload_json": None}
+    )
+
+    run = FlowAssembler().to_run_public(
+        running,
+        result_files=_result_files(steps),
+        outputs=build_run_output_contract(steps),
+    )
+    bundle = build_evidence_bundle(
+        run=running,
+        version=version,
+        step_results=[],
+        step_attempts=[],
+        resolved_input_edges_by_attempt_id={},
+        result_files=_result_files(steps),
+    )
+    exported = render_evidence_json_export(
+        bundle=bundle,
+        context=EvidenceExportContext(
+            detail_mode="raw",
+            export_reason="regulatory_audit",
+            actor=EvidenceExportUserActor(type="user", user_id=_USER_ID),
+        ),
+    )
+
+    assert run.deliverables == []
+    assert exported["summary"]["deliverables"] == []

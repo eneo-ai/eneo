@@ -4737,3 +4737,35 @@ async def test_a_step_timeout_within_the_maximum_saves(user):
     await _write_new_steps(service, flow_repo, [step])
 
     flow_repo.update.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output_mode", "output_type", "kept"),
+    [
+        ("render_verbatim", "pdf", True),
+        ("compose_text", "text", False),
+        ("pass_through", "json", False),
+    ],
+)
+async def test_update_flow_keeps_a_deliverable_only_on_a_document_step(
+    user, output_mode, output_type, kept
+):
+    repo = AsyncMock()
+    service = _service(user=user, flow_repo=repo, version_repo=AsyncMock())
+    deliverable = {"label": "Plan", "file_name": "Plan"}
+    step = _step().model_copy(
+        update={
+            "output_mode": output_mode,
+            "output_type": output_type,
+            "output_config": {"deliverable": deliverable, "extension": "kept"},
+        }
+    )
+
+    updated = await _write_new_steps(service, repo, [step])
+
+    assert updated.steps[0].output_config == (
+        {"deliverable": deliverable, "extension": "kept"}
+        if kept
+        else {"extension": "kept"}
+    )

@@ -31,7 +31,11 @@ from eneo.files.file_models import (
     SignedURLRequest,
 )
 from eneo.flows.api import flow_access_context as flow_access_context_module
-from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.api.flow_run_contract_models import (
+    FlowDeliverableContractPublic,
+    FlowFinalOutputContractPublic,
+    FlowRunOutputContract,
+)
 from eneo.flows.api.flow_run_evidence_router import (
     export_flow_run_evidence,
     get_flow_run_evidence,
@@ -71,6 +75,10 @@ from tests.unittests.flows.test_flow_router import (
     _result_file,
     _run,
 )
+
+
+def _outputs(final_output: FlowFinalOutputContractPublic) -> FlowRunOutputContract:
+    return FlowRunOutputContract(final_output=final_output, deliverables=())
 
 
 class FlowErrorResponse(TypedDict):
@@ -264,8 +272,9 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=evidence["run"],
-        final_output=None,
+        outputs=None,
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -466,8 +475,9 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=redacted_run,
-        final_output=None,
+        outputs=None,
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -558,14 +568,17 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
     evidence_service.get_run.return_value = run
     evidence_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=evidence["run"],
-        final_output=FlowFinalOutputContractPublic(
-            step_id=final_step_id,
-            step_order=1,
-            output_type=FlowOutputType.PDF,
-            output_mode=FlowOutputMode.RENDER_VERBATIM,
-            delivery=FlowOutputDelivery.ARTIFACT,
+        outputs=_outputs(
+            FlowFinalOutputContractPublic(
+                step_id=final_step_id,
+                step_order=1,
+                output_type=FlowOutputType.PDF,
+                output_mode=FlowOutputMode.RENDER_VERBATIM,
+                delivery=FlowOutputDelivery.ARTIFACT,
+            )
         ),
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = evidence_service
@@ -596,6 +609,129 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         "kind": "artifact",
         "files": [artifact_payload],
     }
+
+
+async def test_get_flow_run_evidence_lists_deliverables_of_the_current_attempt(
+    monkeypatch,
+):
+    container = MagicMock()
+    _stub_run_starters(container)
+    flow_id = uuid4()
+    run = _run(flow_id=flow_id, tenant_id=uuid4())
+    final_step_id = uuid4()
+    artifact_file = _result_file(run=run).model_copy(
+        update={"step_id": final_step_id, "attempt_no": 2, "name": "plan.pdf"}
+    )
+    earlier_file = artifact_file.model_copy(
+        update={"attempt_no": 1, "file_id": uuid4(), "name": "first-try.pdf"}
+    )
+    text_file = artifact_file.model_copy(
+        update={
+            "file_id": uuid4(),
+            "ordinal": 1,
+            "source": "generated_output",
+            "name": "plan.txt",
+        }
+    )
+    artifact_payload = artifact_file.model_dump(mode="json")
+    evidence = {
+        "run": run.model_dump(mode="json"),
+        "definition_integrity": {
+            "status": "verified",
+            "expected_checksum": "abc",
+            "current_checksum": "abc",
+        },
+        "definition_snapshot": {"steps": []},
+        "step_results": [],
+        "step_attempts": [],
+        "result_files": [
+            earlier_file.model_dump(mode="json"),
+            artifact_payload,
+            text_file.model_dump(mode="json"),
+        ],
+        "review_checkpoints": [],
+        "webhook_deliveries": [],
+        "provider_calls": _empty_provider_calls(),
+        "debug_export": {
+            "schema_version": "eneo.flow.debug-export.v3",
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {
+                "run_id": str(run.id),
+                "flow_id": str(run.flow_id),
+                "flow_version": run.flow_version,
+                "status": run.status.value,
+            },
+            "definition": {
+                "flow_id": str(run.flow_id),
+                "version": 1,
+                "checksum": "abc",
+                "steps_count": 0,
+            },
+            "steps": [],
+            "security": {
+                "content_included": False,
+                "redaction_applied": True,
+                "classification_field": "output_classification_override",
+            },
+        },
+    }
+    evidence_service = AsyncMock()
+    evidence_service.get_run.return_value = run
+    evidence_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
+        run=evidence["run"],
+        outputs=FlowRunOutputContract(
+            final_output=FlowFinalOutputContractPublic(
+                step_id=final_step_id,
+                step_order=1,
+                output_type=FlowOutputType.PDF,
+                output_mode=FlowOutputMode.RENDER_VERBATIM,
+                delivery=FlowOutputDelivery.ARTIFACT,
+            ),
+            deliverables=(
+                FlowDeliverableContractPublic(
+                    step_id=final_step_id,
+                    step_order=1,
+                    label="Plan",
+                    output_type=FlowOutputType.PDF,
+                    output_mode=FlowOutputMode.RENDER_VERBATIM,
+                    delivery=FlowOutputDelivery.ARTIFACT,
+                ),
+            ),
+        ),
+        result_files=evidence["result_files"],
+        step_results=[
+            {"id": str(artifact_file.step_result_id), "current_attempt_no": 2}
+        ],
+        to_dict=lambda: evidence,
+    )
+    container.flow_run_evidence_service.return_value = evidence_service
+    container.audit_service.return_value = AsyncMock()
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_service.return_value = flow_service
+
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    _enable_space_access(
+        container,
+        user_permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+    response = await get_flow_run_evidence(
+        id=flow_id,
+        run_id=run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert [
+        (item.label, [result_file.name for result_file in item.files])
+        for item in response.run.deliverables
+    ] == [("Plan", ["plan.pdf"])]
+    assert response.run.deliverables[0].kind == "artifact"
 
 
 @pytest.mark.asyncio
@@ -671,8 +807,9 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=evidence["run"],
-        final_output=None,
+        outputs=None,
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -801,8 +938,9 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=evidence["run"],
-        final_output=None,
+        outputs=None,
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -955,8 +1093,9 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
     run_service.get_run.return_value = run
     run_service.get_redacted_evidence_bundle.return_value = SimpleNamespace(
         run=evidence["run"],
-        final_output=None,
+        outputs=None,
         result_files=evidence["result_files"],
+        step_results=evidence.get("step_results", []),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service

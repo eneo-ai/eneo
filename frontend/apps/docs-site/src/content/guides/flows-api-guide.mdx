@@ -1634,6 +1634,14 @@ not one this version recognises, so which earlier steps it read is unknown. An
 empty list still means the step read no earlier step. `input_source` keeps the
 recorded value, and a step with no recorded source ran as `flow_input`.
 
+`summary.deliverables` lists the documents the run delivered, as the run's
+`deliverables` does: each with its `step_order`, `label` and the `file_id`,
+`name` and `availability` of its current-attempt files. It sits in the
+summary, outside the hashed `bundle`, so it leaves the content hash and the
+schema version unchanged. In a redacted export its labels and names pass
+through the same credential masking as the bundle. It is empty until the run
+completes.
+
 Version 17 separates diagnostic metadata from content-bearing evidence. The nested
 `debug_export` uses `eneo.flow.debug-export.v3` and excludes prompts, inputs,
 outputs, free-form errors, definitions and source text. It retains identifiers,

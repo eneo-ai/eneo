@@ -842,7 +842,7 @@ async def get_flow_run(
                 result_files=run_view.result_files,
                 token_usage=run_view.token_usage,
                 transcription_usage=run_view.transcription_usage,
-                final_output=run_view.final_output,
+                outputs=run_view.outputs,
                 webhook_deliveries=run_view.webhook_deliveries,
                 started_by=await started_by_for_run(container, run_view.run),
                 evidence_access=await run_service.evidence_access(

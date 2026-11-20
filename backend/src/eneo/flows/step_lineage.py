@@ -11,6 +11,10 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_participants_field,
     speaker_mapping_speaker_count_field,
 )
+from eneo.flows.domain.step_deliverable import (
+    DELIVERABLE_FILE_NAME_READ_SITE,
+    deliverable_file_name_fields,
+)
 from eneo.flows.domain.tool_input import tool_reference_sites
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
@@ -479,6 +483,11 @@ def step_form_field_reads(
                 text,
                 ".".join((column, *(str(segment) for segment in path))),
             )
+    reads.extend(
+        FormFieldRead("config", name, DELIVERABLE_FILE_NAME_READ_SITE)
+        for name in deliverable_file_name_fields(output_config)
+        if name in fields
+    )
     if mode is FlowOutputMode.SPEAKER_MAPPING:
         # Speaker mapping reads the participant list and the speaker count
         # from the form fields its configuration names, not from a template.
