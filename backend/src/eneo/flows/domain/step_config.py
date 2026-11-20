@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.step_deliverable import FLOW_STEP_DELIVERABLE_KEY
 from eneo.flows.domain.tool_input import TOOL_INPUT_CONFIG_KEY
+from eneo.flows.enums import step_delivers_artifact
 from eneo.flows.http_transport.authored_config import HTTP_CONFIG_KEYS
 
 _TEMPLATE_CONFIG_KEYS = frozenset(
@@ -28,6 +30,10 @@ def clean_inactive_step_config(step: FlowStep) -> FlowStep:
     )
     if step.output_mode != "template_fill":
         output_keys = output_keys | _TEMPLATE_CONFIG_KEYS
+    if not step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        output_keys = output_keys | {FLOW_STEP_DELIVERABLE_KEY}
     return step.model_copy(
         deep=True,
         update={

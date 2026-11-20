@@ -866,6 +866,60 @@ Response:
 }
 ```
 
+#### Several documents from one run
+
+A flow can deliver more than one document. The flow author marks each Word or
+PDF step whose document the run returns, and gives it a label. The last step
+counts as a deliverable whenever its output is a document. The run contract
+lists them in `deliverables` before the run starts, and a completed run lists
+them, in step order, in `deliverables`:
+
+```json
+{
+  "deliverables": [
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "step_order": 2,
+      "label": "Summary",
+      "output_type": "pdf",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000701",
+          "name": "Summary Alex Example 2026-03-17.pdf"
+        }
+      ]
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000104",
+      "step_order": 3,
+      "label": "Report",
+      "output_type": "docx",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000702",
+          "name": "Report Alex Example 2026-03-17.docx"
+        }
+      ]
+    }
+  ]
+}
+```
+
+Each `files` entry has the same fields as `result_files`; the example shortens
+them. Fetch each one with its `file_id` as in step 11.
+
+- `deliverables` is empty until the run completes, and empty for a flow that
+  delivers no document.
+- `deliverables[].files` holds only the step's documents from its current
+  attempt. `result.files` keeps every current file of the last step, which can
+  include a text file beside the document.
+- A marked step whose document is missing is listed with `files: []`. A
+  missing document on the last step still fails the result, as before.
+- `result` and `result_files` are unchanged, so a client that reads only the
+  last document keeps working.
+
 ### 10. List and filter step output
 
 There is no single-step GET for run steps. Call the list endpoint and filter the list by `step_id` for the final DOCX step.

@@ -49,6 +49,10 @@ from eneo.flows.assistant_authoring_snapshot import (
 from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
 from eneo.flows.domain.step_config import clean_inactive_step_config
+from eneo.flows.domain.step_deliverable import (
+    FLOW_STEP_DELIVERABLE_KEY,
+    parse_flow_step_deliverable,
+)
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -484,6 +488,7 @@ def _portable_template_config(
         "template_checksum",
         "placeholders",
         "bindings",
+        FLOW_STEP_DELIVERABLE_KEY,
     }:
         raise _step_config_not_portable(
             step_order=step.step_order, config_field="output_config"
@@ -520,11 +525,30 @@ def _portable_template_config(
     assert binding is not None
     _record_requirement(requirement_drafts, binding, usage)
     requirement_drafts[slot_ref.ref].template = template.descriptor
-    return {
+    portable: FlowPersistedJsonObject = {
         "template_ref": slot_ref.ref,
         "placeholders": names,
         "bindings": config.get("bindings"),
     }
+    deliverable = _portable_deliverable(step)
+    if deliverable is not None:
+        portable[FLOW_STEP_DELIVERABLE_KEY] = deliverable
+    return portable
+
+
+def _portable_deliverable(step: FlowStep) -> FlowPersistedJsonObject | None:
+    """The step's deliverable as a package carries it: without the keys it
+    leaves out, so a package without a file name holds no null. Export runs
+    after the cleanup that drops it from a step without a document."""
+    try:
+        deliverable = parse_flow_step_deliverable(step.output_config)
+    except ValueError as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order, config_field="output_config"
+        ) from exc
+    if deliverable is None:
+        return None
+    return deliverable.model_dump(mode="json", exclude_none=True)
 
 
 def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
@@ -605,6 +629,8 @@ def _portable_output_config(step: FlowStep) -> FlowPersistedJsonObject | None:
     portable: FlowPersistedJsonObject = {}
     if parsed.retrieval_policy is not None:
         portable["retrieval_policy"] = parsed.retrieval_policy.model_dump(mode="json")
+    if parsed.deliverable is not None:
+        portable[FLOW_STEP_DELIVERABLE_KEY] = _portable_deliverable(step)
     if (
         parsed.speaker_mapping is not None
         and step.output_mode is FlowOutputMode.SPEAKER_MAPPING
@@ -884,12 +910,25 @@ def _step_spec_template_strings(
         step_spec.assistant_spec.instructions,
         runtime_variables_for_step(step_spec.input_config),
     )
+    output_config = step_spec.output_config or {}
+    deliverable = output_config.get(FLOW_STEP_DELIVERABLE_KEY)
+    file_name = (
+        cast(dict[str, object], deliverable).get("file_name")
+        if isinstance(deliverable, dict)
+        else None
+    )
     for payload in (
         step_spec.input_bindings,
         step_spec.input_contract,
         step_spec.output_contract,
         step_spec.input_config,
-        step_spec.output_config,
+        # A deliverable's label is literal text; only its file name reads.
+        {
+            key: value
+            for key, value in output_config.items()
+            if key != FLOW_STEP_DELIVERABLE_KEY
+        },
+        file_name,
     ):
         for template in _string_leaves(payload):
             yield template, RESERVED_RUNTIME_VARIABLES

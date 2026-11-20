@@ -4098,6 +4098,7 @@ def test_openapi_flow_evidence_export_documents_single_typed_summary(
         "citations",
         "review_checkpoints",
         "final_output",
+        "deliverables",
         "step_overview",
     }
 

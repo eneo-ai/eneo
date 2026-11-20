@@ -11,6 +11,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
 )
 from eneo.flows.enums import FlowRunReviewCheckpointState
 from eneo.flows.flow_run_provenance import PayloadPreview
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFileAvailability
 from eneo.json_types import JsonObject, JsonValue
 
 EvidenceOutputKind: TypeAlias = Literal[
@@ -95,6 +96,24 @@ class EvidenceFinalOutputSummary(BaseModel):
     artifact_count: int
     artifact_names: list[str]
     artifact_details: list[EvidenceArtifactManifestItem]
+
+
+class EvidenceDeliverableFileSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str
+    name: str
+    availability: FlowRunStepResultFileAvailability
+
+
+class EvidenceDeliverableSummary(BaseModel):
+    """A document the run delivered, as the run's ``deliverables`` lists it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    step_order: int
+    label: str | None
+    files: list[EvidenceDeliverableFileSummary]
 
 
 class EvidenceStepReviewEvent(BaseModel):
@@ -195,6 +214,14 @@ class EvidenceExportSummary(BaseModel):
     citations: JsonObject
     review_checkpoints: EvidenceReviewCheckpointSummary
     final_output: EvidenceFinalOutputSummary
+    deliverables: list[EvidenceDeliverableSummary] = Field(
+        default_factory=lambda: list[EvidenceDeliverableSummary](),
+        description=(
+            "Documents the run delivered, in step order, with each step's "
+            "current document files. Empty until the run has completed. Kept "
+            "out of the hashed bundle."
+        ),
+    )
     step_overview: list[EvidenceStepOverview]
 
 

@@ -16,6 +16,7 @@ from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from eneo.flows.enums import FlowOutputType, final_step_output_type
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -24,7 +25,7 @@ from eneo.flows.flow_metadata import FlowFormFieldType
 from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
 from eneo.flows.flow_run_contract_service import (
     FlowRunContractService,
-    build_final_output_contract,
+    build_run_output_contract,
     max_speakers_option,
     settle_max_speakers,
     speaker_labels_option,
@@ -701,6 +702,8 @@ async def test_get_run_contract_returns_published_inputs_final_output_and_templa
     assert contract.final_output.output_type == "docx"
     assert contract.final_output.output_mode == "template_fill"
     assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
+    assert [item.step_id for item in contract.deliverables] == [template_step.id]
+    assert contract.deliverables[0].delivery == FlowOutputDelivery.ARTIFACT
     assert contract.aggregate_max_files == 2
     assert contract.form_fields[0].name == "published_field"
     assert contract.form_fields[0].type is FlowFormFieldType.TEXT
@@ -1344,10 +1347,8 @@ def test_final_step_output_type_returns_the_last_steps_type_in_step_order() -> N
     assert final_step_output_type(["text", "json", "pdf"]) == FlowOutputType.PDF
 
 
-def test_build_final_output_contract_output_type_matches_final_step_output_type() -> (
-    None
-):
-    """`build_final_output_contract`'s `output_type` must be the literal
+def test_build_run_output_contract_output_type_matches_final_step_output_type() -> None:
+    """`build_run_output_contract`'s final `output_type` must be the literal
     result of `final_step_output_type`, not a separate computation over the
     same steps — proving there is exactly one output-type derivation to
     import, rather than that two independent computations happen to agree.
@@ -1360,15 +1361,124 @@ def test_build_final_output_contract_output_type_matches_final_step_output_type(
     derived = final_step_output_type([step.output_type for step in steps])
     assert derived == FlowOutputType.DOCX
 
-    contract = build_final_output_contract(steps)
+    outputs = build_run_output_contract(steps)
 
-    assert contract is not None
-    assert contract.output_type == derived
+    assert outputs is not None
+    assert outputs.final_output.output_type == derived
 
 
-def test_build_final_output_contract_returns_none_for_no_steps() -> None:
-    assert build_final_output_contract([]) is None
+def test_build_run_output_contract_returns_none_for_no_steps() -> None:
+    assert build_run_output_contract([]) is None
     assert final_step_output_type([]) is None
+
+
+def _output_step(
+    step_order: int,
+    output_mode: str,
+    output_type: str,
+    *,
+    name: str | None = None,
+    deliverable: FlowStepDeliverable | None = None,
+) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=UUID(int=step_order),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        user_description=name,
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode=output_mode,
+        output_config=None,
+        output_type=output_type,
+        deliverable=deliverable,
+    )
+
+
+def _deliverables(steps: list[RuntimeStep]) -> list[tuple[int, str | None]]:
+    outputs = build_run_output_contract(steps)
+    assert outputs is not None
+    for deliverable in outputs.deliverables:
+        assert deliverable.delivery is FlowOutputDelivery.ARTIFACT
+    return [(item.step_order, item.label) for item in outputs.deliverables]
+
+
+def test_a_text_flow_delivers_no_document() -> None:
+    steps = [_output_step(1, "compose_text", "text", name="Skriv")]
+
+    assert _deliverables(steps) == []
+
+
+def test_a_flow_whose_last_step_is_a_document_delivers_it() -> None:
+    steps = [
+        _output_step(1, "compose_text", "text"),
+        _output_step(2, "render_verbatim", "pdf", name="Skapa PDF"),
+    ]
+
+    outputs = build_run_output_contract(steps)
+
+    assert outputs is not None
+    assert [item.model_dump(mode="json") for item in outputs.deliverables] == [
+        {
+            "step_id": str(UUID(int=2)),
+            "step_order": 2,
+            "label": "Skapa PDF",
+            "output_type": "pdf",
+            "output_mode": "render_verbatim",
+            "delivery": "artifact",
+        }
+    ]
+    assert outputs.final_output.step_order == 2
+
+
+def test_two_marked_documents_are_delivered_in_step_order() -> None:
+    steps = [
+        _output_step(
+            1,
+            "template_fill",
+            "docx",
+            deliverable=FlowStepDeliverable(label="Standup Eneo"),
+        ),
+        _output_step(
+            2,
+            "template_fill",
+            "docx",
+            name="Startsidan",
+            deliverable=FlowStepDeliverable(label="Standup Startsidan"),
+        ),
+    ]
+
+    assert _deliverables(steps) == [(1, "Standup Eneo"), (2, "Standup Startsidan")]
+
+
+def test_an_earlier_document_is_delivered_when_the_last_step_is_text() -> None:
+    steps = [
+        _output_step(
+            1, "render_verbatim", "pdf", deliverable=FlowStepDeliverable(label="Plan")
+        ),
+        _output_step(2, "render_verbatim", "pdf", name="Utkast"),
+        _output_step(3, "compose_text", "text", name="Sammanfattning"),
+    ]
+
+    outputs = build_run_output_contract(steps)
+
+    assert _deliverables(steps) == [(1, "Plan")]
+    assert outputs is not None
+    assert outputs.final_output.step_order == 3
+    assert outputs.final_output.delivery is FlowOutputDelivery.PAYLOAD
+
+
+def test_a_marked_step_without_a_document_is_never_delivered() -> None:
+    steps = [
+        _output_step(
+            1, "compose_text", "text", deliverable=FlowStepDeliverable(label="Text")
+        ),
+        _output_step(
+            2, "http_post", "docx", deliverable=FlowStepDeliverable(label="Posted")
+        ),
+    ]
+
+    assert _deliverables(steps) == []
 
 
 @pytest.mark.parametrize(

@@ -152,3 +152,71 @@ def test_cleaned_active_or_unknown_config_keeps_export_refusal(config_kind):
             ),
         )
     assert exc.value.code == expected
+
+
+_DELIVERABLE = {"label": "Standup Eneo", "file_name": "Standup"}
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [
+        ("compose_text", "text"),
+        ("pass_through", "json"),
+        ("http_post", "docx"),
+    ],
+)
+def test_cleanup_drops_deliverable_from_a_step_that_delivers_no_artifact(
+    output_mode, output_type
+):
+    step = FlowStep(
+        assistant_id=uuid4(),
+        step_order=1,
+        input_source="flow_input",
+        input_type="text",
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config={"deliverable": _DELIVERABLE, "citation_mode": "off"},
+    )
+
+    cleaned = clean_inactive_step_config(step)
+
+    assert cleaned.output_config == {"citation_mode": "off"}
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [
+        ("render_verbatim", "pdf"),
+        ("template_fill", "docx"),
+        ("pass_through", "docx"),
+    ],
+)
+def test_cleanup_keeps_deliverable_on_a_step_that_delivers_an_artifact(
+    output_mode, output_type
+):
+    step = FlowStep(
+        assistant_id=uuid4(),
+        step_order=1,
+        input_source="flow_input",
+        input_type="json" if output_mode == "pass_through" else "text",
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config={"deliverable": _DELIVERABLE},
+    )
+
+    assert clean_inactive_step_config(step).output_config == {
+        "deliverable": _DELIVERABLE
+    }
+
+
+def test_a_stored_step_refuses_a_malformed_deliverable():
+    with pytest.raises(ValueError, match="output_config.deliverable"):
+        FlowStep(
+            assistant_id=uuid4(),
+            step_order=1,
+            input_source="flow_input",
+            input_type="text",
+            output_mode="render_verbatim",
+            output_type="pdf",
+            output_config={"deliverable": {"label": "Two\nlines"}},
+        )

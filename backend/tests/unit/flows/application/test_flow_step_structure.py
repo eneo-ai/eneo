@@ -420,3 +420,59 @@ def test_two_fields_may_swap_names():
 
     assert change.removed == frozenset()
     assert _question(structure.steps[0]) == "{{ b }} {{ flow_input.a }}"
+
+
+def _document(**deliverable: str) -> FlowStep:
+    return _step(
+        1,
+        output_mode="render_verbatim",
+        output_type="pdf",
+        output_config={"deliverable": deliverable},
+    )
+
+
+def test_a_deliverable_file_name_follows_a_renamed_form_field_and_its_label_stays():
+    step = _document(
+        label="{{ flow_input.kommun }}", file_name="Plan {{ flow_input.kommun }}"
+    )
+    change = form_field_change(
+        saved_metadata=_form("kommun"),
+        metadata=_form("ort"),
+        renames={"kommun": "ort"},
+    )
+
+    structure = restructure_steps(_kept(step), prompts={}, form_fields=change)
+
+    assert structure.steps[0].output_config == {
+        "deliverable": {
+            "label": "{{ flow_input.kommun }}",
+            "file_name": "Plan {{ flow_input.ort }}",
+        }
+    }
+
+
+def test_removing_a_form_field_a_deliverable_file_name_reads_is_refused():
+    step = _document(label="Plan", file_name="Plan {{ flow_input.kommun }}")
+    change = form_field_change(saved_metadata=_form("kommun"), metadata=_form())
+
+    with pytest.raises(FormFieldStillReadError) as refused:
+        restructure_steps(_kept(step), prompts={}, form_fields=change)
+
+    assert refused.value.code == "flow_form_field_still_read"
+    assert refused.value.context["readers"] == [
+        {
+            "field": "kommun",
+            "step_id": str(step.id),
+            "step_order": 1,
+            "site": "output_config.deliverable.file_name",
+        }
+    ]
+
+
+def test_removing_a_form_field_only_a_deliverable_label_names_is_allowed():
+    step = _document(label="{{ flow_input.kommun }}")
+    change = form_field_change(saved_metadata=_form("kommun"), metadata=_form())
+
+    structure = restructure_steps(_kept(step), prompts={}, form_fields=change)
+
+    assert structure.steps == [step]

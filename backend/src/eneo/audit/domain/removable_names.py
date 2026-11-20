@@ -45,6 +45,9 @@ _CONVERSATION_ACTIONS = frozenset(
     }
 )
 _FILENAME = "filename"
+# The keys a file row's extra names its file by: an upload's, and a flow run's
+# document or input file, whose name a run fills in from its form.
+_EXTRA_FILE_NAMES = frozenset({_FILENAME, "artifact_name", "file_name"})
 
 
 def without_removable_names(
@@ -76,8 +79,10 @@ def _file_row(
     if target is not None:
         row["target"] = {**_without(target, _FILENAME), "name": FILE_TARGET_NAME}
     extra = _object(metadata.get("extra"))
-    if extra is not None and _FILENAME in extra:
-        row["extra"] = _without(extra, _FILENAME)
+    if extra is not None and not _EXTRA_FILE_NAMES.isdisjoint(extra):
+        row["extra"] = {
+            key: value for key, value in extra.items() if key not in _EXTRA_FILE_NAMES
+        }
     return FILE_DESCRIPTIONS[action], row
 
 

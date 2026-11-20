@@ -144,10 +144,15 @@ class FlowStep(BaseModel):
 
     @field_validator("output_config")
     @classmethod
-    def _validate_retrieval_policy(
+    def _validate_output_config(
         cls, value: FlowPersistedJsonObject | None
     ) -> FlowPersistedJsonObject | None:
+        # Imported here: the deliverable reads template expressions, and the
+        # module that owns their pattern loads this one.
+        from eneo.flows.domain.step_deliverable import parse_flow_step_deliverable
+
         parse_flow_step_retrieval_policy(value)
+        parse_flow_step_deliverable(value)
         return value
 
 

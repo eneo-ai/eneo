@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from enum import Enum, StrEnum
@@ -34,6 +35,12 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
 )
+from eneo.flows.domain.step_deliverable import (
+    FLOW_STEP_DELIVERABLE_KEY,
+    file_name_expressions,
+    form_field_read_by,
+    parse_flow_step_deliverable,
+)
 from eneo.flows.domain.step_mapped_execution import (
     FlowStepMappedExecutionConfigurationError,
     resolve_step_mapped_execution,
@@ -53,6 +60,7 @@ from eneo.flows.enums import (
     FlowInputSource,
     FlowRuntimeInputFormat,
     flow_output_mode_uses_completion_model,
+    step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
@@ -69,6 +77,7 @@ from eneo.flows.flow_metadata import (
 )
 from eneo.flows.flow_review_policy import parse_flow_step_review_policy
 from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.flows.flow_run_redaction import is_sensitive_key
 from eneo.flows.flow_validators_form import (
     validate_form_schema,
     validate_variable_alias_collisions,
@@ -405,6 +414,11 @@ def collect_step_graph_issues(
         if form_schema is not None
         else {}
     )
+    run_date_field_names = frozenset(
+        field.name
+        for field in (form_schema.fields if form_schema is not None else ())
+        if field.role == "run_date"
+    )
     run_input = flow_run_input(
         form_fields=bool(form_field_names),
         step_input_configs=[step.input_config for step in sorted_steps],
@@ -731,6 +745,17 @@ def collect_step_graph_issues(
                     publish_strict=require_complete_template_fill_config,
                 ),
             )
+        _capture_flow_step_validation(
+            issues,
+            FlowGraphIssueCode.FLOW_STEP_INVALID,
+            lambda: _validate_deliverable(
+                step,
+                form_field_names=(
+                    form_field_names if require_complete_template_fill_config else None
+                ),
+                run_date_field_names=run_date_field_names,
+            ),
+        )
         if require_complete_template_fill_config:
             _capture_flow_step_validation(
                 issues,
@@ -1017,6 +1042,85 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
             context=exc.context,
             step_order=step.step_order,
         ) from exc
+
+
+_DELIVERABLE_PATH = f"output_config.{FLOW_STEP_DELIVERABLE_KEY}"
+_DELIVERABLE_FILE_NAME_PATH = f"{_DELIVERABLE_PATH}.file_name"
+
+
+def _validate_deliverable(
+    step: FlowStepValidationView,
+    *,
+    form_field_names: AbstractSet[str] | None,
+    run_date_field_names: AbstractSet[str],
+) -> None:
+    """A deliverable sits on a step that delivers a document, and its file
+    name reads only fields of the form that may name a file. The fields are
+    judged when ``form_field_names`` is given, which publishing and importing
+    do; a missing form then has no field to read."""
+
+    def refuse(message: str, *, path: str) -> FlowStepValidationError:
+        return FlowStepValidationError(
+            f"Step {step.step_order}: {path} {message}",
+            step_order=step.step_order,
+            context={"field": path},
+        )
+
+    try:
+        deliverable = parse_flow_step_deliverable(step.output_config)
+    except ValueError as exc:
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: {exc}",
+            step_order=step.step_order,
+            context={"field": _DELIVERABLE_PATH},
+        ) from exc
+    if deliverable is None:
+        return
+    if not step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        raise refuse(
+            "is only for a step whose output is a document a client downloads "
+            "(DOCX or PDF, not posted elsewhere). Remove it, or change the "
+            "step's output to a document.",
+            path=_DELIVERABLE_PATH,
+        )
+    if deliverable.file_name is None or form_field_names is None:
+        return
+    expressions = file_name_expressions(deliverable.file_name)
+    if expressions is None:
+        raise refuse(
+            "has an unmatched `{{` or `}}`. Close the expression or remove the brace.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
+    for expression in expressions:
+        field = form_field_read_by(expression)
+        if field is None:
+            raise refuse(
+                f"can read only a form field, as `{{{{ flow_input.<field> }}}}`; "
+                f"`{{{{ {expression} }}}}` is not one. Use a field of the "
+                "flow's form or fixed text.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if field not in form_field_names:
+            raise refuse(
+                f"reads `{field}`, which is not a field of the form. Add the "
+                "field to the form or remove it from the file name.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if field in run_date_field_names:
+            raise refuse(
+                f"reads `{field}`, the field that holds the run's date, and the "
+                "run's day is already added to every file name. Remove it from "
+                "the file name.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
+        if is_sensitive_key(field):
+            raise refuse(
+                f"reads `{field}`, whose name marks it as sensitive, and a file "
+                "name stays visible in lists and downloads. Use another field.",
+                path=_DELIVERABLE_FILE_NAME_PATH,
+            )
 
 
 def _validate_retrieval_policy(step: FlowStepValidationView) -> None:

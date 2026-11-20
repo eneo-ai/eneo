@@ -26,6 +26,11 @@ from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.step_deliverable import (
+    DELIVERABLE_FILE_NAME_READ_SITE,
+    FLOW_STEP_DELIVERABLE_KEY,
+    form_field_read_by,
+)
 from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_variable_rewriting import (
@@ -268,6 +273,10 @@ def restructure_steps(
                 updates[column] = follow.config(
                     getattr(item.step, column), _channel(column, saved)
                 )
+        if "output_config" not in written:
+            updates["output_config"] = follow.deliverable_file_name(
+                updates["output_config"]
+            )
         untouched = item.step is saved and all(
             getattr(saved, column) == value for column, value in updates.items()
         )
@@ -591,6 +600,42 @@ class _Follower:
             readable=lambda name: (name or "").strip() or None,
         )
         return payload if written == step_ref else {**payload, "step_ref": written}
+
+    def deliverable_file_name(self, config: Any) -> Any:
+        """``config`` with its deliverable's file name reading a renamed form
+        field by its new name; a read of a field the change removes is
+        recorded. Only `flow_input.<field>` names a field there, and the
+        label is literal text."""
+        change = self._change
+        if not change.form_fields.changes_reads or not isinstance(config, dict):
+            return cast(object, config)
+        output_config = cast(dict[str, Any], config)
+        deliverable = output_config.get(FLOW_STEP_DELIVERABLE_KEY)
+        if not isinstance(deliverable, dict):
+            return output_config
+        file_name = cast(dict[str, Any], deliverable).get("file_name")
+        if not isinstance(file_name, str):
+            return output_config
+
+        def rewrite(expression: str) -> str | None:
+            field = form_field_read_by(expression)
+            if field is None or field not in change.form_fields.saved:
+                return None
+            renamed = change.follow_field(
+                field, reader=self._reader, site=DELIVERABLE_FILE_NAME_READ_SITE
+            )
+            return None if renamed is None else f"flow_input.{renamed}"
+
+        followed = rewrite_template_expressions(file_name, rewrite)
+        if followed == file_name:
+            return output_config
+        return {
+            **output_config,
+            FLOW_STEP_DELIVERABLE_KEY: {
+                **cast(dict[str, Any], deliverable),
+                "file_name": followed,
+            },
+        }
 
     def config(self, config: Any, channel: ConfigChannel | None) -> Any:
         if channel is None or channel.sites is None:

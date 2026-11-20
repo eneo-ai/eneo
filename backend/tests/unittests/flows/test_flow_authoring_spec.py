@@ -268,3 +268,40 @@ def _has_local_ref_not_portable_error(exc: ValidationError) -> bool:
         if isinstance(context.get("error"), AssistantSpecLocalRefNotPortableError):
             return True
     return False
+
+
+def test_step_spec_carries_a_deliverable_in_output_config() -> None:
+    step = _step(output_config={"deliverable": {"label": "Standup Eneo"}})
+
+    assert step.output_config == {"deliverable": {"label": "Standup Eneo"}}
+
+
+def test_step_spec_rejects_a_malformed_deliverable() -> None:
+    with pytest.raises(ValidationError, match="output_config.deliverable"):
+        _step(output_config={"deliverable": {"label": "Standup", "extra": 1}})
+
+
+def test_compiling_a_step_leaves_its_deliverable_as_written() -> None:
+    from eneo.flows.flow_authoring_variable_rewriting import (
+        rewrite_step_spec_variables,
+    )
+
+    step = _step(
+        output_config={
+            "deliverable": {
+                "label": "{{ collect_input }}",
+                "file_name": "{{ flow_input.Team }}",
+            },
+            "url_note": "{{ collect_input }}",
+        }
+    )
+
+    rewritten = rewrite_step_spec_variables(step, {"collect_input": 1})
+
+    assert rewritten.output_config == {
+        "deliverable": {
+            "label": "{{ collect_input }}",
+            "file_name": "{{ flow_input.Team }}",
+        },
+        "url_note": "{{ step_1 }}",
+    }

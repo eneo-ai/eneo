@@ -53,6 +53,7 @@ from eneo.flows.api.flow_models import (
     FlowRunStartedByPublic,
 )
 from eneo.flows.api.flow_run_contract_models import FlowCitationSummaryPublic
+from eneo.flows.api.flow_run_response import read_run_public
 from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_REVIEW_ACTIVE_PATH,
@@ -1290,14 +1291,7 @@ def _continuation_response(
     assembler = FlowAssembler()
     view = parts.completed_run_view
     public_run = (
-        assembler.to_run_public(
-            view.run,
-            result_files=view.result_files,
-            token_usage=view.token_usage,
-            transcription_usage=view.transcription_usage,
-            final_output=view.final_output,
-            started_by=parts.started_by,
-        )
+        read_run_public(view, started_by=parts.started_by)
         if view is not None
         else assembler.to_run_public(parts.run, started_by=parts.started_by)
     )

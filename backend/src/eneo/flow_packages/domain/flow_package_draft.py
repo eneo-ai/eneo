@@ -23,6 +23,7 @@ from eneo.flows.domain.flow import (
     FlowStepRetrievalPolicy,
 )
 from eneo.flows.domain.long_material import LongMaterialMode
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from eneo.flows.domain.text_processing import TextProcessingMode
 from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
 
@@ -88,6 +89,7 @@ class FlowPackageStepOutputConfig(BaseModel):
     citation_mode: Literal["off", "inline_inref_sidecar"] | None = None
     speaker_mapping: FlowPackageSpeakerMappingConfig | None = None
     retrieval_policy: FlowStepRetrievalPolicy | None = None
+    deliverable: FlowStepDeliverable | None = None
     template_ref: StrictStr | None = None
     placeholders: list[StrictStr] | None = None
     bindings: dict[StrictStr, StrictStr] | None = None

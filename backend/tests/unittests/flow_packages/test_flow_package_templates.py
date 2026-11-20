@@ -364,3 +364,107 @@ async def test_template_package_does_not_disable_strict_validation_of_other_step
         )
     assert error.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
     assert error.value.context["reason"] == "flow_input_alias_not_received"
+
+
+@pytest.mark.parametrize(
+    "deliverable",
+    [
+        {"label": "Rapport", "file_name": "Rapport {{ flow_input.name }}"},
+        {"label": "Rapport"},
+    ],
+)
+async def test_a_word_steps_deliverable_goes_through_export_zip_and_import(
+    deliverable: dict[str, str],
+) -> None:
+    from uuid import uuid4
+
+    from eneo.flow_packages.application.flow_package_export_service import (
+        FlowPackageExportTemplate,
+        build_flow_package_export_envelope,
+    )
+    from eneo.flow_packages.domain.flow_package_templates import (
+        FlowPackageTemplateDescriptor,
+    )
+    from tests.unittests.flow_packages.test_flow_package_export_service import (
+        _flow,
+        _manifest_metadata,
+        _provenance,
+        _snapshot,
+        _step,
+    )
+
+    source = _template_envelope()
+    template_bytes = next(iter(source.template_payloads.values()))
+    checksum = hashlib.sha256(template_bytes).hexdigest()
+    asset_id = uuid4()
+    assistant_id = uuid4()
+    flow = _flow(
+        metadata_json={"form_schema": {"fields": [{"name": "name", "type": "text"}]}},
+        steps=[
+            _step(
+                1,
+                assistant_id=assistant_id,
+                output_mode="template_fill",
+                output_type="docx",
+                output_config={
+                    "template_asset_id": str(asset_id),
+                    "template_name": "Rapport.docx",
+                    "template_checksum": checksum,
+                    "placeholders": ["dokument"],
+                    "bindings": {"dokument": "{{ flow_input.name }}"},
+                    "deliverable": deliverable,
+                },
+            )
+        ],
+    )
+
+    envelope = build_flow_package_export_envelope(
+        flow=flow,
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=(),
+        manifest_metadata=_manifest_metadata(),
+        provenance=_provenance(),
+        template_assets={
+            asset_id: FlowPackageExportTemplate(
+                descriptor=FlowPackageTemplateDescriptor(
+                    filename="Rapport.docx",
+                    checksum=checksum,
+                    size_bytes=len(template_bytes),
+                    fields=[{"name": "dokument", "kind": "rich"}],
+                ),
+                content=template_bytes,
+            )
+        },
+    )
+
+    assert envelope.spec.steps[0].output_config["deliverable"] == deliverable
+    imported = read_flow_package(write_flow_package(envelope))
+    assert imported.spec.steps[0].output_config["deliverable"] == deliverable
+    assert imported.content_checksum == envelope.content_checksum
+    plan = await build_flow_package_import_plan(
+        imported, candidates=FlowPackageImportPlannerCandidates()
+    )
+    assert plan is not None
+
+
+async def test_a_package_deliverable_on_a_step_without_a_document_is_refused() -> None:
+    from eneo.flows.flow_authoring_spec import FormFieldSpec
+
+    envelope = _template_envelope(shared=True)
+    envelope.spec.form_fields = [FormFieldSpec(name="name", type="text", label="Name")]
+    step = envelope.spec.steps[1]
+    step.output_mode = OutputMode.PASS_THROUGH
+    step.output_type = OutputType.TEXT
+    step.output_config = {"deliverable": {"label": "Text"}}
+    envelope.spec.steps[0].output_config["bindings"] = {
+        "dokument": "{{ flow_input.name }}"
+    }
+
+    with pytest.raises(FlowPackageValidationError) as error:
+        await build_flow_package_import_plan(
+            envelope, candidates=FlowPackageImportPlannerCandidates()
+        )
+
+    assert error.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert error.value.context == {"reason": "flow_step_invalid"}
+    assert "output_config.deliverable is only for" in str(error.value)

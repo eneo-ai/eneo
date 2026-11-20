@@ -2581,6 +2581,42 @@ async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
 
 
 @pytest.mark.asyncio
+async def test_run_detail_carries_the_runs_transcription_usage(user):
+    flow_run_repo = flow_run_repo_mock()
+    provider_call_repo = _provider_call_repo()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id)
+    transcription_usage = FlowRunTranscriptionUsage(
+        audio_seconds=51.25,
+        completeness="complete",
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.recording_seconds_by_run_ids.return_value = {run.id: 25.6254}
+    provider_call_repo.list_usage_for_runs.return_value = {
+        run.id: FlowRunUsage(token_usage=None, transcription_usage=transcription_usage)
+    }
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+    )
+
+    detail = await service.get_run_detail_with_result_files_and_usage(
+        flow_id=flow_id,
+        run_id=run.id,
+    )
+
+    assert detail.transcription_usage == transcription_usage.model_copy(
+        update={"recording_seconds": 25.625}
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_evidence_rejects_service_key_even_for_own_run(user):
     service_user = _service_key_user(user)
     flow_repo = _flow_repo()

@@ -5,6 +5,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any, cast
 
+from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
 from eneo.flows.application.flow_run_evidence_bundle import (
     EvidenceBundle,
     RedactedEvidenceBundle,
@@ -20,6 +21,8 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceReviewCheckpointSummary,
 )
 from eneo.flows.application.flow_run_evidence_export_summary import (
+    EvidenceDeliverableFileSummary,
+    EvidenceDeliverableSummary,
     EvidenceExportSummary,
     EvidenceFinalOutputSummary,
     EvidenceRagSourceSummary,
@@ -37,7 +40,7 @@ from eneo.flows.citation_sidecar import (
     resolve_citation_mode,
     summarize_step_citations,
 )
-from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowRunStatus
 from eneo.flows.domain.rag_evidence import (
     is_mapped_rag_payload,
     iter_retrieved_source_payloads,
@@ -45,6 +48,10 @@ from eneo.flows.domain.rag_evidence import (
 )
 from eneo.flows.domain.step_output import interpret_rejected_output
 from eneo.flows.enums import FlowInputSource, FlowRunReviewCheckpointState
+from eneo.flows.flow_run_contract_service import (
+    current_attempt_result_file_records,
+    project_run_deliverables,
+)
 from eneo.flows.flow_run_provenance import (
     FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
     FlowAttemptProvenanceParseResult,
@@ -52,8 +59,9 @@ from eneo.flows.flow_run_provenance import (
     default_rag_tracking,
     normalize_text_preview,
 )
-from eneo.flows.flow_run_redaction import REDACTION_POLICY_VERSION
+from eneo.flows.flow_run_redaction import REDACTION_POLICY_VERSION, redact_payload
 from eneo.flows.flow_run_step_result_file import (
+    FlowRunStepResultFile,
     FlowRunStepResultFileAvailability,
     FlowRunStepResultFileSource,
 )
@@ -145,10 +153,22 @@ def render_evidence_json_export(
 
     exported_at = datetime.now(timezone.utc)
     review_checkpoint_summary = _build_review_checkpoint_summary(bundle_payload)
+    # Derived from the version's output contract, outside the hashed bundle.
+    deliverables = _deliverable_summaries(bundle_payload, outputs=bundle.outputs)
     summary = _build_summary_payload(
         bundle_payload,
         provenance_parse_results=export_payload.provenance_parse_results,
         review_checkpoint_summary=review_checkpoint_summary,
+        deliverables=(
+            [
+                EvidenceDeliverableSummary.model_validate(item)
+                for item in redact_payload(
+                    [item.model_dump(mode="json") for item in deliverables]
+                )
+            ]
+            if isinstance(bundle, RedactedEvidenceBundle)
+            else deliverables
+        ),
     )
     manifest = _build_manifest(
         bundle_payload,
@@ -301,6 +321,7 @@ def _build_summary_payload(
     *,
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
     review_checkpoint_summary: EvidenceReviewCheckpointSummary,
+    deliverables: list[EvidenceDeliverableSummary],
 ) -> EvidenceExportSummary:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     result_files = _result_file_records(bundle_payload)
@@ -355,8 +376,46 @@ def _build_summary_payload(
         citations=citations,
         review_checkpoints=review_checkpoint_summary,
         final_output=final_output_typed,
+        deliverables=deliverables,
         step_overview=step_overview,
     )
+
+
+def _deliverable_summaries(
+    bundle_payload: dict[str, Any], *, outputs: FlowRunOutputContract | None
+) -> list[EvidenceDeliverableSummary]:
+    try:
+        status = FlowRunStatus(
+            _as_json_object_or_empty(bundle_payload.get("run")).get("status")
+        )
+    except ValueError:
+        return []
+    deliverables = project_run_deliverables(
+        status=status,
+        outputs=outputs,
+        result_files=[
+            FlowRunStepResultFile.model_validate(record)
+            for record in current_attempt_result_file_records(
+                _result_file_records(bundle_payload),
+                _as_json_object_list(bundle_payload.get("step_results")),
+            )
+        ],
+    )
+    return [
+        EvidenceDeliverableSummary(
+            step_order=deliverable.step_order,
+            label=deliverable.label,
+            files=[
+                EvidenceDeliverableFileSummary(
+                    file_id=str(result_file.file_id),
+                    name=result_file.name,
+                    availability=result_file.availability,
+                )
+                for result_file in deliverable.files
+            ],
+        )
+        for deliverable in deliverables
+    ]
 
 
 def _typed_final_output_summary(value: dict[str, Any]) -> EvidenceFinalOutputSummary:

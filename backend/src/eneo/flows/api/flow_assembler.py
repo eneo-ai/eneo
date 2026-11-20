@@ -31,9 +31,11 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowRunArtifactResultPublic,
+    FlowRunDeliverablePublic,
     FlowRunFileBackedTextResultPublic,
     FlowRunInlineTextResultPublic,
     FlowRunOutboundHttpResultPublic,
+    FlowRunOutputContract,
     FlowRunResultPublic,
     FlowRunStructuredResultPublic,
 )
@@ -61,6 +63,7 @@ from eneo.flows.domain.step_output import (
 )
 from eneo.flows.domain.transcript_source import TranscriptSourceReference
 from eneo.flows.enums import FlowOutputDelivery, FlowOutputType, FlowRunStatus
+from eneo.flows.flow_run_contract_service import project_run_deliverables
 from eneo.flows.flow_run_input_envelope import (
     read_max_speakers,
     read_semantic_flow_input_payload,
@@ -142,16 +145,23 @@ class FlowAssembler:
         )
 
     @staticmethod
-    def to_run_result_public(
+    def to_run_outputs_public(
         *,
         run: FlowRun,
-        final_output: FlowFinalOutputContractPublic | None,
+        outputs: FlowRunOutputContract | None,
         result_files: Sequence[FlowRunStepResultFile] = (),
-    ) -> FlowRunResultPublic | None:
-        return _project_run_result(
-            run=run,
-            final_output=final_output,
-            result_files=result_files,
+    ) -> tuple[FlowRunResultPublic | None, list[FlowRunDeliverablePublic]]:
+        """``run``'s ``result`` and ``deliverables`` from one output
+        contract; ``result_files`` hold each step's current attempt."""
+        return (
+            _project_run_result(
+                run=run,
+                final_output=outputs.final_output if outputs is not None else None,
+                result_files=result_files,
+            ),
+            project_run_deliverables(
+                status=run.status, outputs=outputs, result_files=result_files
+            ),
         )
 
     def to_run_public(
@@ -161,7 +171,7 @@ class FlowAssembler:
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
         transcription_usage: FlowRunTranscriptionUsage | None = None,
-        final_output: FlowFinalOutputContractPublic | None = None,
+        outputs: FlowRunOutputContract | None = None,
         started_by: FlowRunStartedByPublic | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
@@ -174,6 +184,9 @@ class FlowAssembler:
             if transcription_usage is not None
             else None
         )
+        result, deliverables = self.to_run_outputs_public(
+            run=run, outputs=outputs, result_files=result_files
+        )
         return FlowRunPublic.model_validate(run).model_copy(
             update={
                 "input_payload_json": read_semantic_flow_input_payload(
@@ -181,12 +194,9 @@ class FlowAssembler:
                 ),
                 "speaker_labels": read_speaker_labels_choice(run.input_payload_json),
                 "max_speakers": read_max_speakers(run.input_payload_json),
-                "result": self.to_run_result_public(
-                    run=run,
-                    final_output=final_output,
-                    result_files=result_files,
-                ),
+                "result": result,
                 "result_files": list(result_files),
+                "deliverables": deliverables,
                 "token_usage": public_token_usage,
                 "transcription_usage": public_transcription_usage,
                 "started_by": started_by,
@@ -234,7 +244,7 @@ class FlowAssembler:
         result_files: Sequence[FlowRunStepResultFile] = (),
         token_usage: FlowRunTokenUsage | None = None,
         transcription_usage: FlowRunTranscriptionUsage | None = None,
-        final_output: FlowFinalOutputContractPublic | None = None,
+        outputs: FlowRunOutputContract | None = None,
         webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
         started_by: FlowRunStartedByPublic | None = None,
         evidence_access: FlowRunEvidenceAccess,
@@ -244,7 +254,7 @@ class FlowAssembler:
             result_files=result_files,
             token_usage=token_usage,
             transcription_usage=transcription_usage,
-            final_output=final_output,
+            outputs=outputs,
             started_by=started_by,
         ).model_dump()
         return FlowRunDetailPublic.model_validate(

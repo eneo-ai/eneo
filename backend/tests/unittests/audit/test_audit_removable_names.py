@@ -49,6 +49,27 @@ def test_a_file_row_keeps_the_object_and_not_its_name(action: ActionType) -> Non
     assert written["target"]["name"] == NAME
 
 
+@pytest.mark.parametrize("key", ["artifact_name", "file_name"])
+def test_a_flow_run_file_link_keeps_the_file_and_not_its_name(key: str) -> None:
+    # A run's document is named from its form, so its name is case data.
+    file_id = str(uuid4())
+    written = {
+        "actor": ACTOR,
+        "target": {"id": file_id, "name": NAME},
+        "extra": {"file_id": file_id, "mimetype": "application/pdf", key: NAME},
+    }
+
+    description, stored = without_removable_names(
+        ActionType.FILE_SIGNED_URL_MINTED,
+        f"Minted a download URL for Flow run artifact '{NAME}'",
+        written,
+    )
+
+    assert description == FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED]
+    assert NAME not in json.dumps(stored)
+    assert stored["extra"] == {"file_id": file_id, "mimetype": "application/pdf"}
+
+
 def test_a_collection_upload_keeps_its_collection_and_not_the_file_name() -> None:
     target = {
         "group_id": str(uuid4()),

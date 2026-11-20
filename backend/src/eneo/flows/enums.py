@@ -166,6 +166,21 @@ def final_output_delivery(
     return FlowOutputDelivery.PAYLOAD
 
 
+def step_delivers_artifact(
+    *, output_type: FlowOutputType | str, output_mode: FlowOutputMode | str
+) -> bool:
+    """Whether a step's output is a file a client downloads: a document it
+    renders, fills or passes through, never one it posts elsewhere. Only such
+    a step can be one of a run's deliverables."""
+    return (
+        final_output_delivery(
+            output_type=FlowOutputType(output_type),
+            output_mode=FlowOutputMode(output_mode),
+        )
+        is FlowOutputDelivery.ARTIFACT
+    )
+
+
 class FlowAuthoringOutputMode(str, Enum):
     """Output modes an authoring spec can carry.
 

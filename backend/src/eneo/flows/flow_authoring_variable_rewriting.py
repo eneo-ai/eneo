@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 
 from eneo.flows.domain.flow_step_validation import FlowStepValidationView
+from eneo.flows.domain.step_deliverable import FLOW_STEP_DELIVERABLE_KEY
 from eneo.flows.enums import (
     FlowInputSource,
     FlowInputType,
@@ -65,10 +66,16 @@ def rewrite_step_spec_variables(
             updates["input_bindings"] = rewritten_bindings
 
     if step_spec.output_config:
-        rewritten_output_config = rewrite_variable_value(
-            step_spec.output_config,
-            ref_to_order,
-        )
+        # A deliverable's label is literal text, and its file name reads only
+        # form fields: neither names a step.
+        rewritten_output_config = {
+            key: (
+                value
+                if key == FLOW_STEP_DELIVERABLE_KEY
+                else rewrite_variable_value(value, ref_to_order)
+            )
+            for key, value in step_spec.output_config.items()
+        }
         if rewritten_output_config != step_spec.output_config:
             updates["output_config"] = rewritten_output_config
 
