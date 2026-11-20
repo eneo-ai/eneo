@@ -15,6 +15,7 @@ from eneo.flows.runtime.step_execution_result import StepExecutionResult
 from eneo.flows.runtime.step_execution_runtime import attach_typed_failure_context
 from eneo.flows.runtime.step_handlers.base import PrepareAssistantStepFn
 from eneo.flows.runtime.step_handlers.deterministic_result import deterministic_result
+from eneo.flows.runtime.step_input_resolution import enforce_inline_input_cap
 from eneo.main.exceptions import TypedIOValidationException
 
 
@@ -71,6 +72,23 @@ class ComposeTextStepHandler:
             ) from exc
 
         output_text = typed_output.persisted_text(prepared.step_input.text)
+        sends_run_result = self.output_mode is FlowOutputMode.HTTP_POST
+        if sends_run_result:
+            # A delivery sends the step's text whole, so text that would be
+            # kept in a file fails the run here rather than its delivery later.
+            try:
+                enforce_inline_input_cap(
+                    text=output_text,
+                    step_order=step.step_order,
+                    input_source=step.input_source,
+                    max_inline_text_bytes=deps.max_inline_text_bytes,
+                )
+            except TypedIOValidationException as exc:
+                raise attach_typed_failure_context(
+                    exc,
+                    input_payload_for_result=prepared.input_payload_for_result,
+                    effective_prompt="",
+                ) from exc
         persisted_text, generated_file_ids = await deps.apply_output_cap(
             text=output_text,
             run=run,
@@ -83,12 +101,23 @@ class ComposeTextStepHandler:
             persisted_text=persisted_text,
             generated_file_ids=generated_file_ids,
             mode=self.output_mode,
-            diagnostic=StepDiagnostic(
-                code="compose_text_used",
-                message=(
-                    f"Step {step.step_order}: compose_text mode persisted resolved "
-                    "text without calling the assistant."
-                ),
-                severity="info",
+            diagnostic=(
+                StepDiagnostic(
+                    code="run_result_text_sent_without_model",
+                    message=(
+                        f"Step {step.step_order}: run_result mode sends the text it "
+                        "reads without calling the assistant."
+                    ),
+                    severity="info",
+                )
+                if sends_run_result
+                else StepDiagnostic(
+                    code="compose_text_used",
+                    message=(
+                        f"Step {step.step_order}: compose_text mode persisted "
+                        "resolved text without calling the assistant."
+                    ),
+                    severity="info",
+                )
             ),
         )
