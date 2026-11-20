@@ -2074,7 +2074,8 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
 ```
 
 - `text` is the run's text result: the text the sending step reads, by default
-  the result of the step before it.
+  the result of the step before it. The sending step's `output_type` is
+  `text`; saving, publishing or importing refuses any other type.
 - `deliverables` lists every document the run delivers, as in
   `FlowRunPublic.deliverables`, with each file's bytes in `content_base64`.
   Check each file against its `size` and `checksum` (SHA-256).
