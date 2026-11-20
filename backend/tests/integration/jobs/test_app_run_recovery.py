@@ -17,10 +17,15 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.apps.app_runs.api import app_run_worker
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
-from eneo.apps.app_runs.app_run_dispatch import claim_app_job, reconcile_app_runs
+from eneo.apps.app_runs.app_run_dispatch import (
+    claim_app_job,
+    fail_interrupted_app_runs,
+    retry_app_submissions,
+)
 from eneo.apps.app_runs.app_run_service import AppRunService
 from eneo.apps.apps.app_service import AppService
 from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.database.database import sessionmanager
 from eneo.database.tables.app_table import AppRuns
 from eneo.database.tables.job_table import Jobs
 from eneo.files.transcriber import Transcriber
@@ -557,11 +562,11 @@ async def test_claim_error_fails_only_an_unstarted_app_run(
         assert response.json()["status"] == Status.IN_PROGRESS.value
         publish.assert_not_awaited()
         if failure_point == "after_commit":
-            async with db_session() as recovery:
-                assert job_id not in await reconcile_app_runs(
+            async with sessionmanager.session() as recovery:
+                assert job_id not in await fail_interrupted_app_runs(
                     recovery, now=datetime.now(timezone.utc) + timedelta(minutes=4)
                 )
-                assert job_id in await reconcile_app_runs(
+                assert job_id in await fail_interrupted_app_runs(
                     recovery, now=datetime.now(timezone.utc) + timedelta(minutes=6)
                 )
     else:
@@ -690,6 +695,54 @@ async def test_reaper_fails_orphaned_runs_and_notifies_the_open_result(
         assert (await session.get(Jobs, other_task)).status == Status.QUEUED.value
 
 
+async def test_slow_redispatch_does_not_block_a_different_delivered_job(
+    app_run_fixture, queued_recording, db_session, monkeypatch
+):
+    first_id, _, _ = await app_run_fixture()
+    ready_id, _ = queued_recording
+    now = datetime.now(timezone.utc)
+    async with db_session() as session:
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == first_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": []},
+                updated_at=now - timedelta(minutes=15),
+            )
+        )
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == ready_id)
+            .values(updated_at=now - timedelta(minutes=6))
+        )
+    async with asyncio.timeout(5):
+        while (
+            await job_manager.get_job_status(ready_id, Task.RUN_APP) != JobStatus.queued
+        ):
+            await asyncio.sleep(0.01)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    retries = []
+
+    async def delayed_redispatch(job_id, params):
+        retries.append(job_id)
+        if job_id == first_id:
+            started.set()
+            await release.wait()
+
+    monkeypatch.setattr(job_manager, "redispatch_app", delayed_redispatch)
+    maintenance = asyncio.create_task(_run_app_maintenance())
+    try:
+        await asyncio.wait_for(started.wait(), 5)
+        async with db_session() as worker:
+            await worker.execute(sa.text("SET LOCAL lock_timeout = '750ms'"))
+            assert await claim_app_job(JobRepository(worker), ready_id)
+    finally:
+        release.set()
+        await asyncio.wait_for(maintenance, 10)
+    assert retries == [first_id]
+
+
 async def test_retry_backlog_does_not_hide_interrupted_or_expired_results(
     app_run_fixture, db_session, client, admin_user_api_key, monkeypatch
 ):
@@ -751,18 +804,21 @@ async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery
         )
     attempt = AsyncMock(side_effect=ConnectionError("broker unavailable"))
     monkeypatch.setattr(job_manager, "redispatch_app", attempt)
-    async with db_session() as session:
-        assert await reconcile_app_runs(session, now=now) == []
+    async with sessionmanager.session() as session:
+        assert await retry_app_submissions(session, now=now) == []
     attempt.assert_awaited_once()
     attempt.side_effect = None
-    async with db_session() as session:
+    async with sessionmanager.session() as session:
         assert (
-            await reconcile_app_runs(session, now=deadline - timedelta(minutes=1)) == []
+            await retry_app_submissions(session, now=deadline - timedelta(minutes=1))
+            == []
         )
     assert attempt.await_count == 2
     async with db_session() as session:
         assert not await claim_app_job(JobRepository(session), job_id)
-        assert await reconcile_app_runs(session, now=deadline) == [job_id]
+    async with sessionmanager.session() as session:
+        assert await fail_interrupted_app_runs(session, now=deadline) == [job_id]
+    async with db_session() as session:
         assert await session.scalar(
             sa.select(Jobs.dispatch_envelope.is_(None)).where(Jobs.id == job_id)
         )
@@ -893,7 +949,8 @@ async def test_recovery_skips_a_live_worker_between_checkpoint_transactions(
             async with db_session() as observer:
                 seen = await observer.get(Jobs, id)
                 assert returned_at is not None and seen.updated_at >= returned_at
-                assert id not in await reconcile_app_runs(observer)
+            async with sessionmanager.session() as recovery:
+                assert id not in await fail_interrupted_app_runs(recovery)
         return await touch(self, id)
 
     monkeypatch.setattr(Transcriber, "transcribe_from_filepath", transcribe)
@@ -966,8 +1023,8 @@ async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
         assert job.dispatch_envelope == {"version": 1, "file_ids": []}
         job_id = job.id
         job.updated_at = datetime.now(timezone.utc) - timedelta(minutes=6)
-    async with db_session() as session:
-        assert await reconcile_app_runs(session) == []
+    async with sessionmanager.session() as session:
+        assert await retry_app_submissions(session) == []
     assert job_manager._redis is not None
     info = await ArqJob(str(job_id), redis=job_manager._redis).info()
     assert info and info.args[0].text is None
