@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import (
     AliasChoices,
     AliasPath,
+    AwareDatetime,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -2475,6 +2476,22 @@ class FlowRunRedispatchRequest(BaseModel):
             "redriving accepted-delivery exhaustion so a retried request cannot rearm "
             "a later exhausted dispatch epoch. Omit it for ordinary due queued "
             "redispatch."
+        ),
+    )
+
+
+class FlowRunWebhookRedeliveryRequest(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "example": {"expected_dead_lettered_at": "2026-07-22T08:30:00Z"}
+        },
+    )
+
+    expected_dead_lettered_at: AwareDatetime = Field(
+        description=(
+            "The delivery's `dead_lettered_at` as read from the run. Only that "
+            "dead letter is reset, so a retried request cannot reset a later one."
         ),
     )
 

@@ -351,6 +351,26 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Retry later with the same observed dispatch_exhausted_at value.",
         user_action="Wait and try redispatch again later.",
     ),
+    FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause=(
+            "The delivery is not a dead-lettered run result of a completed run, "
+            "or it was dead-lettered again."
+        ),
+        consumer_action=(
+            "Refresh the run and retry only for a dead-lettered run result, with "
+            "its current dead_lettered_at value."
+        ),
+        user_action="Reload the run before sending the result again.",
+    ),
+    FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="Required audit logging was unavailable, so the delivery was not reset.",
+        consumer_action="Retry later with the same observed dead_lettered_at value.",
+        user_action="Wait and try sending the result again later.",
+    ),
     FlowApiErrorCode.RUN_INVALID_STEP_INPUTS: _entry(
         category="Run input",
         surfaced_through="API error response",

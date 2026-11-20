@@ -44,6 +44,10 @@ class FlowApiErrorCode(StrEnum):
     RUN_CONCURRENCY_LIMIT_REACHED = "flow_run_concurrency_limit_reached"
     RUN_REDISPATCH_CONFLICT = "flow_run_redispatch_conflict"
     RUN_REDISPATCH_AUDIT_UNAVAILABLE = "flow_run_redispatch_audit_unavailable"
+    RUN_WEBHOOK_REDELIVERY_CONFLICT = "flow_run_webhook_redelivery_conflict"
+    RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE = (
+        "flow_run_webhook_redelivery_audit_unavailable"
+    )
     RUN_INVALID_STEP_INPUTS = "flow_run_invalid_step_inputs"
     RUN_UNKNOWN_STEP_INPUT = "flow_run_unknown_step_input"
     RUN_STEP_INPUT_MAX_FILES_EXCEEDED = "flow_run_step_input_max_files_exceeded"

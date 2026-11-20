@@ -37,6 +37,7 @@ from eneo.flows.api.flow_api_common import (
     error_response,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_definition_access import require_flow_edit_access
 from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
@@ -48,6 +49,8 @@ from eneo.flows.api.flow_models import (
     FlowRunRedispatchResponse,
     FlowRunStartedByPublic,
     FlowRunSummaryPublic,
+    FlowRunWebhookDeliveryPublic,
+    FlowRunWebhookRedeliveryRequest,
 )
 from eneo.flows.api.flow_run_concurrency_response import (
     FLOW_RUN_CONCURRENCY_MESSAGE,
@@ -70,6 +73,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_REDISPATCH_PATH,
     FLOW_RUN_STATUS_CAPABILITIES_PATH,
     FLOW_RUN_STATUS_PATH,
+    FLOW_RUN_WEBHOOK_REDELIVER_PATH,
     FLOW_RUNS_PATH,
 )
 from eneo.flows.application.flow_dispatch import (
@@ -86,6 +90,10 @@ from eneo.flows.application.flow_trace_audit import (
     FLOW_EVIDENCE_READ_ON_GET,
     log_flow_trace_audit_or_raise,
     raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.application.flow_webhook_redelivery import (
+    redeliver_run_result,
+    wake_webhook_outbox,
 )
 from eneo.flows.domain.flow import FlowRun, FlowRunStatus
 from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
@@ -957,6 +965,121 @@ async def cancel_flow_run(
             started_by=started_by,
         )
     return FlowAssembler().to_run_public(run, started_by=started_by)
+
+
+@router.post(
+    FLOW_RUN_WEBHOOK_REDELIVER_PATH,
+    response_model=FlowRunWebhookDeliveryPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="redeliver_flow_run_webhook_delivery",
+    summary="Send a run's result again",
+    description="""
+    Send a completed run's result again after its delivery ended in dead letter.
+    The delivery gets a fresh attempt budget and is sent as before: the same
+    receiver and the same `Idempotency-Key`, so a receiver that already stored
+    the result can recognise it. Only a `run_result` delivery can be sent again.
+
+    Send the delivery's observed `dead_lettered_at` as `expected_dead_lettered_at`.
+    Only that dead letter is reset, so a retried request cannot reset a later one.
+    The audit record and the reset commit together; disabled or failed auditing
+    prevents the redelivery.
+
+    Requires the right to edit the flow. Service keys cannot send a result again.
+    """,
+    responses={
+        403: error_response(
+            description="Caller lacks permission to edit this flow.",
+            message="Insufficient permissions.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description=(
+                "The run or the delivery was not found for this flow and tenant. "
+                f"{RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}"
+            ),
+            message="Flow run webhook delivery not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The delivery cannot be sent again. `context.reason` says why: "
+                "`not_run_result`, `run_not_completed`, `not_dead_lettered` or "
+                "`dead_lettered_at_changed`. Refresh the run before retrying."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT.value: {
+                    "summary": "The delivery was dead-lettered again",
+                    "value": {
+                        "message": (
+                            "The delivery's dead letter changed; refresh the run "
+                            "before retrying."
+                        ),
+                        "eneo_error_code": int(ErrorCodes.CONFLICT),
+                        "code": FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_CONFLICT.value,
+                        "context": {
+                            "reason": "dead_lettered_at_changed",
+                            "delivery_id": "00000000-0000-4000-8000-000000000201",
+                        },
+                    },
+                }
+            },
+        ),
+        503: error_response(
+            description=(
+                "Required audit logging is unavailable, so the delivery was not reset."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE.value: {
+                    "summary": "Required redelivery audit unavailable",
+                    "value": {
+                        "message": "Redelivery audit logging is unavailable.",
+                        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+                        "code": (
+                            FlowApiErrorCode.RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE.value
+                        ),
+                        "context": {"audit_required": True},
+                    },
+                }
+            },
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def redeliver_flow_run_webhook_delivery(
+    id: Annotated[UUID, Path(description="Identifier of the flow that owns the run.")],
+    run_id: Annotated[UUID, Path(description="Identifier of the completed run.")],
+    delivery_id: Annotated[
+        UUID,
+        Path(description="Identifier of the dead-lettered delivery to send again."),
+    ],
+    request: Request,
+    payload: FlowRunWebhookRedeliveryRequest,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+) -> FlowRunWebhookDeliveryPublic:
+    access_context = await require_flow_edit_access(request, container, flow_id=id)
+    user = container.user()
+    actor_kwargs = audit_actor_kwargs(user)
+    delivery = await redeliver_run_result(
+        tenant_id=user.tenant_id,
+        flow_id=id,
+        run_id=run_id,
+        delivery_id=delivery_id,
+        expected_dead_lettered_at=payload.expected_dead_lettered_at,
+        actor_id=actor_kwargs["actor_id"],
+        actor_type=actor_kwargs["actor_type"],
+        actor_api_key_id=actor_kwargs["actor_api_key_id"],
+        audit_metadata=AuditMetadata.standard(actor=user, target=access_context.flow),
+    )
+    await wake_webhook_outbox(container.platform_task_enqueuer())
+    return FlowRunWebhookDeliveryPublic.model_validate(delivery)
 
 
 @router.post(

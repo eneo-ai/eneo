@@ -30,6 +30,7 @@ from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_STEP_TRANSCRIPT_WORDS_PATH,
     FLOW_RUN_STEPS_PATH,
     FLOW_RUN_TRANSCRIPT_CORRECTIONS_PATH,
+    FLOW_RUN_WEBHOOK_REDELIVER_PATH,
     FLOW_RUNS_PATH,
     PUBLISHED_FLOW_RUNTIME_PATH,
     RUN_CONTRACT_PATH,
@@ -219,6 +220,12 @@ FLOW_RUNTIME_ENDPOINT_CONTRACTS: tuple[FlowRuntimeEndpointContract, ...] = (
         operation_id="redispatch_flow_run",
         success_status=status.HTTP_200_OK,
         runtime_path_fields=(_field("redispatch_run_template"),),
+    ),
+    FlowRuntimeEndpointContract(
+        route_path=FLOW_RUN_WEBHOOK_REDELIVER_PATH,
+        method="post",
+        operation_id="redeliver_flow_run_webhook_delivery",
+        success_status=status.HTTP_200_OK,
     ),
     FlowRuntimeEndpointContract(
         route_path=FLOW_RUN_EVIDENCE_PATH,

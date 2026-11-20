@@ -5399,6 +5399,8 @@
   "audit_action_flow_run_failed_description": "En flödeskörning avslutades med felstatus.",
   "audit_action_flow_run_redispatched": "Flödeskörning omskickad",
   "audit_action_flow_run_redispatched_description": "En flödeskörning köades igen för bearbetning.",
+  "audit_action_flow_run_webhook_redelivered": "Flödeskörningens resultat skickat igen",
+  "audit_action_flow_run_webhook_redelivered_description": "En flödeskörnings resultat köades för att skickas igen efter att utskicket misslyckats.",
   "audit_action_flow_run_audit_delivery_redriven": "Audit-leverans för flödeskörning omstartad",
   "audit_action_flow_run_audit_delivery_redriven_description": "En systemoperatör återställde en dead-letter-markerad audit-leverans för nytt leveransförsök av arbetaren.",
   "audit_action_flow_run_cancelled": "Flödeskörning avbruten",

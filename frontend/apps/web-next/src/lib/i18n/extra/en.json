@@ -3725,6 +3725,8 @@
   "flow_error_flow_run_concurrency_limit_reached": "Too many flow runs are active right now. Try again when one finishes.",
   "flow_error_flow_run_redispatch_conflict": "The run's status has changed. Reload the run and try again.",
   "flow_error_flow_run_redispatch_audit_unavailable": "The run could not be re-run because required audit logging is unavailable right now. Try again later.",
+  "flow_error_flow_run_webhook_redelivery_conflict": "The result cannot be sent again in its current state. Reload the run and try again.",
+  "flow_error_flow_run_webhook_redelivery_audit_unavailable": "The result could not be sent again because required audit logging is unavailable right now. Try again later.",
   "flow_error_flow_run_evidence_forbidden": "You do not have permission to view the evidence for this run.",
   "flow_error_flow_run_evidence_export_disabled": "Evidence download is turned off for this flow. Whoever manages the flow can turn it on in the flow's basic settings.",
   "flow_error_flow_run_evidence_raw_export_forbidden": "Exporting evidence with content is turned off for this run.",

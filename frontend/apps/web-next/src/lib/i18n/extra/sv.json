@@ -3725,6 +3725,8 @@
   "flow_error_flow_run_concurrency_limit_reached": "För många flödeskörningar är aktiva just nu. Försök igen när en har avslutats.",
   "flow_error_flow_run_redispatch_conflict": "Körningens status har ändrats. Läs in körningen igen och försök på nytt.",
   "flow_error_flow_run_redispatch_audit_unavailable": "Körningen kunde inte köras om eftersom den obligatoriska loggningen inte fungerar just nu. Försök igen senare.",
+  "flow_error_flow_run_webhook_redelivery_conflict": "Resultatet kan inte skickas igen i sitt nuvarande läge. Läs in körningen igen och försök på nytt.",
+  "flow_error_flow_run_webhook_redelivery_audit_unavailable": "Resultatet kunde inte skickas igen eftersom den obligatoriska loggningen inte fungerar just nu. Försök igen senare.",
   "flow_error_flow_run_evidence_forbidden": "Du har inte behörighet att se bevisunderlaget för den här körningen.",
   "flow_error_flow_run_evidence_export_disabled": "Nedladdning av bevisunderlag är avstängd för det här flödet. Den som ansvarar för flödet kan slå på den under flödets grundinställningar.",
   "flow_error_flow_run_evidence_raw_export_forbidden": "Export av bevisunderlag med innehåll är avstängd för den här körningen.",
