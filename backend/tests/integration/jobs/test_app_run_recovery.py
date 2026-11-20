@@ -81,13 +81,19 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
     client,
     admin_user_api_key,
     recovery_recording,
+    db_session,
     redis_client,
     monkeypatch,
 ):
     headers = {"X-API-Key": admin_user_api_key.key}
     app_url, file_id, recording = recovery_recording
 
+    summary_started = asyncio.Event()
+    finish_summary = asyncio.Event()
+
     async def complete(self, *, model, transcription_inputs, **kwargs):
+        summary_started.set()
+        await finish_summary.wait()
         assert transcription_inputs == ["meeting transcript"]
         if terminal == Status.FAILED:
             raise RuntimeError("Summary provider unavailable")
@@ -182,6 +188,18 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         )
         try:
             async with asyncio.timeout(5):
+                await summary_started.wait()
+                async with db_session() as observer:
+                    job = await observer.get(Jobs, run.job_id)
+                    assert job is not None and job.status == Status.IN_PROGRESS.value
+                    # Make the live run eligible by age while its provider is busy.
+                    failed = await JobRepository(observer).mark_stale_jobs_failed(
+                        tasks=[Task.RUN_APP.value],
+                        stale_before=datetime.now(timezone.utc) + timedelta(minutes=1),
+                    )
+                    assert run.job_id not in failed
+            finish_summary.set()
+            async with asyncio.timeout(5):
                 while True:
                     event = await subscription.get_message(timeout=1)
                     if event is not None:
@@ -212,6 +230,7 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
             assert downloaded.headers["content-disposition"].startswith("attachment")
             assert downloaded.content == recording
         finally:
+            finish_summary.set()
             release_terminal_publish.set()
             succeeded = await asyncio.wait_for(running, timeout=5)
         assert succeeded is (terminal == Status.COMPLETE)
@@ -318,6 +337,122 @@ async def app_run_fixture(
         )
 
     return create
+
+
+async def test_app_worker_loss_before_completion_does_not_replay_started_work(
+    app_run_fixture, db_session, client, monkeypatch
+):
+    job_id, params, _ = await app_run_fixture()
+    delivery = {"job_id": str(job_id)}
+
+    class LostWorker(BaseException):
+        """Roll back execution without invoking the worker's graceful-failure handler."""
+
+    start_app = AsyncMock(side_effect=LostWorker)
+    monkeypatch.setattr(AppService, "get_app", start_app)
+    with pytest.raises(LostWorker):
+        await app_run_worker.run_app(delivery, params)
+
+    async with db_session() as observer:
+        job = await observer.get(Jobs, job_id)
+        assert job is not None and job.status == Status.IN_PROGRESS.value
+
+    assert await app_run_worker.run_app(delivery, params) is False
+    start_app.assert_awaited_once_with(params.app_id)
+
+
+@pytest.mark.parametrize(
+    "failure_point", ["before_update", "other_worker", "after_commit"]
+)
+async def test_claim_error_fails_only_an_unstarted_app_run(
+    app_run_fixture, db_session, client, admin_user_api_key, monkeypatch, failure_point
+):
+    job_id, params, _ = await app_run_fixture()
+    claim = JobRepository.mark_job_started
+
+    async def interrupted_claim(repo, id):
+        if failure_point == "after_commit":
+            dialect = repo.delegate.session.get_bind().dialect
+            commit = dialect.do_commit
+
+            def lose_ack(connection):
+                monkeypatch.setattr(dialect, "do_commit", commit)
+                commit(connection)
+                raise ConnectionError("lost commit acknowledgement")
+
+            monkeypatch.setattr(dialect, "do_commit", lose_ack)
+            return await claim(repo, id)
+        if failure_point == "other_worker":
+            async with db_session() as other_worker:
+                assert await claim(JobRepository(other_worker), id)
+        raise ConnectionError("database connection interrupted")
+
+    monkeypatch.setattr(JobRepository, "mark_job_started", interrupted_claim)
+    start_app = AsyncMock()
+    monkeypatch.setattr(AppService, "get_app", start_app)
+    publish = AsyncMock()
+    monkeypatch.setattr("eneo.worker.worker.publish_task_status", publish)
+
+    with pytest.raises(ConnectionError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    response = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert response.status_code == 200, response.text
+    start_app.assert_not_awaited()
+    if failure_point != "before_update":
+        assert response.json()["status"] == Status.IN_PROGRESS.value
+        publish.assert_not_awaited()
+    else:
+        assert response.json()["status"] == Status.FAILED.value
+        publish.assert_awaited_once_with(
+            Channel(type=ChannelType.APP_RUN_UPDATES, user_id=params.user_id),
+            RedisMessage(id=params.id, status=Status.FAILED),
+        )
+
+
+async def test_cancelled_app_run_fails_after_its_start_is_committed(
+    app_run_fixture, db_session, client, monkeypatch
+):
+    job_id, params, _ = await app_run_fixture()
+    monkeypatch.setattr(
+        AppService, "get_app", AsyncMock(side_effect=asyncio.CancelledError)
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    async with db_session() as observer:
+        job = await observer.get(Jobs, job_id)
+        assert job is not None and job.status == Status.FAILED.value
+        assert job.failure_code == JobFailureCode.CANCELLED.value
+
+
+async def test_app_worker_stops_if_recovery_wins_between_claim_and_execution(
+    app_run_fixture, db_session, monkeypatch
+):
+    job_id, params, _ = await app_run_fixture()
+    touch = JobRepository.touch_job
+
+    async def recover_before_execution(repo, id):
+        async with db_session() as recovery:
+            failed = await JobRepository(recovery).mark_stale_jobs_failed(
+                tasks=[Task.RUN_APP.value],
+                stale_before=datetime.now(timezone.utc) + timedelta(seconds=1),
+                failure_code=JobFailureCode.PROCESSING_INTERRUPTED,
+            )
+            assert id in failed
+        return await touch(repo, id)
+
+    monkeypatch.setattr(JobRepository, "touch_job", recover_before_execution)
+    start_app = AsyncMock()
+    monkeypatch.setattr(AppService, "get_app", start_app)
+    assert await app_run_worker.run_app({"job_id": str(job_id)}, params) is False
+    start_app.assert_not_awaited()
+    async with db_session() as observer:
+        job = await observer.get(Jobs, job_id)
+        assert job is not None and job.status == Status.FAILED.value
 
 
 async def test_late_delivery_cannot_restart_a_failed_app_run(

@@ -127,7 +127,8 @@ class JobRepository:
         """Update an in-progress job's timestamp to signal 'still alive'.
 
         Upload processing uses this as a heartbeat and stops if the job has
-        already become terminal.
+        already become terminal. The update holds the row lock until commit,
+        so app runs can keep maintenance from reaping a live worker.
 
         Args:
             id: Job UUID to touch

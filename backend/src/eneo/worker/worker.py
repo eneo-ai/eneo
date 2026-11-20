@@ -17,6 +17,7 @@ from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.jobs.job_models import failure_code_for_exception
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
@@ -408,6 +409,7 @@ class Worker:
         *,
         keep_result: int | None = None,
         max_tries: int | None = None,
+        commit_start_before_run: bool = False,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
@@ -424,14 +426,26 @@ class Worker:
                 user_id = params.user_id if with_user else None
 
                 task_manager: TaskManager | None = None
+                claim_pending = commit_start_before_run
                 try:
+                    if commit_start_before_run:
+                        async with sessionmanager.session() as start, start.begin():
+                            if not await JobRepository(start).mark_job_started(job_id):
+                                return False
+                        # Only a confirmed commit lets this delivery fail a running job.
+                        claim_pending = False
+
                     async with sessionmanager.session() as session, session.begin():
                         container = await self._create_container(
                             session, user_id=user_id
                         )
-                        # Hold the job row until the task commits. A reaper skips
-                        # this lock, and late deliveries cannot restart a failed job.
-                        if not await container.job_repo().mark_job_started(job_id):
+                        # Hold the row through completion so recovery skips live work.
+                        repo = container.job_repo()
+                        if commit_start_before_run:
+                            started = await repo.touch_job(job_id)
+                        else:
+                            started = await repo.mark_job_started(job_id)
+                        if not started:
                             return False
                         task_manager = container.task_manager(
                             job_id=job_id,
@@ -452,8 +466,9 @@ class Worker:
 
                         success = task_manager.successful()
                 except (Exception, asyncio.CancelledError) as exc:
-                    # The task transaction rolled back. Store the failure separately.
-                    if await self._fail_job_after_commit_error(job_id, user_id, exc):
+                    if await self._record_job_failure(
+                        job_id, user_id, exc, only_if_queued=claim_pending
+                    ):
                         if task_manager is not None:
                             await task_manager.publish_status(Status.FAILED)
                         elif channel_type is not None and user_id is not None:
@@ -479,11 +494,13 @@ class Worker:
 
         return decorator
 
-    async def _fail_job_after_commit_error(
+    async def _record_job_failure(
         self,
         job_id: UUID,
         user_id: UUID | None,
         exc: BaseException,
+        *,
+        only_if_queued: bool = False,
     ) -> bool:
         """Record the failure in a fresh session so the job is not left pending
         until the reaper finds it.
@@ -496,7 +513,7 @@ class Worker:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
                 failed = await container.job_service().fail_job(
-                    job_id, failure_code=code
+                    job_id, failure_code=code, only_if_queued=only_if_queued
                 )
             return failed is not None
         except Exception as error:
