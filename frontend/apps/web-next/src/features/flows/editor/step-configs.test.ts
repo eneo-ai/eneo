@@ -287,31 +287,42 @@ describe("long material", () => {
   });
 
   it("is offered only on a completion step that reads its material whole", () => {
-    expect(longMaterialEligibility({ output_mode: "pass_through", input_config: null })).toBe(
-      "eligible"
-    );
-    expect(longMaterialEligibility({ output_mode: "http_post", input_config: null })).toBe(
-      "eligible"
-    );
-    expect(longMaterialEligibility({ output_mode: "compose_text", input_config: null })).toBe(
-      "output"
-    );
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { text_processing: { mode: "summarize" } }
+        input_config: null,
+        output_config: null
+      })
+    ).toBe("eligible");
+    expect(
+      longMaterialEligibility({ output_mode: "http_post", input_config: null, output_config: null })
+    ).toBe("eligible");
+    expect(
+      longMaterialEligibility({
+        output_mode: "compose_text",
+        input_config: null,
+        output_config: null
+      })
+    ).toBe("output");
+    expect(
+      longMaterialEligibility({
+        output_mode: "pass_through",
+        input_config: { text_processing: { mode: "summarize" } },
+        output_config: null
       })
     ).toBe("text_processing");
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { item_map: { enabled: true } }
+        input_config: { item_map: { enabled: true } },
+        output_config: null
       })
     ).toBe("mapped");
     expect(
       longMaterialEligibility({
         output_mode: "pass_through",
-        input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } }
+        input_config: { runtime_input: { enabled: true, execution_mode: "per_source" } },
+        output_config: null
       })
     ).toBe("mapped");
   });

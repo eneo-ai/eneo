@@ -252,13 +252,18 @@ export function withLongMaterial(inputConfig: unknown, on: boolean): JsonObject 
 
 /**
  * Whether the core accepts long material on the step: a completion step
- * (`pass_through` or `http_post`) that does not read its material by
- * section, per item or per file (`step_mapped_execution.py`).
+ * (`pass_through` or `http_post` with a model) that does not read its
+ * material by section, per item or per file (`step_mapped_execution.py`).
  */
 export function longMaterialEligibility(
-  step: Pick<StepConfig, "output_mode" | "input_config">
+  step: Pick<StepConfig, "output_mode" | "input_config" | "output_config">
 ): "eligible" | "output" | "text_processing" | "mapped" {
-  if (step.output_mode !== "pass_through" && step.output_mode !== "http_post") return "output";
+  if (
+    (step.output_mode !== "pass_through" && step.output_mode !== "http_post") ||
+    !usesCompletionModel(step)
+  ) {
+    return "output";
+  }
   const config = objectOf(step.input_config);
   if (config.text_processing !== undefined && config.text_processing !== null) {
     return "text_processing";
@@ -320,6 +325,21 @@ export function httpsHostFixed(url: string): boolean {
  */
 export function runResultUrlFixed(url: string): boolean {
   return httpsHostFixed(url) && !url.includes("{{");
+}
+
+/**
+ * Whether the step sends the run's result: an outbound call whose body Eneo
+ * builds once the run is complete (the core's `sends_run_result`). It sends
+ * the text the step reads.
+ */
+export function sendsRunResult(step: {
+  output_mode: OutputMode;
+  output_config?: unknown;
+}): boolean {
+  return (
+    step.output_mode === "http_post" &&
+    readHttpConfig(step.output_config, "output").body.mode === "run_result"
+  );
 }
 
 /**
@@ -741,12 +761,26 @@ export function withSpeakerMapping(outputConfig: unknown, mapping: SpeakerMappin
 // Citations and the retrieval policy: both only for AI-written output.
 // ---------------------------------------------------------------------------
 
-export function outputModeUsesCompletionModel(mode: OutputMode): boolean {
-  return mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping";
+/**
+ * Whether the step calls an AI model: its mode answers with one, unless it
+ * sends the run's result, which Eneo builds without one. The one owner of
+ * the rule; the core keeps the same (`may_call_completion_provider`).
+ */
+export function usesCompletionModel(step: {
+  output_mode: OutputMode;
+  output_config?: unknown;
+}): boolean {
+  const mode = step.output_mode;
+  return (
+    (mode === "pass_through" || mode === "http_post" || mode === "speaker_mapping") &&
+    !sendsRunResult(step)
+  );
 }
 
-export function supportsCitations(step: Pick<StepConfig, "output_type" | "output_mode">): boolean {
-  return step.output_type === "text" && outputModeUsesCompletionModel(step.output_mode);
+export function supportsCitations(
+  step: Pick<StepConfig, "output_type" | "output_mode" | "output_config">
+): boolean {
+  return step.output_type === "text" && usesCompletionModel(step);
 }
 
 export function readCitationsOn(outputConfig: unknown): boolean {

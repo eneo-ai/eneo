@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { readHttpConfig, readLongMaterial, readRuntimeInput } from "./step-configs";
 import {
+  longMaterialEligibility,
+  readHttpConfig,
+  readLongMaterial,
+  readRuntimeInput,
+  supportsCitations
+} from "./step-configs";
+import {
+  applyHttpOutputChange,
   applyInputSourceChange,
   applyInputTypeChange,
   applyOutputModeChange,
@@ -11,7 +18,9 @@ import {
   inputSourceOptions,
   inputTypeOptions,
   outputModeIssue,
-  outputModeOptions
+  outputModeOptions,
+  outputTypeOptions,
+  stepUsesModel
 } from "./step-rules";
 import { stepConfigOf, type StepConfig } from "./step-types";
 import { makeStep } from "./testing/fixtures";
@@ -143,6 +152,60 @@ describe("long material follows the mode", () => {
     const step = later({ input_config: { long_material: { mode: "digest" } } });
     expect(readLongMaterial(applyOutputModeChange(step, "compose_text").input_config)).toBe(false);
     expect(readLongMaterial(applyOutputModeChange(step, "http_post").input_config)).toBe(true);
+  });
+});
+
+describe("a step that sends the run's result", () => {
+  /** An outbound step with an AI answer as JSON and everything only a model uses. */
+  const outbound = (body: Record<string, unknown>, overrides: Partial<StepConfig> = {}) =>
+    later({
+      output_mode: "http_post",
+      output_type: "json",
+      output_contract: { type: "object" },
+      output_config: {
+        url: "https://receiver.example.org/eneo",
+        body,
+        citation_mode: "inline_inref_sidecar",
+        retrieval_policy: { version: 1, mode: "fail_closed" }
+      },
+      input_config: { long_material: { mode: "digest" } },
+      ...overrides
+    });
+  const withBody = (step: StepConfig, mode: "auto" | "run_result", url?: string) => {
+    const http = readHttpConfig(step.output_config, "output");
+    return applyHttpOutputChange(step, { ...http, url: url ?? http.url, body: { mode } });
+  };
+
+  it("calls no model: it sends text and drops what only a model uses", () => {
+    const step = withBody(outbound({ mode: "auto" }), "run_result");
+    expect(stepUsesModel(step)).toBe(false);
+    expect(step).toMatchObject({ output_type: "text", output_contract: null });
+    expect(step.output_config).not.toHaveProperty("citation_mode");
+    expect(step.output_config).not.toHaveProperty("retrieval_policy");
+    expect(readLongMaterial(step.input_config)).toBe(false);
+    expect(outputTypeOptions(step).map((option) => option.value)).toEqual(["text"]);
+    expect(supportsCitations(step)).toBe(false);
+    expect(longMaterialEligibility(step)).toBe("output");
+  });
+
+  it("leaves an ordinary outbound step as it is when its call changes", () => {
+    const step = outbound({ mode: "auto" });
+    expect(stepUsesModel(step)).toBe(true);
+    const changed = withBody(step, "auto", "https://other.example.org/eneo");
+    expect(changed).toMatchObject({ output_type: "json", output_contract: { type: "object" } });
+    expect(changed.output_config).toMatchObject({
+      url: "https://other.example.org/eneo",
+      citation_mode: "inline_inref_sidecar",
+      retrieval_policy: { version: 1, mode: "fail_closed" }
+    });
+    expect(readLongMaterial(changed.input_config)).toBe(true);
+    expect(outputTypeOptions(changed).map((option) => option.value)).toContain("json");
+  });
+
+  it("reads a body left from an outbound call only while the step sends one", () => {
+    const left = outbound({ mode: "run_result" }, { output_mode: "pass_through" });
+    expect(stepUsesModel(left)).toBe(true);
+    expect(longMaterialEligibility(left)).toBe("eligible");
   });
 });
 
