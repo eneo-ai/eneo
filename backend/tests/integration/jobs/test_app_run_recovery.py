@@ -1,5 +1,6 @@
 import asyncio
 import wave
+from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from unittest.mock import AsyncMock
@@ -354,6 +355,87 @@ async def app_run_fixture(
     return create
 
 
+@pytest.fixture
+async def queued_recording(client, db_session, admin_user_api_key, recovery_recording):
+    app_url, file_id, _ = recovery_recording
+    headers = {"X-API-Key": admin_user_api_key.key}
+    response = await client.post(
+        f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
+    )
+    assert response.status_code == 203, response.text
+    run_id = UUID(response.json()["id"])
+    async with db_session() as db:
+        run = await db.get(AppRuns, run_id)
+        params = AppRunParams(
+            id=run.id,
+            user_id=run.user_id,
+            app_id=run.app_id,
+            file_ids=[UUID(file_id)],
+            text=None,
+        )
+        return run.job_id, params
+
+
+@pytest.mark.parametrize(
+    "provider_failed", [False, True], ids=["complete-write", "failure-write"]
+)
+async def test_failed_terminal_write_rolls_back_and_announces_persisted_failure(
+    queued_recording,
+    client,
+    db_session,
+    admin_user_api_key,
+    monkeypatch,
+    provider_failed,
+):
+    job_id, params = queued_recording
+
+    async def run_app(service, **kwargs):
+        if provider_failed:
+            raise RuntimeError("Summary unavailable")
+        await service.repo.session.execute(
+            sa.update(AppRuns)
+            .where(AppRuns.id == params.id)
+            .values(output_text="summary")
+        )
+
+    monkeypatch.setattr(AppRunService, "run_app", run_app)
+    original_update = JobRepository.update_job
+    terminal_writes = []
+
+    async def update_job(repo, id, job, **kwargs):
+        if id == job_id and job.status in (Status.COMPLETE, Status.FAILED):
+            terminal_writes.append(job.status)
+            if len(terminal_writes) == 1:
+                # A rejected statement aborts the execution transaction in PostgreSQL.
+                await repo.delegate.session.execute(sa.text("SELECT 1 / 0"))
+        return await original_update(repo, id, job, **kwargs)
+
+    monkeypatch.setattr(JobRepository, "update_job", update_job)
+    terminal_events = []
+
+    async def observe_committed_state(channel, message):
+        if message.status in (Status.COMPLETE, Status.FAILED):
+            async with db_session() as reader:
+                job = await reader.get(Jobs, job_id)
+                run = await reader.get(AppRuns, params.id)
+                terminal_events.append((message.status, job.status, run.output_text))
+
+    monkeypatch.setattr(task_manager, "publish_task_status", observe_committed_state)
+    with suppress(sa.exc.DBAPIError):
+        await app_run_worker.run_app({"job_id": str(job_id)}, params)
+
+    detail = await client.get(
+        f"/api/v1/app-runs/{params.id}/", headers={"X-API-Key": admin_user_api_key.key}
+    )
+    assert detail.status_code == 200
+    assert detail.json()["status"] == Status.FAILED
+    assert terminal_events == [(Status.FAILED, Status.FAILED, None)]
+    assert terminal_writes == [
+        Status.FAILED if provider_failed else Status.COMPLETE,
+        Status.FAILED,
+    ]
+
+
 async def test_poll_observes_status_and_summary_from_the_same_commit(
     app_run_fixture, client, db_session, admin_user_api_key
 ):
@@ -678,28 +760,14 @@ async def test_recovery_rejects_missing_source_without_republishing(
 
 @pytest.mark.parametrize("committed", [False, True], ids=["rollback", "lost-ack"])
 async def test_checkpoint_failure_stops_before_summary_and_records_actual_progress(
-    client, db_session, admin_user_api_key, recovery_recording, monkeypatch, committed
+    client, db_session, admin_user_api_key, queued_recording, monkeypatch, committed
 ):
     from eneo.files.file_service import FileService
     from eneo.worker.task_manager import JobCheckpointError
 
-    app_url, file_id, _ = recovery_recording
+    job_id, params = queued_recording
     headers = {"X-API-Key": admin_user_api_key.key}
-    response = await client.post(
-        f"{app_url}runs/", json={"files": [{"id": file_id}]}, headers=headers
-    )
-    assert response.status_code == 203, response.text
-    run_id = UUID(response.json()["id"])
     async with db_session() as db:
-        run = await db.get(AppRuns, run_id)
-        params = AppRunParams(
-            id=run.id,
-            user_id=run.user_id,
-            app_id=run.app_id,
-            file_ids=[UUID(file_id)],
-            text=None,
-        )
-        job_id = run.job_id
         dialect = db.get_bind().dialect
 
     save = FileService.save_transcription
@@ -728,7 +796,7 @@ async def test_checkpoint_failure_stops_before_summary_and_records_actual_progre
     with pytest.raises(JobCheckpointError):
         await app_run_worker.run_app({"job_id": job_id}, params)
     summary.assert_not_awaited()
-    detail = await client.get(f"/api/v1/app-runs/{run_id}/", headers=headers)
+    detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
     assert detail.json()["status"] == Status.FAILED
     assert detail.json()["input"]["files"][0]["transcription"] == (
         "saved speech" if committed else None

@@ -113,7 +113,7 @@ class TaskManager:
                 Used when mark_job_started() has already atomically set the status
                 to prevent worker resurrection race condition.
             transactional: The caller publishes terminal status after commit and
-                records cancellation after rollback.
+                records failure in a fresh transaction if a terminal write fails.
         """
         if not status_already_set:
             await self.set_status(Status.IN_PROGRESS)
@@ -138,10 +138,10 @@ class TaskManager:
             message = str(exc).strip()
             # Avoid storing excessively long error messages on the job record
             truncated_message = message[:512] if message else None
-            await self.fail_job(truncated_message, publish=not transactional)
+            await self.fail_job(truncated_message, transactional=transactional)
             self.success = False
         else:
-            await self.complete_job(publish=not transactional)
+            await self.complete_job(transactional=transactional)
             self.success = True
         finally:
             if self._cleanup_func is not None:
@@ -159,24 +159,28 @@ class TaskManager:
         if self.job_service is not None:
             await self.job_service.set_status(self.job_id, status)
 
-    async def complete_job(self, *, publish: bool = True):
+    async def complete_job(self, *, transactional: bool = False):
         if self._job_already_handled:
             return
-        if publish:
+        if not transactional:
             await self.publish_status(status=Status.COMPLETE)
         if self.job_service is not None:
             try:
                 await self.job_service.complete_job(self.job_id, self._result_location)
             except Exception as exc:
+                if transactional:
+                    raise
                 logger.error(
                     "Failed to mark job as complete",
                     extra={"job_id": str(self.job_id), "error": str(exc)},
                 )
 
-    async def fail_job(self, message: str | None = None, *, publish: bool = True):
+    async def fail_job(
+        self, message: str | None = None, *, transactional: bool = False
+    ):
         if self._job_already_handled:
             return
-        if publish:
+        if not transactional:
             await self.publish_status(status=Status.FAILED)
 
         if message:
@@ -189,6 +193,8 @@ class TaskManager:
             try:
                 await self.job_service.fail_job(self.job_id, message)
             except Exception as exc:
+                if transactional:
+                    raise
                 logger.error(
                     "Failed to mark job as failed",
                     extra={"job_id": str(self.job_id), "error": str(exc)},
