@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID, uuid4
 
+from arq.jobs import JobStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
@@ -36,18 +37,24 @@ async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -
         await job_manager.enqueue(task, job_id, params)
     except Exception:
         logger.exception(
-            "Committed job could not be queued",
+            "Queue did not confirm job dispatch",
             extra={"job_id": str(job_id), "task": task.value},
         )
-        if task == Task.RUN_APP:
-            try:
-                async with sessionmanager.session() as session, session.begin():
-                    await JobRepository(session).fail_app_dispatch_if_unclaimed(job_id)
-            except Exception:
-                logger.exception(
-                    "Could not record app dispatch failure",
-                    extra={"job_id": str(job_id)},
-                )
+    else:
+        return
+
+    if task != Task.RUN_APP:
+        return
+    try:
+        # Redis may have enqueued the job before its reply was lost.
+        if await job_manager.get_job_status(job_id, task) == JobStatus.not_found:
+            async with sessionmanager.session() as session, session.begin():
+                await JobRepository(session).fail_app_dispatch_if_unclaimed(job_id)
+    except Exception:
+        logger.exception(
+            "Could not reconcile app dispatch; scheduled recovery will check the job",
+            extra={"job_id": str(job_id)},
+        )
 
 
 class JobService:
