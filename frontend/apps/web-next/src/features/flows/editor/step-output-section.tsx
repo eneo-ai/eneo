@@ -26,7 +26,6 @@ import {
   supportsCitations,
   withCitations,
   withDeliverable,
-  withHttpConfig,
   withSpeakerMapping,
   type SpeakerMapping,
   type StepDeliverable
@@ -39,6 +38,7 @@ import {
   outputTypeLabel
 } from "./step-labels";
 import {
+  applyHttpOutputChange,
   applyOutputModeChange,
   applyOutputTypeChange,
   outputModeIssue,
@@ -398,14 +398,7 @@ export function StepOutputSection({
               stepId={stepId}
               direction="output"
               config={readHttpConfig(draft.output_config, "output")}
-              onChange={(http) =>
-                onChange({
-                  ...draft,
-                  // The run's result is sent as the text the step reads.
-                  ...(http.body.mode === "run_result" ? { output_type: "text" } : {}),
-                  output_config: withHttpConfig(draft.output_config, http)
-                })
-              }
+              onChange={(http) => onChange(applyHttpOutputChange(draft, http))}
               groups={variableGroups({
                 flow,
                 stepOrder: stepOrder + 1,

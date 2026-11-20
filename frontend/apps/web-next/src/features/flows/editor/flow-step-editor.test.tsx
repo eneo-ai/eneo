@@ -2558,20 +2558,6 @@ describe("FlowStepEditor deliverables", () => {
       }
     ).step_edits[0]!.changes.output_config;
 
-  it("sends the run's result as text, whatever the step answered before", async () => {
-    const flow = resultFlow({ body: { mode: "auto" } });
-    flow.steps[1] = { ...flow.steps[1]!, output_type: "json" };
-    renderEditor(storeEdits(flow)(), { stepId: "step-2" });
-    await chooseBody(messages.flow_step_editor_http_body_run_result);
-    await saveStep();
-    const changes = (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] })
-      .step_edits[0]!.changes;
-    expect(changes).toMatchObject({
-      output_type: "text",
-      output_config: { body: { mode: "run_result" } }
-    });
-  });
-
   it("sends the run's result when chosen, keeps it when reopened, and goes back to the step's own result", async () => {
     const current = storeEdits(
       resultFlow({ body: { mode: "json_template", template: '{"text": "{{text}}"}' } })
@@ -2628,6 +2614,40 @@ describe("FlowStepEditor deliverables", () => {
       await screen.findByText(messages.flow_step_editor_http_body_run_result_text_only)
     ).toBeTruthy();
   }, 20_000);
+
+  it("calls no model when it sends the run's result: the AI's task goes and the result is text", async () => {
+    const start = resultFlow({ citation_mode: "inline_inref_sidecar" });
+    const current = storeEdits({
+      ...start,
+      steps: start.steps.map((step) =>
+        step.id === "step-2"
+          ? { ...step, output_type: "json", input_config: { long_material: { mode: "digest" } } }
+          : step
+      )
+    });
+    renderEditor(current(), { stepId: "step-2" });
+    // An ordinary outbound step: an AI answers, with an instruction and a model.
+    const aiHeading = () =>
+      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_ai_title });
+    await waitFor(() => expect(aiHeading()).toBeTruthy());
+    expect(
+      screen.getByRole("switch", { name: new RegExp(`^${messages.flow_step_citation_mode}`) })
+    ).toBeTruthy();
+    await chooseBody(messages.flow_step_editor_http_body_run_result);
+    await waitFor(() => expect(aiHeading()).toBeNull());
+    expect(
+      screen.queryByRole("switch", { name: new RegExp(`^${messages.flow_step_citation_mode}`) })
+    ).toBeNull();
+    // Nothing hidden holds the save back.
+    await saveStep();
+    const body = patchBodies()[0] as {
+      step_edits: { changes: { output_type: string; input_config: unknown } }[];
+    };
+    expect(body.step_edits[0]!.changes.output_type).toBe("text");
+    expect(body.step_edits[0]!.changes.input_config).toBeNull();
+    expect(outputConfigOf(0)).not.toHaveProperty("citation_mode");
+    expect(body).not.toHaveProperty("assistants");
+  }, 30_000);
 
   it("holds the run's result to a fixed https address and its own Content-Type before saving", async () => {
     let view = renderEditor(

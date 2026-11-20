@@ -153,6 +153,32 @@ describe("checkDraft", () => {
     ).toBe(false);
   });
 
+  it("asks no instruction or model of a step that sends the run's result", () => {
+    const outbound = (mode: string) =>
+      makeStep(2, {
+        output_mode: "http_post",
+        output_config: {
+          url: "https://receiver.example.org/eneo",
+          auth: { mode: "none" },
+          body: { mode }
+        }
+      });
+    const blank = makeAssistant({
+      id: "assistant-2",
+      prompt: { text: "", description: null },
+      completion_model: null
+    } as never);
+    const problemsOf = (mode: string) =>
+      checkDraft(makeFlow({ steps: [makeStep(1), outbound(mode)] }), {
+        ...none,
+        assistants: new Map([["assistant-2", blank]])
+      })
+        .steps.find(({ step }) => step.step_order === 2)
+        ?.problems.map((problem) => problem.code) ?? [];
+    expect(problemsOf("auto")).toEqual(["prompt_missing", "model_missing"]);
+    expect(problemsOf("run_result")).toEqual([]);
+  });
+
   it("counts a Word field filled from a source the flow no longer has as unfilled", () => {
     const template = (bindings: Record<string, string>) =>
       makeFlow({

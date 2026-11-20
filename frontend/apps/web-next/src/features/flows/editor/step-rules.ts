@@ -1,7 +1,6 @@
 import {
   FILE_INPUT_TYPES,
   hasUnderlag,
-  outputModeUsesCompletionModel,
   readRuntimeInput,
   readSpeakerMapping,
   readTemplateFill,
@@ -11,6 +10,7 @@ import {
   hasHttpConfig,
   readHttpConfig,
   reviewLocked,
+  sendsRunResult,
   reviewSupported,
   stepDeliversArtifact,
   supportsCitations,
@@ -28,6 +28,8 @@ import {
   longMaterialEligibility,
   readLongMaterial,
   withLongMaterial,
+  usesCompletionModel,
+  type HttpConfig,
   type ToolArgumentSpec
 } from "./step-configs";
 import {
@@ -239,10 +241,12 @@ export function outputModeOptions(
 }
 
 export function outputTypeOptions(
-  step: Pick<StepConfig, "input_type" | "output_mode" | "output_type">
+  step: Pick<StepConfig, "input_type" | "output_mode" | "output_type" | "output_config">
 ): Option<OutputType>[] {
   const allowed: readonly OutputType[] =
-    step.output_mode === "transcribe_only" || step.output_mode === "compose_text"
+    step.output_mode === "transcribe_only" ||
+    step.output_mode === "compose_text" ||
+    sendsRunResult(step)
       ? ["text"]
       : step.output_mode === "template_fill"
         ? ["docx"]
@@ -308,15 +312,19 @@ export function chainIssue(
 /**
  * Settings that belong to one output mode and that the core refuses under
  * another: citations and the retrieval policy need a model's answer, review
- * cannot follow outbound delivery, a speaker mapping is always reviewed.
+ * cannot follow outbound delivery, a speaker mapping is always reviewed, a
+ * step that sends the run's result sends text.
  */
 function settle(step: StepConfig): StepConfig {
   let next = step;
+  if (sendsRunResult(next) && next.output_type !== "text") {
+    next = { ...next, output_type: "text", output_contract: null };
+  }
   if (!supportsCitations(next)) {
     const output_config = withCitations(next.output_config, false);
     if (output_config !== next.output_config) next = { ...next, output_config };
   }
-  if (!supportsRetrievalPolicy(next.output_mode)) {
+  if (!supportsRetrievalPolicy(next.output_mode) || !usesCompletionModel(next)) {
     const output_config = withRetrievalPolicy(next.output_config, null);
     if (output_config !== next.output_config) next = { ...next, output_config };
   }
@@ -513,6 +521,16 @@ export function applyOutputModeChange(step: StepConfig, mode: OutputMode): StepC
   return settle(next);
 }
 
+/**
+ * The outbound call changed. Choosing the body that sends the run's result
+ * settles the step, as it then calls no model; another edit of the call
+ * leaves the step's other settings as they are.
+ */
+export function applyHttpOutputChange(step: StepConfig, http: HttpConfig): StepConfig {
+  const next = { ...step, output_config: withHttpConfig(step.output_config, http) };
+  return sendsRunResult(next) && !sendsRunResult(step) ? settle(next) : next;
+}
+
 export function applyOutputTypeChange(step: StepConfig, type: OutputType): StepConfig {
   let mode = step.output_mode;
   if (
@@ -537,8 +555,8 @@ export function applyOutputTypeChange(step: StepConfig, type: OutputType): StepC
 }
 
 /** Whether the step runs an AI model, and so has an instruction and a model. */
-export function stepUsesModel(step: Pick<StepConfig, "output_mode">): boolean {
-  return outputModeUsesCompletionModel(step.output_mode);
+export function stepUsesModel(step: { output_mode: OutputMode; output_config?: unknown }): boolean {
+  return usesCompletionModel(step);
 }
 
 /**
