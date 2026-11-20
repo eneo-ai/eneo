@@ -869,7 +869,8 @@ Response:
 #### Several documents from one run
 
 A flow can deliver more than one document. The flow author marks each Word or
-PDF step whose document the run returns, and gives it a label. The last step
+PDF step whose document the run returns with `output_config.deliverable`, and
+gives it a label. The last step
 counts as a deliverable whenever its output is a document. The run contract
 lists them in `deliverables` before the run starts, and a completed run lists
 them, in step order, in `deliverables`:
@@ -915,8 +916,10 @@ them. Fetch each one with its `file_id` as in step 11.
 - `deliverables[].files` holds only the step's documents from its current
   attempt. `result.files` keeps every current file of the last step, which can
   include a text file beside the document.
-- A marked step whose document is missing is listed with `files: []`. A
-  missing document on the last step still fails the result, as before.
+- A marked step whose document is missing is listed with `files: []`. On
+  the last step, reading the run fails, as before, only when the step left no
+  file at all; when it left only a text file, `result.files` holds that file
+  and its deliverable lists `files: []`.
 - `result` and `result_files` are unchanged, so a client that reads only the
   last document keeps working.
 

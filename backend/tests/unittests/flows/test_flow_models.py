@@ -865,6 +865,34 @@ def test_run_public_fails_explicitly_when_completed_artifact_is_missing() -> Non
         )
 
 
+def test_a_last_document_step_with_only_a_text_file_keeps_its_result() -> None:
+    # The result fails only when the last step has no file rows at all; with
+    # a text file and no document the result holds that file, and the step's
+    # deliverable lists no document.
+    first_id, last_id = uuid4(), uuid4()
+    run = _completed_run(output_payload_json={"text": "rendered"})
+    text_file = _document_file(run, step_id=last_id).model_copy(
+        update={
+            "source": "generated_output",
+            "name": "lifecare.txt",
+            "mimetype": "text/plain",
+        }
+    )
+
+    public = FlowAssembler().to_run_public(
+        run, result_files=(text_file,), outputs=_two_document_outputs(first_id, last_id)
+    )
+
+    assert public.result is not None
+    assert public.result.model_dump(mode="json")["files"] == [
+        text_file.model_dump(mode="json")
+    ]
+    assert [(item.step_id, item.files) for item in public.deliverables] == [
+        (first_id, []),
+        (last_id, []),
+    ]
+
+
 def test_run_public_fails_explicitly_without_completed_run_contract() -> None:
     with pytest.raises(
         FlowRunResultProjectionError,
