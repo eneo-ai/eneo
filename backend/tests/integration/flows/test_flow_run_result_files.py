@@ -15,9 +15,12 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from eneo.audit.application.audit_service import AuditService
+from eneo.audit.domain.actor_types import ActorType
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import SafeAsyncSession, sessionmanager
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.flow_tables import (
+    FlowRuns,
     FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
     FlowStepResults,
@@ -40,6 +43,7 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.exceptions import TypedIOValidationException
+from tests.integration.flows.test_flow_run_repository import _insert_service_key
 from tests.integration.flows.test_flow_run_result_delivery import RUN_RESULT_CONFIG
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_running_webhook_run,
@@ -327,3 +331,42 @@ async def test_a_request_refused_when_it_is_compiled_is_never_audited_as_sent(
     assert outcome["dead_lettered"] == 1
     send.assert_not_awaited()
     assert await _sending_audits(run.id) == []
+
+
+async def test_a_run_started_with_a_service_key_sends_its_result_as_that_service(
+    setup_database, run_with_a_document, monkeypatch, admin_user
+):
+    run, delivery_id, _ = await run_with_a_document()
+    async with sessionmanager.session() as session, session.begin():
+        service_id, key_id = await _insert_service_key(
+            session,
+            tenant_id=admin_user.tenant_id,
+            created_by_user_id=admin_user.id,
+            display_name="Integration",
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .values(
+                principal_type=PrincipalType.SERVICE_KEY.value,
+                principal_user_id=None,
+                principal_service_id=service_id,
+                created_by_api_key_id=key_id,
+                runtime_service_permission="write",
+            )
+        )
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    outcome = await _run_outbox()
+
+    assert outcome["delivered"] == 1, outcome
+    send.assert_awaited_once()
+    [audit] = await _read(
+        sa.select(
+            AuditLog.actor_type, AuditLog.actor_api_key_id, AuditLog.actor_id
+        ).where(AuditLog.action == _SENDING, AuditLog.entity_id == run.id)
+    )
+    assert audit.actor_type == ActorType.API_KEY.value
+    assert audit.actor_api_key_id == key_id
+    assert audit.actor_id is None
