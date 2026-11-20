@@ -17,6 +17,7 @@ from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
 from eneo.jobs.job_models import failure_code_for_exception
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
@@ -408,6 +409,7 @@ class Worker:
         *,
         keep_result: int | None = None,
         max_tries: int | None = None,
+        commit_start_before_run: bool = False,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
@@ -423,15 +425,27 @@ class Worker:
                 assert job_id is not None
                 user_id = params.user_id if with_user else None
 
+                if commit_start_before_run:
+                    # Commit before any provider call. If the commit outcome is
+                    # unknown, only maintenance can fail the job safely: a different
+                    # delivery may already own it.
+                    async with sessionmanager.session() as start, start.begin():
+                        if not await JobRepository(start).mark_job_started(job_id):
+                            return False
+
                 task_manager: TaskManager | None = None
                 try:
                     async with sessionmanager.session() as session, session.begin():
                         container = await self._create_container(
                             session, user_id=user_id
                         )
-                        # Hold the job row until the task commits. A reaper skips
-                        # this lock, and late deliveries cannot restart a failed job.
-                        if not await container.job_repo().mark_job_started(job_id):
+                        # Hold the row through completion so recovery skips live work.
+                        repo = container.job_repo()
+                        if commit_start_before_run:
+                            started = await repo.touch_job(job_id)
+                        else:
+                            started = await repo.mark_job_started(job_id)
+                        if not started:
                             return False
                         task_manager = container.task_manager(
                             job_id=job_id,
