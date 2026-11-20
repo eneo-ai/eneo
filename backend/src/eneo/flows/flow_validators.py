@@ -1134,7 +1134,7 @@ def _validate_deliverable(
     if file_name_reads_as_credential(deliverable.file_name):
         raise refuse(
             "reads as a credential (such as `Basic …`, `Bearer …` or "
-            "`token=…`) whatever the form holds, so a run never names a "
+            "`token=…`) for an ordinary form value, so a run never names a "
             "document by it and uses the label instead. Reword the fixed text.",
             path=_DELIVERABLE_FILE_NAME_PATH,
         )

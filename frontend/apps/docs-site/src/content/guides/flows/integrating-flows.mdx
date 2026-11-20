@@ -930,7 +930,7 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
   between `{{ }}` is allowed, nor a field whose name marks it as sensitive,
   such as `password` or `token`, nor the form's run-date field: the run's day
   is already in every name. Publishing also refuses fixed text that reads as
-  a credential whatever the form holds, such as `Basic plan` or `token=`.
+  a credential for an ordinary form value, such as `Basic plan` or `token=`.
 - The run's day is added after the name, as for every document:
   `Standup Eneo 2026-11-19.docx`. Characters a file name cannot hold become
   spaces, and a value that credential masking would change is left out, as is
