@@ -289,6 +289,7 @@ def test_the_contract_and_run_detail_examples_describe_one_flow() -> None:
         *contract["steps_requiring_input"],
         *contract["steps_requiring_review"],
         FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+        *detail["result_files"],
     ]
     order_by_step: dict[str, set[int]] = {}
     for step in steps:
@@ -314,6 +315,15 @@ def test_the_contract_and_run_detail_examples_describe_one_flow() -> None:
     assert {file["step_id"] for file in detail["result"]["files"]} == {
         contract["final_output"]["step_id"]
     }
+    # Readiness is reported only for a step that fills a Word template.
+    template_fill_steps = {
+        step["step_id"]
+        for step in (contract["final_output"], *contract["deliverables"])
+        if step["output_mode"] == "template_fill"
+    }
+    assert {
+        item["step_id"] for item in contract["template_readiness"]
+    } <= template_fill_steps
     assert detail["webhook_deliveries"]
 
 

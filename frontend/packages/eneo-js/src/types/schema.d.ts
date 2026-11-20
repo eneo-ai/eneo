@@ -22197,15 +22197,7 @@ export interface components {
      *           "step_order": 3
      *         }
      *       ],
-     *       "template_readiness": [
-     *         {
-     *           "can_download": false,
-     *           "can_edit": false,
-     *           "published_flow_version": 3,
-     *           "status": "unavailable",
-     *           "step_id": "00000000-0000-0000-0000-000000000102"
-     *         }
-     *       ],
+     *       "template_readiness": [],
      *       "transcription": {
      *         "live": {
      *           "available": true

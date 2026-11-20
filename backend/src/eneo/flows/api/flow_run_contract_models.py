@@ -129,20 +129,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
         }
     ],
     "aggregate_max_files": 1,
-    "template_readiness": [
-        {
-            "step_id": "00000000-0000-0000-0000-000000000102",
-            "template_asset_id": None,
-            "template_file_id": None,
-            "template_name": None,
-            "checksum": None,
-            "published_flow_version": 3,
-            "status": "unavailable",
-            "can_edit": False,
-            "can_download": False,
-            "message_code": None,
-        }
-    ],
+    "template_readiness": [],
     "transcription": {
         "live": {"available": True, "reason": None},
         "speaker_labels": {"selectable": True, "required": False, "default": True},
