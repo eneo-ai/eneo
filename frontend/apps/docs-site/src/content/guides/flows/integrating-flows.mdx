@@ -2026,6 +2026,87 @@ export class EneoFlows {
 }
 ```
 
+## Sending the run result to a receiver
+
+An HTTP POST step whose body mode is `run_result` sends the run's result to a
+fixed HTTPS address. The result is sent when the run has completed, so a
+failing receiver never fails the run. The step does not call its model: it
+keeps the text it reads as its own text.
+
+```json
+{
+  "url": "https://receiver.example.org/eneo/results",
+  "auth": { "mode": "none" },
+  "body": { "mode": "run_result" }
+}
+```
+
+The request is `application/json` with the schema `eneo.flow_run_result.v1`:
+
+```json
+{
+  "schema": "eneo.flow_run_result.v1",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "run_id": "00000000-0000-0000-0000-000000000101",
+  "run_created_at": "2026-11-20T08:00:00+00:00",
+  "run_completed_at": "2026-11-20T08:05:00+00:00",
+  "text": "# Meeting\n\n- Decision: done",
+  "deliverables": [
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000201",
+      "step_order": 2,
+      "label": "Minutes",
+      "output_type": "docx",
+      "files": [
+        {
+          "file_id": "00000000-0000-0000-0000-000000000301",
+          "name": "Minutes.docx",
+          "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+          "size": 18234,
+          "checksum": "<sha256 hex>",
+          "content_base64": "UEsDBBQ..."
+        }
+      ]
+    }
+  ]
+}
+```
+
+- `text` is the run's text result: the text the sending step reads, by default
+  the result of the step before it.
+- `deliverables` lists every document the run delivers, as in
+  `FlowRunPublic.deliverables`, with each file's bytes in `content_base64`.
+  Check each file against its `size` and `checksum` (SHA-256).
+- The files of one result may hold at most 20 MB together, counted before
+  base64. Base64 makes the body about a third larger, so plan for about
+  27 MB. A larger result, or a file whose content is gone or no longer
+  matches its checksum, is never sent in part: the delivery ends in dead
+  letter without a request.
+- Text longer than a step result keeps inline (`FLOW_MAX_INLINE_TEXT_BYTES`)
+  is never cut: the sending step cannot read it whole, and the run fails with
+  `typed_io_input_too_large`.
+- Headers may read run data; the address may not. Content-Type is set by the
+  mode and cannot be authored.
+
+**Receiver contract.** Answer `2xx` once the result is stored. Delivery is at
+least once: the same result can arrive again with the same `Idempotency-Key`,
+so store by that key. Any other answer, or no answer within the step's
+timeout, is retried: five attempts in all, waiting 30, 120, 300 and 900
+seconds between them. After the last failed attempt the delivery ends in dead
+letter. An audit row is written before every attempt, with the receiver's host
+and the file ids, never the content.
+
+**Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
+`delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
+lists each attempt. A dead-lettered result can be sent again with
+`POST /api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/`
+and the body `{"expected_dead_lettered_at": "<dead_lettered_at from the run>"}`.
+It needs edit access to the flow and returns the delivery, now pending again
+with a fresh set of attempts. A delivery that is not dead-lettered, or whose
+dead letter has changed since it was read, answers `409`
+(`flow_run_webhook_redelivery_conflict`, with the reason in `context.reason`).
+
 ## Testing an authored HTTP step
 
 `POST /api/v1/flows/{id}/http-test` requires the saved `step_id` and authored
@@ -2046,6 +2127,10 @@ an unavailable encryption key returns `503`. A missing or wrong key cannot
 resolve a stored credential and no request is sent. Stored auth credentials and
 headers marked secret are encrypted with authenticated Fernet encryption; public
 Flow configurations expose stored-secret references instead of the values.
+
+A step whose body mode is `run_result` cannot be tested this way: the test
+answers `success: false` with `HTTP_RUN_RESULT_NOT_TESTABLE` and sends nothing.
+Start a run to try the receiver.
 
 The test returns status, elapsed time and a request preview with whole secret
 header values redacted. Credential-bearing tests do not read or preview the
