@@ -472,13 +472,6 @@ def step_form_field_reads(
         ("output_config", output_config),
         ("input_config", input_config),
     )
-    if sends_run_result(mode, output_config):
-        # A run result sends the run's text and every deliverable, and any
-        # earlier step may be one, so the body reads each of them.
-        reads.extend(
-            StepRead("config", order, (), "output_config.body")
-            for order in range(1, max_prior_step_order + 1)
-        )
     for column, config in configs:
         channel = config_channel(
             column=column,

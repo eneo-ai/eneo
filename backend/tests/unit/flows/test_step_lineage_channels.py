@@ -573,3 +573,25 @@ def test_no_form_field_is_read_by_a_step_reading_only_steps() -> None:
         )
         == ()
     )
+
+
+def test_a_run_result_reads_every_earlier_step_and_no_form_field_of_its_own() -> None:
+    config = {
+        "url": "https://receiver.example.org/results",
+        "auth": {"mode": "none"},
+        "body": {"mode": "run_result"},
+    }
+    shape = {
+        "input_source": FlowInputSource.PREVIOUS_STEP,
+        "output_mode": FlowOutputMode.HTTP_POST,
+        "output_config": config,
+    }
+
+    body_reads = [
+        read.step_order
+        for read in step_reads_by_channel(**_shape(**shape))
+        if read.site == "output_config.body"
+    ]
+
+    assert body_reads == list(range(1, _shape()["max_prior_step_order"] + 1))
+    assert _field_reads(**shape) == ()
