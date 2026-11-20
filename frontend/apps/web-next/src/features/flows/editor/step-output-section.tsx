@@ -28,8 +28,7 @@ import {
   withDeliverable,
   withHttpConfig,
   withSpeakerMapping,
-  type SpeakerMapping,
-  type StepDeliverable
+  type SpeakerMapping
 } from "./step-configs";
 import { HttpFields } from "./step-http-fields";
 import {
@@ -52,7 +51,8 @@ import {
   type JsonObject,
   type OutputMode,
   type OutputType,
-  type StepConfig
+  type StepConfig,
+  type StepDeliverable
 } from "./step-types";
 import { formFieldsOf, insertToken, variableGroups, type VariableGroup } from "./step-variables";
 

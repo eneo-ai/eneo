@@ -5,7 +5,8 @@ import {
   type JsonObject,
   type OutputMode,
   type ReviewPolicy,
-  type StepConfig
+  type StepConfig,
+  type StepDeliverable
 } from "./step-types";
 
 /**
@@ -757,12 +758,6 @@ export function withRetrievalPolicy(
 // Deliverable: `output_config.deliverable` marks a step whose file is one of
 // the run's results, with a label and an optional file name.
 // ---------------------------------------------------------------------------
-
-/**
- * The stored shape (`FlowStepDeliverable` in the core). Local until the API
- * types are generated with it; then it is replaced by the generated one.
- */
-export type StepDeliverable = { label: string; file_name?: string };
 
 /** The core's bounds for a deliverable's label and file name, in characters. */
 export const DELIVERABLE_LABEL_MAX = 120;
