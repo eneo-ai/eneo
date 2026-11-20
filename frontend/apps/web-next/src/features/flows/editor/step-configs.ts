@@ -764,6 +764,18 @@ export const DELIVERABLE_LABEL_MAX = 120;
 export const DELIVERABLE_FILE_NAME_MAX = 200;
 
 /**
+ * Whether a label or file name is one line as the core keeps it as written:
+ * no line breaks or invisible characters, and no double, leading or trailing
+ * spaces.
+ */
+export function isOneLine(value: string): boolean {
+  return (
+    value === value.trim().split(/\s+/).join(" ") &&
+    !/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(value)
+  );
+}
+
+/**
  * Whether the step's output is a file of the run, the only kind of step that
  * can be a deliverable: a document the step does not send away over HTTP
  * (the core's `final_output_delivery` is `artifact`).

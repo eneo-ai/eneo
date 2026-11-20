@@ -2399,6 +2399,35 @@ describe("FlowStepEditor deliverables", () => {
     ).toEqual({ user_description: "Standup för alla" });
   }, 20_000);
 
+  it("says a label or file name must be one line, as the core keeps them as written", async () => {
+    renderEditor(deliveryFlow());
+    fireEvent.click(await deliverySwitch());
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "Till  Eneo" } });
+    fireEvent.change(fileNameField(), { target: { value: " Standup {{flow_input.team}}" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
+    ).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
+    expect(document.activeElement).toBe(label);
+
+    fireEvent.change(label, { target: { value: "Till Eneo " } });
+    fireEvent.change(fileNameField(), { target: { value: "Standup\t{{flow_input.team}}" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
+    ).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
+    expect(patchBodies()).toHaveLength(0);
+
+    fireEvent.change(label, { target: { value: "Till Eneo" } });
+    fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.team}}" } });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    await saveStep();
+    expect(patchBodies()).toHaveLength(1);
+  }, 20_000);
+
   it("counts the label and file name in characters, and refuses a label of only spaces", async () => {
     renderEditor(deliveryFlow());
     fireEvent.click(await deliverySwitch());

@@ -43,6 +43,7 @@ import {
   DELIVERABLE_FILE_NAME_MAX,
   DELIVERABLE_LABEL_MAX,
   httpUrlProblem,
+  isOneLine,
   readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
@@ -762,11 +763,19 @@ function StepEditorSession({
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
+      } else if (!isOneLine(deliverable.label)) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_one_line"
+        );
       }
       if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
           "flow_step_editor_deliverable_file_name_too_long",
           { max: DELIVERABLE_FILE_NAME_MAX }
+        );
+      } else if (!isOneLine(deliverable.file_name ?? "")) {
+        problems["output_config.deliverable.file_name"] = t(
+          "flow_step_editor_deliverable_file_name_one_line"
         );
       }
     }
