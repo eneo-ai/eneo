@@ -91,7 +91,8 @@ async def test_preview_token_admits_draft_widgets(client, admin_token):
     assert resp.status_code == 200, resp.text
     preview = resp.json()
     assert preview["public_id"] == public_id
-    assert preview["expires_in"] > 900
+    # A bearer in the admin page's DOM lives no longer than a visitor token.
+    assert 0 < preview["expires_in"] <= 900
 
     resp = await client.get(
         f"/api/v1/widgets/{public_id}/config/", headers=_auth(preview["token"])

@@ -132,9 +132,36 @@ describe("WidgetsAdminPage", () => {
     );
     expect(within(blocked).getByText(/Kan inte aktiveras: /)).toBeTruthy();
   });
+
+  it("names the MCP servers outside Eneo a widget reaches", async () => {
+    showPage({ items: [overviewItem({ external_tools: ["Ärendesystemet", "Bokningen"] })] });
+    expect(
+      await screen.findByText("MCP-servrar utanför Eneo: Ärendesystemet, Bokningen")
+    ).toBeTruthy();
+  });
 });
 
 describe("WidgetsAdminPage policy", () => {
+  it("an organisation can refuse widgets whose assistant uses tools outside Eneo", async () => {
+    api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
+      ok({ ...policy, ...init.body })
+    );
+    showPage({ route: "/admin/widgets?tab=policy" });
+    const allow = await screen.findByRole("switch", {
+      name: /^Tillåt widgetar med verktyg på MCP-servrar utanför Eneo/
+    });
+    expect((allow as HTMLInputElement).checked).toBe(true);
+    fireEvent.click(allow);
+    await waitFor(
+      () =>
+        expect(api.PATCH).toHaveBeenCalledWith(
+          "/api/v1/admin/widget-policy/",
+          expect.objectContaining({ body: { allow_external_tools: false } })
+        ),
+      { timeout: 2000 }
+    );
+  });
+
   it("a policy change refreshes the overview, whose blockers fold the policy in", async () => {
     api.PATCH.mockImplementation((_path: string, init: { body: Record<string, unknown> }) =>
       ok({ ...policy, ...init.body })

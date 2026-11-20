@@ -195,7 +195,15 @@ def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
     audit_log.actor_id (FK to users.id) would FK-violate. Mirror the gating
     pattern used by user_service._log_api_key_used: emit (None, SYSTEM) for
     service keys, (user.id, USER) for real users.
+
+    A widget visitor is synthetic too (``build_visitor_user``): its id is a
+    pseudonymous visitor id, not a users row, so it gets its own actor type
+    and no actor_id. The entry's metadata carries the visitor id. Decided on
+    the context object itself, so a user double with a truthy attribute of
+    that name is still audited as a user.
     """
+    if isinstance(getattr(user, "active_widget", None), WidgetVisitorContext):
+        return None, ActorType.WIDGET_VISITOR
     if is_service_api_key(user):
         return None, ActorType.SYSTEM
     return user.id, ActorType.USER

@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { ConversationMessage } from "@eneo/eneo-js";
-  import { Markdown, sanitizeLinkHref } from "$lib/components/markdown/index.js";
+  import { Markdown, sanitizeWebHref } from "$lib/components/markdown/index.js";
   import { tick } from "svelte";
   import Check from "@lucide/svelte/icons/check";
   import ChevronRight from "@lucide/svelte/icons/chevron-right";
@@ -163,7 +163,9 @@
           {#if expanded}
             <ol id={listId} class="mt-2 flex flex-col gap-1.5 text-sm">
               {#each sources as source, sourceIndex (source.id)}
-                {@const href = source.url ? sanitizeLinkHref(source.url) : undefined}
+                <!-- A stored source address links out, so only an absolute http(s)
+                     URL is one; the rule tool sources already follow. -->
+                {@const href = sanitizeWebHref(source.url)}
                 <li
                   id={anchorFor(sourceIndex)}
                   tabindex="-1"

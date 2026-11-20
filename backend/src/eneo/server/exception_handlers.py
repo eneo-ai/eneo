@@ -17,6 +17,7 @@ from eneo.authentication.oidc.errors import (
     OidcTransactionInvalidError,
 )
 from eneo.data_retention.derivations import DerivedSourceRemovedError
+from eneo.data_retention.domain.rules import RetentionExceedsSpaceError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -450,6 +451,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     # --- Copies of removed content ---
     DerivedSourceRemovedError: (410, None, ErrorCodes.DERIVED_SOURCE_REMOVED),
+    # --- Retention periods ---
+    RetentionExceedsSpaceError: (400, None, ErrorCodes.RETENTION_EXCEEDS_SPACE),
 }
 
 

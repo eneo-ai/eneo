@@ -22,6 +22,8 @@ def test_migration_graph_has_one_head() -> None:
     [
         ("202611091200", "202610201100", "202611081500"),
         ("202610201100", "202611081500", "202610201100"),
+        ("202611161200", "202611190900", "202610201100"),
+        ("202611190900", "202610201100", "202611091200"),
     ],
 )
 def test_specialist_stack_upgrade_preserves_applied_revisions(
@@ -41,7 +43,8 @@ def test_specialist_stack_upgrade_preserves_applied_revisions(
     ]
 
     assert required_revision in pending
-    assert "202611161200" in pending
+    assert scripts.get_current_head() in pending
+    assert current_revision not in pending
     assert already_applied not in pending
     assert "202610071400" not in pending
     assert len(pending) == len(set(pending))

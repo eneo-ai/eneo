@@ -29,6 +29,21 @@ How the roles and protections work is explained in
 
 Everything in this table works with an ordinary GitHub account.
 
+## What differs by role
+
+Everyone contributes through pull requests, and Core Maintainers decide what is
+merged. The steps below are the same for all; this is what differs:
+
+| You are                                                                             | You work from              | Labels and checks                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anyone with a GitHub account                                                        | A fork                     | If you are outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing runs before they start. A maintainer adds the labels unless you have been given Triage access. |
+| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | With Triage access you label your own pull request. As a member of the `eneo-ai` organisation, your checks start without approval.                                                                            |
+| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.                                                                                                                      |
+
+[Governance and Roles](/contributing/governance) explains the roles, why Core
+Maintainers is the only team with write access, and
+[how an organisation becomes a Collaborator](/contributing/governance#how-does-my-organisation-become-a-collaborator).
+
 ## Create an issue
 
 <Steps>
@@ -101,6 +116,10 @@ Open the folder in VS Code and choose **Reopen in Container**. The
 [development environment guide](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#2-fork-and-set-up-the-development-environment)
 covers the rest of the setup.
 
+Already have a clone of `eneo-ai/eneo`? Without write access, a push to it is
+refused with 403. Run `gh repo fork --remote` in the clone and push to your
+fork; the same guide shows the steps.
+
 ### Branch from the latest `develop`
 
 ```bash
@@ -109,9 +128,12 @@ git switch -c fix/short-description upstream/develop
 pre-commit install --install-hooks --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 ```
 
-Use a prefix that describes the work: `feature/`, `fix/`, `docs/`, `refactor/`
-or `test/`. The hooks run formatting, commit message and pre-push checks
-locally, so problems show up before CI.
+Start the branch name with a prefix that describes the work, such as
+`feature/`, `fix/`, `docs/`, `refactor/` or `test/`. CI rejects a branch
+without an allowed prefix; the full list is `feature/`, `feat/`, `fix/`,
+`hotfix/`, `security/`, `chore/`, `deps/`, `docs/`, `test/`, `refactor/`,
+`remove/`, `ci/` and `perf/`. The hooks run formatting, commit message and
+pre-push checks locally, so problems show up before CI.
 
 ### Make the change
 
@@ -127,30 +149,45 @@ Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
 `develop` branch. Before you submit:
 
 - Write the title as a Conventional Commit, for example
-  `fix(spaces): resolve permission check bug`. It becomes the commit message
-  on `develop`.
+  `fix(spaces): resolve permission check bug`. A pull request with several
+  commits lands with its title as the commit title on `develop`; one with a
+  single commit uses that commit's message, so write both the same way.
 - Link the issue under **Planning** with `Fixes #123`.
 - Fill in the rest of the template: **Changes**, **Why**, **User-facing**,
-  **Testing**, and **Accessibility** for UI changes.
+  **Testing**, and **Accessibility** for UI changes. The **User-facing
+  section** check fails when **User-facing** is empty; write a sentence or
+  `No`. The check runs again when you edit the description.
 - Leave **Allow edits by maintainers** ticked, so a maintainer can push a small
   fix for you.
 - Open it as a **draft** if you want early feedback on the direction.
 
 ### Let the checks run
 
-`CI / CI`, `Dependency Review / Dependency Review` and `PR label policy / PR labels`
-must pass. If this is your first contribution, a maintainer may need to approve
-the first workflow run before it starts.
+Four checks must pass: `CI / CI`, `Dependency Review / Dependency Review`,
+`PR label policy / PR labels` and `PR user-facing notes / User-facing section`.
+If you are not a member of the `eneo-ai` organisation, a maintainer approves
+the CI, Dependency Review and User-facing runs before they start; PR labels
+runs straight away.
 
-You may not be able to add labels yourself. A maintainer adds them during
-review, and the PR label check turns green when they do. If the pull request
-links no issue, it gets a `needs:task-link` label until you add `Fixes #123`.
+If you have Triage access, as Collaborators do, add the labels yourself.
+Otherwise a maintainer adds them during review, and the PR label check turns
+green when they do. A ready pull request
+into `develop` that closes no issue gets a `needs:task-link` label until the
+intake sees a closing link; [Project Roadmap](/contributing/project-roadmap)
+lists the two ways to add one.
 
 ### Review and merge
 
 A Core Maintainer reviews the pull request. Answer the comments and push new
 commits to the same branch instead of force-pushing, so reviewers can see what
 changed. Every conversation must be resolved before the merge.
+
+A maintainer can request an advisory review from our
+[Review Agent](https://ccimen.github.io/review-agent/docs/how-reviews-work) by
+commenting `/review`. Fix each finding or explain your response in the pull
+request. After new commits, `/review` reviews the latest commit; if it missed
+something, comment `/review feedback missed because …`. A Core Maintainer
+decides whether the change is ready.
 
 When the change is ready, the Core Maintainer approves it and chooses **Merge
 when ready**. The pull request enters the merge queue as soon as the checks are
@@ -224,18 +261,18 @@ docs(api): update assistant endpoint documentation
 
 ## Security checks
 
-Pull requests run CI and Dependency Review before merge. These checks keep
-dependency updates reviewable and prevent known high-severity vulnerable
-dependencies from entering `develop`. See
+Pull requests run CI and Dependency Review before merge. See
 [Security for Contributors](/contributing/security) for the required checks and
-how to handle a failing security check.
+how to handle a failing security check, and [Security at Eneo](/docs/security)
+for how the checks fit with the rest of Eneo's security work.
 
 ## Report a vulnerability
 
 Never report a vulnerability in a public issue, pull request or discussion.
 Report it privately, either through
 [**Security → Report a vulnerability**](https://github.com/eneo-ai/eneo/security/advisories/new)
-on GitHub or by email to `security@sundsvall.se`. The
+on GitHub, which is the preferred way, or, if you cannot use GitHub, by email to
+`security@sundsvall.se`. The
 [security policy](https://github.com/eneo-ai/eneo/blob/develop/docs/SECURITY.md)
 describes what to include and the response times.
 

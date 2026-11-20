@@ -43,6 +43,24 @@ function renderBar(autosave: WidgetAutosave, isAdmin = true) {
 }
 
 describe("WidgetStatusBar", () => {
+  test.each(["draft", "paused"] as const)("describes %s activation to an admin", async (status) => {
+    renderBar(new WidgetAutosave(widget({ status }), vi.fn()));
+    const action = status === "paused" ? "widget_admin_resume" : "widget_admin_activate";
+    await expect.element(page.getByText("widget_admin_external_tools_note")).toBeVisible();
+    await expect
+      .element(page.getByRole("button", { name: action }))
+      .toHaveAccessibleDescription("widget_admin_external_tools_note");
+  });
+
+  test.each([
+    ["active", true],
+    ["draft", false],
+    ["paused", false]
+  ] as const)("omits the activation notice for %s with admin=%s", (status, isAdmin) => {
+    renderBar(new WidgetAutosave(widget({ status }), vi.fn()), isAdmin);
+    expect(page.getByText("widget_admin_external_tools_note").query()).toBeNull();
+  });
+
   test("an active widget that is not serving as configured says so", async () => {
     renderBar(
       new WidgetAutosave(widget({ activation_blockers: ["target_not_published"] }), vi.fn())
@@ -87,6 +105,68 @@ describe("WidgetStatusBar", () => {
       .element(page.getByRole("button", { name: "widget_admin_activate" }))
       .toHaveAccessibleDescription(/widget_admin_blocker_subtitle_empty/);
   });
+
+  test("pausing leaves focus on the status heading, not the page", async () => {
+    const autosave = new WidgetAutosave(widget(), vi.fn());
+    const noop = vi.fn(async () => {});
+    render(WidgetStatusBar, {
+      autosave,
+      isAdmin: true,
+      onActivate: noop,
+      onPause: vi.fn(async () => autosave.replace(widget({ status: "paused" }))),
+      onArchive: noop,
+      onReload: noop
+    });
+    const pause = page.getByRole("button", { name: "widget_admin_pause" }).element() as HTMLElement;
+    pause.focus();
+    pause.click();
+
+    await expect.element(page.getByRole("button", { name: "widget_admin_resume" })).toBeVisible();
+    await vi.waitFor(() =>
+      expect(document.activeElement).toBe(
+        page.getByRole("heading", { name: "widget_admin_status" }).element()
+      )
+    );
+  });
+
+  test.each([
+    {
+      action: "activating",
+      current: widget({ status: "draft", activated_at: null }),
+      button: "widget_admin_activate",
+      handler: "onActivate"
+    },
+    {
+      action: "pausing",
+      current: widget(),
+      button: "widget_admin_pause",
+      handler: "onPause"
+    }
+  ] as const)(
+    "$action that fails gives focus back to its button",
+    async ({ current, button, handler }) => {
+      let fail!: (error: Error) => void;
+      const noop = vi.fn(async () => {});
+      const handlers = { onActivate: noop, onPause: noop };
+      handlers[handler] = vi.fn(() => new Promise<void>((_, reject) => (fail = reject)));
+      render(WidgetStatusBar, {
+        autosave: new WidgetAutosave(current, vi.fn()),
+        isAdmin: true,
+        onArchive: noop,
+        onReload: noop,
+        ...handlers
+      });
+      const pressed = page.getByRole("button", { name: button }).element() as HTMLElement;
+      pressed.focus();
+      pressed.click();
+
+      // Busy, the button is disabled, which drops focus to the page.
+      await vi.waitFor(() => expect(handlers[handler]).toHaveBeenCalledTimes(1));
+      await vi.waitFor(() => expect(document.activeElement).toBe(document.body));
+      fail(new Error("offline"));
+      await vi.waitFor(() => expect(document.activeElement).toBe(pressed));
+    }
+  );
 
   test("lists what the server refused so it can be found on any tab", async () => {
     const autosave = new WidgetAutosave(

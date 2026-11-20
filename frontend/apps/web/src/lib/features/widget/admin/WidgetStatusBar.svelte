@@ -1,10 +1,12 @@
 <!--
   Lifecycle of one widget: status, save state, why it cannot be activated
   yet (or, once active, what keeps it from serving properly), and the
-  activate / pause / archive actions. Activation and archiving are for tenant
-  admins; pausing is the kill switch every editor has.
+  activate / pause / archive actions. Activation and archiving
+  are for tenant admins; pausing is the kill switch every
+  editor has.
 -->
 <script lang="ts">
+  import { tick } from "svelte";
   import * as AlertDialog from "$lib/components/ui/alert-dialog/index.js";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
@@ -31,8 +33,26 @@
   const blockers = $derived(widget.activation_blockers ?? []);
   const refusals = $derived([...new Set(Object.values(autosave.refusals))]);
   const canActivate = $derived(isAdmin && blockers.length === 0 && !autosave.hasPending);
-
   let archiveOpen = $state(false);
+  let heading = $state<HTMLElement>();
+  const pressed = () => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active !== document.body ? active : null;
+  };
+  const usable = (element: HTMLElement | null): element is HTMLElement =>
+    !!element?.isConnected && !element.matches(":disabled");
+
+  async function refocus(
+    button: HTMLElement | null,
+    fallback: () => HTMLElement | null | undefined
+  ) {
+    await tick();
+    const active = document.activeElement;
+    // Focus the user has moved on stays where it is. Focus still on a button
+    // the action left disabled is not: browsers drop it, or strand it there.
+    if (active && active !== document.body && !active.matches(":disabled")) return;
+    (usable(button) ? button : fallback())?.focus();
+  }
 
   const activate = createAsyncState(async () => {
     try {
@@ -43,6 +63,11 @@
       toastWidgetError(error, m.widget_admin_could_not_activate());
     }
   });
+  async function startActivation() {
+    const button = pressed();
+    await activate();
+    await refocus(button, () => heading);
+  }
   const pause = createAsyncState(async () => {
     try {
       await onPause();
@@ -50,6 +75,11 @@
       toastError(error, m.widget_admin_could_not_pause());
     }
   });
+  async function startPause() {
+    const button = pressed();
+    await pause();
+    await refocus(button, () => heading);
+  }
   const archive = createAsyncState(async () => {
     try {
       await onArchive();
@@ -108,12 +138,19 @@
           ? m.widget_admin_resume_admin_only()
           : null
   );
+  const externalToolsNote = $derived(
+    isAdmin && blockers.length === 0 && (widget.status === "draft" || widget.status === "paused")
+      ? m.widget_admin_external_tools_note()
+      : null
+  );
   const activateReasonId = $derived(
     blockers.length > 0
       ? "widget-status-blockers"
       : adminOnlyNote
         ? "widget-status-admin-only"
-        : null
+        : externalToolsNote
+          ? "widget-status-external-tools"
+          : null
   );
 </script>
 
@@ -123,7 +160,14 @@
 >
   <div class="flex flex-wrap items-center justify-between gap-3">
     <div class="flex flex-wrap items-center gap-3">
-      <h2 id="widget-status-title" class="text-base font-semibold">{m.widget_admin_status()}</h2>
+      <h2
+        id="widget-status-title"
+        tabindex="-1"
+        bind:this={heading}
+        class="text-base font-semibold"
+      >
+        {m.widget_admin_status()}
+      </h2>
       <Badge
         variant={widget.status === "active"
           ? "default"
@@ -156,7 +200,7 @@
 
     <div class="flex flex-wrap items-center gap-2">
       {#if widget.status === "active"}
-        <Button variant="outline" onclick={pause} disabled={pause.isLoading}
+        <Button variant="outline" onclick={startPause} disabled={pause.isLoading}
           >{m.widget_admin_pause()}</Button
         >
       {:else if widget.status !== "archived"}
@@ -182,8 +226,9 @@
         {:else}
           <Button
             variant="default"
-            onclick={activate}
+            onclick={startActivation}
             disabled={!canActivate || activate.isLoading}
+            aria-describedby={activateReasonId ?? undefined}
           >
             {widget.status === "paused" ? m.widget_admin_resume() : m.widget_admin_activate()}
           </Button>
@@ -208,8 +253,6 @@
     </div>
   {/if}
   {#if blockers.length > 0}
-    <!-- An active widget with blockers is live but not serving as configured
-         (an unpublished assistant, no allowed website, no AI disclosure). -->
     <div
       id="widget-status-blockers"
       class="bg-warning-dimmer text-warning-stronger rounded-lg px-3 py-2 text-sm"
@@ -227,11 +270,13 @@
     </div>
   {:else if adminOnlyNote}
     <p id="widget-status-admin-only" class="text-secondary text-sm">{adminOnlyNote}</p>
+  {:else if externalToolsNote}
+    <p id="widget-status-external-tools" class="text-secondary text-sm">{externalToolsNote}</p>
   {/if}
 </section>
 
 <AlertDialog.Root bind:open={archiveOpen}>
-  <AlertDialog.Content>
+  <AlertDialog.Content escapeKeydownBehavior={archive.isLoading ? "ignore" : "close"}>
     <AlertDialog.Header>
       <AlertDialog.Title>{m.widget_admin_archive_title()}</AlertDialog.Title>
       <AlertDialog.Description>{m.widget_admin_archive_description()}</AlertDialog.Description>
