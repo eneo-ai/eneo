@@ -3,10 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
-from urllib.parse import urlsplit
 from uuid import UUID
 
 from eneo.audit.application.audit_service import AuditService
@@ -17,6 +16,7 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_repo import FileRepository
+from eneo.flows.api.flow_run_contract_models import FlowRunDeliverablePublic
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
@@ -45,6 +45,7 @@ from eneo.flows.flow_run_contract_service import (
 )
 from eneo.flows.flow_run_error import FlowRunError
 from eneo.flows.http_transport import sends_run_result
+from eneo.flows.http_transport.effective_url import parse_effective_http_url
 from eneo.flows.infrastructure.flow_repo import FlowRepository
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
@@ -157,10 +158,19 @@ class WebhookDeliveryPayload:
     context: dict[str, Any]
     audit_actor: FlowRunActor | None
     # The document a run_result body sends; None for a template body, which
-    # is sent while its run is running.
-    run_result_body: JsonValue | None = None
+    # is sent while its run is running. It holds file content: never in a repr.
+    run_result_body: JsonValue | None = field(default=None, repr=False)
     # The files that body sends, for the audit row written before each send.
     run_result_file_ids: tuple[UUID, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class _RunResultSource:
+    """What a run result body is built from once the delivery's transaction
+    has ended: its deliverables and a read grant for each file found."""
+
+    deliverables: list[FlowRunDeliverablePublic]
+    grants: dict[UUID, ContentReadGrant]
 
 
 class WebhookDeliveryClaimLostError(RuntimeError):
@@ -274,8 +284,6 @@ class FlowRunWebhookDeliveryService:
         try:
             payload = await self._prepare_before_sends_end(row=row, deadline=deadline)
             payload_prepared = True
-            if payload.run_result_body is not None:
-                await self._audit_run_result_send(row=row, payload=payload)
             try:
                 await self._deliver_payload(row=row, payload=payload, deadline=deadline)
             finally:
@@ -401,7 +409,14 @@ class FlowRunWebhookDeliveryService:
         try:
             async with preparation:
                 async with self.webhook_delivery_repo.session.begin():
-                    return await self._prepare_delivery_payload(row=row)
+                    payload, source = await self._prepare_delivery_payload(row=row)
+                if source is None:
+                    return payload
+                # The files' bytes are read on a connection of their own, once
+                # this delivery's transaction no longer holds one.
+                return await self._with_run_result_body(
+                    payload, source=source, tenant_id=row.tenant_id
+                )
         except TimeoutError as exc:
             if preparation.expired():
                 raise WebhookSendNotStartedError(
@@ -463,7 +478,10 @@ class FlowRunWebhookDeliveryService:
         self,
         *,
         row: FlowRunWebhookDeliveryRow,
-    ) -> WebhookDeliveryPayload:
+    ) -> tuple[WebhookDeliveryPayload, _RunResultSource | None]:
+        """The delivery's run, step, text and audit actor, read in the
+        delivery's transaction. A run result also gets what its body is built
+        from; its files' bytes are not read here."""
         run = await self.flow_run_repo.get(
             run_id=row.flow_run_id,
             tenant_id=row.tenant_id,
@@ -543,15 +561,17 @@ class FlowRunWebhookDeliveryService:
         if isinstance(structured, dict | list):
             context["structured"] = structured
 
+        # Headers may read run data as for any body; the address may not.
+        payload = WebhookDeliveryPayload(
+            run=run,
+            step=step,
+            step_result=step_result,
+            text_payload=text_payload,
+            context=context,
+            audit_actor=audit_actor,
+        )
         if not run_result:
-            return WebhookDeliveryPayload(
-                run=run,
-                step=step,
-                step_result=step_result,
-                text_payload=text_payload,
-                context=context,
-                audit_actor=audit_actor,
-            )
+            return payload, None
         # Every deliverable of the completed run, as its detail lists them.
         deliverables = project_run_deliverables(
             status=run.status,
@@ -561,32 +581,49 @@ class FlowRunWebhookDeliveryService:
             ),
         )
         check_run_result_files(deliverables)
-        file_ids = run_result_file_ids(deliverables)
-        return WebhookDeliveryPayload(
-            run=run,
-            step=step,
-            step_result=step_result,
-            text_payload=text_payload,
-            # Headers may read run data as for any body; the address may not.
-            context=context,
-            audit_actor=audit_actor,
-            run_result_body=run_result_body(
-                run=run,
-                # The step kept the text it read as its own: the run's text.
-                text=text_payload,
-                deliverables=deliverables,
-                contents=await self._read_file_contents(
-                    file_ids, tenant_id=row.tenant_id
-                ),
+        return payload, _RunResultSource(
+            deliverables=deliverables,
+            grants=await self._content_grants(
+                run_result_file_ids(deliverables), tenant_id=row.tenant_id
             ),
-            run_result_file_ids=tuple(file_ids),
         )
 
-    async def _read_file_contents(
+    async def _with_run_result_body(
+        self,
+        payload: WebhookDeliveryPayload,
+        *,
+        source: _RunResultSource,
+        tenant_id: UUID,
+    ) -> WebhookDeliveryPayload:
+        """The payload with its run result body. A file whose bytes cannot
+        be read, or no longer match, refuses the body."""
+        contents: dict[UUID, bytes] = {}
+        if source.grants:
+            payloads = await self.object_content().read_content_bytes(
+                list(source.grants.values())
+            )
+            contents = {
+                file_id: payloads[grant.content_id]
+                for file_id, grant in source.grants.items()
+                if grant.content_id in payloads
+            }
+        return replace(
+            payload,
+            run_result_body=run_result_body(
+                run=payload.run,
+                # The step kept the text it read as its own: the run's text.
+                text=payload.text_payload,
+                deliverables=source.deliverables,
+                contents=contents,
+            ),
+            run_result_file_ids=tuple(run_result_file_ids(source.deliverables)),
+        )
+
+    async def _content_grants(
         self, file_ids: list[UUID], *, tenant_id: UUID
-    ) -> dict[UUID, bytes]:
-        """Each file's own bytes: an upload's original or a generated
-        document's artifact. A file that cannot be read is left out, which
+    ) -> dict[UUID, ContentReadGrant]:
+        """A read grant for each file's own bytes: an upload's original or a
+        generated document's artifact. A file without one is left out, which
         refuses the body."""
         if not file_ids:
             return {}
@@ -611,19 +648,20 @@ class FlowRunWebhookDeliveryService:
                     tenant_id=tenant_id,
                     access_class=reference.access_class,
                 )
-        payloads = await self.object_content().read_content_bytes(list(grants.values()))
-        return {
-            file_id: payloads[grant.content_id]
-            for file_id, grant in grants.items()
-            if grant.content_id in payloads
-        }
+        return grants
 
     async def _audit_run_result_send(
-        self, *, row: FlowRunWebhookDeliveryRow, payload: WebhookDeliveryPayload
+        self,
+        *,
+        row: FlowRunWebhookDeliveryRow,
+        payload: WebhookDeliveryPayload,
+        url: str,
     ) -> None:
         """Record, and commit, that the run's result and files are about to
-        leave Eneo, before anything is sent. The row names the files by id
-        and the receiver by its host; it holds no file name or content."""
+        leave Eneo: after its request is compiled, before it is sent. The row
+        names the files by id and the receiver by the host of the compiled
+        address; it holds no file name or content."""
+        url_host = parse_effective_http_url(url).host
         actor = payload.audit_actor
         try:
             if self.audit_service is None or actor is None:
@@ -648,9 +686,7 @@ class FlowRunWebhookDeliveryService:
                             "run_id": str(row.flow_run_id),
                             "delivery_id": str(row.id),
                             "delivery_attempt": row.delivery_attempts,
-                            "url_host": urlsplit(
-                                str((payload.step.output_config or {}).get("url", ""))
-                            ).hostname,
+                            "url_host": url_host,
                             "file_ids": [
                                 str(file_id) for file_id in payload.run_result_file_ids
                             ],
@@ -699,6 +735,9 @@ class FlowRunWebhookDeliveryService:
                 ends_at=deadline.ends_at,
             )
 
+        async def audit_run_result_send(url: str) -> None:
+            await self._audit_run_result_send(row=row, payload=payload, url=url)
+
         deps = FlowHttpOrchestrationDeps(
             encryption_service=self.encryption_service,
             variable_resolver=self.variable_resolver,
@@ -716,6 +755,9 @@ class FlowRunWebhookDeliveryService:
             idempotency_key=row.idempotency_key,
             sends_end_at=deadline.sends_end_at,
             run_result_body=payload.run_result_body,
+            before_send=(
+                audit_run_result_send if payload.run_result_body is not None else None
+            ),
         )
 
     async def _record_success(

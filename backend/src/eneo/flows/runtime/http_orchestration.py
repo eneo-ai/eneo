@@ -335,10 +335,13 @@ async def deliver_webhook(
     idempotency_key: str,
     sends_end_at: float,
     run_result_body: JsonValue | None = None,
+    before_send: Callable[[str], Awaitable[None]] | None = None,
 ) -> None:
     """Send one webhook request. ``sends_end_at`` (event-loop clock) bounds the
     send together with the step's own timeout; a send that cannot start before
-    it raises WebhookSendNotStartedError without contacting the receiver."""
+    it raises WebhookSendNotStartedError without contacting the receiver.
+    ``before_send`` is awaited with the compiled address once the request is
+    compiled and within the deadline, and only then is the request sent."""
     if step.output_config is None:
         return
     try:
@@ -379,13 +382,20 @@ async def deliver_webhook(
         idempotency_key.encode("utf-8")
     ).hexdigest()
 
-    timeout_seconds = min(
-        timeout_seconds, sends_end_at - asyncio.get_running_loop().time()
-    )
-    if timeout_seconds <= 0:
-        raise WebhookSendNotStartedError(
-            "The webhook delivery job ran out of time before the request was sent."
-        )
+    def within_deadline(timeout: float) -> float:
+        timeout = min(timeout, sends_end_at - asyncio.get_running_loop().time())
+        if timeout <= 0:
+            raise WebhookSendNotStartedError(
+                "The webhook delivery job ran out of time before the request was sent."
+            )
+        return timeout
+
+    timeout_seconds = within_deadline(timeout_seconds)
+    if before_send is not None:
+        await before_send(url)
+        # ponytail: a deadline reached while before_send commits leaves its
+        # record without a send; the claim is released and tried again.
+        timeout_seconds = within_deadline(timeout_seconds)
     start_time = time.monotonic()
     try:
         # Normalize before auditing so audit failures cannot chain raw credentials.
