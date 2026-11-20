@@ -3,7 +3,7 @@ import {
   type ModelWithKwargs
 } from "@/features/assistants/editor/model-kwargs";
 import { tokensOf } from "../flow-steps";
-import { readRuntimeInput, withStoredSecrets } from "./step-configs";
+import { readRuntimeInput, withDeliverable, withStoredSecrets } from "./step-configs";
 import {
   EDITABLE_STEP_FIELDS,
   objectOf,
@@ -144,7 +144,9 @@ type StepUpdateRequest = Omit<FlowStep, "created_at" | "updated_at"> & { assista
 /**
  * A step as a preview sends it: the fields a flow update accepts, with every
  * credential as stored. The classification never reads one, and the request
- * is the preview's query key, which a secret must never enter.
+ * is the preview's query key, which a secret must never enter. The deliverable
+ * is left out too: the classification does not read it, and one still being
+ * written (an empty label) would have the whole preview refused.
  */
 function updateRequestOf(
   step: FlowStep,
@@ -156,7 +158,7 @@ function updateRequestOf(
     step_order: step.step_order,
     ...config,
     input_config: withStoredSecrets(config.input_config),
-    output_config: withStoredSecrets(config.output_config)
+    output_config: withStoredSecrets(withDeliverable(config.output_config, null))
   };
 }
 
