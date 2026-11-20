@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
 from eneo.authentication.endpoint_access import (
@@ -244,18 +244,16 @@ async def disable_mcp_for_tenant(
 async def update_tenant_tool_enabled(
     tool_id: UUID,
     data: MCPServerToolUpdate,
-    container: Container = _WITH_USER,
+    container: Annotated[
+        Container, Depends(get_container(with_user=True, transaction_scope="function"))
+    ],
 ):
     """Update tenant-level enablement for a tool (admin only)."""
     service = container.mcp_server_service()
     assembler = container.mcp_server_tool_assembler()
 
-    # Fetch tool and server info before update (update does manual session.commit())
-    tool_before = await service.tool_repo.one(id=tool_id)
-    mcp_server = await service.get_mcp_server(tool_before.mcp_server_id)
-
-    # Update tool's tenant-level enabled status
     tool = await service.update_tenant_tool_enabled(tool_id, data.is_enabled)
+    mcp_server = await service.get_mcp_server(tool.mcp_server_id)
 
     # Audit logging
     user = container.user()

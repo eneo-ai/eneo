@@ -1551,7 +1551,6 @@ class MCPServerService:
         )
 
         await self.repo.session.execute(stmt)
-        await self.repo.session.commit()
 
         # Return tool with tenant setting applied
         tool.enabled_override = is_enabled
