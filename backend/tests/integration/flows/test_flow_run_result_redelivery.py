@@ -24,6 +24,7 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunWebhookDeliveries,
     Flows,
+    FlowStepAttempts,
 )
 from eneo.flows import FlowRepository
 from eneo.flows.application.flow_webhook_delivery_policy import (
@@ -51,6 +52,7 @@ from tests.integration.flows.test_flow_run_result_delivery import (  # noqa: F40
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_running_webhook_run,
     _intent,
+    _read,
     _read_one,
     _response,
     _run_outbox,
@@ -322,6 +324,90 @@ async def test_redelivery_needs_edit_rights_and_a_delivery_of_this_run(
     retired = await client.post(_path(run, delivery_id), json=body, headers=headers)
     assert retired.status_code == 404, retired.text
     assert (await _delivery(delivery_id)).delivery_status == "dead_lettered"
+
+
+async def test_a_service_key_cannot_send_a_result_again(
+    setup_database, client, admin_token, dead_lettered_run
+):
+    run, delivery_id, at = await dead_lettered_run()
+    service_key = await consumer._create_flow_service_key(client, token=admin_token)
+
+    response = await client.post(
+        _path(run, delivery_id),
+        json={"expected_dead_lettered_at": at.isoformat()},
+        headers={"X-API-Key": service_key},
+    )
+
+    assert response.status_code == 403, response.text
+    assert (await _delivery(delivery_id)).delivery_status == "dead_lettered"
+    assert not await _redelivery_audits(run.id)
+
+
+async def test_a_delivery_is_found_only_under_its_own_run_and_flow(
+    setup_database, client, admin_token, dead_lettered_run
+):
+    run, delivery_id, at = await dead_lettered_run()
+    # A second run of the same flow, with a dead letter of its own.
+    other_run_id, other_delivery_id = uuid4(), uuid4()
+    await _copy_row(FlowRuns, run.id, id=other_run_id)
+    [(attempt_id,)] = await _read(
+        sa.select(FlowStepAttempts.id).where(
+            FlowStepAttempts.flow_run_id == run.id,
+            FlowStepAttempts.step_id
+            == sa.select(FlowRunWebhookDeliveries.step_id)
+            .where(FlowRunWebhookDeliveries.id == delivery_id)
+            .scalar_subquery(),
+        )
+    )
+    await _copy_row(FlowStepAttempts, attempt_id, id=uuid4(), flow_run_id=other_run_id)
+    await _copy_row(
+        FlowRunWebhookDeliveries,
+        delivery_id,
+        id=other_delivery_id,
+        flow_run_id=other_run_id,
+        idempotency_key=f"other-{uuid4()}",
+    )
+    space_id = await consumer._create_space(client, token=admin_token)
+    other_flow = await client.post(
+        "/api/v1/flows/",
+        json={"space_id": space_id, "name": f"other-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert other_flow.status_code == 201, other_flow.text
+    body = {"expected_dead_lettered_at": at.isoformat()}
+    headers = {"Authorization": f"Bearer {admin_token}"}
+
+    other_runs_delivery = await client.post(
+        _path(run, other_delivery_id), json=body, headers=headers
+    )
+    other_flows_path = (
+        f"/api/v1/flows/{other_flow.json()['id']}/runs/{run.id}/"
+        f"webhook-deliveries/{delivery_id}/redeliver/"
+    )
+    under_other_flow = await client.post(other_flows_path, json=body, headers=headers)
+
+    assert other_runs_delivery.status_code == 404, other_runs_delivery.text
+    assert under_other_flow.status_code == 404, under_other_flow.text
+    for kept in (delivery_id, other_delivery_id):
+        assert (await _delivery(kept)).delivery_status == "dead_lettered"
+    assert not await _redelivery_audits(run.id)
+    assert not await _redelivery_audits(other_run_id)
+
+
+async def _copy_row(table, row_id: UUID, **changes) -> None:
+    """Insert a copy of one row with ``changes`` applied."""
+    columns = table.__table__
+    [row] = await _read(sa.select(columns).where(columns.c.id == row_id))
+    await _write(sa.insert(columns).values({**row._mapping, **changes}))
+
+
+async def _redelivery_audits(run_id: UUID) -> list:
+    return await _read(
+        sa.select(AuditLog.id).where(
+            AuditLog.action == "flow_run_webhook_redelivered",
+            AuditLog.entity_id == run_id,
+        )
+    )
 
 
 async def test_a_failed_audit_refuses_the_redelivery(
