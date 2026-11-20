@@ -157,6 +157,7 @@ flowchart TB
 | Change | Who | Do |
 |---|---|---|
 | `MAX_TOOL_ROUNDS` defaults to 40 (was a fixed 10), so a tool-heavy turn can cost up to four times the calls and tokens; LiteLLM's `REQUEST_TIMEOUT` no longer applies | Everyone | `MAX_TOOL_ROUNDS=10` keeps the old cap; move a custom `REQUEST_TIMEOUT` to `COMPLETION_REQUEST_TIMEOUT_SECONDS` (default 600) |
+| Each model response can run up to 10 tool calls. After reading the results, the model can request any skipped calls again. Once the turn has run 60 calls or spent its tool-result budget, the model is asked for a final answer | Assistants that make many parallel or repeated tool calls | Adjust `MAX_TOOL_CALLS_PER_ROUND` to change how many calls run before the model reassesses. Adjust `MAX_TOOL_CALLS_PER_TURN` to change the total per user message |
 | Provider types that cannot route are refused with `400`; model names no longer double the prefix | Administrators | Fix `mistral/mistral/…` completion model names; embedding and reranking need new models; [recreate refused providers](/guides/ai-providers#adding-a-provider-admin-ui) |
 | Images have no `apt`; the frontend image also has no `npm`, `npx`, `corepack` or `yarn` | Builds on the images | Install in a separate build stage |
 | The backend needs Python 3.11.5 or a later 3.11 release (`>=3.11.5,<3.12`); 2.3 accepted any 3.11 release | Backends run outside the images | Move to Python 3.11.5 or a later 3.11 release; image-based installations need nothing |

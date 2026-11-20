@@ -23,11 +23,14 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     CONFIRMATION_DECLINED_MESSAGE,
     CONFIRMATION_TIMEOUT_MESSAGE,
     MCP_IMAGE_PLACEHOLDER_TEMPLATE,
+    TOOL_CALL_LIMIT_MESSAGE,
     TOOL_RESULT_BUDGET_NOTICE,
+    TOOL_TURN_LIMIT_MESSAGE,
     PreparedModelStream,
     TenantModelAdapter,
     _build_tool_result_with_references,
     _GeneratedFileChunks,
+    _ToolCallBudget,
     _ToolResultBudget,
 )
 from eneo.files.model_file_references import file_handle
@@ -1014,7 +1017,7 @@ def test_tool_result_budget_admits_until_exhausted_then_withholds():
 
 @pytest.mark.asyncio
 @pytest.mark.usefixtures("declared_capabilities")
-async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
+async def test_non_streaming_runs_no_tool_once_the_result_budget_is_spent():
     adapter = _make_completion_adapter()
     adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
@@ -1042,6 +1045,11 @@ async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
 
     assert completion.text == "final answer"
     assert completion_call.await_args is not None
+    # The call asked for after the budget ran out is answered, not run, and
+    # the model gets one last request without tools.
+    assert [len(round_calls) for round_calls in mcp_proxy.calls] == [1]
+    assert completion_call.await_args_list[1].kwargs["tool_choice"] == "none"
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
     tool_messages = [
         message
         for message in completion_call.await_args.kwargs["messages"]
@@ -1049,11 +1057,11 @@ async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
     ]
     assert len(tool_messages) == 2
     assert "tool-ok" in tool_messages[0]["content"]
-    assert tool_messages[1]["content"] == TOOL_RESULT_BUDGET_NOTICE
+    assert tool_messages[1]["content"] == json.dumps({"error": TOOL_TURN_LIMIT_MESSAGE})
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
+async def test_iterate_stream_runs_no_tool_once_the_result_budget_is_spent():
     adapter = _make_adapter()
     adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
@@ -1076,8 +1084,8 @@ async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
     with patch(
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         AsyncMock(side_effect=follow_ups),
-    ):
-        await _collect(
+    ) as completion_call:
+        output = await _collect(
             adapter,
             stream,
             require_tool_approval=False,
@@ -1086,10 +1094,298 @@ async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
             pending_approval_ids=set(),
         )
 
+    assert [len(round_calls) for round_calls in mcp_proxy.calls] == [1]
+    assert completion_call.await_args is not None
+    assert completion_call.await_args_list[0].kwargs["tool_choice"] == "none"
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
     tool_messages = [message for message in messages if message["role"] == "tool"]
     assert len(tool_messages) == 2
     assert "tool-ok" in tool_messages[0]["content"]
-    assert tool_messages[1]["content"] == TOOL_RESULT_BUDGET_NOTICE
+    assert tool_messages[1]["content"] == json.dumps({"error": TOOL_TURN_LIMIT_MESSAGE})
+    assert "".join(chunk.text or "" for chunk in output) == "done"
+    assert not any(chunk.response_type == ResponseType.ERROR for chunk in output)
+
+
+def test_a_result_admitted_within_the_budget_is_unchanged_and_the_next_withheld():
+    # Results of one round are admitted in order, so the calls that ran
+    # alongside the one that used the budget up are still withheld.
+    budget = _ToolResultBudget(token_limit=4, litellm_model="openai/test-model")
+
+    assert not budget.exhausted
+    budget.admit("one two three four five six seven eight nine ten")
+    assert budget.exhausted
+    assert budget.admit("more") == TOOL_RESULT_BUDGET_NOTICE
+
+
+def test_tool_call_budget_grants_up_to_the_round_and_turn_limits():
+    budget = _ToolCallBudget(per_round=3, per_turn=7)
+
+    assert budget.take(5) == 3
+    assert budget.take(2) == 2
+    assert not budget.spent
+    assert budget.take(3) == 2
+    assert budget.spent
+    assert budget.take(1) == 0
+
+
+def _cap_tool_calls(
+    monkeypatch: pytest.MonkeyPatch, *, per_round: int, per_turn: int
+) -> None:
+    settings = get_settings().model_copy(
+        update={
+            "max_tool_calls_per_round": per_round,
+            "max_tool_calls_per_turn": per_turn,
+        }
+    )
+    monkeypatch.setattr(tenant_model_adapter, "get_settings", lambda: settings)
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_non_streaming_runs_only_the_calls_one_response_may_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=2, per_turn=3)
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[
+                _response_tool_call(f"call_{number}", json.dumps({"q": number}))
+                for number in range(1, 5)
+            ],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[_response_tool_call("retry_3", '{"q":3}')],
+            finish_reason="tool_calls",
+        ),
+        _response(content="final answer"),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "final answer"
+    assert [[args["q"] for _, args in calls] for calls in mcp_proxy.calls] == [
+        [1, 2],
+        [3],
+    ]
+    assert completion_call.await_args is not None
+    sent = completion_call.await_args.kwargs["messages"]
+    # Every call the model made is answered: a provider rejects a transcript
+    # with an unanswered tool call.
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in sent
+        if message["role"] == "tool"
+    }
+    refused = json.dumps({"error": TOOL_CALL_LIMIT_MESSAGE})
+    assert set(results) == {"call_1", "call_2", "call_3", "call_4", "retry_3"}
+    assert "tool-ok" in results["retry_3"]
+    assert "tool-ok" in results["call_1"]
+    assert "tool-ok" in results["call_2"]
+    assert results["call_3"] == refused
+    assert results["call_4"] == refused
+    # The round limit alone leaves tools on for the next response.
+    assert completion_call.await_args_list[1].kwargs.get("tool_choice") != "none"
+    assert completion_call.await_count == 3
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
+    statuses = {
+        metadata.tool_call_id: metadata.result_status
+        for metadata in completion.tool_calls_metadata or []
+    }
+    assert statuses == {
+        "call_1": "succeeded",
+        "call_2": "succeeded",
+        "call_3": "failed",
+        "call_4": "failed",
+        "retry_3": "succeeded",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_non_streaming_turn_call_limit_refuses_further_calls_and_forces_an_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=10, per_turn=2)
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    responses = [
+        _response(
+            tool_calls=[
+                _response_tool_call("call_1", '{"q":"x"}'),
+                _response_tool_call("call_2", '{"q":"x"}'),
+            ],
+            finish_reason="tool_calls",
+        ),
+        _response(
+            tool_calls=[_response_tool_call("call_3", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        ),
+        _response(content="final answer"),
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ) as completion_call:
+        completion = await adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            mcp_proxy=mcp_proxy,
+        )
+
+    assert completion.text == "final answer"
+    assert [len(round_calls) for round_calls in mcp_proxy.calls] == [2]
+    assert completion_call.await_args is not None
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in completion_call.await_args.kwargs["messages"]
+        if message["role"] == "tool"
+    }
+    assert results["call_3"] == json.dumps({"error": TOOL_TURN_LIMIT_MESSAGE})
+    rejected = next(
+        call
+        for call in completion.tool_calls_metadata or []
+        if call.tool_call_id == "call_3"
+    )
+    assert rejected.result_status == "failed"
+    assert rejected.result == results["call_3"]
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_runs_only_the_calls_one_response_may_run(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=2, per_turn=3)
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    messages: list[dict] = []
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_delta_chunk(
+                index=index,
+                tool_call_id=f"call_{index + 1}",
+                tool_name="server__tool",
+                arguments=json.dumps({"q": index + 1}),
+                finish_reason="tool_calls" if index == 3 else None,
+            )
+            for index in range(4)
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(
+            side_effect=[
+                _AsyncChunkStream(
+                    [_tool_call_chunk(tool_call_id="retry_3", arguments='{"q":3}')]
+                ),
+                _AsyncChunkStream([_text_chunk("done", finish_reason="stop")]),
+            ]
+        ),
+    ) as completion_call:
+        output = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert [[args["q"] for _, args in calls] for calls in mcp_proxy.calls] == [
+        [1, 2],
+        [3],
+    ]
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in messages
+        if message["role"] == "tool"
+    }
+    refused = json.dumps({"error": TOOL_CALL_LIMIT_MESSAGE})
+    assert set(results) == {"call_1", "call_2", "call_3", "call_4", "retry_3"}
+    assert "tool-ok" in results["retry_3"]
+    assert "tool-ok" in results["call_1"]
+    assert "tool-ok" in results["call_2"]
+    assert results["call_3"] == refused
+    assert results["call_4"] == refused
+    assert completion_call.await_args is not None
+    assert completion_call.await_args_list[0].kwargs.get("tool_choice") != "none"
+    assert completion_call.await_count == 2
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
+    # The reader is shown that the two calls did not run.
+    final_status: dict[str, str | None] = {}
+    for chunk in output:
+        for metadata in chunk.tool_calls_metadata or []:
+            if metadata.result_status is not None and metadata.tool_call_id:
+                final_status[metadata.tool_call_id] = metadata.result_status
+    assert final_status["call_3"] == "failed"
+    assert final_status["call_4"] == "failed"
+    assert final_status["call_1"] == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_turn_call_limit_refuses_further_calls_and_forces_an_answer(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=10, per_turn=1)
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    messages: list[dict] = []
+    follow_ups = [
+        _AsyncChunkStream([_tool_call_chunk(tool_call_id="call_2")]),
+        _AsyncChunkStream([_text_chunk("done", finish_reason="stop")]),
+    ]
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": messages,
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=follow_ups),
+    ) as completion_call:
+        output = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    assert [len(round_calls) for round_calls in mcp_proxy.calls] == [1]
+    assert completion_call.await_args is not None
+    assert completion_call.await_args.kwargs["tool_choice"] == "none"
+    results = {
+        message["tool_call_id"]: message["content"]
+        for message in messages
+        if message["role"] == "tool"
+    }
+    assert results["call_2"] == json.dumps({"error": TOOL_TURN_LIMIT_MESSAGE})
+    assert not any(chunk.response_type == ResponseType.ERROR for chunk in output)
 
 
 def test_models_without_tool_capability_receive_no_tools():
@@ -2376,8 +2672,9 @@ async def test_model_is_told_how_many_tool_rounds_remain_near_the_cap(
     assert "2 tool round(s) remain" in results["call_1"]
     assert "1 tool round(s) remain" in results["call_2"]
     assert "No tool rounds remain" in results["call_3"]
-    # The model finished inside the budget, so nothing was refused.
-    assert "tool_choice" not in completion_call.await_args_list[-1].kwargs
+    # The last permitted round produced results; its follow-up asks for the answer.
+    assert completion_call.await_args_list[-1].kwargs["tool_choice"] == "none"
+    assert completion_call.await_count == max_rounds + 1
 
 
 async def test_completion_requests_carry_the_configured_timeout(
@@ -3089,9 +3386,13 @@ def _decided(*decisions: ToolApprovalDecision, timed_out: bool = False):
     return manager
 
 
-async def _confirming_round(chunks, messages, **approval):
-    """One tool round over ``_ConfirmingMCPProxy``, then a final answer."""
+async def _confirming_round(chunks, messages, *, next_round=None, **approval):
+    """Run the tool requests over ``_ConfirmingMCPProxy``, then return a final answer."""
     proxy = _ConfirmingMCPProxy()
+    follow_ups = []
+    if next_round is not None:
+        follow_ups.append(_AsyncChunkStream(next_round))
+    follow_ups.append(_AsyncChunkStream([_text_chunk("done", finish_reason="stop")]))
     stream = _AsyncChunkStream(
         chunks,
         eneo_context={
@@ -3103,9 +3404,7 @@ async def _confirming_round(chunks, messages, **approval):
     )
     with patch(
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(
-            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
-        ),
+        AsyncMock(side_effect=follow_ups),
     ):
         completions = await _collect(
             _make_adapter(), stream, pending_approval_ids=set(), **approval
@@ -3287,6 +3586,102 @@ async def test_without_required_approval_an_external_tool_runs_unasked():
     assert not _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
     manager.request_approval.assert_not_awaited()
     assert proxy.calls == [[("server__tool", {"q": "x"})]]
+
+
+async def test_a_call_outside_the_budget_never_asks_for_approval(monkeypatch):
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=3)
+    manager = _decided()
+    messages = []
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="read",
+                tool_name="flows__read_flow",
+                arguments="{}",
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="run",
+                tool_name="flows__run_flow",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+    manager.request_approval.assert_not_awaited()
+    assert not _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
+    assert proxy.calls == [[("flows__read_flow", {})]]
+    assert _tool_result(messages, "run") == {"error": TOOL_CALL_LIMIT_MESSAGE}
+
+
+async def test_an_unavailable_confirmation_leaves_room_for_an_unattended_read(
+    monkeypatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=3)
+    messages = []
+    proxy, _ = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="run", tool_name="flows__run_flow", arguments="{}"
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="read",
+                tool_name="flows__read_flow",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+    )
+    assert (
+        _tool_result(messages, "run")
+        == tenant_model_adapter.CONFIRMATION_UNAVAILABLE_RESULT
+    )
+    assert proxy.calls == [[("flows__read_flow", {})]]
+
+
+async def test_declining_an_approval_preserves_the_turn_budget_for_a_later_request(
+    monkeypatch,
+):
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=1)
+    manager = _decided(ToolApprovalDecision(tool_call_id="run", approved=False))
+    messages = []
+    proxy, _ = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="run", tool_name="flows__run_flow", arguments="{}"
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="read",
+                tool_name="flows__read_flow",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        next_round=[
+            _tool_call_chunk(
+                tool_call_id="retry", tool_name="flows__read_flow", arguments="{}"
+            )
+        ],
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+    assert manager.request_approval.await_args.kwargs["tool_call_ids"] == ["run"]
+    assert _tool_result(messages, "run")["denied"]
+    assert _tool_result(messages, "read") == {"error": TOOL_CALL_LIMIT_MESSAGE}
+    assert proxy.calls == [[("flows__read_flow", {})]]
 
 
 async def test_required_approval_asks_about_external_and_confirmation_calls_at_once():

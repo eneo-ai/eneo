@@ -39,7 +39,7 @@ async def connect(
     user: Annotated[UserInDB, Depends(get_user_from_websocket)],
 ):
     await websocket.accept(subprotocol=ENEO_SUBPROTOCOL)
-    logger.debug(f"User {user.email} connected to websocket.")
+    logger.debug("User %s connected to websocket.", user.id)
 
     session = user.credential.session if user.credential is not None else None
     try:
@@ -56,7 +56,7 @@ async def connect(
     finally:
         websocket_manager.unsubscribe_from_all_channels(websocket)
 
-    logger.debug(f"WebSocket connection with user {user.email} has been closed.")
+    logger.debug("WebSocket connection with user %s has been closed.", user.id)
 
 
 async def _receive(websocket: WebSocket, user: UserInDB) -> None:
@@ -68,7 +68,7 @@ async def _receive(websocket: WebSocket, user: UserInDB) -> None:
                 websocket_message, websocket=websocket, user=user
             )
         except WebSocketDisconnect:
-            logger.debug(f"User {user.email} disconnected from websocket.")
+            logger.debug("User %s disconnected from websocket.", user.id)
             return
         except Exception:
             # If anything happens while handling message, ignore it and keep the

@@ -8,8 +8,35 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from eneo.authentication.api_key_request_context import resolve_client_ip
-from eneo.main.config import get_settings
+from eneo.main.config import Settings, get_settings
+from eneo.main.logging import get_logger
 from eneo.main.request_context import clear_request_context, set_request_context
+
+logger = get_logger(__name__)
+
+_untrusted_forwarding_reported = False
+
+
+def _report_untrusted_forwarding_once(request: Request, settings: Settings) -> None:
+    """Say, once per process, that a proxy's forwarding header goes unused.
+
+    Behind a reverse proxy with TRUSTED_PROXY_COUNT left at 0, every request
+    is logged and audited with the proxy's address, and nothing else says so.
+    """
+    global _untrusted_forwarding_reported
+    if _untrusted_forwarding_reported or settings.trusted_proxy_count > 0:
+        return
+    sent = [name for name in settings.trusted_proxy_headers if name in request.headers]
+    if not sent:
+        return
+    _untrusted_forwarding_reported = True
+    logger.warning(
+        "Requests arrive with %s but TRUSTED_PROXY_COUNT is 0, so the client "
+        "address in logs and audit entries is the sender of the connection: "
+        "the reverse proxy, if there is one. Set TRUSTED_PROXY_COUNT to the "
+        "number of reverse proxies in front of Eneo to record the client.",
+        ", ".join(sent),
+    )
 
 
 def _current_trace_id() -> str | None:
@@ -65,6 +92,7 @@ class RequestContextMiddleware:
         correlation_id = trace_id or legacy_id
 
         settings = get_settings()
+        _report_untrusted_forwarding_once(request, settings)
         ip_address = resolve_client_ip(
             request,
             trusted_proxy_count=settings.trusted_proxy_count,

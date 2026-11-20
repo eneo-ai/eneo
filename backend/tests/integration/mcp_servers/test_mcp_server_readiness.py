@@ -88,7 +88,8 @@ async def test_reads_and_edits_agree_with_settings_and_keep_stored_data(
                     MCPServerToolSettings(
                         tenant_id=admin_user.tenant_id,
                         mcp_server_tool_id=tool.id,
-                        is_enabled=TENANT_TOOL_SETTINGS[tool_state],
+                        # Start in the opposite state so the PUT must persist a change.
+                        is_enabled=not TENANT_TOOL_SETTINGS[tool_state],
                     )
                 )
         await session.flush()

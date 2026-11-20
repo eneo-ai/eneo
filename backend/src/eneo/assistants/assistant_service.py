@@ -3313,10 +3313,12 @@ class AssistantService:
                         )
                         input_source = "provider"
                         assert completion_model is not None
+                        # The estimate is of the first request; the usage
+                        # totals sum every request a tool-using turn made.
                         log_token_count_drift(
                             model_name=completion_model.name,
                             predicted=response.total_token_count,
-                            actual=stream_usage.prompt_tokens,
+                            actual=stream_usage.first_request_prompt_tokens,
                         )
                     else:
                         final_skill_tokens = skill_runtime.snapshot().measurement.tokens
