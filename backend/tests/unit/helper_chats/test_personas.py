@@ -289,9 +289,11 @@ def test_the_assistant_fragment_describes_a_function_as_the_editor_does():
     # The helper's own tools (a runtime function among them) say how they are
     # built; the assistant's function is described as the editor describes it.
     assert (
-        "Describe a function in the editor's words, as the reads give them, and "
-        "say nothing about how it is built, such as the programming language it "
-        "runs: your own tools in this chat are not the assistant's functions."
+        "What you know about a function is what the reads say about it, in the "
+        "editor's words. Your own tools in this chat are not the assistant's "
+        "functions and show nothing about how those work. Asked how a function "
+        "works technically, give the editor's description and say that is all "
+        "you know."
     ) in fragment
 
 
