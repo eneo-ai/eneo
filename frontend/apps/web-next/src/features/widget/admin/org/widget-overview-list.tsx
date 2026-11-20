@@ -73,8 +73,11 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
           : t("widget_admin_status_draft");
   const widgetHref = (item: WidgetOverviewItem) =>
     `/spaces/${item.space_id}/assistants/${item.target_id}/widget`;
-  const blockedReason = (item: WidgetOverviewItem) =>
-    (item.activation_blockers ?? []).map((code) => blockerLabel(code, t)).join(", ");
+  const externalTools = (item: WidgetOverviewItem) => item.external_tools ?? [];
+  const blockedReason = (item: WidgetOverviewItem) => {
+    const reasons = (item.activation_blockers ?? []).map((code) => blockerLabel(code, t));
+    return reasons.join(", ");
+  };
   const budgetPercent = (item: WidgetOverviewItem) =>
     item.daily_token_budget
       ? Math.min(100, Math.round((item.budget_used_today / item.daily_token_budget) * 100))
@@ -146,6 +149,14 @@ export function WidgetOverviewList({ overview }: { overview: WidgetOverview }) {
                   // Live, but not serving as configured: say so where the badge says "Aktiv".
                   <p className="bg-ax-orange-muted text-ax-orange rounded-lg px-3 py-2 text-sm">
                     {t("widget_admin_overview_active_issues", { reasons: reason })}
+                  </p>
+                )}
+                {externalTools(item).length > 0 && (
+                  // The widget's reach beyond Eneo: what an anonymous visitor can make the assistant call.
+                  <p className="text-ax-text-secondary text-sm">
+                    {t("widget_admin_overview_external_tools", {
+                      servers: externalTools(item).join(", ")
+                    })}
                   </p>
                 )}
 

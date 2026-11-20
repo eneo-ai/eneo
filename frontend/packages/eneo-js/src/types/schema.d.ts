@@ -3704,7 +3704,7 @@ export interface paths {
     put?: never;
     /**
      * Link Widget Template
-     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve.
+     * @description Make the widget follow a published template. Its texts, appearance and language are copied now; the release's locked groups are then written onto the widget with every publication and cannot be edited on the widget. Refused with `widget_serving_blocked` when the release would leave an active widget unable to serve. Switching an active widget to another template is for tenant admins (`admin_required_while_active`); editors pause the widget first.
      */
     post: operations["link_widget_template_api_v1_widgets__id__link_template__post"];
     delete?: never;
@@ -3724,7 +3724,7 @@ export interface paths {
     put?: never;
     /**
      * Detach Widget Template
-     * @description Stop following the template. The widget keeps its current texts, appearance and language and every part becomes editable again.
+     * @description Stop following the template. The widget keeps its current texts, appearance and language and every part becomes editable again. On an active widget this is for tenant admins (`admin_required_while_active`); editors pause the widget first.
      */
     post: operations["detach_widget_template_api_v1_widgets__id__detach_template__post"];
     delete?: never;
@@ -3752,7 +3752,7 @@ export interface paths {
     head?: never;
     /**
      * Update Widget
-     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`).
+     * @description Update a widget's configuration. Changes to allowed origins, limits, privacy or bot protection invalidate outstanding visitor tokens. A value outside the tenant's widget policy is refused with `widget_policy_violation` (listing `violations`); an edit that would leave an active widget unable to serve is refused with `widget_serving_blocked` (listing `blockers`). On an active widget, a change to allowed origins, privacy or bot protection is for tenant admins (`admin_required_while_active`, listing `fields`); editors pause the widget first.
      */
     patch: operations["update_widget_api_v1_widgets__id___patch"];
     trace?: never;
@@ -3788,7 +3788,7 @@ export interface paths {
     put?: never;
     /**
      * Create Widget Preview Token
-     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for draft and paused widgets; each call is a fresh pseudonymous visitor.
+     * @description Mint a visitor token for the live preview on the admin page. Admits the embed page for a draft widget; refused for a paused one with `preview_unavailable_while_paused`. Each call is a fresh pseudonymous visitor and is recorded in the audit log.
      */
     post: operations["create_widget_preview_token_api_v1_widgets__id__preview_token__post"];
     delete?: never;
@@ -3808,7 +3808,7 @@ export interface paths {
     put?: never;
     /**
      * Activate Widget
-     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy and with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
+     * @description Activate a widget so it serves visitors. Tenant admins only. Fails with `widget_policy_violation` (listing `violations`) when settings are outside the tenant's widget policy, with `widget_serving_blocked` (listing `blockers`) when the configuration is incomplete.
      */
     post: operations["activate_widget_api_v1_widgets__id__activate__post"];
     delete?: never;
@@ -4070,7 +4070,7 @@ export interface paths {
     };
     /**
      * Get Widget Template
-     * @description A widget template. Tenant admins only.
+     * @description A widget template. Readable by everyone with the widgets permission, like the template list; only tenant admins change it.
      */
     get: operations["get_widget_template_api_v1_admin_widget_templates__id___get"];
     put?: never;
@@ -10470,6 +10470,8 @@ export interface components {
       | "widget_archived"
       | "widget_policy_updated"
       | "widget_budget_exhausted"
+      | "widget_preview_token_minted"
+      | "widget_external_tool_called"
       | "widget_template_created"
       | "widget_template_updated"
       | "widget_template_deleted"
@@ -10499,7 +10501,7 @@ export interface components {
      * @description Categorize who performed the action
      * @enum {string}
      */
-    ActorType: "user" | "system" | "api_key";
+    ActorType: "user" | "system" | "api_key" | "widget_visitor";
     /** AddSpaceGroupMemberRequest */
     AddSpaceGroupMemberRequest: {
       /**
@@ -26487,6 +26489,32 @@ export interface components {
       /** Revision */
       revision: number;
     };
+    /** WidgetExternalToolPublic */
+    WidgetExternalToolPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+    };
+    /**
+     * WidgetExternalToolServerPublic
+     * @description An MCP server outside Eneo that the widget's assistant reaches, with
+     *     the tools the assistant has switched on there.
+     */
+    WidgetExternalToolServerPublic: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Name */
+      name: string;
+      /** Tools */
+      tools: components["schemas"]["WidgetExternalToolPublic"][];
+    };
     /**
      * WidgetFeedback
      * @description A visitor's vote on the answer, with an optional comment.
@@ -26628,6 +26656,11 @@ export interface components {
        * @description Why the widget could not be activated as configured: empty when it can. A policy violation does not stop an active widget: it is served within the policy.
        */
       activation_blockers?: string[];
+      /**
+       * External Tools
+       * @description Names of the assistant's MCP servers outside Eneo with a tool switched on.
+       */
+      external_tools: string[];
     };
     /** WidgetOverviewPublic */
     WidgetOverviewPublic: {
@@ -26688,6 +26721,11 @@ export interface components {
       min_retention_days: number;
       /** Max Retention Days */
       max_retention_days: number;
+      /**
+       * Allow External Tools
+       * @description Whether widgets may publish assistants with tools switched on at MCP servers outside Eneo. Default true; off, such widgets cannot be activated, and live ones serve visitors without those tools and are flagged in the overview.
+       */
+      allow_external_tools: boolean;
     };
     /** WidgetPolicyUpdate */
     WidgetPolicyUpdate: {
@@ -26699,6 +26737,8 @@ export interface components {
       min_retention_days?: number | null;
       /** Max Retention Days */
       max_retention_days?: number | null;
+      /** Allow External Tools */
+      allow_external_tools?: boolean | null;
     };
     /**
      * WidgetPosition
@@ -26780,6 +26820,11 @@ export interface components {
       activation_blockers: string[];
       /** @description Set when the widget follows a template. */
       template?: components["schemas"]["WidgetTemplateLinkPublic"] | null;
+      /**
+       * External Tools
+       * @description The assistant’s enabled tools on external MCP servers.
+       */
+      external_tools: components["schemas"]["WidgetExternalToolServerPublic"][];
       /** Created By User Id */
       created_by_user_id?: string | null;
       /** Activated By User Id */

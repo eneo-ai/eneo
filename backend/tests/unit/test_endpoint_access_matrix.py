@@ -256,3 +256,36 @@ def test_toggling_security_classifications_requires_admin_before_dispatch(
     assert response.status_code == expected, response.text
     if expected == 200:
         assert response.json() == "admitted"
+
+
+# The widget admin API: what the public internet sees, what governs it (the
+# tenant policy, templates published onto live widgets) and the overview of
+# it. Session-only throughout, so no API key, however scoped, reaches it.
+WIDGET_ADMIN_PREFIXES = (
+    "/api/v1/spaces/{space_id}/widgets/",
+    "/api/v1/widgets/",
+    "/api/v1/admin/widget-policy/",
+    "/api/v1/admin/widgets/",
+    "/api/v1/widget-templates/",
+    "/api/v1/admin/widget-templates/",
+)
+
+
+def test_the_whole_widget_admin_api_is_session_only():
+    operations = [
+        case for case in OPERATIONS if case.route.path.startswith(WIDGET_ADMIN_PREFIXES)
+    ]
+    # Every mounted router is in the sample: spaces, widgets, policy, overview,
+    # templates and admin templates.
+    assert len(operations) >= 20
+    assert {
+        prefix
+        for prefix in WIDGET_ADMIN_PREFIXES
+        if not any(case.route.path.startswith(prefix) for case in operations)
+    } == set()
+    not_session = {
+        case.identity: case.policy.authentication
+        for case in operations
+        if case.policy.authentication is not Authentication.SESSION
+    }
+    assert not_session == {}

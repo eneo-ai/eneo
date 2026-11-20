@@ -3741,6 +3741,10 @@ class AssistantService:
             ]
 
         if self.user.active_widget is not None:
+            # Use the assistant’s current tools within the organisation’s widget policy.
+            mcp_servers_override = self.user.active_widget.reachable_servers(
+                mcp_servers_override
+            )
             await self._inline_attachments_for_visitor(
                 assistant_to_ask, effective_completion_model, skill_composition.prompt
             )
