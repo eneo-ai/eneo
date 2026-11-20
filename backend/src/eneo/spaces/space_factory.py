@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.apps.apps.app_factory import AppFactory
+from eneo.assistants.assistant import AssistantSpecialist
 from eneo.collections.domain.collection import Collection
 from eneo.database.tables.app_table import Apps
 from eneo.database.tables.assistant_table import Assistants
@@ -526,6 +527,24 @@ class SpaceFactory:
                 user=user,
             ),
         )
+        # Specialists are assistants of this same space, so their names come
+        # from the rows already loaded rather than a second load that would
+        # re-populate the shared identities.
+        records_by_id = {record.id: record for record in assistants_in_db}
+        for assistant in all_assistants:
+            record = records_by_id.get(assistant.id)
+            if record is None:
+                continue
+            assistant.specialists = [
+                AssistantSpecialist(
+                    id=row.specialist_id,
+                    name=records_by_id[row.specialist_id].name,
+                    default_description=records_by_id[row.specialist_id].description,
+                    user_description=row.description,
+                )
+                for row in record.assistant_specialists
+                if row.specialist_id in records_by_id
+            ]
         default_assistant = next(
             (assistant for assistant in all_assistants if assistant.is_default), None
         )

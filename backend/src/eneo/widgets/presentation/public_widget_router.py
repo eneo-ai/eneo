@@ -209,10 +209,11 @@ def _principal(request: Request) -> WidgetPrincipal:
         "Ask the widget's assistant as a visitor. Always streams Server-Sent"
         " Events. Pass `session_id` to continue one of the visitor's own"
         " sessions. The assistant answers as configured, with its knowledge,"
-        " MCP servers and web search; image generation, images returned by"
-        " tools and uploads are not available to visitors. The stream never"
-        " carries the model, reasoning or tool results; references and tool"
-        " calls follow the widget's `show_sources` and `show_tool_activity`."
+        " MCP servers and web search; specialists, image generation, images"
+        " returned by tools and uploads are not available to visitors. The"
+        " stream never carries the model, reasoning or tool results; references"
+        " and tool calls follow the widget's `show_sources` and"
+        " `show_tool_activity`."
     ),
     responses=responses.streaming_response(AskChatResponse, [400, 401, 404, 429, 503]),
 )
