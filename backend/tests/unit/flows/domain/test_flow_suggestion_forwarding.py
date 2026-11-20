@@ -523,7 +523,20 @@ def test_a_step_whose_output_is_its_input_copied_is_a_deterministic_candidate() 
     # Everything the step was billed: a compose_text step calls no model.
     assert item.impact.tokens_per_run == 950
     assert item.fix.kind == "assisted"
-    assert "a compose_text step puts that together without a model" in item.message
+    assert item.message == (
+        "In 1 of the last 1 runs, 95 % of step 2's output was its input copied "
+        "word for word, with about 100 bytes of its own; if that part is not "
+        "needed, a compose_text step without a model is worth trying."
+    )
+
+
+def test_the_deterministic_candidate_message_reports_the_share_and_own_bytes() -> None:
+    (item,) = _candidates([[_verbatim_attempt(0.9, output=1000)]])
+
+    for measured in ("In 1 of the last 1 runs", "90 %", "about 100 bytes of its own"):
+        assert measured in item.message, measured
+    assert "worth trying" in item.message
+    assert "puts that together without a model" not in item.message
 
 
 def test_a_deterministic_candidate_needs_a_verbatim_output_with_little_of_its_own() -> (

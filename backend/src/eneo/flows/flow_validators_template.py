@@ -138,6 +138,25 @@ def validate_template_expression_reference(
         )
 
 
+def unbound_template_fields(
+    placeholder_names: Sequence[str], bindings: dict[str, object]
+) -> list[str]:
+    """The template's fields without a binding. An explicit empty string is
+    a binding: the field is left empty on purpose."""
+
+    return [name for name in placeholder_names if name not in bindings]
+
+
+def orphaned_template_bindings(
+    placeholder_names: Sequence[str], bindings: dict[str, object]
+) -> list[str]:
+    """The bindings that name no field of the template. Publish accepts
+    them and no field shows their value, though their expressions are still
+    checked and resolved; the editor's draft check names them."""
+
+    return [name for name in bindings if name not in placeholder_names]
+
+
 def validate_template_placeholder_bindings(
     *,
     step_order: int,
@@ -152,7 +171,7 @@ def validate_template_placeholder_bindings(
             f"Step {step_order}: output_config.bindings must be an object."
         )
     bound = cast(dict[str, object], bindings)
-    missing = [name for name in placeholder_names if name not in bound]
+    missing = unbound_template_fields(placeholder_names, bound)
     if missing:
         raise BadRequestException(
             f"Step {step_order}: template placeholders are missing bindings: {', '.join(missing)}."

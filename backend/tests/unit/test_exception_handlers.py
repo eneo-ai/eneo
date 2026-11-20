@@ -6,6 +6,7 @@ import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 
+from eneo.data_retention.domain.rules import RetentionExceedsSpaceError
 from eneo.main.exceptions import (
     EXCEPTION_MAP,
     BadRequestException,
@@ -17,6 +18,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import GeneralError
+from eneo.policy_levels import PolicyLevel
 from eneo.server.exception_handlers import add_exception_handlers
 
 EXPECTED_DERIVED_ERROR_CODES = frozenset(
@@ -339,3 +341,29 @@ def test_prompt_in_use_maps_to_409_with_its_own_code():
     # Not NAME_COLLISION: clients word that one as a taken name.
     assert payload["eneo_error_code"] == ErrorCodes.PROMPT_IN_USE_BY_GOVERNANCE == 9069
     assert payload["message"] == message
+
+
+@pytest.mark.parametrize(
+    "origin,wire_origin",
+    [
+        (PolicyLevel.ORGANIZATION, "organization"),
+        (PolicyLevel.SPACE, "space"),
+        (PolicyLevel.FLOW, "flow"),
+    ],
+)
+def test_a_retention_period_over_its_cap_answers_400_with_the_cap_and_its_origin(
+    origin: PolicyLevel, wire_origin: str
+):
+    """The code keeps its name whichever level set the cap; a client reads the
+    level from `cap_origin`, and the body carries nothing else about the write."""
+    client = _make_client(RetentionExceedsSpaceError(cap_days=30, cap_origin=origin))
+
+    response = client.get("/boom")
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "message": "The retention period is longer than the limit that applies here.",
+        "eneo_error_code": 9086,
+        "code": "retention_exceeds_space",
+        "context": {"cap_days": 30, "cap_origin": wire_origin},
+    }

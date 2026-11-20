@@ -20,6 +20,7 @@ from eneo.flows.application.flow_step_kinds import (
     StepKindChange,
     StepKindOption,
     editor_update,
+    insertion_change,
     step_kind_answer,
 )
 from eneo.flows.domain.flow import Flow, FlowStep
@@ -27,7 +28,14 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionContributors,
     FlowRunRetentionOff,
 )
-from eneo.flows.domain.step_kinds import FlowStepKind
+from eneo.flows.domain.step_kinds import (
+    STEP_KIND_DESCRIPTIONS,
+    STEP_KIND_REQUIRED_VALUES,
+    STEP_KIND_VALUES,
+    FlowStepKind,
+    StepKindValues,
+    check_step_kind_values,
+)
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_authoring_spec import MAX_FLOW_AUTHORING_STEPS
 from eneo.main.exceptions import BadRequestException
@@ -199,8 +207,10 @@ async def _save(
     *,
     position: int | None = None,
     step_id: UUID | None = None,
+    saved: list[Flow] | None = None,
 ) -> BadRequestException | ValidationError | None:
-    """The editor's save of ``change``: its refusal, or None when it saves."""
+    """The editor's save of ``change``: its refusal, or None when it saves;
+    the saved flow is appended to ``saved``."""
     user = SimpleNamespace(
         id=uuid4(),
         tenant_id=flow.tenant_id,
@@ -260,7 +270,12 @@ async def _save(
     )
     try:
         update = editor_update(
-            flow, change, position=position, step_id=step_id, name="Added step"
+            flow,
+            change,
+            expected_revision=flow.draft_revision,
+            position=position,
+            step_id=step_id,
+            name="Added step",
         )
         await flow_authoring_operations.apply_editor_update(
             flow.require_persisted_id(),
@@ -270,6 +285,8 @@ async def _save(
         )
     except (BadRequestException, ValidationError) as exc:
         return exc
+    if saved is not None:
+        saved.append(flow_repo.update.call_args.kwargs["flow"])
     return None
 
 
@@ -387,3 +404,516 @@ def test_a_step_added_first_takes_the_run_input_over() -> None:
     assert by_kind[FlowStepKind.REVIEW].refusals[0].issue_code == (
         "typed_io_invalid_input_source_position"
     )
+
+
+def test_the_update_carries_the_revision_its_caller_read() -> None:
+    # The caller read revision 1; the draft has moved on to 3 since. The
+    # update is saved against what the caller read, so the save refuses it
+    # as stale instead of applying it over a change the caller never saw.
+    flow = _flow([_step(1)])
+    change = step_kind_answer(flow, prompts={}, positions=[2], step_ids=[])
+    option = change.insertions[0].options[0]
+
+    update = editor_update(flow, option.change, expected_revision=1, position=2)
+
+    assert flow.draft_revision == 3
+    assert update.expected_revision == 1
+
+
+async def _added(
+    flow: Flow,
+    kind: FlowStepKind,
+    values: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    position: int | None = None,
+) -> FlowStep:
+    """The step a kind with ``values`` is saved as, by the editor's save."""
+    place = position or len(flow.steps) + 1
+    kind_values = StepKindValues.model_validate(values)
+    check_step_kind_values(kind, kind_values)
+    change = insertion_change(flow, kind, position=place, values=kind_values)
+    saved: list[Flow] = []
+    refusal = await _save(flow, change, {}, monkeypatch, position=place, saved=saved)
+    assert refusal is None, refusal
+    return next(step for step in saved[0].steps if step.step_order == place)
+
+
+_FACTS = '{"beslut": "Bifall", "datum": "2026-11-11"}'
+_READ = {"question": "Läs {{ step_1.output.text }}"}
+_TOOL = {"mcp_server_id": str(uuid4()), "tool_id": str(uuid4()), "arguments": {}}
+
+
+@pytest.mark.parametrize(
+    ("kind", "values", "saved"),
+    [
+        (
+            FlowStepKind.AI,
+            {"instruction": "Sammanfatta.", "review": {"mode": "view"}},
+            {
+                "output_mode": "pass_through",
+                "review_policy": {"mode": "view", "expires_after_seconds": None},
+            },
+        ),
+        (
+            FlowStepKind.STRUCTURED,
+            {"instruction": "Ta fram fakta.", "example": _FACTS},
+            {
+                "output_type": "json",
+                "output_contract": {
+                    "type": "object",
+                    "properties": {
+                        "beslut": {"type": "string"},
+                        "datum": {"type": "string"},
+                    },
+                    "required": ["beslut", "datum"],
+                },
+            },
+        ),
+        (
+            FlowStepKind.AI,
+            {"instruction": "Läs.", "input_bindings": _READ},
+            {"input_bindings": _READ, "input_type": "text"},
+        ),
+        (
+            FlowStepKind.STRUCTURED,
+            {
+                "instruction": "Ta fram fakta.",
+                "example": _FACTS,
+                "input_bindings": _READ,
+                "review": {"mode": "edit"},
+            },
+            {
+                "input_bindings": _READ,
+                "review_policy": {"mode": "edit", "expires_after_seconds": None},
+            },
+        ),
+        (
+            FlowStepKind.DOCUMENT,
+            {"input_bindings": _READ},
+            {"output_mode": "render_verbatim", "input_bindings": _READ},
+        ),
+        (
+            FlowStepKind.REVIEW,
+            {"review": {"mode": "view"}},
+            {"review_policy": {"mode": "view", "expires_after_seconds": None}},
+        ),
+        (
+            FlowStepKind.TOOL,
+            {"tool": _TOOL},
+            {"input_source": "tool", "input_config": {"tool": _TOOL}},
+        ),
+        (
+            FlowStepKind.COMPOSE,
+            {"input_bindings": {"question": "Beslut: {{ step_1.output.text }}"}},
+            {
+                "output_mode": "compose_text",
+                "input_bindings": {"question": "Beslut: {{ step_1.output.text }}"},
+            },
+        ),
+        (
+            FlowStepKind.DOCUMENT,
+            {"format": "pdf"},
+            {"output_mode": "render_verbatim", "output_type": "pdf"},
+        ),
+        (
+            FlowStepKind.FETCH_HTTP,
+            {"url": _URL, "http": {"response_format": "json"}},
+            {"input_source": "http_get", "output_mode": "compose_text"},
+        ),
+        (
+            FlowStepKind.SEND_HTTP,
+            {
+                "url": _URL,
+                "http": {"auth": {"mode": "bearer_token"}, "timeout_seconds": 10},
+                "instruction": "Lämna det vidare oförändrat.",
+            },
+            {"output_mode": "http_post"},
+        ),
+    ],
+    ids=lambda value: value.value if isinstance(value, FlowStepKind) else None,
+)
+async def test_each_value_a_kind_takes_is_in_the_saved_step(
+    kind: FlowStepKind,
+    values: dict[str, Any],
+    saved: dict[str, Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow = _flow([_step(1)])
+
+    step = await _added(flow, kind, values, monkeypatch)
+
+    dumped = step.model_dump(mode="json")
+    for column, value in saved.items():
+        assert dumped[column] == value, column
+    if kind is FlowStepKind.FETCH_HTTP:
+        config = dumped["input_config"]
+        assert (config["url"], config["response_format"], config["auth"]) == (
+            _URL,
+            "json",
+            {"mode": "none"},
+        )
+    if kind is FlowStepKind.SEND_HTTP:
+        config = dumped["output_config"]
+        assert (config["url"], config["auth"]["mode"], config["timeout_seconds"]) == (
+            _URL,
+            "bearer_token",
+            10,
+        )
+
+
+async def test_a_speaker_step_is_saved_with_its_choices_and_a_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    flow, _ = DRAFTS["transcript and speakers"]()
+    flow = flow.model_copy(update={"steps": flow.steps[:1]})
+
+    step = await _added(
+        flow,
+        FlowStepKind.SPEAKERS,
+        {
+            "participants_field": "deltagare",
+            "speaker_count_field": "antal",
+            "infer_names": True,
+        },
+        monkeypatch,
+    )
+
+    assert step.output_config == {
+        "speaker_mapping": {
+            "participants_field": "deltagare",
+            "speaker_count_field": "antal",
+            "infer_names": True,
+        }
+    }
+    assert step.review_policy is not None
+
+
+_MODEL_KINDS = [
+    (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+    (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+]
+
+
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [*_MODEL_KINDS, (FlowStepKind.REVIEW, {})],
+    ids=["ai", "structured", "review"],
+)
+@pytest.mark.parametrize(
+    "review", [{}, True, {"enabled": True}], ids=["empty", "true", "enabled"]
+)
+async def test_a_review_asked_for_without_a_mode_is_the_default_review(
+    kind: FlowStepKind,
+    needs: dict[str, Any],
+    review: object,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    step = await _added(
+        _flow([_step(1)]), kind, {**needs, "review": review}, monkeypatch
+    )
+
+    assert step.model_dump(mode="json")["review_policy"] == {
+        "mode": "edit",
+        "expires_after_seconds": None,
+    }
+
+
+@pytest.mark.parametrize(("kind", "needs"), _MODEL_KINDS, ids=["ai", "structured"])
+async def test_a_step_given_no_review_has_none(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    step = await _added(_flow([_step(1)]), kind, needs, monkeypatch)
+
+    assert step.review_policy is None
+
+
+@pytest.mark.parametrize(
+    "review",
+    ["edit", "", False, {"enabled": False}, {"enabled": True, "note": "kort"}],
+    ids=["text", "empty text", "false", "turned off", "another key"],
+)
+def test_a_review_of_another_shape_is_refused_with_the_shape_it_takes(
+    review: object,
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": review})
+
+    (error,) = refused.value.errors()
+    assert error["loc"] == ("review",)
+    assert '{"mode": "edit"}' in error["msg"]
+    assert '{"mode": "view"}' in error["msg"]
+
+
+def test_a_review_with_a_mode_is_judged_by_the_review_policy_itself() -> None:
+    from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"review": {"mode": "ändra"}})
+
+    assert [error["loc"] for error in refused.value.errors()] == [("review", "mode")]
+    # The default is the kinds' own: the policy a saved step has still needs
+    # its mode.
+    with pytest.raises(ValidationError):
+        FlowStepReviewPolicy.model_validate({})
+
+
+async def test_a_first_step_reads_an_upload_only_when_asked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    empty = _flow([])
+
+    text = await _added(empty, FlowStepKind.AI, {"instruction": "Läs."}, monkeypatch)
+    upload = await _added(
+        empty,
+        FlowStepKind.AI,
+        {
+            "instruction": "Läs.",
+            "upload": {"input_format": "document", "required": False},
+        },
+        monkeypatch,
+    )
+
+    assert (text.input_type, text.input_config) == ("text", None)
+    assert upload.input_type == "document"
+    assert upload.input_config == {
+        "runtime_input": {
+            "enabled": True,
+            "required": False,
+            "input_format": "document",
+        }
+    }
+
+
+async def test_an_upload_is_given_in_the_words_its_saved_configuration_has(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # What a saved step's input_config.runtime_input reads as is what
+    # upload takes: the value is saved as it was given.
+    step = await _added(
+        _flow([]),
+        FlowStepKind.AI,
+        {"instruction": "Läs.", "upload": _DOCUMENT_UPLOADS["runtime_input"]},
+        monkeypatch,
+    )
+
+    assert step.input_type == "document"
+    assert step.input_config == _DOCUMENT_UPLOADS
+
+
+@pytest.mark.parametrize(
+    ("upload", "where", "told"),
+    [
+        # The format has one name, the saved one.
+        ({"format": "document"}, ("upload", "input_format"), "Field required"),
+        (
+            {"input_format": "document", "enabled": False},
+            ("upload", "enabled"),
+            "leave upload out for a step without an upload",
+        ),
+        ({"input_format": "audio"}, ("upload", "input_format"), "'document' or 'file'"),
+    ],
+    ids=["another name", "turned off", "audio"],
+)
+def test_an_upload_of_another_shape_is_refused_with_what_it_takes(
+    upload: dict[str, Any], where: tuple[str, ...], told: str
+) -> None:
+    with pytest.raises(ValidationError) as refused:
+        StepKindValues.model_validate({"upload": upload})
+
+    messages = {error["loc"]: error["msg"] for error in refused.value.errors()}
+    assert told in messages[where]
+
+
+@pytest.mark.parametrize(
+    ("kind", "needs"),
+    [
+        (FlowStepKind.AI, {"instruction": "Sammanfatta."}),
+        (FlowStepKind.STRUCTURED, {"instruction": "Ta fram fakta.", "example": _FACTS}),
+    ],
+    ids=["ai", "structured"],
+)
+async def test_long_material_is_saved_beside_the_upload_it_is_given_with(
+    kind: FlowStepKind, needs: dict[str, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    digest = {"long_material": {"mode": "digest"}}
+
+    first = await _added(
+        _flow([]),
+        kind,
+        {**needs, "upload": {"input_format": "document"}, **digest},
+        monkeypatch,
+    )
+    later = await _added(_flow([_step(1)]), kind, {**needs, **digest}, monkeypatch)
+
+    # One input_config carries both values: neither replaces the other.
+    assert first.input_type == "document"
+    assert first.input_config == {**_DOCUMENT_UPLOADS, **digest}
+    assert later.input_config == digest
+
+
+def test_long_material_takes_only_the_modes_a_saved_step_takes() -> None:
+    with pytest.raises(ValidationError):
+        StepKindValues.model_validate({"long_material": {"mode": "summary"}})
+
+
+def test_a_step_put_first_hands_over_from_its_final_shape() -> None:
+    first = _step(1, input_type="json")
+    flow = _flow([first])
+
+    change = insertion_change(
+        flow,
+        FlowStepKind.STRUCTURED,
+        position=1,
+        values=StepKindValues(instruction="Ta fram fakta.", example=_FACTS),
+    )
+
+    # The new step gives json, which the old first step reads as it is.
+    assert change.step_edits == ((first.id, {"input_source": "previous_step"}),)
+
+
+@pytest.mark.parametrize(
+    ("kind", "values", "message"),
+    [
+        (FlowStepKind.AI, {"instruction": "Läs.", "format": "pdf"}, "not use format"),
+        (
+            FlowStepKind.STRUCTURED,
+            {"instruction": "Ta fram.", "example": _FACTS, "url": _URL},
+            "not use url",
+        ),
+        (FlowStepKind.COMPOSE, {"review": {"mode": "edit"}}, "not use review"),
+        (
+            FlowStepKind.COMPOSE,
+            {"long_material": {"mode": "digest"}},
+            "not use long_material",
+        ),
+        (FlowStepKind.DOCUMENT, {"instruction": "Skriv."}, "not use instruction"),
+        (FlowStepKind.TEMPLATE, {"instruction": "Fyll i."}, "not use instruction"),
+        (FlowStepKind.TRANSCRIBE, {"instruction": "Skriv ut."}, "not use instruction"),
+        (
+            FlowStepKind.SPEAKERS,
+            {"review": {"mode": "edit"}},
+            "not use review",
+        ),
+        (FlowStepKind.REVIEW, {"instruction": "Granska."}, "not use instruction"),
+        (
+            FlowStepKind.FETCH_HTTP,
+            {"url": _URL, "instruction": "Hämta."},
+            "not use instruction",
+        ),
+        (FlowStepKind.TOOL, {"tool": _TOOL, "url": _URL}, "not use url"),
+        (
+            FlowStepKind.SEND_HTTP,
+            {"url": _URL, "review": {"mode": "edit"}},
+            "not use review",
+        ),
+        (FlowStepKind.STRUCTURED, {"instruction": "Ta fram."}, "needs example"),
+        (FlowStepKind.SEND_HTTP, {}, "needs url"),
+    ],
+)
+def test_a_value_the_kind_does_not_use_or_lacks_is_refused(
+    kind: FlowStepKind, values: dict[str, Any], message: str
+) -> None:
+    with pytest.raises(BadRequestException) as refused:
+        check_step_kind_values(kind, StepKindValues.model_validate(values))
+
+    assert message in str(refused.value)
+    assert refused.value.code == "flow_step_kind_values_invalid"
+
+
+@pytest.mark.parametrize(
+    "reads",
+    [None, {"question": "Läs {{ step_1.output.text }}"}],
+    ids=["after the step before", "with its own reads"],
+)
+async def test_an_upload_on_a_later_step_is_refused_by_the_save(
+    reads: dict[str, str] | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    flow = _flow([_step(1)])
+    values = StepKindValues.model_validate(
+        {
+            "instruction": "Läs.",
+            "upload": {"input_format": "document"},
+            **({"input_bindings": reads} if reads else {}),
+        }
+    )
+    check_step_kind_values(FlowStepKind.AI, values)
+    change = insertion_change(flow, FlowStepKind.AI, position=2, values=values)
+    saved: list[Flow] = []
+
+    refusal = await _save(flow, change, {}, monkeypatch, position=2, saved=saved)
+
+    assert refusal is not None
+    assert "only supported with input_source 'flow_input'" in str(refusal)
+    assert saved == []
+
+
+def test_the_value_tables_cover_every_kind_with_fields_the_values_have() -> None:
+    kinds = set(FlowStepKind)
+    assert set(STEP_KIND_DESCRIPTIONS) == kinds
+    assert set(STEP_KIND_VALUES) == kinds
+    assert set(STEP_KIND_REQUIRED_VALUES) <= kinds
+    for kind, takes in STEP_KIND_VALUES.items():
+        assert set(takes) <= set(StepKindValues.model_fields), kind
+        assert set(STEP_KIND_REQUIRED_VALUES.get(kind, ())) <= set(takes), kind
+
+
+def test_a_value_no_kind_has_is_refused_by_the_values_shape() -> None:
+    with pytest.raises(ValidationError):
+        StepKindValues.model_validate({"input_source": "flow_input"})
+
+
+def test_settings_saved_with_the_step_keep_transcription_on() -> None:
+    flow = _flow([_step(1)], metadata_json=_TRANSCRIBING)
+    change = insertion_change(flow, FlowStepKind.TRANSCRIBE, position=1)
+
+    # The settings replace wizard whole without the switch the step needs.
+    update = editor_update(
+        flow,
+        change,
+        expected_revision=flow.draft_revision,
+        position=1,
+        definition={"metadata_json": {"wizard": {"transcription_language": "sv"}}},
+    )
+
+    assert update.definition.metadata_json == {
+        "wizard": {"transcription_language": "sv", "transcription_enabled": True}
+    }
+
+
+def test_a_word_step_takes_a_template_the_flow_has_or_waits_for_one() -> None:
+    from eneo.flows.domain.step_kinds import step_kind_configuration
+
+    template_id = uuid4()
+
+    waiting = step_kind_configuration(FlowStepKind.TEMPLATE, previous_output_type=None)
+    filled = step_kind_configuration(
+        FlowStepKind.TEMPLATE,
+        previous_output_type=None,
+        values=StepKindValues(
+            template_asset_id=template_id,
+            bindings={"datum": "{{ flow_input.datum }}"},
+        ),
+    )
+
+    assert waiting["output_config"] is None
+    assert filled["output_config"] == {
+        "template_asset_id": str(template_id),
+        "bindings": {"datum": "{{ flow_input.datum }}"},
+    }
+
+
+def test_an_example_is_read_as_text_or_as_an_object() -> None:
+    from eneo.flows.domain.step_kinds import step_kind_configuration
+
+    as_text, as_object = (
+        step_kind_configuration(
+            FlowStepKind.STRUCTURED,
+            previous_output_type=None,
+            values=StepKindValues.model_validate({"example": example}),
+        )
+        for example in (_FACTS, {"beslut": "Bifall", "datum": "2026-11-11"})
+    )
+
+    assert as_text["output_contract"] == as_object["output_contract"]
+    assert as_text["output_contract"] is not None

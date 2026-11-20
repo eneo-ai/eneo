@@ -483,10 +483,11 @@ describe("suggestionText with the draft's steps", () => {
         run_count: 4,
         held_runs: 3
       }),
-      "Modellen sätter bara ihop texten som steget får",
+      "Modellen sätter mest ihop texten som steget får",
       "I 3 av de 4 senaste körningarna var 96\u00a0% av stegets svar hämtat ord för ord ur " +
-        "underlaget, med bara lite egen text. Ett steg av typen ”Sätt ihop text” kan " +
-        "göra samma sak utan modell"
+        "underlaget, med bara lite egen text (cirka 180 byte). Behövs inte den egna delen " +
+        "kan ett steg av typen ”Sätt ihop text” vara värt att pröva och jämföra: det " +
+        "anropar ingen modell och kostar därför inga tokens."
     ],
     [
       suggestion("oversized_reasoning", ["step-2"], {
@@ -501,8 +502,8 @@ describe("suggestionText with the draft's steps", () => {
       "Steget ber om resonemangsnivån ”Hög” för ett litet svar i fast format",
       "I 4 av de 5 senaste körningarna var stegets anrop små: modellen fick som mest " +
         "3\u00a0% av vad den kan ta emot och skrev som mest 900 tokens, resonemanget " +
-        "inräknat. Att plocka ut ett litet svar i fast format kräver sällan så mycket " +
-        "resonemang, så en lägre nivå gör troligen samma arbete för mindre."
+        "inräknat. Storleken visar inte hur svår uppgiften är. Det är bara ett råd: prova " +
+        "en lägre resonemangsnivå för steget och jämför svaren."
     ]
   ])("renders %#: %s", (item, title, explanation) => {
     const step = STEPS.find((candidate) => candidate.id === item.steps[0]);

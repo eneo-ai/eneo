@@ -1,0 +1,6 @@
+# Read by `uv pip compile` when it regenerates scripts/requirements-pdf.txt.
+# Resolve only versions uploaded to PyPI at least 7 days ago. Exceptions follow
+# the rule in backend/pyproject.toml: `exclude-newer-package`, set to a time just
+# after the last file of the needed release was uploaded, with an advisory link
+# and a removal date. Never `false`.
+exclude-newer = "7 days"

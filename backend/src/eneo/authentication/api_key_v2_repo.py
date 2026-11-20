@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional, cast
+from typing import Any, Literal, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -135,17 +135,40 @@ class ApiKeysV2Repository:
         }
 
     async def get(
-        self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
+        self,
+        *,
+        key_id: UUID,
+        tenant_id: UUID,
+        for_update: bool | Literal["no_key"] = False,
     ) -> Optional[ApiKeyV2InDB]:
         """Return the key; with ``for_update`` the row stays locked until the
-        surrounding transaction completes."""
+        surrounding transaction completes. Another transaction that needs a
+        conflicting lock on the row, as every change to the row does, waits
+        and then reads the key as this transaction left it, except the two
+        writers below that skip a held key.
+
+        ``"no_key"`` takes FOR NO KEY UPDATE, for a change that keeps the row
+        and does not write its key columns (``id``, ``key_hash``,
+        ``hash_version``). Rows that point to the key can still be written in
+        the meantime: their foreign key check only takes FOR KEY SHARE.
+        ``True`` takes FOR UPDATE, which also makes such rows wait until the
+        transaction ends; deleting the key needs it, so that no new row points
+        to the key between the read and the delete. Neither lock keeps other
+        transactions from reading the key, so a request that signed in with
+        the key before a change can still finish after it. Recording a use
+        (``update_last_used_at``) skips a key another transaction holds, so the
+        request goes on and the key keeps its earlier time; a change that comes
+        after a recorded use waits until that request's transaction ends. The
+        writes of ``run_daily_maintenance`` (``_update_matching``) skip a held
+        key the same way.
+        """
         query = (
             sa.select(self.table)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
         )
         if for_update:
-            query = query.with_for_update()
+            query = query.with_for_update(key_share=for_update == "no_key")
         record = await self.session.scalar(query)
 
         if record is None:
@@ -709,19 +732,66 @@ class ApiKeysV2Repository:
 
         return items, total
 
-    async def list_expired_candidates(
-        self,
-        *,
-        now: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.expires_at.is_not(None))
-            .where(self.table.expires_at <= now)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.EXPIRED.value)
+    # Each maintenance step selects keys by one condition. The same condition
+    # guards the step's change to each key, so a key that stopped matching
+    # after it was selected is left as it is, as is a key another transaction
+    # holds.
+
+    def due_for_expiry(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Keys past their end date that are not yet recorded as expired."""
+        return sa.and_(
+            self.table.expires_at.is_not(None),
+            self.table.expires_at <= now,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.EXPIRED.value,
         )
-        records = await self.session.scalars(query)
+
+    def expired_but_open(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Keys recorded as expired whose end date still lets them sign in:
+        later than ``now`` or missing. Sign-in reads the date, not the state."""
+        return sa.and_(
+            self.table.state == ApiKeyState.EXPIRED.value,
+            self.table.revoked_at.is_(None),
+            sa.or_(self.table.expires_at.is_(None), self.table.expires_at > now),
+        )
+
+    def unused_since(
+        self, *, tenant_id: UUID, cutoff: datetime
+    ) -> sa.ColumnElement[bool]:
+        """The tenant's keys not used, or never used and created, since ``cutoff``."""
+        return sa.and_(
+            self.table.tenant_id == tenant_id,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.EXPIRED.value,
+            sa.or_(
+                self.table.last_used_at < cutoff,
+                sa.and_(
+                    self.table.last_used_at.is_(None),
+                    self.table.created_at < cutoff,
+                ),
+            ),
+        )
+
+    def rotation_grace_over(self, *, now: datetime) -> sa.ColumnElement[bool]:
+        """Rotated keys whose grace period has ended and that are not revoked."""
+        return sa.and_(
+            self.table.rotation_grace_until.is_not(None),
+            self.table.rotation_grace_until <= now,
+            self.table.revoked_at.is_(None),
+            self.table.state != ApiKeyState.REVOKED.value,
+        )
+
+    async def list_matching(
+        self, condition: sa.ColumnElement[bool], *, limit: int
+    ) -> list[ApiKeyV2InDB]:
+        """The oldest ``limit`` keys matching ``condition``, in a stable order
+        so a run that stops at the limit is continued by the next one."""
+        records = await self.session.scalars(
+            sa.select(self.table)
+            .where(condition)
+            .order_by(self.table.created_at, self.table.id)
+            .limit(limit)
+        )
         return [ApiKeyV2InDB.model_validate(record) for record in records]
 
     async def scope_is_flow_managed_assistant(self, assistant_id: UUID) -> bool:
@@ -750,41 +820,76 @@ class ApiKeysV2Repository:
         records = await self.session.scalars(query)
         return [ApiKeyV2InDB.model_validate(record) for record in records]
 
-    async def list_rotation_grace_candidates(
+    async def expire_matching(
         self,
+        condition: sa.ColumnElement[bool],
         *,
-        now: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.rotation_grace_until.is_not(None))
-            .where(self.table.rotation_grace_until <= now)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.REVOKED.value)
-        )
-        records = await self.session.scalars(query)
-        return [ApiKeyV2InDB.model_validate(record) for record in records]
+        key: ApiKeyV2InDB,
+        expires_at: datetime,
+    ) -> Optional[ApiKeyV2InDB]:
+        """Record ``key`` as expired at ``expires_at`` if it still matches
+        ``condition`` and still has the end date it was selected with.
 
-    async def list_unused_before(
-        self,
-        *,
-        tenant_id: UUID,
-        cutoff: datetime,
-    ) -> list[ApiKeyV2InDB]:
-        query = (
-            sa.select(self.table)
-            .where(self.table.tenant_id == tenant_id)
-            .where(self.table.revoked_at.is_(None))
-            .where(self.table.state != ApiKeyState.EXPIRED.value)
-            .where(
-                sa.or_(
-                    self.table.last_used_at < cutoff,
-                    sa.and_(
-                        self.table.last_used_at.is_(None),
-                        self.table.created_at < cutoff,
-                    ),
-                )
-            )
+        None when no row changed: another transaction holds the key, or it
+        was used, revoked or given another end date after it was selected,
+        and the change belongs to that writer.
+        """
+        return await self._update_matching(
+            condition,
+            self.table.expires_at.is_not_distinct_from(key.expires_at),
+            key=key,
+            state=ApiKeyState.EXPIRED.value,
+            expires_at=expires_at,
         )
-        records = await self.session.scalars(query)
-        return [ApiKeyV2InDB.model_validate(record) for record in records]
+
+    async def revoke_matching(
+        self,
+        condition: sa.ColumnElement[bool],
+        *,
+        key: ApiKeyV2InDB,
+        **values: object,
+    ) -> Optional[ApiKeyV2InDB]:
+        """Revoke ``key`` if it still matches ``condition``; None when no row
+        changed, so a concurrent revocation or a new grace period stands, and
+        a key another transaction holds is left as it is."""
+        return await self._update_matching(
+            condition, key=key, state=ApiKeyState.REVOKED.value, **values
+        )
+
+    async def _update_matching(
+        self,
+        *conditions: sa.ColumnElement[bool],
+        key: ApiKeyV2InDB,
+        **values: object,
+    ) -> Optional[ApiKeyV2InDB]:
+        # Take the row's lock under the same conditions as the update, skipping
+        # the row when another transaction holds it: the job never waits for a
+        # revocation, use or edit in progress, which may take the job's keys in
+        # another order. Such a key is left as it is (None) by this selection's
+        # write; a later selection in the same run, or a later run, can take it.
+        # The conditions in the lock keep the job from locking a row that
+        # already fails them in the statement's snapshot; a change committed
+        # between that snapshot and the lock can still leave the row unchanged
+        # but locked until the job commits, as Postgres keeps a lock it took
+        # before rechecking the row.
+        # The update keeps the same filter, so Postgres checks it again on the
+        # committed row if it changed while the statement ran (READ COMMITTED).
+        matching = (
+            self.table.id == key.id,
+            self.table.tenant_id == key.tenant_id,
+            *conditions,
+        )
+        locked = (
+            sa.select(self.table.id)
+            .where(*matching)
+            .with_for_update(key_share=True, skip_locked=True)
+            .cte("locked_key")
+        )
+        record = await self.session.scalar(
+            sa.update(self.table)
+            .where(*matching)
+            .where(self.table.id == locked.c.id)
+            .values(**values)
+            .returning(self.table)
+        )
+        return None if record is None else ApiKeyV2InDB.model_validate(record)

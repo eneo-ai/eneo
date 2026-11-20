@@ -1,8 +1,9 @@
 [install]
 # Install only versions published at least 7 days ago (seconds).
 minimumReleaseAge = 604800
-# Exceptions: exact "pkg@x.y.z" only, each with an advisory link and a removal
-# date at most 7 days out. Never a bare package name.
+# Exceptions go in `minimumReleaseAgeExcludes`: exact "pkg@x.y.z" only, each
+# with an advisory link and a removal date at most 7 days out. Never a bare
+# package name.
 # @astryxdesign/*@0.7.12 (published 2026-11-10): the product owner chose the
 # latest Astryx on 2026-11-10. The packages carry SLSA provenance and npm
 # signatures from the Astryx maintainers (npm audit signatures: verified).

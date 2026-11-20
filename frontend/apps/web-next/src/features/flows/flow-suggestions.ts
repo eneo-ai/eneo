@@ -526,6 +526,7 @@ export function suggestionText(
         explanation: t("flow_suggestion_deterministic_candidate_explanation", {
           ...heldRuns(params),
           share: numberOr(params.output_verbatim_ratio, 0),
+          own: numberOr(params.own_bytes, 0),
           kind: t("flow_add_step_compose")
         })
       };

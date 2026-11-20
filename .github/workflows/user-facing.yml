@@ -1,7 +1,6 @@
 name: PR user-facing notes
 
 on:
-  workflow_call:
   pull_request:
     types: [opened, synchronize, reopened, edited, ready_for_review]
     branches:
@@ -15,9 +14,8 @@ permissions:
   contents: read
   pull-requests: read
 
-# A newer push to a pull request replaces its older check. Called by CI for anything
-# else (image publication included), it belongs to that one run and is never cancelled
-# or replaced by another run's check.
+# A newer push or body edit to a pull request replaces its older check. A merge
+# candidate's run belongs to that run alone and is never cancelled or replaced.
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('user-facing-{0}-{1}', github.workflow, github.event.pull_request.number) || format('user-facing-{0}-{1}', github.workflow, github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
