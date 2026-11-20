@@ -34,6 +34,10 @@
       "ignore": ["src/icons/Icon.svelte"]
     },
     "packages/eneo-js": {},
-    "packages/eslint-plugin": {}
+    "packages/eslint-plugin": {},
+    "packages/widget-loader": {
+      "ignoreFiles": ["scripts/minify-css.d.mts"],
+      "ignoreDependencies": ["@vitest/browser"]
+    }
   }
 }
