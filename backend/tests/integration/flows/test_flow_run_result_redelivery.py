@@ -343,6 +343,31 @@ async def test_a_failed_audit_refuses_the_redelivery(
     assert delivery.dead_lettered_at == at
 
 
+async def test_a_redelivery_is_audited_even_when_the_action_is_turned_off(
+    setup_database, client, admin_token, dead_lettered_run, monkeypatch
+):
+    run, delivery_id, at = await dead_lettered_run()
+    monkeypatch.setattr(
+        AuditService, "_should_log_action", AsyncMock(return_value=False)
+    )
+
+    response = await client.post(
+        _path(run, delivery_id),
+        json={"expected_dead_lettered_at": at.isoformat()},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert (await _delivery(delivery_id)).delivery_status == "pending"
+    audit = await _read_one(
+        sa.select(AuditLog.log_metadata).where(
+            AuditLog.action == "flow_run_webhook_redelivered",
+            AuditLog.entity_id == run.id,
+        )
+    )
+    assert audit.log_metadata["delivery_id"] == str(delivery_id)
+
+
 async def _wait_until_blocked(task: asyncio.Task) -> None:
     await asyncio.sleep(0.5)
     assert not task.done()

@@ -956,8 +956,9 @@ async def cancel_flow_run(
 
     Send the delivery's observed `dead_lettered_at` as `expected_dead_lettered_at`.
     Only that dead letter is reset, so a retried request cannot reset a later one.
-    The audit record and the reset commit together; disabled or failed auditing
-    prevents the redelivery.
+    The audit record and the reset commit together, and it is written even when
+    the tenant has turned that audit action off; a failed audit write prevents
+    the redelivery.
 
     Requires the right to edit the flow. Service keys cannot send a result again.
     """,

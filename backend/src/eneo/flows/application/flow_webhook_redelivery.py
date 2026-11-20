@@ -171,6 +171,7 @@ async def redeliver_run_result(
                         ),
                         "previous_delivery_attempts": delivery.delivery_attempts,
                     },
+                    required=True,
                 )
                 if audit_log is None:
                     raise _audit_unavailable()
