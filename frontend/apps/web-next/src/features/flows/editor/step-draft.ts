@@ -8,6 +8,7 @@ import {
   EDITABLE_STEP_FIELDS,
   objectOf,
   sameJson,
+  sameStepField,
   sortedIds,
   stepConfigOf,
   type AssistantConfig,
@@ -46,7 +47,7 @@ export function draftAssistant(saved: AssistantConfig, edits: AssistantEdits): A
 export function stepChanges(saved: StepConfig, draft: StepConfig): StepPatch | null {
   const changes: JsonObject = {};
   for (const field of EDITABLE_STEP_FIELDS) {
-    if (!sameJson(saved[field], draft[field])) changes[field] = draft[field];
+    if (!sameStepField(field, saved[field], draft[field])) changes[field] = draft[field];
   }
   return Object.keys(changes).length > 0 ? (changes as StepPatch) : null;
 }
@@ -220,7 +221,7 @@ export function savedFlowPreviewRequest(flow: FlowPublic) {
 /** The edits that still change something on top of `saved`, for "N changes" and rebasing. */
 export function changedStepFields(saved: StepConfig, edits: StepEdits): (keyof StepConfig)[] {
   return (Object.keys(edits) as (keyof StepConfig)[]).filter(
-    (field) => !sameJson(saved[field], edits[field])
+    (field) => !sameStepField(field, saved[field], edits[field])
   );
 }
 

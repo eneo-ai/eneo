@@ -2212,6 +2212,7 @@
   "flow_step_editor_deliverable_file_name_description": "Optional. Write fixed text and insert form fields. The run's date is added automatically, and equal names get a number.",
   "flow_step_editor_deliverable_file_name_too_long": "The file name can be at most {max} characters. Shorten it.",
   "flow_step_editor_deliverable_insert_field": "Insert form field",
+  "flow_step_editor_http_test_run_result": "A call that sends the run's result cannot be tested here.",
   "flow_step_editor_control_title": "Review and security",
   "flow_step_editor_review_expiry": "Review expires after",
   "flow_step_editor_review_expiry_description": "How long the run waits for review. Leave empty for the default, 14 days.",

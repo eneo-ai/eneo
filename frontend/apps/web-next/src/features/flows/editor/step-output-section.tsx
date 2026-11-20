@@ -169,8 +169,14 @@ function DeliverableFields({
   const customiseRef = useRef<HTMLDivElement>(null);
   const deliverable = readDeliverable(draft.output_config);
   const shown = deliverable ?? (isLast && customising ? { label: "" } : null);
-  const set = (next: StepDeliverable | null) =>
+  const set = (next: StepDeliverable | null) => {
+    // The last document emptied is the default again; its fields stay open.
+    if (isLast && next && next.label === "" && !next.file_name) {
+      setCustomising(true);
+      next = null;
+    }
     onChange({ ...draft, output_config: withDeliverable(draft.output_config, next) });
+  };
 
   const fields = shown && (
     <>

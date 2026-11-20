@@ -33,6 +33,15 @@ describe("stepChanges", () => {
     expect(stepChanges(saved, reordered)).toBeNull();
   });
 
+  it("reads an empty output_config as none, and a marked one emptied as a change", () => {
+    const empty = stepConfigOf(makeStep({ output_config: {} }));
+    expect(stepChanges(empty, draftStep(empty, { output_config: null }))).toBeNull();
+    const marked = stepConfigOf(makeStep({ output_config: { deliverable: { label: "A" } } }));
+    expect(stepChanges(marked, draftStep(marked, { output_config: null }))).toEqual({
+      output_config: null
+    });
+  });
+
   it("keeps settings the editor does not show when it edits the object that holds them", () => {
     const draft = draftStep(saved, {
       input_config: withRuntimeInput(saved.input_config, "text", { enabled: true, required: true })

@@ -17,6 +17,7 @@ import { answerShape, previewParts } from "./request-preview";
 import {
   hasHttpConfig,
   readCitationsOn,
+  readDeliverable,
   readHttpConfig,
   readInputBindings,
   readLongMaterial,
@@ -24,7 +25,8 @@ import {
   readTemplateFill,
   readToolConfig,
   reviewChoiceOf,
-  sourceRefKey
+  sourceRefKey,
+  stepDeliversArtifact
 } from "./step-configs";
 import { sourceRefName } from "./step-input-section";
 import {
@@ -151,6 +153,7 @@ export function StepReadOnly({
     step.output_mode === "http_post" && hasHttpConfig(step.output_config)
       ? readHttpConfig(step.output_config, "output")
       : null;
+  const deliverable = stepDeliversArtifact(step) ? readDeliverable(step.output_config) : null;
   const model = assistant?.completion_model_id
     ? space.completion_models.find((candidate) => candidate.id === assistant.completion_model_id)
     : null;
@@ -306,6 +309,16 @@ export function StepReadOnly({
                 </li>
               ))}
             </ul>
+          </MetadataListItem>
+        )}
+        {deliverable && (
+          <MetadataListItem label={t("flow_step_editor_deliverable_label")}>
+            <span className="[overflow-wrap:anywhere]">{deliverable.label}</span>
+          </MetadataListItem>
+        )}
+        {deliverable?.file_name && (
+          <MetadataListItem label={t("flow_step_editor_deliverable_file_name")}>
+            <span className="[overflow-wrap:anywhere]">{deliverable.file_name}</span>
           </MetadataListItem>
         )}
         {answer.kind === "fields" && answer.fields.length > 0 && (

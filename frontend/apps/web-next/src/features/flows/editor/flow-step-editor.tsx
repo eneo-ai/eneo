@@ -46,7 +46,8 @@ import {
   readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
-  readToolConfig
+  readToolConfig,
+  stepDeliversArtifact
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
 import {
@@ -746,19 +747,23 @@ function StepEditorSession({
             : t("flow_step_editor_http_url_invalid");
       }
     }
-    const deliverable = readDeliverable(current.output_config);
+    // A stale value on a step that delivers no file is not shown, and the core drops it.
+    const deliverable = stepDeliversArtifact(current)
+      ? readDeliverable(current.output_config)
+      : null;
     if (deliverable) {
+      // In characters (code points), as the core counts them.
       if (!deliverable.label.trim()) {
         problems["output_config.deliverable.label"] = t(
           "flow_step_editor_deliverable_label_required"
         );
-      } else if (deliverable.label.length > DELIVERABLE_LABEL_MAX) {
+      } else if (Array.from(deliverable.label).length > DELIVERABLE_LABEL_MAX) {
         problems["output_config.deliverable.label"] = t(
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
       }
-      if ((deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
+      if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
           "flow_step_editor_deliverable_file_name_too_long",
           { max: DELIVERABLE_FILE_NAME_MAX }

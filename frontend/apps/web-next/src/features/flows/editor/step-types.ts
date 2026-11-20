@@ -142,6 +142,19 @@ export function sameJson(left: unknown, right: unknown): boolean {
   return canonicalJson(left) === canonicalJson(right);
 }
 
+/**
+ * True when a step field's two values save the same. Empty output settings
+ * are no output settings: an older step stored `{}` where the editor writes
+ * null once the last key is removed, so a setting turned on and off again
+ * changes nothing.
+ */
+export function sameStepField(field: keyof StepConfig, left: unknown, right: unknown): boolean {
+  if (field !== "output_config") return sameJson(left, right);
+  const none = (value: unknown) =>
+    isJsonObject(value) && Object.keys(value).length === 0 ? null : value;
+  return sameJson(none(left), none(right));
+}
+
 export function sortedIds(items: readonly { id: string }[]): string[] {
   return items.map((item) => item.id).sort();
 }

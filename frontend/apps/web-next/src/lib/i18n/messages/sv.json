@@ -8255,6 +8255,7 @@
   "flow_step_editor_deliverable_file_name_description": "Valfritt. Skriv fast text och infoga formulärfält. Körningens datum läggs till automatiskt, och lika namn får ett nummer.",
   "flow_step_editor_deliverable_file_name_too_long": "Filnamnet får vara högst {max} tecken. Korta ner det.",
   "flow_step_editor_deliverable_insert_field": "Infoga formulärfält",
+  "flow_step_editor_http_test_run_result": "Ett anrop som skickar körningens resultat kan inte testas här.",
   "flow_step_editor_control_title": "Granskning och säkerhet",
   "flow_step_editor_review_expiry": "Granskningen löper ut efter",
   "flow_step_editor_review_expiry_description": "Hur länge körningen väntar på granskning. Lämna tomt för standard, 14 dagar.",

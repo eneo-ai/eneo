@@ -28,6 +28,7 @@ import {
   longMaterialEligibility,
   readLongMaterial,
   withLongMaterial,
+  type HttpBodyMode,
   type ToolArgumentSpec
 } from "./step-configs";
 import {
@@ -148,6 +149,27 @@ function withCurrent<T extends string>(
     .filter((value) => valid.includes(value))
     .map((value) => ({ value, invalid: false }));
   return valid.includes(current) ? options : [{ value: current, invalid: true }, ...options];
+}
+
+const HTTP_BODY_CHOICES: readonly HttpBodyMode[] = [
+  "auto",
+  "json_template",
+  "text_template",
+  "none"
+];
+
+/**
+ * The body modes to choose from. A stored mode that is not one of them (a
+ * body that sends the run's result) comes first, by its name, and cannot be
+ * chosen here.
+ */
+export function httpBodyModeOptions(
+  current: HttpBodyMode
+): { value: HttpBodyMode; disabled: boolean }[] {
+  const options = HTTP_BODY_CHOICES.map((value) => ({ value, disabled: false }));
+  return HTTP_BODY_CHOICES.includes(current)
+    ? options
+    : [{ value: current, disabled: true }, ...options];
 }
 
 export function inputSourceOptions(position: number, current: InputSource): Option<InputSource>[] {
