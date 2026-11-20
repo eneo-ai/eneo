@@ -165,7 +165,7 @@ export function initAnalytics(client) {
 
     insights: {
       /**
-       * Get insights for a specifc assistant or group chat
+       * Get insights for a specific assistant
        * @param {Object} args
        * @param {import('./conversations').ChatPartner} args.chatPartner
        * @param {string} [args.startDate] Define start and end date for data; Expects UTC time string.
@@ -174,21 +174,15 @@ export function initAnalytics(client) {
        *
        */
       statistics: async ({ chatPartner, startDate, endDate }) => {
-        /**  @type {{assistant_id?: string, group_chat_id?: string}} */
-        const target = { assistant_id: undefined, group_chat_id: undefined };
-
-        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
-          target.assistant_id = chatPartner.id;
-        } else if (chatPartner.type === "group-chat") {
-          target.group_chat_id = chatPartner.id;
-        } else {
+        if (chatPartner.type !== "assistant" && chatPartner.type !== "default-assistant") {
           throw new EneoError(
-            "Asking a question requires one of 'assistant' or 'groupChat' to be specified",
+            "Insights require an 'assistant' to be specified",
             "CONNECTION",
             0,
             0
           );
         }
+        const target = { assistant_id: chatPartner.id };
 
         const res = await client.fetch("/api/v1/analysis/conversation-insights/", {
           method: "get",
@@ -214,21 +208,15 @@ export function initAnalytics(client) {
          *
          */
         list: async ({ chatPartner, startDate, endDate, nextCursor, limit, nameFilter }) => {
-          /**  @type {{assistant_id?: string, group_chat_id?: string}} */
-          const target = { assistant_id: undefined, group_chat_id: undefined };
-
-          if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
-            target.assistant_id = chatPartner.id;
-          } else if (chatPartner.type === "group-chat") {
-            target.group_chat_id = chatPartner.id;
-          } else {
+          if (chatPartner.type !== "assistant" && chatPartner.type !== "default-assistant") {
             throw new EneoError(
-              "Asking a question requires one of 'assistant' or 'groupChat' to be specified",
+              "Insights require an 'assistant' to be specified",
               "CONNECTION",
               0,
               0
             );
           }
+          const target = { assistant_id: chatPartner.id };
 
           const res = await client.fetch("/api/v1/analysis/conversation-insights/sessions/", {
             method: "get",
@@ -285,21 +273,15 @@ export function initAnalytics(client) {
         onAnswer,
         processingMode = "sync"
       }) => {
-        /**  @type {{assistant_id?: string, group_chat_id?: string}} */
-        const target = { assistant_id: undefined, group_chat_id: undefined };
-
-        if (chatPartner.type === "assistant" || chatPartner.type === "default-assistant") {
-          target.assistant_id = chatPartner.id;
-        } else if (chatPartner.type === "group-chat") {
-          target.group_chat_id = chatPartner.id;
-        } else {
+        if (chatPartner.type !== "assistant" && chatPartner.type !== "default-assistant") {
           throw new EneoError(
-            "Asking a question requires one of 'assistant' or 'groupChat' to be specified",
+            "Insights require an 'assistant' to be specified",
             "CONNECTION",
             0,
             0
           );
         }
+        const target = { assistant_id: chatPartner.id };
 
         if (processingMode === "auto") {
           const response = await client.fetch("/api/v1/analysis/conversation-insights/", {

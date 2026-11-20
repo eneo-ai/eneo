@@ -227,8 +227,6 @@ export type ComposerProps = {
   knowledgeMode?: ChatPartner["knowledgeMode"];
   /** Verktyg pill: a switch per capability and MCP server, and the personal chat's Skills. */
   tools?: ReactNode;
-  /** Group chats: @-mention picker. */
-  mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
   modelSelector?: ReactNode;
   /** Start state for the personal assistant: the assistant selector as a token. */
@@ -318,7 +316,6 @@ export function Composer({
   knowledge = [],
   knowledgeMode,
   tools,
-  mention,
   modelSelector,
   partnerToken,
   contextBar,
@@ -439,7 +436,6 @@ export function Composer({
               )}
               <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
-              {mention}
             </div>
           }
           sendActions={modelSelector}

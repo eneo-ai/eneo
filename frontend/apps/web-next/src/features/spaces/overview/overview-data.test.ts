@@ -69,21 +69,17 @@ describe("recentChatItems", () => {
   it("puts the most recently changed first", () => {
     const older = makeAssistant({ id: "older", updated_at: "2026-01-01T00:00:00Z" });
     const newer = makeAssistant({ id: "newer", name: "B", updated_at: "2026-09-01T00:00:00Z" });
-    const group = {
-      id: "group",
-      type: "group-chat",
-      name: "Grupp",
-      published: false,
-      user_id: "u",
-      metadata_json: null,
-      created_at: "2026-05-01T00:00:00Z",
-      updated_at: "2026-05-01T00:00:00Z"
-    };
-    const space = makeSpace({ assistants: [older, newer], groupChats: [group] });
+    const sameTime = makeAssistant({
+      id: "same-time",
+      name: "A",
+      updated_at: "2026-09-01T00:00:00Z",
+      completion_model_id: null
+    });
+    const space = makeSpace({ assistants: [older, newer, sameTime] });
 
     expect(recentChatItems(space, compare).map((item) => item.id)).toEqual([
+      "same-time",
       "newer",
-      "group",
       "older"
     ]);
   });

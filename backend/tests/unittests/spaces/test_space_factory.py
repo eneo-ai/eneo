@@ -165,7 +165,6 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
     missing_model_assistant_id = uuid4()
     invalid_assistant_id = uuid4()
     app_id = uuid4()
-    group_chat_ids = [uuid4(), uuid4()]
     service_ids = [uuid4(), uuid4()]
 
     space_in_db = MagicMock()
@@ -232,20 +231,6 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
     # Corruption there must not force full-domain hydration or hide metadata.
     app.completion_model_kwargs = {"temperature": "not-a-number"}
 
-    group_chats = []
-    for group_chat_id in group_chat_ids:
-        group_chat = MagicMock()
-        group_chat.id = group_chat_id
-        group_chat.created_at = now
-        group_chat.updated_at = now
-        group_chat.name = f"group-chat-{group_chat_id}"
-        group_chat.user_id = user_id
-        group_chat.published = True
-        group_chat.metadata_json = None
-        group_chat.icon_id = None
-        group_chat.insight_enabled = False
-        group_chats.append(group_chat)
-
     services = []
     for service_id in service_ids:
         service = MagicMock()
@@ -268,7 +253,6 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
             missing_model_assistant,
             invalid_assistant,
         ],
-        group_chats_in_db=group_chats,
         apps_in_db=[app],
         services_in_db=services,
         completion_models=[completion_model],
@@ -293,7 +277,6 @@ def test_create_applications_projection_preserves_sparse_response_contract(facto
     assert projection.access.app_ids == frozenset({app_id})
     assert projection.access.members[member_id].role == "admin"
     assert projection.access.group_members[group_id].role == "viewer"
-    assert [item.id for item in projection.group_chats] == group_chat_ids
     assert [item.id for item in projection.services] == service_ids
 
 

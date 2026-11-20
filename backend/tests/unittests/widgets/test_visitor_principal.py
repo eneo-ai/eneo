@@ -83,9 +83,7 @@ def test_session_principal_is_widget_plus_visitor():
     # A user session whose user_id happens to equal the visitor id is not ours.
     assert not service._is_owner(user_session)  # type: ignore[arg-type]
 
-    session_add = service._build_session_add(
-        name="n", assistant_id=widget.target_id, group_chat_id=None
-    )
+    session_add = service._build_session_add(name="n", assistant_id=widget.target_id)
     assert (session_add.user_id, session_add.api_key_id) == (None, None)
     assert (session_add.widget_id, session_add.visitor_id) == (widget.id, visitor_id)
 
@@ -113,7 +111,6 @@ async def test_ownership_projection_requires_both_widget_and_visitor():
         widget_id=widget.id,
         visitor_id=visitor_id,
         assistant_id=widget.target_id,
-        group_chat_id=None,
     )
     repo.get_ownership.return_value = owned
     assert (

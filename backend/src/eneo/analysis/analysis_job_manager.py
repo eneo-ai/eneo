@@ -30,8 +30,7 @@ class AnalysisJobManager:
         job_id: UUID,
         tenant_id: UUID,
         question: str,
-        assistant_id: UUID | None,
-        group_chat_id: UUID | None,
+        assistant_id: UUID,
     ) -> AnalysisJob:
         now = datetime.now(timezone.utc)
         job = AnalysisJob(
@@ -40,7 +39,6 @@ class AnalysisJobManager:
             status=AnalysisJobStatus.QUEUED,
             question=question,
             assistant_id=assistant_id,
-            group_chat_id=group_chat_id,
             created_at=now,
             updated_at=now,
         )
@@ -52,7 +50,15 @@ class AnalysisJobManager:
         raw = await self.redis.get(key)
         if raw is None:
             return None
-        return AnalysisJob.model_validate(orjson.loads(raw))
+        record: dict[str, object] = orjson.loads(raw)
+        # Until pre-upgrade Redis jobs expire, a group ID can be the only
+        # target. Retirement preserved that UUID on the migrated assistant.
+        group_chat_id = record.pop("group_chat_id", None)
+        if (record.get("assistant_id") is None) == (group_chat_id is None):
+            return None
+        if group_chat_id is not None:
+            record["assistant_id"] = group_chat_id
+        return AnalysisJob.model_validate(record)
 
     async def mark_processing(
         self, *, tenant_id: UUID, job_id: UUID

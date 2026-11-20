@@ -140,8 +140,11 @@ was being made is not stored. Once that time is older than the conversation's pe
 history replaces the name with an empty one, which both apps show as Untitled, and
 removes the feedback text; the feedback vote stays. This holds whether or not the
 conversation's questions are still there, so a name chosen later is kept as long as
-its own time allows. A group chat's name and feedback text follow the shortest period
-among its assistants. A conversation from before the upgrade that recorded these
+its own time allows. With specialists, the name and feedback text follow the
+orchestrating assistant's period. Former groups retain their shortest effective member
+period through the migrated specialist links; a shorter explicit period on the
+migrated assistant also applies. These are resolved from current settings,
+without restarting the age of old text. A conversation from before the upgrade that recorded these
 times counts from when it was created. After the upgrade, health can therefore read
 `degraded` until the step has cleared the older names and feedback texts: they are
 overdue, not a false alarm. The step `names_and_feedback` reports them as
@@ -200,7 +203,7 @@ With extended logging, the log of each turn holds the earlier turns of its
 conversation. Removing a question clears every later log of its conversation that
 still holds content, in the same unit, so access to the removed turn ends with the
 question. The removal reads every log of the conversation that still holds content,
-and the unit is charged one row for each: in a group chat each turn follows its own
+and the unit is charged one row for each: in a former group chat each historical turn follows its own
 Assistant's period, so earlier turns can be kept. The logs are never cleared in
 parts. A question whose conversation has more such logs than
 `RETENTION_CONVERSATIONS_MAX_UNIT_ROWS` allows is kept as `unit_exceeds_budget`, and

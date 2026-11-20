@@ -161,10 +161,12 @@ are no cycles and no nested budgets. The table `assistants_specialists` rejects
 a self-reference; deleting a specialist cascades the link and moving an
 assistant to another Space drops its links in both directions.
 
-Group chats are unchanged by this decision: they keep the existing single
-assistant selector and mentions. Retiring that type in favour of specialists on
-an assistant, shared-Space default assistant orchestration and API-key
-execution are separate decisions that build on this one.
+Group chats are retired by the follow-up migration `202610221200`: every group
+becomes an assistant with the same id and its members become that assistant's
+specialists, sessions move to the assistant, and the group tables are dropped.
+The old `/group-chats` API answers 410. Shared-Space default assistant
+orchestration and API-key execution are separate decisions that build on this
+one.
 
 The migration adds the specialists table and a nullable consultation column on
 questions; it does not rewrite existing assistants or question history. A

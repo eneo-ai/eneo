@@ -1,5 +1,5 @@
 import { EneoError, type EneoErrorCode } from "@eneo/eneo-js";
-import { isHttpError } from "@sveltejs/kit";
+import { isHttpError, isRedirect } from "@sveltejs/kit";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { toAppError } from "$lib/core/errors/toAppError";
 import { load as loadSpace } from "./spaces/[spaceId]/chat/+page";
@@ -27,14 +27,12 @@ function fixture(hasSession = true) {
   const getPartner = vi.fn(async () => partner);
   const getSession = vi.fn(async () => conversation);
   const listSessions = vi.fn(async () => history);
-  const getGroup = vi.fn(async () => ({ ...partner, type: "group-chat" }));
   const currentSpace = { default_assistant: { ...partner, permissions: ["read"] } };
   const input = {
     parent: async () => ({
       eneo: {
         assistants: { get: getPartner, getSession },
-        conversations: { get: getSession, list: listSessions },
-        groupChats: { get: getGroup }
+        conversations: { get: getSession, list: listSessions }
       },
       currentSpace
     }),
@@ -55,8 +53,7 @@ function fixture(hasSession = true) {
     currentSpace,
     getPartner,
     getSession,
-    listSessions,
-    getGroup
+    listSessions
   };
 }
 
@@ -238,16 +235,16 @@ describe("Space chat access", () => {
     expect(data.listSessions).not.toHaveBeenCalled();
   });
 
-  test("still loads group-chat conversations", async () => {
+  test("opens a saved group-chat link as the assistant with that id", async () => {
     const data = fixture();
     data.input.url.searchParams.set("type", "group-chat");
 
-    expect(await loadSpace(data.input as never)).toMatchObject({
-      chatPartner: { type: "group-chat" },
-      initialConversation: data.conversation,
-      initialHistory: data.history
-    });
-    expect(data.getGroup).toHaveBeenCalledOnce();
+    const outcome = await Promise.resolve(loadSpace(data.input as never)).catch(
+      (error: unknown) => error
+    );
+    expect(isRedirect(outcome) && outcome.location).toBe(
+      "/spaces/space-1/chat?type=assistant&id=assistant-1&session_id=session-1"
+    );
     expect(data.getPartner).not.toHaveBeenCalled();
   });
 

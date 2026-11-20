@@ -92,7 +92,7 @@ it("renders a finished message again only when what it shows changes", async () 
   for (const text of ["h", "he", "hej"]) type(text);
   expect(savedRenders()).toBe(0);
 
-  // Streaming an answer; a group chat names the answering assistant on the way.
+  // Streaming an answer, which names the answering assistant on the way.
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
   await settle();
   expect(probe.controller).not.toBeNull();

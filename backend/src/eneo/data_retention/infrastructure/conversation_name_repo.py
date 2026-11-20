@@ -9,26 +9,20 @@ apps show as untitled; the feedback vote stays.
 
 from collections.abc import Sequence
 from datetime import datetime, timedelta
-from typing import Any, TypeVar, cast
+from typing import Any, TypeVar
 from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
-from sqlalchemy.sql.functions import coalesce
 
 from eneo.data_retention.domain.retention import RetentionKeyset, RetentionOverdue
 from eneo.data_retention.infrastructure.conversation_retention_policy import (
-    conversation_retention_policy,
+    conversation_text_retention_days,
 )
 from eneo.data_retention.infrastructure.retention_sql import outside_widgets, uuid_in
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
 
@@ -38,26 +32,7 @@ _Row = TypeVar("_Row", bound=tuple[Any, ...])
 class ConversationNameRepository:
     def __init__(self, session: AsyncSession, *, now: datetime) -> None:
         self.session = session
-        # The period of the space and organisation around the conversation.
-        around = conversation_retention_policy(
-            cast("ColumnElement[int | None]", sa.null())
-        ).days
-        member = aliased(Assistants)
-        # A group chat's turns come from its assistants, each on its own
-        # period, so its name keeps no longer than the shortest of them.
-        shortest_member = (
-            sa.select(sa.func.min(coalesce(member.data_retention_days, around)))
-            .select_from(GroupChatsAssistantsMapping)
-            .join(member, member.id == GroupChatsAssistantsMapping.assistant_id)
-            .where(GroupChatsAssistantsMapping.group_chat_id == Sessions.group_chat_id)
-            .scalar_subquery()
-        )
-        days = conversation_retention_policy(
-            sa.case(
-                (Sessions.group_chat_id.is_not(None), shortest_member),
-                else_=Assistants.data_retention_days,
-            )
-        ).days
+        days = conversation_text_retention_days()
         self.cutoff = now - sa.func.make_interval(0, 0, 0, days)
         self.days = days
 
@@ -67,11 +42,7 @@ class ConversationNameRepository:
         return (
             statement.select_from(Sessions)
             .outerjoin(Assistants, Assistants.id == Sessions.assistant_id)
-            .outerjoin(GroupChatsTable, GroupChatsTable.id == Sessions.group_chat_id)
-            .join(
-                Spaces,
-                Spaces.id == coalesce(GroupChatsTable.space_id, Assistants.space_id),
-            )
+            .join(Spaces, Spaces.id == Assistants.space_id)
             .outerjoin(
                 AuditRetentionPolicy, AuditRetentionPolicy.tenant_id == Spaces.tenant_id
             )
