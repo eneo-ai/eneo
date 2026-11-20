@@ -114,9 +114,7 @@ class AppRunService:
 
         await self.repo.delete(id)
 
-    async def run_app(
-        self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID], text: str | None
-    ):
+    async def run_app(self, app_id: UUID, app_run_id: UUID, file_ids: list[UUID]):
         app_run = await self.get_app_run(app_run_id)
 
         execution: AppExecutionResult = await self.app_service.run_app(

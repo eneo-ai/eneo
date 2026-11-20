@@ -54,7 +54,6 @@ async def run_app(
         app_run_id=params.id,
         app_id=params.app_id,
         file_ids=params.file_ids,
-        text=params.text,
     )
 
 

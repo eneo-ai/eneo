@@ -38,7 +38,7 @@ async def test_update_tokens_in_run():
     file_ids = [uuid4()]
 
     # Execute
-    await app_run_service.run_app(app_id, app_run_id, file_ids, "input")
+    await app_run_service.run_app(app_id, app_run_id, file_ids)
 
     # Assert
     num_tokens_output = count_tokens(completion.text)
