@@ -1201,9 +1201,7 @@ class FlowRunService:
                     usage_by_run_id.get(run.id),
                     recording_seconds_by_run_id.get(run.id),
                 ),
-                outputs=outputs_by_version_ref.get(
-                    (run.flow_id, run.flow_version)
-                ),
+                outputs=outputs_by_version_ref.get((run.flow_id, run.flow_version)),
             )
             for run in runs
         )

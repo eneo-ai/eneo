@@ -1090,8 +1090,7 @@ def _validate_deliverable(
     expressions = file_name_expressions(deliverable.file_name)
     if expressions is None:
         raise refuse(
-            "has an unmatched `{{` or `}}`. Close the expression or remove "
-            "the brace.",
+            "has an unmatched `{{` or `}}`. Close the expression or remove the brace.",
             path=_DELIVERABLE_FILE_NAME_PATH,
         )
     for expression in expressions:

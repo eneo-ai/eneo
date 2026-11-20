@@ -102,7 +102,8 @@ def file_name_expressions(file_name: str) -> list[str] | None:
     if "{{" in leftover or "}}" in leftover:
         return None
     return [
-        match.group(1).strip() for match in TEMPLATE_VARIABLE_PATTERN.finditer(file_name)
+        match.group(1).strip()
+        for match in TEMPLATE_VARIABLE_PATTERN.finditer(file_name)
     ]
 
 

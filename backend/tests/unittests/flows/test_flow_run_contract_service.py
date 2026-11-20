@@ -16,6 +16,7 @@ from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_invariant_exceptions import (
     FlowPublishedDefinitionWithoutExecutableStepsError,
 )
+from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from eneo.flows.enums import FlowOutputType, final_step_output_type
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
@@ -44,7 +45,6 @@ from eneo.main.models import NOT_PROVIDED
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
-from eneo.flows.domain.step_deliverable import FlowStepDeliverable
 from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.unittests.spaces.test_space_transcription_services import (
     _connection,
@@ -1347,9 +1347,7 @@ def test_final_step_output_type_returns_the_last_steps_type_in_step_order() -> N
     assert final_step_output_type(["text", "json", "pdf"]) == FlowOutputType.PDF
 
 
-def test_build_run_output_contract_output_type_matches_final_step_output_type() -> (
-    None
-):
+def test_build_run_output_contract_output_type_matches_final_step_output_type() -> None:
     """`build_run_output_contract`'s final `output_type` must be the literal
     result of `final_step_output_type`, not a separate computation over the
     same steps — proving there is exactly one output-type derivation to
