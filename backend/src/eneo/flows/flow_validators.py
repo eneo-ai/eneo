@@ -99,7 +99,7 @@ from eneo.flows.flow_variable_definitions import (
     runtime_variable_shape,
     runtime_variables_for_step,
 )
-from eneo.flows.http_transport.step_configs import sends_http_config
+from eneo.flows.http_transport.step_configs import sends_http_config, sends_run_result
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
@@ -567,6 +567,21 @@ def collect_step_graph_issues(
                 _flow_step_issue(
                     code=FlowGraphIssueCode.FLOW_STEP_INVALID,
                     message=compose_text_error,
+                    step_order=step.step_order,
+                )
+            )
+        # A step that sends the run's result sends the text it reads; another
+        # output type would parse or render that text instead.
+        if step.output_type != "text" and sends_run_result(
+            step.output_mode, step.output_config
+        ):
+            issues.append(
+                _flow_step_issue(
+                    code=FlowGraphIssueCode.FLOW_STEP_INVALID,
+                    message=(
+                        f"Step {step.step_order}: a step that sends the run's "
+                        "result requires output_type 'text'."
+                    ),
                     step_order=step.step_order,
                 )
             )

@@ -4515,3 +4515,31 @@ def test_deliverable_file_name_needs_a_form_that_has_the_field(
 
     with pytest.raises(BadRequestException, match="not a field of the form"):
         _publish(step, metadata_json=metadata_json)
+
+
+def _run_result_step(output_type: str) -> FlowStep:
+    return _step(
+        output_mode="http_post",
+        output_type=output_type,
+        output_config={
+            "url": "https://example.test/hook",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+
+
+@pytest.mark.parametrize("output_type", ["json", "docx", "pdf"])
+def test_validate_steps_rejects_a_run_result_step_whose_output_is_not_text(
+    output_type: str,
+) -> None:
+    _assert_validate_steps_rejects(
+        [_run_result_step(output_type)],
+        expected_type=FlowStepValidationError,
+        match="sends the run's result requires output_type 'text'",
+        step_order=1,
+    )
+
+
+def test_validate_steps_accepts_a_run_result_step_whose_output_is_text() -> None:
+    validate_steps([_run_result_step("text")])
