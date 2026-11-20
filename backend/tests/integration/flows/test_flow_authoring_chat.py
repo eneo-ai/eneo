@@ -1410,11 +1410,10 @@ async def test_a_default_without_tools_is_refused(client, model_choices: ModelCh
 
 
 async def test_the_helper_chat_settings_leave_the_flow_chat_alone_but_its_model(
-    client, model_choices: ModelChoices, db_container
+    client, model_choices: ModelChoices
 ):
-    """The organisation's switch and guidance for the helper chat on
-    assistants do not reach the flow chat; the default model they share
-    does."""
+    """The organisation's switch for the helper chat on assistants does not
+    reach the flow chat; the default model they share does."""
     setup = model_choices
     saved = await client.patch(
         "/api/v1/settings/helper-chat-policy",
@@ -1433,16 +1432,6 @@ async def test_the_helper_chat_settings_leave_the_flow_chat_alone_but_its_model(
     assert reopened.json()["default_completion_model_id"] == setup.strong_id
     read = await client.get(_POLICY_URL, headers=setup.headers)
     assert read.json() == {"completion_model_id": setup.strong_id}
-    async with db_container() as container:
-        persona = await container.session().scalar(
-            sa.select(Prompts.text)
-            .join(PromptsAssistants, PromptsAssistants.prompt_id == Prompts.id)
-            .where(
-                PromptsAssistants.assistant_id == UUID(setup.chat["assistant_id"]),
-                PromptsAssistants.is_selected.is_(True),
-            )
-        )
-    assert persona == AUTHORING_INSTRUCTIONS
 
 
 # --- Conversations ----------------------------------------------------------

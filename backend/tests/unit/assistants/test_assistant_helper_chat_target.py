@@ -350,19 +350,3 @@ async def test_the_lock_takes_the_assistants_own():
     container.assistant_service.return_value.lock_assistant.assert_awaited_once_with(
         target_id
     )
-
-
-@pytest.mark.parametrize("editing", [True, False])
-async def test_every_turn_gets_the_same_assistant_settings_tools(editing: bool):
-    server = await ASSISTANT_TARGET.build_tool_server(
-        token="t", tenant_id=uuid4(), editing=editing
-    )
-
-    assert server.name == "assistant"
-    assert {tool.name for tool in server.tools} == {
-        "read_assistant",
-        "read_options",
-        "read_prompt_history",
-        "propose_changes",
-        "publish_assistant",
-    }

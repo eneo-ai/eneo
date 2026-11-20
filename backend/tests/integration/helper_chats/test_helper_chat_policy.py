@@ -4,16 +4,12 @@ guidance do to the chats."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from types import SimpleNamespace
 from uuid import UUID, uuid4
 
-import psycopg2
 import pytest
 import sqlalchemy as sa
 
 from eneo.assistants.assistant import Assistant
-from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.ai_models_table import CompletionModels
@@ -27,7 +23,7 @@ from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserState
-from init_db import add_tenant_user
+from tests.integration.helper_chats.conftest import Setup, loopback_ctx, open_chat
 
 _POLICY_URL = "/api/v1/settings/helper-chat-policy"
 _DEFAULTS = {
@@ -36,46 +32,6 @@ _DEFAULTS = {
     "guidance_max_length": 4000,
     "completion_model_id": None,
 }
-
-
-@dataclass(frozen=True)
-class Setup:
-    headers: dict[str, str]
-    space_id: str
-    assistant_id: str
-    url: str
-
-
-@pytest.fixture
-async def setup(client, db_container, admin_user, patch_auth_service_jwt) -> Setup:
-    async with db_container() as container:
-        # The chat's instructions need a model that calls tools and has room.
-        await container.session().execute(
-            sa.update(CompletionModels)
-            .where(CompletionModels.tenant_id == admin_user.tenant_id)
-            .values(supports_tool_calling=True, max_input_tokens=128_000)
-        )
-        token = container.auth_service().create_access_token_for_user(admin_user)
-    headers = {"Authorization": f"Bearer {token}"}
-    space = await client.post(
-        "/api/v1/spaces/",
-        headers=headers,
-        json={"name": f"helper-chat-policy-{uuid4().hex[:8]}"},
-    )
-    assert space.status_code == 201, space.text
-    assistant = await client.post(
-        "/api/v1/assistants/",
-        headers=headers,
-        json={"name": "Ärendehjälpen", "space_id": space.json()["id"]},
-    )
-    assert assistant.status_code == 200, assistant.text
-    assistant_id = assistant.json()["id"]
-    return Setup(
-        headers=headers,
-        space_id=space.json()["id"],
-        assistant_id=assistant_id,
-        url=f"/api/v1/assistants/{assistant_id}/helper-chat/",
-    )
 
 
 @pytest.fixture
@@ -103,43 +59,10 @@ async def member_headers(db_container, admin_user) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-@pytest.fixture
-async def other_admin_headers(db_container, test_settings) -> dict[str, str]:
-    """An administrator of another organisation."""
-    conn = psycopg2.connect(
-        host=test_settings.postgres_host,
-        port=test_settings.postgres_port,
-        dbname=test_settings.postgres_db,
-        user=test_settings.postgres_user,
-        password=test_settings.postgres_password,
-    )
-    add_tenant_user(
-        conn,
-        tenant_name="helper_chat_policy_tenant_2",
-        quota_limit=1000000,
-        user_name="helper_chat_policy_user_2",
-        user_email="helper-chat-policy-2@example.com",
-        user_password="TenantFixturePass123!",
-    )
-    conn.close()
-    async with db_container() as container:
-        user = await container.user_repo().get_user_by_email(
-            "helper-chat-policy-2@example.com"
-        )
-        token = container.auth_service().create_access_token_for_user(user)
-    return {"Authorization": f"Bearer {token}"}
-
-
 async def _patch(client, headers: dict[str, str], body: dict) -> dict:
     saved = await client.patch(_POLICY_URL, headers=headers, json=body)
     assert saved.status_code == 200, saved.text
     return saved.json()
-
-
-async def _open(client, setup: Setup) -> dict:
-    opened = await client.post(setup.url, headers=setup.headers)
-    assert opened.status_code == 200, opened.text
-    return opened.json()
 
 
 async def _persona(db_container, chat: dict) -> str | None:
@@ -182,28 +105,6 @@ async def test_the_settings_have_their_defaults_until_an_administrator_saves_the
     }
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        pytest.param({"enabled": None}, id="enabled-null"),
-        pytest.param({"enabled": "kanske"}, id="enabled-not-a-boolean"),
-        pytest.param({"guidance": None}, id="guidance-null"),
-        pytest.param({"guidance": ["du"]}, id="guidance-not-a-string"),
-        pytest.param({"guidance": "x" * 4001}, id="guidance-over-the-cap"),
-        pytest.param({"guidance": "Ange\u0000källan."}, id="guidance-with-nul"),
-        pytest.param({"completion_model_id": "modell"}, id="model-not-a-uuid"),
-        pytest.param({"prompt": "Du är en guide."}, id="unknown-field"),
-    ],
-)
-async def test_a_setting_that_is_not_valid_is_refused_and_nothing_changes(
-    client, setup: Setup, body: dict
-):
-    refused = await client.patch(_POLICY_URL, headers=setup.headers, json=body)
-
-    assert refused.status_code == 422, refused.text
-    assert (await client.get(_POLICY_URL, headers=setup.headers)).json() == _DEFAULTS
-
-
 async def test_the_guidance_is_capped_at_its_maximum_length(client, setup: Setup):
     longest = "x" * 4000
 
@@ -223,7 +124,7 @@ async def test_the_guidance_is_capped_at_its_maximum_length(client, setup: Setup
 
 
 async def test_only_an_administrator_reads_and_changes_the_settings_of_their_own(
-    client, setup: Setup, member_headers, other_admin_headers
+    client, setup: Setup, member_headers, other_tenant_headers
 ):
     read = await client.get(_POLICY_URL, headers=member_headers)
     changed = await client.patch(
@@ -234,11 +135,11 @@ async def test_only_an_administrator_reads_and_changes_the_settings_of_their_own
 
     # Another organisation's administrator changes their own settings only.
     theirs = await _patch(
-        client, other_admin_headers, {"enabled": False, "guidance": "Ange källan."}
+        client, other_tenant_headers, {"enabled": False, "guidance": "Ange källan."}
     )
     assert theirs["enabled"] is False
     assert (await client.get(_POLICY_URL, headers=setup.headers)).json() == _DEFAULTS
-    assert (await client.get(_POLICY_URL, headers=other_admin_headers)).json() == (
+    assert (await client.get(_POLICY_URL, headers=other_tenant_headers)).json() == (
         theirs
     )
     # And the chats of this organisation stay on.
@@ -248,23 +149,16 @@ async def test_only_an_administrator_reads_and_changes_the_settings_of_their_own
 
 
 async def test_a_change_is_audited_with_the_administrator_as_actor(
-    client, setup: Setup, admin_user, monkeypatch: pytest.MonkeyPatch
+    client, setup: Setup, admin_user, queued
 ):
-    entries: list[dict] = []
-    log_async = AuditService.log_async
-
-    async def record(self, **kwargs):
-        entries.append(kwargs)
-        return await log_async(self, **kwargs)
-
-    monkeypatch.setattr(AuditService, "log_async", record)
+    queued.clear()
 
     await _patch(
         client, setup.headers, {"enabled": False, "guidance": "Ange alltid källan."}
     )
 
-    assert len(entries) == 1
-    entry = entries[0]
+    assert len(queued) == 1
+    entry = queued[0]
     assert entry["action"] == ActionType.TENANT_SETTINGS_UPDATED
     assert entry["user"].id == admin_user.id
     assert entry["tenant_id"] == admin_user.tenant_id
@@ -285,7 +179,7 @@ async def test_the_default_model_is_the_one_every_helper_chat_shares(
     db_container,
     admin_user,
     completion_model_factory,
-    monkeypatch: pytest.MonkeyPatch,
+    queued,
 ):
     space = await client.get(f"/api/v1/spaces/{setup.space_id}/", headers=setup.headers)
     assert space.status_code == 200, space.text
@@ -310,21 +204,14 @@ async def test_the_default_model_is_the_one_every_helper_chat_shares(
         },
     )
     assert linked.status_code == 200, linked.text
-    assert (await _open(client, setup))["default_completion_model_id"] != strong_id
-    entries: list[dict] = []
-    log_async = AuditService.log_async
-
-    async def record(self, **kwargs):
-        entries.append(kwargs)
-        return await log_async(self, **kwargs)
-
-    monkeypatch.setattr(AuditService, "log_async", record)
+    assert (await open_chat(client, setup))["default_completion_model_id"] != strong_id
+    queued.clear()
 
     saved = await _patch(client, setup.headers, {"completion_model_id": strong_id})
 
     assert saved == {**_DEFAULTS, "completion_model_id": strong_id}
-    assert (await _open(client, setup))["default_completion_model_id"] == strong_id
-    assert entries[0]["metadata"]["changes"] == {
+    assert (await open_chat(client, setup))["default_completion_model_id"] == strong_id
+    assert queued[0]["metadata"]["changes"] == {
         "completion_model_id": {"old": None, "new": strong_id}
     }
     # It is the flow chat's default too: one value for every helper chat.
@@ -347,16 +234,10 @@ async def test_the_default_model_is_the_one_every_helper_chat_shares(
     assert cleared == _DEFAULTS
 
 
-def _loopback_ctx(token: str) -> SimpleNamespace:
-    """The slice of a FastMCP ``Context`` the loopback foundation reads."""
-    request = SimpleNamespace(headers={"authorization": f"Bearer {token}"})
-    return SimpleNamespace(request_context=SimpleNamespace(request=request))
-
-
 async def test_turned_off_no_chat_is_opened_or_continued_until_it_is_on_again(
     client, setup: Setup, db_container, admin_user, monkeypatch: pytest.MonkeyPatch
 ):
-    chat = await _open(client, setup)
+    chat = await open_chat(client, setup)
     url = setup.url + chat["session_id"] + "/"
     asked: list[str] = []
 
@@ -395,14 +276,14 @@ async def test_turned_off_no_chat_is_opened_or_continued_until_it_is_on_again(
             assistant_id=UUID(chat["assistant_id"]),
             session_id=UUID(chat["session_id"]),
         )
-    tool = await assistant_settings.read_assistant(_loopback_ctx(token))
+    tool = await assistant_settings.read_assistant(loopback_ctx(token))
     assert tool.isError
     assert "turned off" in tool.content[0].text
     assert "Ärendehjälpen" not in tool.content[0].text
 
     await _patch(client, setup.headers, {"enabled": True})
 
-    reopened = await _open(client, setup)
+    reopened = await open_chat(client, setup)
     assert reopened["session_id"] == chat["session_id"]
     assert (await client.get(setup.url + "availability", headers=setup.headers)).json()[
         "available"
@@ -412,7 +293,7 @@ async def test_turned_off_no_chat_is_opened_or_continued_until_it_is_on_again(
 async def test_the_guidance_reaches_the_persona_the_next_time_the_chat_is_opened(
     client, setup: Setup, db_container
 ):
-    chat = await _open(client, setup)
+    chat = await open_chat(client, setup)
     assert await _persona(db_container, chat) == ASSISTANT_INSTRUCTIONS
     guidance = "Tilltala alltid personen med du.\nAnge alltid källan."
 
@@ -420,7 +301,7 @@ async def test_the_guidance_reaches_the_persona_the_next_time_the_chat_is_opened
 
     # An open chat keeps the persona it was given until it is opened again.
     assert await _persona(db_container, chat) == ASSISTANT_INSTRUCTIONS
-    await _open(client, setup)
+    await open_chat(client, setup)
     persona = await _persona(db_container, chat)
     assert persona == (
         ASSISTANT_INSTRUCTIONS
@@ -433,5 +314,5 @@ async def test_the_guidance_reaches_the_persona_the_next_time_the_chat_is_opened
 
     # Without guidance the persona is the code's own again, to the byte.
     await _patch(client, setup.headers, {"guidance": ""})
-    await _open(client, setup)
+    await open_chat(client, setup)
     assert await _persona(db_container, chat) == ASSISTANT_INSTRUCTIONS

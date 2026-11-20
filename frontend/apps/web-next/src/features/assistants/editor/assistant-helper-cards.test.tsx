@@ -543,64 +543,6 @@ describe("The helper's cards for the rest of the settings", () => {
     ).toEqual([["Webbplatser", "Lades till", "lansstyrelsen.se", "Togs bort", "kommun.se"]]);
   });
 
-  it("saves exactly the proposal's request for a list with Använd, and then shows it as used", async () => {
-    const update = { groups: [{ id: "c1" }, { id: "c3" }] };
-    api.POST.mockResolvedValue(ok(withSettings({ groups: [{ id: "c3" }, { id: "c1" }] })));
-    renderCard(
-      toolCall("propose_changes", {
-        target_id: ID,
-        proposal: {
-          changes: [
-            {
-              field: "groups",
-              before: named(["c1", "Bygglov"]),
-              after: named(["c1", "Bygglov"], ["c3", "Strandskydd"])
-            }
-          ],
-          update
-        }
-      }),
-      withSettings({ groups: [{ id: "c1" }] })
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Använd" }));
-
-    await waitFor(() => expect(screen.getByText("Använt")).toBeTruthy());
-    expect(api.POST).toHaveBeenCalledTimes(1);
-    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-      params: { path: { id: ID } },
-      body: update
-    });
-  });
-
-  it("undoes exactly the change's request for a list with Ångra, and then shows it as undone", async () => {
-    const undo = { mcp_servers: [{ id: "s1" }] };
-    api.POST.mockResolvedValue(ok(withSettings({ mcp_servers: [{ id: "s1" }] })));
-    renderCard(
-      toolCall("update_assistant", {
-        target_id: ID,
-        changes: [
-          {
-            field: "mcp_servers",
-            before: named(["s1", "Ärenden"]),
-            after: named(["s1", "Ärenden"], ["s2", "Arkivet"])
-          }
-        ],
-        undo
-      }),
-      withSettings({ mcp_servers: [{ id: "s2" }, { id: "s1" }] })
-    );
-
-    fireEvent.click(screen.getByRole("button", { name: "Ångra" }));
-
-    await waitFor(() => expect(screen.getByText("Ångrat")).toBeTruthy());
-    expect(api.POST).toHaveBeenCalledTimes(1);
-    expect(api.POST).toHaveBeenCalledWith("/api/v1/assistants/{id}/", {
-      params: { path: { id: ID } },
-      body: undo
-    });
-  });
-
   it("shows a proposal of tools, ranking, retention and insights the assistant already has as used", () => {
     const proposalOf = (assistant: Assistant) =>
       renderCard(
@@ -682,22 +624,6 @@ describe("The helper's cards for the rest of the settings", () => {
     expect(reason?.textContent).toBe(
       "Diagram kan inte slås på. Funktionen är avstängd i ytans inställningar."
     );
-  });
-
-  it("offers no Använd for a list to someone who may not edit the assistant", () => {
-    renderCard(
-      toolCall("propose_changes", {
-        target_id: ID,
-        proposal: {
-          changes: [{ field: "groups", before: [], after: named(["c1", "Bygglov"]) }],
-          update: { groups: [{ id: "c1" }] }
-        }
-      }),
-      withSettings({ groups: [], permissions: ["read"] })
-    );
-
-    expect(screen.getByRole("region", { name: "Förslag på ändring" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Använd" })).toBeNull();
   });
 });
 

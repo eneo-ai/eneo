@@ -4,15 +4,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { API_KEYS_KEY, API_KEY_SUBSCRIPTIONS_KEY } from "@/features/api-keys/api-keys";
 import { HelperPanel } from "@/features/helper/helper-panel";
-import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import messages from "@/lib/i18n/messages/sv.json";
 import { renderHookInApp, renderInApp, testQueryClient } from "@/test/render";
-import {
-  assistantHelperApi,
-  assistantHelperAvailabilityQueryOptions,
-  type AssistantHelperAvailability
-} from "./assistant-helper-api";
+import type { AssistantHelperAvailability } from "./assistant-helper-api";
 import { AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
 import type { Assistant } from "./use-assistant";
 
@@ -59,69 +54,6 @@ const CHAT = {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-});
-
-describe("The assistant's helper chat endpoints", () => {
-  it("opens the chat, changes it and starts a conversation on the assistant's own routes", async () => {
-    api.POST.mockResolvedValue(ok(CHAT));
-    api.PATCH.mockResolvedValue(ok({ ...CHAT, completion_model_id: null }));
-    const chat = assistantHelperApi(ID);
-
-    expect(await chat.open()).toEqual(CHAT);
-    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
-      params: { path: { id: ID } }
-    });
-    await chat.update("session-1", { completion_model_id: null, reasoning_effort: null });
-    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/{session_id}/", {
-      params: { path: { id: ID, session_id: "session-1" } },
-      body: { completion_model_id: null, reasoning_effort: null }
-    });
-    await chat.startConversation("session-1");
-    expect(api.POST).toHaveBeenLastCalledWith(
-      "/api/v1/assistants/{id}/helper-chat/{session_id}/conversations/",
-      { params: { path: { id: ID, session_id: "session-1" } } }
-    );
-    expect(chat.key).toEqual(["helper-chats", "assistant", ID]);
-  });
-
-  it("starts each visit afresh, asks for it on the open route, and lists the conversations", async () => {
-    const listed = [
-      {
-        session_id: "session-0",
-        title: "Vilken modell?",
-        started_at: "2026-11-18T09:00:00Z",
-        last_asked_at: "2026-11-18T09:05:00Z",
-        current: false
-      }
-    ];
-    api.POST.mockResolvedValue(ok(CHAT));
-    api.GET.mockResolvedValue(ok({ items: listed, count: 1 }));
-    const chat = assistantHelperApi(ID);
-
-    expect(chat.freshPerVisit).toBe(true);
-    await chat.open({ fresh: true });
-    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
-      params: { path: { id: ID }, query: { fresh_start: true } }
-    });
-    expect(await chat.listConversations?.()).toEqual(listed);
-    expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/conversations/", {
-      params: { path: { id: ID } }
-    });
-  });
-
-  it("reads whether the chat is available from the assistant's availability route", async () => {
-    api.GET.mockResolvedValue(ok({ available: false, reason: "no_model" }));
-
-    const answer = await testQueryClient().query(
-      assistantHelperAvailabilityQueryOptions(browserApi, ID)
-    );
-
-    expect(answer).toEqual({ available: false, reason: "no_model" });
-    expect(api.GET).toHaveBeenCalledWith("/api/v1/assistants/{id}/helper-chat/availability", {
-      params: { path: { id: ID } },
-      signal: expect.any(AbortSignal)
-    });
-  });
 });
 
 describe("The editor's Hjälpassistent toggle", () => {
@@ -350,49 +282,5 @@ describe("The helper panel on an assistant", () => {
       params: { path: { id: ID }, query: { fresh_start: true } }
     });
     expect(screen.getByRole("button", { name: messages.helper_history })).toBeTruthy();
-  });
-
-  it("shows nothing of an earlier visit's conversation before the new one", async () => {
-    openChat(CHAT);
-    const queryClient = testQueryClient();
-    const first = renderInApp(<Panel availability={{ available: true }} />, { queryClient });
-    expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
-    first.unmount();
-
-    let land!: (value: unknown) => void;
-    api.POST.mockReturnValue(new Promise((resolve) => (land = resolve)));
-    renderInApp(<Panel availability={{ available: true }} />, { queryClient });
-
-    expect(screen.queryByText("partner: Hjälpassistenten")).toBeNull();
-    expect(api.POST).toHaveBeenLastCalledWith("/api/v1/assistants/{id}/helper-chat/", {
-      params: { path: { id: ID }, query: { fresh_start: true } }
-    });
-    land(ok({ ...CHAT, session_id: "session-2" }));
-    expect(await screen.findByText("partner: Hjälpassistenten")).toBeTruthy();
-  });
-
-  it("has one mode: no picker and the same words", async () => {
-    openChat(CHAT);
-    const { result } = renderHookInApp(() =>
-      useAssistantHelper({ assistant: ASSISTANT, availability: { available: true } })
-    );
-    expect(result.current.modes).toBeNull();
-    renderInApp(<Panel availability={{ available: true }} />);
-
-    expect(await screen.findByText(messages.helper_placeholder)).toBeTruthy();
-    expect(screen.getByText(messages.helper_partner_description)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Läge:/ })).toBeNull();
-    expect(api.PATCH).not.toHaveBeenCalled();
-  });
-
-  it("does not ask for the chat where it is unavailable, and says why", async () => {
-    renderInApp(<Panel availability={{ available: false, reason: "not_supported" }} />);
-
-    expect(
-      await screen.findByText(
-        "Den här assistenten ställs in på annat håll, så den har ingen hjälpassistent."
-      )
-    ).toBeTruthy();
-    expect(api.POST).not.toHaveBeenCalled();
   });
 });

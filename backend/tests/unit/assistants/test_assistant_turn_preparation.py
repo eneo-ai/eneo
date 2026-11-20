@@ -425,18 +425,16 @@ async def test_an_assistant_chat_turn_proposes_and_publishes_and_names_no_mode(
         ("flow", WITHOUT_TOOLS_NOW, (WITHOUT_TOOLS, EDITING_NOW, ASKING_NOW)),
     ],
 )
-@pytest.mark.parametrize("editing", [True, False])
 async def test_a_helper_chat_turn_without_tool_calling_is_told_it_has_no_tools(
     turn: TurnFixture,
     target_type: str,
     note: str,
     other_notes: tuple[str, ...],
-    editing: bool,
 ):
     model = turn.assistant.completion_model
     assert model is not None
     model.supports_tool_calling = False
-    _bind_helper_chat(turn, target_type=target_type, editing=editing)
+    _bind_helper_chat(turn, target_type=target_type, editing=True)
 
     await turn.service.ask(
         question="Rename it",

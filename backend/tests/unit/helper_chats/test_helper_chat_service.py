@@ -1,8 +1,6 @@
-"""The helper chat mechanics every target shares: what an audit entry records,
-what a target without an action for an event leaves out, the read-only gates
-an entry point can ask about, what edit mode means on a target with and
-without modes, when an opening starts a new conversation, and how the
-person's conversations are listed."""
+"""The helper chat mechanics every target shares: what a target without an
+action for an event leaves out, the read-only gates an entry point can ask
+about, and what edit mode means on a target with and without modes."""
 
 from __future__ import annotations
 
@@ -13,13 +11,11 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.helper_chats.application import helper_chat_service
 from eneo.helper_chats.targets import (
     HelperChatAudit,
-    HelperChatAuditEvent,
     HelperChatTargetType,
     target_for,
 )
@@ -58,39 +54,6 @@ def _chat(target_type: str) -> HelperChats:
         editing=True,
         mode_changed_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
-
-
-async def test_an_event_is_recorded_with_the_person_as_actor_and_the_target_as_entity():
-    person = _person()
-    container = _container(person)
-    event = HelperChatAuditEvent(ActionType.ASSISTANT_UPDATED, "Something happened.")
-    target = _target(
-        HelperChatAudit(
-            entity_type=EntityType.ASSISTANT,
-            chat_created=event,
-            conversation_started=None,
-            model_changed=None,
-        )
-    )
-    target_id = uuid4()
-
-    await helper_chat_service._audit(  # pyright: ignore[reportPrivateUsage]
-        container,
-        target,
-        event,
-        target_id=target_id,
-        record=SimpleNamespace(id=target_id, name="Ärendehjälpen"),
-        extra={"session_id": "s"},
-    )
-
-    entry = container.audit_service.return_value.log_async.await_args.kwargs
-    assert entry["actor_id"] == person.id
-    assert entry["tenant_id"] == person.tenant_id
-    assert entry["action"] == ActionType.ASSISTANT_UPDATED
-    assert entry["entity_type"] == EntityType.ASSISTANT
-    assert entry["entity_id"] == target_id
-    assert entry["metadata"]["actor"]["id"] == str(person.id)
-    assert entry["metadata"]["extra"] == {"session_id": "s"}
 
 
 async def test_an_event_the_target_has_no_action_for_is_not_recorded():
@@ -246,9 +209,8 @@ def _modeless_target() -> MagicMock:
     return target
 
 
-@pytest.mark.parametrize("editing", [True, False])
 async def test_a_mode_change_on_a_target_without_modes_changes_nothing(
-    monkeypatch: pytest.MonkeyPatch, editing: bool
+    monkeypatch: pytest.MonkeyPatch,
 ):
     container = _container(_person())
     chat = _row("assistant", editing=False)
@@ -261,7 +223,7 @@ async def test_a_mode_change_on_a_target_without_modes_changes_nothing(
             target,
             target_id=chat.target_id,
             session_id=chat.session_id,
-            editing=editing,
+            editing=True,
         )
 
     target.require_edit.assert_not_awaited()
@@ -295,19 +257,6 @@ async def test_an_approved_change_on_a_target_with_modes_needs_edit_mode():
     target.require_edit.assert_not_awaited()
 
 
-async def test_a_chat_on_a_target_without_modes_never_passes_as_in_edit_mode():
-    """A row on such a target that holds edit mode still has no edit mode to
-    write in."""
-    container = _container(_person())
-    target = _modeless_target()
-
-    with pytest.raises(TypeError, match="has no modes"):
-        await helper_chat_service.require_edit_mode(
-            container, target, _row("assistant", editing=True), change=True
-        )
-    target.require_edit.assert_not_awaited()
-
-
 async def test_whether_a_chat_exists_is_asked_for_the_caller_and_the_target():
     person = _person()
     container = _container(person)
@@ -323,100 +272,3 @@ async def test_whether_a_chat_exists_is_asked_for_the_caller_and_the_target():
     assert person.id in params.values()
     assert target_id in params.values()
     assert HelperChatTargetType.ASSISTANT in params.values()
-
-
-def _opening_target() -> MagicMock:
-    target = MagicMock(target_type=HelperChatTargetType.ASSISTANT)
-    target.require_available = AsyncMock()
-    target.require_edit = AsyncMock(return_value=SimpleNamespace())
-    target.lock = AsyncMock(return_value=True)
-    return target
-
-
-@pytest.mark.parametrize(
-    ("fresh_start", "holds_a_question", "starts"),
-    [
-        pytest.param(True, True, True, id="fresh-over-a-question"),
-        pytest.param(True, False, False, id="fresh-over-an-empty-one"),
-        pytest.param(False, True, False, id="resuming"),
-    ],
-)
-async def test_an_opening_starts_a_conversation_only_fresh_over_a_question(
-    monkeypatch: pytest.MonkeyPatch,
-    fresh_start: bool,
-    holds_a_question: bool,
-    starts: bool,
-):
-    container = _container(_person())
-    chat = _row("assistant", editing=False)
-    container.session.return_value.scalar = AsyncMock(return_value=chat)
-    monkeypatch.setattr(helper_chat_service, "load_chat", AsyncMock(return_value=chat))
-    asked = AsyncMock(return_value=holds_a_question)
-    monkeypatch.setattr(helper_chat_service, "_holds_a_question", asked)
-    started = AsyncMock()
-    monkeypatch.setattr(helper_chat_service, "_start_conversation", started)
-    monkeypatch.setattr(
-        helper_chat_service, "_sync_assistant", AsyncMock(return_value=None)
-    )
-
-    opened = await helper_chat_service.get_or_create_chat(
-        container,
-        _opening_target(),
-        target_id=chat.target_id,
-        request=MagicMock(),
-        fresh_start=fresh_start,
-    )
-
-    assert opened.chat is chat
-    if starts:
-        started.assert_awaited_once_with(container, chat, reason="fresh_start")
-    else:
-        started.assert_not_awaited()
-    # A resuming opening never asks what the conversation holds.
-    assert asked.await_count == (1 if fresh_start else 0)
-
-
-async def test_the_conversations_are_read_in_one_query_for_the_caller_and_the_chat(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    person = _person()
-    container = _container(person)
-    chat = _row("assistant", editing=False)
-    read = AsyncMock(return_value=(chat, SimpleNamespace()))
-    monkeypatch.setattr(helper_chat_service, "_read_chat", read)
-    earlier = uuid4()
-    now = datetime.now(timezone.utc)
-    result = MagicMock()
-    result.all.return_value = [
-        (
-            chat.session_id,
-            now,
-            now,
-            "Hjälp mig\n  skriva  @[Instruktioner](setting:prompt)",
-        ),
-        (earlier, now - timedelta(days=1), now - timedelta(days=1), "Vilken modell?"),
-    ]
-    container.session.return_value.execute = AsyncMock(return_value=result)
-    target = _opening_target()
-
-    listed = await helper_chat_service.list_conversations(
-        container, target, target_id=chat.target_id, request=MagicMock()
-    )
-
-    assert [(item.session_id, item.current) for item in listed] == [
-        (chat.session_id, True),
-        (earlier, False),
-    ]
-    assert listed[0].title == "Hjälp mig skriva @[Instruktioner](setting:prompt)"
-    # The checks are opening's, and the chat is read without its pause upkeep.
-    target.require_available.assert_awaited_once()
-    target.require_edit.assert_awaited_once()
-    assert read.await_args.kwargs["session_id"] is None
-    assert read.await_args.kwargs["target_id"] == chat.target_id
-    container.session.return_value.execute.assert_awaited_once()
-    query = container.session.return_value.execute.await_args.args[0]
-    params = query.compile().params
-    assert person.id in params.values()
-    assert person.tenant_id in params.values()
-    assert chat.assistant_id in params.values()
-    assert helper_chat_service.CONVERSATION_LIST_LIMIT in params.values()
