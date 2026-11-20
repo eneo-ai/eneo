@@ -415,23 +415,33 @@ async def _sync_assistant(
 async def _sync_tools(
     container: Container, chat: HelperChats, space: Space, assistant: Any
 ) -> None:
-    """Give the chat's assistant look-up mode for uploads and the tool
-    runtime's functions its space offers. Each goes in an update of its own:
-    a refusal (a provider that stopped meeting the space's classification, a
-    tool set that does not fit the model) is logged and leaves the chat as it
-    is, and never takes the other setting with it."""
-    # A file uploaded in the chat is looked up through the files tool where
-    # the model needs it, not put whole in the prompt: the chat is shown
-    # long material (a letter, a transcript) to work from. A model without
-    # tool calling gets the text inlined anyway.
-    if assistant.inline_file_text:
-        await _update_tools(container, chat, "look-up mode", inline_file_text=False)
+    """Give the chat's assistant what its target's chat works with
+    (``HelperChatTarget.tool_runtime``): look-up mode for uploads and the tool
+    runtime's functions its space offers, or neither. Each goes in an update
+    of its own: a refusal (a provider that stopped meeting the space's
+    classification, a tool set that does not fit the model) is logged and
+    leaves the chat as it is, and never takes the other setting with it."""
+    tool_runtime = target_for(chat.target_type).tool_runtime
+    # With the tool runtime, a file uploaded in the chat is looked up through
+    # the files tool where the model needs it, not put whole in the prompt:
+    # the chat is shown long material (a letter, a transcript) to work from.
+    # A model without tool calling gets the text inlined anyway. Without the
+    # tool runtime there is no files tool, and the text goes with the question.
+    if assistant.inline_file_text == tool_runtime:
+        await _update_tools(
+            container,
+            chat,
+            "look-up mode" if tool_runtime else "uploads read with the question",
+            inline_file_text=not tool_runtime,
+        )
     # The tool runtime's functions, as far as the space offers them and a
     # provider is ready; a space setting that changed is followed here.
-    states = await capability_availability(
-        _session(container), chat.tenant_id, space.security_classification
-    )
-    wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
+    wanted: list[CapabilityPurpose] = []
+    if tool_runtime:
+        states = await capability_availability(
+            _session(container), chat.tenant_id, space.security_classification
+        )
+        wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
     if sorted(wanted) != sorted(assistant.enabled_capabilities):
         await _update_tools(
             container, chat, "the tool runtime's functions", enabled_capabilities=wanted

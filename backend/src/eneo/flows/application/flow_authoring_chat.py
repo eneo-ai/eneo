@@ -820,6 +820,7 @@ class _FlowTarget:
 
     target_type = HelperChatTargetType.FLOW
     modes = _FlowModes()
+    tool_runtime = True
     audit = HelperChatAudit(
         entity_type=EntityType.FLOW,
         chat_created=HelperChatAuditEvent(

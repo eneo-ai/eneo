@@ -282,6 +282,8 @@ class _AssistantTarget:
 
     target_type = HelperChatTargetType.ASSISTANT
     modes = None
+    # The chat reads and proposes settings; it makes no files and no charts.
+    tool_runtime = False
     audit = HelperChatAudit(
         entity_type=EntityType.ASSISTANT,
         chat_created=HelperChatAuditEvent(

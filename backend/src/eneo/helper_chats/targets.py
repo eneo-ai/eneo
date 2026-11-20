@@ -123,6 +123,14 @@ class HelperChatTarget(Protocol[RecordT]):
         to apply."""
         ...
 
+    @property
+    def tool_runtime(self) -> bool:
+        """Whether the chat's assistant works with the tool runtime: its
+        functions as far as the chat's space offers them, and an uploaded
+        file looked up through the files tool. A chat without it has its
+        target's tools only, and reads an upload's text with the question."""
+        ...
+
     def instructions(self, container: Container) -> str:
         """The persona the chat's assistant answers with, as the caller's
         organisation has it. It is written onto the chat's assistant when the
