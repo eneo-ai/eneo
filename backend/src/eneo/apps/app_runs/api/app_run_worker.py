@@ -3,7 +3,11 @@ from typing import cast
 from uuid import UUID
 
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
-from eneo.apps.app_runs.app_run_dispatch import claim_app_job, reconcile_app_runs
+from eneo.apps.app_runs.app_run_dispatch import (
+    claim_app_job,
+    fail_interrupted_app_runs,
+    retry_app_submissions,
+)
 from eneo.database.database import AsyncSession
 from eneo.jobs.job_manager import DURABLE_APP_FUNCTION
 from eneo.main.container.container import Container
@@ -60,22 +64,25 @@ async def run_app(
 @worker.cron_job(manages_own_session=True, run_at_startup=True)
 async def reconcile_app_run_jobs(container: Container) -> None:
     session = cast(AsyncSession, container.session())
-    async with session.begin():
-        failed_ids = await reconcile_app_runs(session)
+    for reconcile in (fail_interrupted_app_runs, retry_app_submissions):
+        failed_ids = await reconcile(session)
         if not failed_ids:
-            return
+            continue
+        async with session.begin():
+            targets = await container.app_run_repo().get_update_targets_for_jobs(
+                failed_ids
+            )
 
-        targets = await container.app_run_repo().get_update_targets_for_jobs(failed_ids)
-
-    logger.warning(
-        "App run reconciliation marked jobs failed", extra={"count": len(failed_ids)}
-    )
-    for run_id, user_id, app_id, space_id, personal in targets:
-        await publish_task_status(
-            Channel(type=ChannelType.APP_RUN_UPDATES, user_id=user_id),
-            RedisMessage(
-                id=run_id,
-                status=Status.FAILED,
-                additional_data=_update_data(app_id, space_id, personal=personal),
-            ),
+        logger.warning(
+            "App run reconciliation marked jobs failed",
+            extra={"count": len(failed_ids)},
         )
+        for run_id, user_id, app_id, space_id, personal in targets:
+            await publish_task_status(
+                Channel(type=ChannelType.APP_RUN_UPDATES, user_id=user_id),
+                RedisMessage(
+                    id=run_id,
+                    status=Status.FAILED,
+                    additional_data=_update_data(app_id, space_id, personal=personal),
+                ),
+            )
