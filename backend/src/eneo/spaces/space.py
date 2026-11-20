@@ -494,6 +494,7 @@ class Space:
         # Only add completion model to space if the assistant has one
         if cm is not None and getattr(cm, "id", None) is not None:
             if not self.is_completion_model_in_space(cm.id):
+                self.validate_model_security_compatibility(cm)
                 self.add_completion_model(cm)
 
         self.assistants.append(assistant)
