@@ -46,7 +46,7 @@ async def get_app_run(
     if (
         app_run.input_files
         and app_run.job
-        and app_run.job.status in (Status.COMPLETE, Status.FAILED)
+        and app_run.job.status in (Status.IN_PROGRESS, Status.COMPLETE, Status.FAILED)
     ):
         files = await container.file_service().get_public_files_by_ids(
             [file.id for file in app_run.input_files]

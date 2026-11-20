@@ -20,6 +20,7 @@ from eneo.jobs.job_staging import terminal_staging_jobs_statement
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _PREVIOUS_REVISION = "202607281600"
+_REVISION = "202607291000"
 _REAPER_INDEX = "ix_jobs_knowledge_in_progress_reaper"
 _CLEANUP_INDEX = "ix_jobs_staging_cleanup"
 
@@ -110,31 +111,11 @@ def test_restart_safe_knowledge_migration_round_trip_and_query_plans(
     migration_database: tuple[str, Config],
 ) -> None:
     database_url, config = migration_database
-    command.upgrade(config, "head")
+    command.upgrade(config, _REVISION)
 
     columns, indexes = _job_schema(database_url)
     assert "staging_cleaned_at" in columns
     assert {_REAPER_INDEX, _CLEANUP_INDEX} <= indexes
-
-    connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute("SET enable_seqscan = off")
-            cursor.execute("SET plan_cache_mode = force_generic_plan")
-        reaper_plan = _prepared_plan(
-            connection,
-            name="restart_safe_reaper_plan",
-            statement=stale_in_progress_jobs_statement(datetime.now(timezone.utc)),
-        )
-        cleanup_plan = _prepared_plan(
-            connection,
-            name="restart_safe_cleanup_plan",
-            statement=terminal_staging_jobs_statement(),
-        )
-        assert _REAPER_INDEX in reaper_plan
-        assert _CLEANUP_INDEX in cleanup_plan
-    finally:
-        connection.close()
 
     terminal_job_id = uuid4()
     connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
@@ -196,3 +177,24 @@ def test_restart_safe_knowledge_migration_round_trip_and_query_plans(
     columns, indexes = _job_schema(database_url)
     assert "staging_cleaned_at" in columns
     assert {_REAPER_INDEX, _CLEANUP_INDEX} <= indexes
+
+    # Exercise the current worker queries against the current schema.
+    connection = psycopg2.connect(database_url.replace("+psycopg2", ""))
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SET enable_seqscan = off")
+            cursor.execute("SET plan_cache_mode = force_generic_plan")
+        reaper_plan = _prepared_plan(
+            connection,
+            name="restart_safe_reaper_plan",
+            statement=stale_in_progress_jobs_statement(datetime.now(timezone.utc)),
+        )
+        cleanup_plan = _prepared_plan(
+            connection,
+            name="restart_safe_cleanup_plan",
+            statement=terminal_staging_jobs_statement(),
+        )
+        assert _REAPER_INDEX in reaper_plan
+        assert _CLEANUP_INDEX in cleanup_plan
+    finally:
+        connection.close()

@@ -27,3 +27,15 @@ async def test_transcribe_returns_the_durable_winner_from_a_racing_write() -> No
         file.id,
         "provider result",
     )
+
+
+@pytest.mark.asyncio
+async def test_saved_empty_transcript_is_reused_without_loading_audio():
+    speech = AsyncMock()
+    transcriber = Transcriber(MagicMock())
+    transcriber.transcribe_from_filepath = speech
+    audio = File.model_construct(
+        id=uuid4(), mimetype="audio/mpeg", blob=None, transcription=""
+    )
+    assert await transcriber.transcribe(audio, MagicMock()) == ""
+    speech.assert_not_awaited()

@@ -2,10 +2,8 @@ from datetime import datetime, timezone
 from typing import cast
 from uuid import UUID, uuid4
 
-from arq.jobs import JobStatus
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from eneo.database.database import sessionmanager
 from eneo.database.transaction_callbacks import after_outer_transaction
 from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import (
@@ -19,6 +17,7 @@ from eneo.jobs.job_models import (
 from eneo.jobs.job_repo import ACTIVE_JOB_STATUSES, JobRepository
 from eneo.jobs.job_staging import job_staging_path
 from eneo.jobs.task_models import (
+    AppDispatchEnvelope,
     TaskParams,
     Transcription,
     UploadInfoBlob,
@@ -40,21 +39,6 @@ async def _enqueue_committed_job(task: Task, job_id: UUID, params: TaskParams) -
             "Queue did not confirm job dispatch",
             extra={"job_id": str(job_id), "task": task.value},
         )
-    else:
-        return
-
-    if task != Task.RUN_APP:
-        return
-    try:
-        # Redis may have enqueued the job before its reply was lost.
-        if await job_manager.get_job_status(job_id, task) == JobStatus.not_found:
-            async with sessionmanager.session() as session, session.begin():
-                await JobRepository(session).fail_app_dispatch_if_unclaimed(job_id)
-    except Exception:
-        logger.exception(
-            "Could not reconcile app dispatch; scheduled recovery will check the job",
-            extra={"job_id": str(job_id)},
-        )
 
 
 class JobService:
@@ -75,6 +59,7 @@ class JobService:
         task_params: TaskParams,
         enqueue: bool = True,
         after_commit: bool = False,
+        dispatch_envelope: AppDispatchEnvelope | None = None,
     ) -> JobInDb:
         """Add a QUEUED job row and hand the job to the worker.
 
@@ -88,7 +73,14 @@ class JobService:
         if task in KNOWLEDGE_TASKS:
             raise ValueError(f"Knowledge task {task.value} requires durable dispatch")
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
-        job_in_db = await self.job_repo.add_job(job=job)
+        if dispatch_envelope is None:
+            job_in_db = await self.job_repo.add_job(job=job)
+        else:
+            if task != Task.RUN_APP or not enqueue or not after_commit:
+                raise ValueError("App dispatch requires a post-commit app submission")
+            job_in_db = await self.job_repo.add_durable_job(
+                job, job_id=uuid4(), dispatch_envelope=dispatch_envelope
+            )
 
         if not enqueue:
             return job_in_db
@@ -137,7 +129,7 @@ class JobService:
 
         envelope = build_dispatch_envelope(task, task_params)
         job = Job(task=task, name=name, status=Status.QUEUED, user_id=self.user.id)
-        job_in_db = await self.job_repo.add_durable_knowledge_job(
+        job_in_db = await self.job_repo.add_durable_job(
             job,
             job_id=job_id or uuid4(),
             dispatch_envelope=envelope,

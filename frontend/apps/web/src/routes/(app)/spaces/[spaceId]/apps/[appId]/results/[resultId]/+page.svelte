@@ -37,7 +37,21 @@
 </svelte:head>
 
 {#snippet formattedResult()}
-  {#if run.result.output}
+  {#if !run.isComplete}
+    <div class="flex h-[50vh] flex-col items-center justify-center gap-4">
+      <div class="audio-wave">
+        <div class="wave-bar" style="animation-delay: 0s"></div>
+        <div class="wave-bar" style="animation-delay: 0.1s"></div>
+        <div class="wave-bar" style="animation-delay: 0.2s"></div>
+        <div class="wave-bar" style="animation-delay: 0.3s"></div>
+        <div class="wave-bar" style="animation-delay: 0.4s"></div>
+      </div>
+      <span class="text-secondary">{m.result_being_generated()}</span>
+      {#each run.recordings as file (file.id)}
+        <AppRunFileDownload {file} />
+      {/each}
+    </div>
+  {:else if run.result.output}
     <AppResultToolbar
       type="output"
       text={run.result.output}
@@ -92,73 +106,57 @@
         class=" prose border-default bg-primary relative min-h-72 w-full max-w-[90ch] rounded-sm border px-16 py-8 text-lg shadow-lg"
       >
         <div class="printable-document relative flex flex-col py-4" bind:this={printElement}>
-          {#if run.isComplete}
-            {#if run.transcribedFiles.length > 0}
-              <div class="hidden-in-print -mt-2 h-20">
-                <Tabbar>
-                  <TabTrigger tab="results">{m.results()}</TabTrigger>
-                  <TabTrigger tab="transcription">{m.transcription()}</TabTrigger>
-                </Tabbar>
-              </div>
-              <Tab id="results">
-                {@render formattedResult()}
-              </Tab>
-              <Tab id="transcription">
-                <div class="flex flex-col gap-8">
-                  {#each run.transcribedFiles as file (file.id)}
-                    {@const url = attachmentUrlService.getUrl(file)}
-                    <AppResultToolbar
-                      type="transcription"
-                      text={file.transcription}
-                      fileName={run.textFileName}
-                      {printElement}
-                      floating
-                      class="hidden-in-print absolute -right-[5.5rem] z-10"
-                    />
-
-                    <div class="border-stronger bg-secondary rounded-xl border print:border-none">
-                      <div
-                        class="hidden-in-print border-stronger bg-primary -m-[1px] rounded-xl border p-2 shadow"
-                      >
-                        <div class="flex items-center justify-between gap-4 px-1 pb-2">
-                          <div class="flex gap-2">
-                            <UploadedFileIcon {file}></UploadedFileIcon>
-                            {file.name}
-                          </div>
-                          <AppRunFileDownload {file} compact />
-                        </div>
-                        {#if url}
-                          <audio
-                            controls
-                            src={url}
-                            class="border-stronger h-8 w-full rounded-full border shadow-sm"
-                          ></audio>
-                        {/if}
-                      </div>
-                      <div class="p-4">
-                        <Markdown source={file.transcription}></Markdown>
-                      </div>
-                    </div>
-                  {/each}
-                </div>
-              </Tab>
-            {:else}
-              {@render formattedResult()}
-            {/if}
-          {:else}
-            <div class="flex h-[50vh] flex-col items-center justify-center gap-4">
-              <div class="audio-wave">
-                <div class="wave-bar" style="animation-delay: 0s"></div>
-                <div class="wave-bar" style="animation-delay: 0.1s"></div>
-                <div class="wave-bar" style="animation-delay: 0.2s"></div>
-                <div class="wave-bar" style="animation-delay: 0.3s"></div>
-                <div class="wave-bar" style="animation-delay: 0.4s"></div>
-              </div>
-              <span class="text-secondary">{m.result_being_generated()}</span>
-              {#each run.recordings as file (file.id)}
-                <AppRunFileDownload {file} />
-              {/each}
+          {#if run.transcribedFiles.length > 0}
+            <div class="hidden-in-print -mt-2 h-20">
+              <Tabbar>
+                <TabTrigger tab="results">{m.results()}</TabTrigger>
+                <TabTrigger tab="transcription">{m.transcription()}</TabTrigger>
+              </Tabbar>
             </div>
+            <Tab id="results">
+              {@render formattedResult()}
+            </Tab>
+            <Tab id="transcription">
+              <div class="flex flex-col gap-8">
+                {#each run.transcribedFiles as file (file.id)}
+                  {@const url = attachmentUrlService.getUrl(file)}
+                  <AppResultToolbar
+                    type="transcription"
+                    text={file.transcription}
+                    fileName={run.textFileName}
+                    {printElement}
+                    floating
+                    class="hidden-in-print absolute -right-[5.5rem] z-10"
+                  />
+
+                  <div class="border-stronger bg-secondary rounded-xl border print:border-none">
+                    <div
+                      class="hidden-in-print border-stronger bg-primary -m-[1px] rounded-xl border p-2 shadow"
+                    >
+                      <div class="flex items-center justify-between gap-4 px-1 pb-2">
+                        <div class="flex gap-2">
+                          <UploadedFileIcon {file}></UploadedFileIcon>
+                          {file.name}
+                        </div>
+                        <AppRunFileDownload {file} compact />
+                      </div>
+                      {#if url}
+                        <audio
+                          controls
+                          src={url}
+                          class="border-stronger h-8 w-full rounded-full border shadow-sm"
+                        ></audio>
+                      {/if}
+                    </div>
+                    <div class="p-4">
+                      <Markdown source={file.transcription}></Markdown>
+                    </div>
+                  </div>
+                {/each}
+              </div>
+            </Tab>
+          {:else}
+            {@render formattedResult()}
           {/if}
         </div>
       </div>

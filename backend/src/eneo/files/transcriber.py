@@ -1,5 +1,6 @@
 import contextlib
 import tempfile
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -38,9 +39,11 @@ class Transcriber:
         encryption_service: Optional["EncryptionService"] = None,
         session: Optional["AsyncSession"] = None,
         user: Optional["UserInDB"] = None,
+        after_transcription_saved: Callable[[], Awaitable[None]] | None = None,
     ):
         super().__init__()
         self.file_service = file_service
+        self.after_transcription_saved = after_transcription_saved
         self.tenant = tenant
         # Source of dynamic outbound-header values for the provider request.
         self.user = user
@@ -50,12 +53,15 @@ class Transcriber:
 
     async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
         mimetype: str = file.mimetype or ""
-        if file.blob is None or not AudioMimeTypes.has_value(mimetype):
+        if not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
         # If file already has a transcription, return it
-        if file.transcription:
+        if file.transcription is not None:
             return file.transcription
+
+        if file.blob is None:
+            raise ValueError("Audio file has no content")
 
         temp_file_path: Path | None = None
         try:
@@ -70,6 +76,8 @@ class Transcriber:
             )
 
             result = await self.file_service.save_transcription(file.id, result)
+            if self.after_transcription_saved is not None:
+                await self.after_transcription_saved()
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):
