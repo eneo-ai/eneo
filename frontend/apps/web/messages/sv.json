@@ -4821,6 +4821,8 @@
   "permission_storage_description": "Administrera fillagring: koppla en S3-kompatibel lagring, rotera dess nycklar och sätta uppladdningsgränser.",
   "permission_assistant_debug": "Felsökning av assistenter",
   "permission_assistant_debug_description": "Se innehållsfri diagnostik för chattar du har tillgång till, till exempel vilka skills som aktiverades.",
+  "permission_helper_chat": "Hjälpassistent",
+  "permission_helper_chat_description": "Använd hjälpassistenten bredvid en assistents inställningar. Utan behörigheten visas den inte; allt annat fungerar som vanligt.",
   "permission_group_chat": "Chatt & samarbete",
   "permission_group_chat_short": "Chatt",
   "permission_group_functions": "Funktioner",

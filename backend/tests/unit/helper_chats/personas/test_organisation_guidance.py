@@ -33,8 +33,6 @@ def test_the_guidance_follows_the_persona_under_its_introduction() -> None:
         + guidance
         + "\n"
     )
-    assert persona.startswith(ASSISTANT_INSTRUCTIONS)
-    assert persona.endswith(guidance + "\n")
 
 
 def test_the_introduction_says_whose_it_is_and_what_it_cannot_change() -> None:

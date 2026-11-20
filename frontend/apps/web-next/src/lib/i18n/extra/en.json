@@ -4814,6 +4814,7 @@
   "helper_marks_applied": "You used the proposal and changed {settings}.",
   "helper_marks_undone": "You undid the change to {settings}.",
   "helper_unavailable_disabled": "Your organisation has turned off the helper.",
+  "helper_unavailable_no_permission": "Your role does not give access to the helper.",
   "helper_tool_read_prompt_history": "Reading the prompt history",
   "helper_tool_read_prompt_history_done": "Read the prompt history",
   "helper_tool_publish_assistant": "Publishing the assistant",

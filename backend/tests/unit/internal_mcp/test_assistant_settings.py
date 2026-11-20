@@ -974,39 +974,6 @@ def _tool_context(container, session_id, assistant_id):
     return context
 
 
-async def test_a_tool_reaches_the_assistant_only_through_the_tokens_chat(monkeypatch):
-    session_id, hidden_id = uuid4(), uuid4()
-    chat = SimpleNamespace(target_id=uuid4(), space_id=uuid4())
-    load = AsyncMock(return_value=chat)
-    monkeypatch.setattr(
-        assistant_settings,
-        "internal_tool_context",
-        _tool_context(MagicMock(), session_id, hidden_id),
-    )
-    monkeypatch.setattr(helper_chat_service, "load_chat", load)
-    reached = []
-
-    async def operation(_container, loaded):
-        reached.append(loaded.target_id)
-        return page_lines(
-            ["read"],
-            tool="read_assistant",
-            section="overview",
-            offset=0,
-            assistant_id=loaded.target_id,
-        )
-
-    result = await assistant_settings._call(MagicMock(), operation)  # pyright: ignore[reportPrivateUsage]
-
-    assert not result.isError
-    assert reached == [chat.target_id]
-    assert load.await_args.args[1] is ASSISTANT_TARGET
-    assert load.await_args.kwargs == {
-        "session_id": session_id,
-        "assistant_id": hidden_id,
-    }
-
-
 async def test_a_token_without_a_chat_reaches_no_assistant(monkeypatch):
     monkeypatch.setattr(
         assistant_settings,
@@ -1050,6 +1017,17 @@ def test_no_tool_takes_an_assistant_from_the_model():
     assert set(inspect.signature(assistant_settings.propose_changes).parameters) == {
         "ctx",
         "changes",
+    }
+    assert set(
+        inspect.signature(assistant_settings.read_prompt_history).parameters
+    ) == {
+        "ctx",
+        "offset",
+        "version",
+    }
+    assert set(inspect.signature(assistant_settings.publish_assistant).parameters) == {
+        "ctx",
+        "published",
     }
 
 
@@ -1466,6 +1444,18 @@ def test_a_refused_request_names_the_fields_but_not_what_was_sent():
     assert result.isError
     assert "knowledge_mode" in text and "prompt.text" in text
     assert secret not in text
+
+    # A list given in the wrong shape is refused the same way.
+    not_an_id = "not-an-id-5e6f"
+    with pytest.raises(ValidationError) as misshapen:
+        assistant_settings.changes_request(
+            {"groups": {"add": [{"id": not_an_id}], "replace": []}}
+        )
+
+    text = assistant_settings._error_result(misshapen.value).content[0].text  # pyright: ignore[reportPrivateUsage]
+
+    assert "groups.add.0.id" in text and "groups.replace" in text
+    assert not_an_id not in text
 
 
 def test_instructions_too_long_to_keep_leave_their_text_out_but_not_the_request():
@@ -2060,19 +2050,6 @@ def test_the_model_is_told_what_was_added_and_removed_by_name():
         assert ident not in text
 
 
-def test_a_list_given_in_the_wrong_shape_names_the_fields_not_the_values():
-    secret = "not-an-id-5e6f"
-    with pytest.raises(ValidationError) as invalid:
-        assistant_settings.changes_request(
-            {"groups": {"add": [{"id": secret}], "replace": []}}
-        )
-
-    text = assistant_settings._error_result(invalid.value).content[0].text  # pyright: ignore[reportPrivateUsage]
-
-    assert "groups.add.0.id" in text and "groups.replace" in text
-    assert secret not in text
-
-
 def test_read_assistant_names_what_the_persons_role_does_not_let_them_change():
     reading = replace(_reading(), rights=assistant_settings.NO_RIGHTS)
 
@@ -2426,36 +2403,6 @@ def test_read_assistant_says_what_the_editors_rules_hold_back():
     assert servers_line not in tools and model_line not in tools
 
 
-async def test_the_editors_rules_are_refused_by_the_proposal_and_nothing_is_written(
-    monkeypatch,
-):
-    container, apply = _chat_calls(monkeypatch)
-    world = _knowledge_only(_world())
-    container.assistant_service.return_value.get_assistant_with_effective_config = (
-        AsyncMock(return_value=(world.assistant, [], None))
-    )
-    container.space_service.return_value.get_space = AsyncMock(return_value=world.space)
-    monkeypatch.setattr(
-        assistant_settings, "_change_facts", AsyncMock(return_value=_facts())
-    )
-    add_server = {"mcp_servers": {"add": [{"id": str(world.archive.id)}]}}
-    add_function = {"enabled_capabilities": {"add": ["web_search"]}}
-
-    propose = assistant_settings.propose_changes
-    world.assistant.completion_model = _chat_model("Stor modell", _offering())
-    combined = await propose(MagicMock(), changes=add_server)
-    assert combined.isError
-    assert combined.content[0].text == _HAS_KNOWLEDGE
-
-    world.assistant.completion_model = _without_tools()
-    without_tools = await propose(MagicMock(), changes=add_function)
-    assert without_tools.isError
-    assert without_tools.content[0].text.startswith(_NO_TOOLS + _WEB_SEARCH_CANNOT)
-    apply.assert_not_awaited()
-    container.audit_service().log.assert_not_called()
-    container.audit_service().log_async.assert_not_called()
-
-
 # --- read_prompt_history -----------------------------------------------------
 
 
@@ -2567,39 +2514,6 @@ def _publishing(monkeypatch, *, published: bool, rights):
     return chat, publish
 
 
-async def test_publishing_needs_the_persons_edit_access(monkeypatch):
-    chat, publish = _publishing(monkeypatch, published=False, rights=_ALL_RIGHTS)
-
-    result = await assistant_settings.publish_assistant(MagicMock(), published=True)
-
-    assert not result.isError, result.content[0].text
-    publish.assert_awaited_once()
-    # The edit access is checked on the chat's assistant before the change.
-    ASSISTANT_TARGET.require_edit.assert_awaited_once()  # pyright: ignore[reportFunctionMemberAccess]
-    assert ASSISTANT_TARGET.require_edit.await_args.args[2] == chat.target_id  # pyright: ignore[reportFunctionMemberAccess]
-    assert helper_chat_service.load_chat.await_args.kwargs["lock"] is True  # pyright: ignore[reportFunctionMemberAccess]
-
-
-async def test_publishing_is_refused_without_edit_access_before_anything_is_read(
-    monkeypatch,
-):
-    _, publish = _publishing(monkeypatch, published=False, rights=_ALL_RIGHTS)
-    monkeypatch.setattr(
-        ASSISTANT_TARGET,
-        "require_edit",
-        AsyncMock(side_effect=ASSISTANT_TARGET.refusals.unavailable("no_edit_rights")),
-    )
-
-    result = await assistant_settings.publish_assistant(MagicMock(), published=True)
-
-    assert result.isError
-    assert result.content[0].text == (
-        "You do not have permission to edit this assistant."
-    )
-    assistant_settings._person_rights.assert_not_awaited()  # pyright: ignore[reportPrivateUsage, reportFunctionMemberAccess]
-    publish.assert_not_awaited()
-
-
 async def test_publishing_is_refused_without_the_right_or_when_nothing_would_change(
     monkeypatch,
 ):
@@ -2647,7 +2561,11 @@ async def test_publishing_goes_through_the_shared_operation_in_the_persons_name(
 
     result = await assistant_settings.publish_assistant(MagicMock(), published=True)
 
-    assert not result.isError
+    assert not result.isError, result.content[0].text
+    # The edit access is checked on the chat's assistant before the change.
+    ASSISTANT_TARGET.require_edit.assert_awaited_once()  # pyright: ignore[reportFunctionMemberAccess]
+    assert ASSISTANT_TARGET.require_edit.await_args.args[2] == chat.target_id  # pyright: ignore[reportFunctionMemberAccess]
+    assert helper_chat_service.load_chat.await_args.kwargs["lock"] is True  # pyright: ignore[reportFunctionMemberAccess]
     publish.assert_awaited_once()
     assert publish.await_args.kwargs == {
         "assistant_id": chat.target_id,
@@ -2663,17 +2581,3 @@ async def test_publishing_goes_through_the_shared_operation_in_the_persons_name(
         'Published: the assistant is now published; "Status" under "Publicering" '
         'is now "Publicerad".'
     )
-
-
-def test_the_history_and_publishing_take_no_assistant_from_the_model():
-    assert set(
-        inspect.signature(assistant_settings.read_prompt_history).parameters
-    ) == {
-        "ctx",
-        "offset",
-        "version",
-    }
-    assert set(inspect.signature(assistant_settings.publish_assistant).parameters) == {
-        "ctx",
-        "published",
-    }

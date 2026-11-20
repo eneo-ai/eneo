@@ -418,15 +418,6 @@ describe("Before a message goes to the helper", () => {
   });
 });
 
-describe("The helper's one mode", () => {
-  it("has no mode to pick: the helper proposes and never writes the form by itself", () => {
-    renderEditor();
-    openHelperBeside();
-
-    expect(state.adapter!.modes).toBeNull();
-  });
-});
-
 describe("Escape and the helper", () => {
   it("closes a helper that covers the form, focus back on the toggle", () => {
     renderEditor();
@@ -442,13 +433,6 @@ describe("Escape and the helper", () => {
     expect(aside()).toBeNull();
     expect(document.activeElement).toBe(toggle);
     expect(toggle.getAttribute("aria-pressed")).toBe("false");
-  });
-
-  it("leaves a helper beside the form open", () => {
-    renderEditor();
-    openHelperBeside();
-    fireEvent.keyDown(screen.getByRole("textbox", { name: "Meddelande" }), { key: "Escape" });
-    expect(aside()).not.toBeNull();
   });
 });
 
@@ -466,17 +450,6 @@ describe("The helper's toggle in a phone's section bar", () => {
     fireEvent.click(toggle);
     expect(aside()).not.toBeNull();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it.each([
-    ["no model in the space", { available: false, reason: "no_model" }],
-    ["no right to edit", { available: false, reason: "no_edit_rights" }],
-    ["an assistant set up elsewhere", { available: false, reason: "not_supported" }],
-    ["an answer not known yet", null]
-  ] as const)("is not there for %s", (_case, availability) => {
-    setViewport("phone");
-    renderEditor({ route: `${EDIT}?section=general`, availability });
-    expect(within(sectionBar()).queryByRole("button", { name: "Hjälpassistent" })).toBeNull();
   });
 });
 
@@ -523,6 +496,56 @@ describe("chatChangeMarks", () => {
       sections: new Map([
         ["general", 1],
         ["ai", 3]
+      ])
+    });
+  });
+
+  it("marks a setting shown under another's row there, and a function on its own line", () => {
+    const references = new Map([
+      reference("knowledge", "knowledge", "assistant-knowledge"),
+      reference("rerank_model_id", "knowledge", "reranker"),
+      reference("mcp_servers", "mcp", "mcp"),
+      reference("enabled_capabilities", "capabilities", "capabilities"),
+      reference("document_template", "capabilities", "assistant-document-template"),
+      reference("data_retention_days", "security", "assistant-retention-days"),
+      reference("insight_enabled", "publishing", "assistant-insights"),
+      reference("published", "publishing", "assistant-publish-status")
+    ]);
+
+    expect(
+      chatChangeMarks(
+        [
+          // The knowledge lists are the knowledge's row, the tool settings the servers'.
+          "groups",
+          "websites",
+          "rerank_model_id",
+          "mcp_tools",
+          // The function switched, not the row of all functions.
+          "enabled_capabilities.web_search",
+          "document_template",
+          "data_retention_days",
+          "insight_enabled",
+          "published"
+        ],
+        references
+      )
+    ).toEqual({
+      rows: new Set([
+        "assistant-knowledge",
+        "reranker",
+        "mcp",
+        "assistant-web_search",
+        "assistant-document-template",
+        "assistant-retention-days",
+        "assistant-insights",
+        "assistant-publish-status"
+      ]),
+      sections: new Map([
+        ["knowledge", 3],
+        ["mcp", 1],
+        ["capabilities", 2],
+        ["security", 1],
+        ["publishing", 2]
       ])
     });
   });

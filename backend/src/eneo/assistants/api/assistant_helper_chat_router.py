@@ -125,7 +125,8 @@ def _response(
 _FORBIDDEN = _response(
     "The caller may not edit the assistant, or it does not exist or cannot be "
     "read: the three answer alike. The organisation has turned the helper chat "
-    "off (`helper_chat_disabled`). An API key gets 403 too "
+    "off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` "
+    "permission (`helper_chat_no_permission`). An API key gets 403 too "
     "(`session_auth_required`): the chat takes a signed-in session.",
     _error(
         AssistantHelperChatErrorCode.NO_EDIT_RIGHTS,
@@ -137,6 +138,12 @@ _FORBIDDEN = _response(
         AssistantHelperChatErrorCode.DISABLED,
         "Your organisation has turned off the helper chat.",
         eneo_error_code=ErrorCodes.UNAUTHORIZED,
+    ),
+    _error(
+        AssistantHelperChatErrorCode.NO_PERMISSION,
+        "Your role does not give access to the helper chat.",
+        eneo_error_code=ErrorCodes.UNAUTHORIZED,
+        context={"auth_layer": "tenant_role"},
     ),
 )
 _NOT_FOUND = _response(
@@ -440,6 +447,10 @@ async def list_assistant_helper_chat_conversations(
                         "disabled": {
                             "summary": "The organisation has turned the chat off",
                             "value": {"available": False, "reason": "disabled"},
+                        },
+                        "no_permission": {
+                            "summary": "The caller's role lacks `helper_chat`",
+                            "value": {"available": False, "reason": "no_permission"},
                         },
                     }
                 }

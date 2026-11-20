@@ -122,7 +122,7 @@ flowchart TB
 | [HTTP hardening](#http-hardening) | Proxies that set HSTS or CSP | Decide who owns HSTS and CSP |
 | Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500`; `422` lists only `loc`, `type` and `msg`; an unexpected failure answers `500` with code `internal_error` and an `error_id` | Password API clients | Handle the two codes; update `422` parsing |
 | [Password lifecycle](#password-lifecycle) | Seeded users, password integrations | Check `DEFAULT_USER_PASSWORD` |
-| [The helper assistant replaces the Prompt Guide in the React web app](#helper-replaces-prompt-guide) | Administrators of organisations with a Prompt Guide | Move your own rules to the helper's guidance; check its switch and model |
+| [The helper assistant replaces the Prompt Guide in the React web app](#helper-replaces-prompt-guide) | Administrators of organisations with a Prompt Guide | Move your own rules to the helper's guidance; check its switch and model; grant the permission to the roles that should have the helper |
 
 ### API contract [#api-contract]
 
@@ -339,7 +339,9 @@ The helper does not take over:
 
 Helper conversations count as model use, also in the person's own usage, which the guide's conversations did not. The helper proposes each change to an assistant and saves nothing itself: the change is saved when the person applies the proposal, as the person's own change. Publishing or unpublishing from the helper waits for the person's approval in the chat. Both are audited as the person's own changes.
 
-**Do:** move your own rules from the guide's prompt into the helper's guidance, then check the switch and the default model in **Admin > Helper assistant**.
+The helper needs the **Helper assistant** permission in the person's role. The upgrade grants it to the predefined Owner role only. Without it the helper is not shown, and the person edits the assistant as before. The flow assistant does not follow this permission.
+
+**Do:** move your own rules from the guide's prompt into the helper's guidance, then check the switch and the default model in **Admin > Helper assistant**. Grant the **Helper assistant** permission to the roles that should have the helper.
 
 ## Details: API contract [#details-api-contract]
 

@@ -28,6 +28,7 @@ PERMISSIONS_WITH_DESCRIPTION = {
     Permission.MODULES: "Install and configure modules for the current Eneo organization.",
     Permission.WIDGETS: "Configure embeddable widgets for assistants in spaces you can edit. Activating a widget for the public additionally requires the admin permission.",
     Permission.ASSISTANT_DEBUG: "Inspect body-free chat diagnostics, including Skill activation decisions, for conversations you can access.",
+    Permission.HELPER_CHAT: "Use the helper assistant beside an assistant's settings. Without this permission the helper is unavailable; all other access is unaffected.",
     Permission.WEB_SEARCH: "Use web search in chats where an assistant offers it. Without this permission web search tools are never attached for the user.",
     Permission.IMAGE_GENERATION: "Use image generation in chats where an assistant offers it. Without this permission image generation tools are never attached for the user.",
     Permission.FILE_ANALYSIS: "Ask questions about attached files (CSV and Excel today) in chats where an assistant offers it. Without this permission file analysis tools are never attached for the user.",

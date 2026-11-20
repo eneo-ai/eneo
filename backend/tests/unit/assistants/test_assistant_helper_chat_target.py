@@ -32,6 +32,7 @@ from eneo.main.exceptions import (
     UnauthorizedException,
 )
 from eneo.main.models import ResourcePermission
+from eneo.roles.permissions import Permission
 
 _EDIT = [ResourcePermission.EDIT, ResourcePermission.DELETE]
 
@@ -57,7 +58,9 @@ def _container(
     help_assistant: bool = False,
 ) -> MagicMock:
     container = MagicMock()
-    container.user.return_value = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    container.user.return_value = SimpleNamespace(
+        id=uuid4(), tenant_id=uuid4(), permissions=[Permission.HELPER_CHAT]
+    )
     service = container.assistant_service.return_value
     service.helper_chat_owner_id = AsyncMock(return_value=owner_id)
     service.get_assistant = AsyncMock(
@@ -293,6 +296,25 @@ async def test_turned_off_by_the_organisation_no_chat_is_offered_or_opened():
     assert unavailable.code == AssistantHelperChatErrorCode.DISABLED
 
 
+async def test_a_role_without_the_helper_chat_gets_none_offered_or_opened():
+    # The role answers before the assistant is read; only "off" comes first.
+    container = _container(permissions=_EDIT)
+    container.user.return_value.permissions = [Permission.ASSISTANTS]
+
+    with pytest.raises(UnauthorizedException) as refused:
+        await ASSISTANT_TARGET.require_available(container)
+
+    assert refused.value.code == AssistantHelperChatErrorCode.NO_PERMISSION
+    assert await _reason(container) == "no_permission"
+    container.assistant_service.return_value.get_assistant.assert_not_called()
+    unavailable = ASSISTANT_TARGET.refusals.unavailable("no_permission")
+    assert isinstance(unavailable, UnauthorizedException)
+    assert unavailable.code == AssistantHelperChatErrorCode.NO_PERMISSION
+
+    off = _in_organisation(container, {"enabled": False})
+    assert await _reason(off) == "disabled"
+
+
 async def test_the_chat_is_on_unless_the_organisation_turned_it_off():
     for container in (
         _container(),
@@ -350,19 +372,3 @@ async def test_the_lock_takes_the_assistants_own():
     container.assistant_service.return_value.lock_assistant.assert_awaited_once_with(
         target_id
     )
-
-
-@pytest.mark.parametrize("editing", [True, False])
-async def test_every_turn_gets_the_same_assistant_settings_tools(editing: bool):
-    server = await ASSISTANT_TARGET.build_tool_server(
-        token="t", tenant_id=uuid4(), editing=editing
-    )
-
-    assert server.name == "assistant"
-    assert {tool.name for tool in server.tools} == {
-        "read_assistant",
-        "read_options",
-        "read_prompt_history",
-        "propose_changes",
-        "publish_assistant",
-    }

@@ -4814,6 +4814,7 @@
   "helper_marks_applied": "Du använde förslaget och ändrade {settings}.",
   "helper_marks_undone": "Du ångrade ändringen av {settings}.",
   "helper_unavailable_disabled": "Organisationen har stängt av hjälpassistenten.",
+  "helper_unavailable_no_permission": "Din roll ger inte tillgång till hjälpassistenten.",
   "helper_tool_read_prompt_history": "Läser prompthistoriken",
   "helper_tool_read_prompt_history_done": "Läste prompthistoriken",
   "helper_tool_publish_assistant": "Publicerar assistenten",

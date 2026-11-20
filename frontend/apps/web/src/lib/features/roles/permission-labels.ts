@@ -133,6 +133,11 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_assistant_debug(),
         description: m.permission_assistant_debug_description()
       };
+    case "helper_chat":
+      return {
+        label: m.permission_helper_chat(),
+        description: m.permission_helper_chat_description()
+      };
     case "web_search":
       return {
         label: m.permission_web_search(),

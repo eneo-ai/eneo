@@ -15163,9 +15163,10 @@ export interface components {
       available: boolean;
       /**
        * Reason
-       * @description Why not: `disabled` when the organisation has turned the helper chat off (checked first); `no_model` when the space has no model that supports tools; `no_edit_rights` when the caller may not edit the assistant, which is also the answer for one that does not exist or cannot be read; `not_supported` for an assistant that is configured elsewhere (a helper chat's own, a help assistant or a flow step's). Null when available.
+       * @description Why not: `disabled` when the organisation has turned the helper chat off (checked first); `no_permission` when the caller's role lacks the `helper_chat` permission (checked next); `no_model` when the space has no model that supports tools; `no_edit_rights` when the caller may not edit the assistant, which is also the answer for one that does not exist or cannot be read; `not_supported` for an assistant that is configured elsewhere (a helper chat's own, a help assistant or a flow step's). Null when available.
        */
-      reason?: ("disabled" | "no_model" | "no_edit_rights" | "not_supported") | null;
+      reason?:
+        ("disabled" | "no_permission" | "no_model" | "no_edit_rights" | "not_supported") | null;
     };
     /** AssistantHelperChatPublic */
     AssistantHelperChatPublic: {
@@ -37496,6 +37497,7 @@ export interface components {
       | "modules"
       | "widgets"
       | "assistant_debug"
+      | "helper_chat"
       | "web_search"
       | "image_generation"
       | "file_analysis"
@@ -59455,7 +59457,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -59576,7 +59578,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -59651,7 +59653,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;
@@ -59720,7 +59722,7 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
-      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
       403: {
         headers: {
           [name: string]: unknown;

@@ -232,13 +232,6 @@ def test_the_assistant_fragment_names_a_published_assistant_once():
     assert "not every time" in fragment
 
 
-def test_the_assistant_fragment_sends_the_rest_to_the_editor():
-    fragment = _unwrapped(ASSISTANT_FRAGMENT)
-
-    assert "Everything else you can neither change nor propose" in fragment
-    assert "say where in the editor they change it" in fragment
-
-
 def test_the_assistant_fragment_names_every_setting_the_chat_changes():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
@@ -256,6 +249,7 @@ def test_the_assistant_fragment_names_every_setting_the_chat_changes():
         "the icon, API keys, the web widget, conversation logging, and moving or "
         "deleting the assistant."
     ) in fragment
+    assert "say where in the editor they change it" in fragment
 
 
 def test_the_assistant_fragment_suggests_only_what_the_person_may_change():
