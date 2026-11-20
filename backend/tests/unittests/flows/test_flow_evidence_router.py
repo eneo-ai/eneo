@@ -275,6 +275,7 @@ async def test_get_flow_run_evidence_delegates_to_evidence_service(monkeypatch):
         outputs=None,
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -478,6 +479,7 @@ async def test_get_flow_run_evidence_returns_failed_run_retryability(monkeypatch
         outputs=None,
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -579,6 +581,7 @@ async def test_get_flow_run_evidence_projects_redacted_artifact_result_files(
         ),
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = evidence_service
@@ -702,6 +705,7 @@ async def test_get_flow_run_evidence_lists_deliverables_of_the_current_attempt(
         step_results=[
             {"id": str(artifact_file.step_result_id), "current_attempt_no": 2}
         ],
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = evidence_service
@@ -810,6 +814,7 @@ async def test_get_flow_run_evidence_enriches_service_principal_actor_summaries(
         outputs=None,
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -941,6 +946,7 @@ async def test_get_flow_run_evidence_allows_space_admin_without_trace_permission
         outputs=None,
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
@@ -1096,6 +1102,7 @@ async def test_get_flow_run_evidence_fails_closed_when_required_audit_is_unavail
         outputs=None,
         result_files=evidence["result_files"],
         step_results=evidence.get("step_results", []),
+        webhook_deliveries=(),
         to_dict=lambda: evidence,
     )
     container.flow_run_evidence_service.return_value = run_service
