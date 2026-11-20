@@ -71,9 +71,13 @@ async def recovery_recording(
     return app_url, upload.json()["id"], recording.getvalue()
 
 
-@pytest.mark.parametrize("terminal", [Status.COMPLETE, Status.FAILED])
+@pytest.mark.parametrize(
+    ("terminal", "drop_reply"),
+    [(Status.COMPLETE, False), (Status.FAILED, False), (Status.COMPLETE, True)],
+)
 async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
     terminal,
+    drop_reply,
     client,
     admin_user_api_key,
     recovery_recording,
@@ -99,6 +103,19 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         AsyncMock(return_value="meeting transcript"),
     )
     monkeypatch.setattr(CompletionService, "get_response", complete)
+
+    if drop_reply:
+        enqueue = job_manager.enqueue
+        lost_reply = asyncio.get_running_loop().create_future()
+
+        async def enqueue_without_reply(task, job_id, params):
+            delivery = await enqueue(task, job_id, params)
+            if task == Task.RUN_APP:
+                lost_reply.set_result(asyncio.current_task())
+                raise ConnectionError("lost enqueue acknowledgement")
+            return delivery
+
+        monkeypatch.setattr(job_manager, "enqueue", enqueue_without_reply)
 
     # Pause the real request just after queue_app_run so a worker could observe
     # any delivery made before the API transaction commits.
@@ -130,6 +147,9 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         release.set()
         response = await asyncio.wait_for(request, timeout=5)
     assert response.status_code == 203, response.text
+    if drop_reply:
+        callback = await asyncio.wait_for(lost_reply, 5)
+        await asyncio.wait_for(asyncio.shield(callback), 5)
     pending = await client.get(f"/api/v1/app-runs/{run.id}/", headers=headers)
     assert pending.status_code == 200, pending.text
     assert pending.json()["status"] == Status.QUEUED
@@ -197,9 +217,18 @@ async def test_audio_run_reaches_worker_after_commit_and_publishes_saved_result(
         assert succeeded is (terminal == Status.COMPLETE)
 
 
-@pytest.mark.parametrize("claimed", [False, True])
+@pytest.mark.parametrize(
+    ("claimed", "can_check", "expected"),
+    [
+        (False, True, Status.FAILED),
+        (True, True, Status.IN_PROGRESS),
+        (False, False, Status.QUEUED),
+    ],
+)
 async def test_app_dispatch_error_fails_only_an_unclaimed_run(
     claimed,
+    can_check,
+    expected,
     db_session,
     client,
     admin_user_api_key,
@@ -210,6 +239,10 @@ async def test_app_dispatch_error_fails_only_an_unclaimed_run(
     app_url, file_id, _ = recovery_recording
     enqueue = job_manager.enqueue
     delivery = asyncio.get_running_loop().create_future()
+    if not can_check:
+        monkeypatch.setattr(
+            job_manager, "get_job_status", AsyncMock(side_effect=ConnectionError())
+        )
     async with db_session() as worker:
 
         async def lose_acknowledgement(task, job_id, params):
@@ -230,11 +263,11 @@ async def test_app_dispatch_error_fails_only_an_unclaimed_run(
 
     detail = await client.get(f"/api/v1/app-runs/{params.id}/", headers=headers)
     assert detail.status_code == 200, detail.text
-    assert detail.json()["status"] == (Status.IN_PROGRESS if claimed else Status.FAILED)
+    assert detail.json()["status"] == expected
     async with db_session() as session:
         job = await session.get(Jobs, job_id)
         assert job is not None
-        if claimed:
+        if expected != Status.FAILED:
             assert job.failure_code is None
         else:
             assert job.failure_code == JobFailureCode.DISPATCH_FAILED
