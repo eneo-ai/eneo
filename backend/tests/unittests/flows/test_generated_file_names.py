@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import pytest
 from docx import Document
+from pydantic import ValidationError
 
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_deliverable import FlowStepDeliverable
@@ -407,12 +408,15 @@ def test_a_form_value_is_written_as_text(value: object, expected: str) -> None:
     assert names.name(step_order=1, output_type="pdf") == f"{expected} 2026-09-23.pdf"
 
 
-def test_a_number_too_long_to_write_leaves_the_name_as_before() -> None:
+def test_a_number_too_long_to_write_takes_the_label() -> None:
+    # Past Python's digit limit for int-to-text conversion, so longer than
+    # masking judges.
     names = _own_names(
-        _own(1, "pdf", "Möte {{ flow_input.Val }}"), form_values={"Val": 10**5000}
+        _own(1, "pdf", "Möte {{ flow_input.Val }}", "Protokoll"),
+        form_values={"Val": 10**5000},
     )
 
-    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
 
 
 def test_a_field_name_with_spaces_and_swedish_letters_is_read() -> None:
@@ -548,24 +552,22 @@ LONG_URL = f"https://{LONG_USER_INFO}@example.com/"
 
 
 @pytest.mark.parametrize(
-    ("file_name", "value", "expected"),
+    ("file_name", "value"),
     [
-        ("Möte {{ flow_input.Team }}", LONG_URL, "Möte"),
-        (
-            "Möte https://{{ flow_input.Team }}",
-            f"{LONG_USER_INFO}@example.com/",
-            "Möte https",
-        ),
-        ("Möte {{ flow_input.Team }}", [LONG_URL], "Möte"),
+        ("Möte {{ flow_input.Team }}", LONG_URL),
+        ("Möte https://{{ flow_input.Team }}", f"{LONG_USER_INFO}@example.com/"),
+        ("Möte {{ flow_input.Team }}", [LONG_URL]),
     ],
 )
-def test_a_value_longer_than_masking_judges_is_left_out(
-    file_name: str, value: object, expected: str
+def test_a_value_longer_than_masking_judges_takes_the_label(
+    file_name: str, value: object
 ) -> None:
-    names = _own_names(_own(1, "pdf", file_name), form_values={"Team": value})
+    names = _own_names(
+        _own(1, "pdf", file_name, "Protokoll"), form_values={"Team": value}
+    )
 
     assert redact_string(LONG_URL, key=None) != LONG_URL
-    assert names.name(step_order=1, output_type="pdf") == f"{expected} 2026-09-23.pdf"
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
 
 
 def test_values_that_make_a_name_longer_than_masking_judges_take_the_label() -> None:
@@ -585,15 +587,130 @@ def test_values_that_make_a_name_longer_than_masking_judges_take_the_label() -> 
     assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
 
 
-def test_a_megabyte_form_value_is_left_out_in_well_under_a_second() -> None:
+def test_a_user_name_whose_at_sign_is_in_a_value_too_long_to_judge_takes_the_label() -> (
+    None
+):
+    # Leaving the second value out would drop the `@` that marks the first as
+    # a URL's user information.
+    names = _own_names(
+        _own(1, "pdf", "https://{{ flow_input.A }}{{ flow_input.B }}", "Protokoll"),
+        form_values={"A": "SAMPLE", "B": f"@example.com/{'p' * 1000}"},
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"
+    assert names.stem(step_order=1, output_type="pdf") == "Protokoll 2026-09-23"
+
+
+# Every credential form masking knows, each with the secret in it; masked as
+# written or once cleaned.
+_CREDENTIALS = [
+    f"Bearer {SECRET_MARKER}",
+    f"Bearer/{SECRET_MARKER}",
+    f"Basic {SECRET_MARKER}",
+    f"Digest {SECRET_MARKER}",
+    f"token={SECRET_MARKER}",
+    f"password:{SECRET_MARKER}",
+    f"password\u200b={SECRET_MARKER}",
+    f"api_key={SECRET_MARKER}",
+    f'"client_secret": "{SECRET_MARKER}"',
+    f"https://{SECRET_MARKER}@example.com/",
+    f"https://user:{SECRET_MARKER}@example.com/",
+    f"https://example.com/?code={SECRET_MARKER}",
+]
+_PADDING = "a" * 1000
+# Where the fixed text stands beside the two form fields.
+_LAYOUTS = [("text", "A", "B"), ("A", "text", "B"), ("A", "B", "text")]
+
+
+def _cuts(credential: str) -> list[int]:
+    """Every place in ``credential``, but only a few inside the padding."""
+    start = credential.find(_PADDING)
+    if start < 0:
+        return list(range(len(credential) + 1))
+    end = start + len(_PADDING)
+    inside = [start + 1, start + len(_PADDING) // 2, end - 1]
+    outside = [cut for cut in range(len(credential) + 1) if cut <= start or cut >= end]
+    return sorted(outside + inside)
+
+
+@pytest.mark.parametrize("credential", _CREDENTIALS)
+@pytest.mark.parametrize("padded", [False, True], ids=["short", "padded"])
+@pytest.mark.parametrize("layout", _LAYOUTS, ids=lambda layout: "-".join(layout))
+@pytest.mark.parametrize("second_field", ["B", "B as a list", "api_token"])
+def test_a_credential_split_anywhere_across_the_name_takes_the_label(
+    credential: str,
+    padded: bool,
+    layout: tuple[str, str, str],
+    second_field: str,
+) -> None:
+    # The credential is cut into three parts at every pair of places and
+    # spread over the fixed text and two form fields, the second one also as
+    # a list or under a field name masking refuses.
+    if padded:
+        credential = credential.replace(SECRET_MARKER, SECRET_MARKER + _PADDING)
+    field_b = "api_token" if second_field == "api_token" else "B"
+    expression = {"A": "{{ flow_input.A }}", "B": "{{ flow_input.%s }}" % field_b}
+    cuts = _cuts(credential)
+    named: list[tuple[str, dict[str, object], str]] = []
+    tried = 0
+    for first in cuts:
+        for second in (cut for cut in cuts if cut >= first):
+            parts = dict(
+                zip(
+                    layout,
+                    (credential[:first], credential[first:second], credential[second:]),
+                )
+            )
+            file_name = "".join(
+                parts["text"] if slot == "text" else expression[slot] for slot in layout
+            )
+            form_values: dict[str, object] = {
+                "A": parts["A"],
+                field_b: [parts["B"]] if second_field == "B as a list" else parts["B"],
+            }
+            try:
+                step = _own(1, "pdf", file_name, "Protokoll")
+            except ValidationError:
+                # Not one line of at most 200 characters: no run is named by it.
+                continue
+            tried += 1
+            names = _own_names(step, form_values=form_values)
+            name = names.name(step_order=1, output_type="pdf")
+            stem = names.stem(step_order=1, output_type="pdf")
+            if (name, stem) != ("Protokoll 2026-09-23.pdf", "Protokoll 2026-09-23"):
+                named.append((file_name, form_values, name))
+
+    leaked = [case for case in named if SECRET_MARKER in case[2]]
+    assert tried
+    assert not named, (
+        f"{len(named)} names were not the label, {len(leaked)} with the secret: "
+        f"{(leaked or named)[:3]!r:.2000}"
+    )
+
+
+@pytest.mark.parametrize("field", ["Team", "api_token"])
+@pytest.mark.parametrize("value", ["", None, [], "MISSING"])
+def test_an_empty_form_field_is_filled_in_as_empty(field: str, value: object) -> None:
+    form_values: dict[str, object] = {} if value == "MISSING" else {field: value}
+    names = _own_names(
+        _own(1, "pdf", "Möte {{ flow_input.%s }}" % field, "Protokoll"),
+        form_values=form_values,
+    )
+
+    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+
+
+def test_a_megabyte_form_value_takes_the_label_in_well_under_a_second() -> None:
     # The masking patterns take time quadratic in a long run of word
     # characters, so a value past the limit is never judged, nor written.
     value = "token" * 200_000
-    steps = (_own(1, "pdf", "Möte {{ flow_input.Team }} {{ flow_input.Team }}"),)
+    steps = (
+        _own(1, "pdf", "Möte {{ flow_input.Team }} {{ flow_input.Team }}", "Protokoll"),
+    )
 
     started = time.perf_counter()
     names = _own_names(*steps, form_values={"Team": value})
     elapsed = time.perf_counter() - started
 
     assert elapsed < 1.0
-    assert names.name(step_order=1, output_type="pdf") == "Möte 2026-09-23.pdf"
+    assert names.name(step_order=1, output_type="pdf") == "Protokoll 2026-09-23.pdf"

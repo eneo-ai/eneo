@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-import re
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -64,10 +63,11 @@ class GeneratedFileNames:
 
     A step whose deliverable has a file name of its own is named by it, filled
     in from the run's form, instead of by the flow's and the step's names; the
-    day and the numbering apply as to any other document. When the filled-in
-    name holds nothing, or masking would change it, the deliverable's label
-    names the document: it is fixed text, while the run's own name can be the
-    very form value masking refused.
+    day and the numbering apply as to any other document. When a form value
+    or the filled-in name reads as a credential or is longer than masking
+    judges, or the name holds nothing, the deliverable's label names the
+    document: it is fixed text, while the run's own name can be the very form
+    value masking refused.
     """
 
     flow_name: str
@@ -175,20 +175,27 @@ def _masked(text: str) -> bool:
 def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
     """``file_name`` with each `{{ flow_input.<field> }}` filled in from the
     run's form, cleaned and cut to a file name's length; empty when nothing is
-    left, when it is longer than masking judges, or when masking would change
-    it, as written or cleaned. Anything else
+    left, or when a value or the filled-in name is longer than masking judges
+    or masking would change it, as written or cleaned. Anything else
     between `{{ }}`, and a name with a stray brace, fill in nothing: publish
-    refuses them, and a run must never fail on its name."""
-    if file_name_expressions(file_name) is None:
+    refuses them, and a run must never fail on its name.
+
+    A name missing one value is never built: the value left out can hold what
+    makes the rest a credential (the `@` after a URL's user information), so
+    only the whole filled-in name is judged, never a part of it."""
+    expressions = file_name_expressions(file_name)
+    if expressions is None:
         return ""
-
-    def fill(match: re.Match[str]) -> str:
-        field = form_field_read_by(match.group(1))
-        if field is None:
+    values: list[str] = []
+    for expression in expressions:
+        field = form_field_read_by(expression)
+        value = _form_value_text(form_values.get(field), field=field) if field else ""
+        if value is None:
             return ""
-        return _form_value_text(form_values.get(field), field=field)
+        values.append(value)
 
-    filled = TEMPLATE_VARIABLE_PATTERN.sub(fill, file_name)
+    filled_values = iter(values)
+    filled = TEMPLATE_VARIABLE_PATTERN.sub(lambda _: next(filled_values), file_name)
     if len(filled) > _MASKED_PREFIX_CHARS:
         return ""
     # A value clean on its own can complete a credential with the fixed text
@@ -202,18 +209,24 @@ def _own_name(file_name: str, form_values: Mapping[str, object]) -> str:
     return _clean(utf8_prefix(cleaned, max_bytes=MAX_FILE_NAME_BYTES))
 
 
-def _form_value_text(value: object, *, field: str) -> str:
-    """A form value as it is written into a file name: empty when masking would
-    change it or it is longer than masking judges, so a credential typed into
-    the form never names a file."""
-    text = _scalar_text(value)
-    if text is None and isinstance(value, (list, tuple)):
-        items = (_scalar_text(item) for item in cast(Sequence[object], value))
-        text = ", ".join(item for item in items if item)
-    if not text or len(text) > _MASKED_PREFIX_CHARS:
+def _form_value_text(value: object, *, field: str) -> str | None:
+    """A form value as it is written into a file name, empty when the field
+    holds nothing a name can show; None, leaving the value out, when masking
+    would change it or it is longer than masking judges, so a credential typed
+    into the form never names a file."""
+    try:
+        text = _scalar_text(value)
+        if text is None and isinstance(value, (list, tuple)):
+            items = (_scalar_text(item) for item in cast(Sequence[object], value))
+            text = ", ".join(item for item in items if item)
+    except ValueError:
+        # An integer past Python's digit limit for int-to-text conversion,
+        # far longer than masking judges.
+        return None
+    if not text:
         return ""
-    if redact_string(text, key=field) != text:
-        return ""
+    if len(text) > _MASKED_PREFIX_CHARS or redact_string(text, key=field) != text:
+        return None
     return text
 
 
@@ -225,11 +238,7 @@ def _scalar_text(value: object) -> str | None:
     if isinstance(value, float):
         return str(value) if math.isfinite(value) else ""
     if isinstance(value, int):
-        try:
-            return str(value)
-        except ValueError:
-            # Past Python's digit limit for int-to-text conversion.
-            return ""
+        return str(value)
     return None
 
 
