@@ -1,3 +1,5 @@
+import type { components } from "@/lib/api/schema";
+
 import {
   isJsonObject,
   objectOf,
@@ -5,7 +7,8 @@ import {
   type JsonObject,
   type OutputMode,
   type ReviewPolicy,
-  type StepConfig
+  type StepConfig,
+  type StepPatch
 } from "./step-types";
 
 /**
@@ -287,12 +290,8 @@ export function isSecretSentinel(value: unknown): value is SecretSentinel {
 }
 
 export type HttpAuthMode = "none" | "bearer_token" | "api_key" | "basic_auth";
-/**
- * `run_result` sends the finished run's result, built by Eneo, once the run
- * is complete; it is not in the generated API types yet. Widened here until
- * the types are generated with it.
- */
-export type HttpBodyMode = "auto" | "json_template" | "text_template" | "none" | "run_result";
+/** `run_result` sends the finished run's result, built by Eneo, once the run is complete. */
+export type HttpBodyMode = components["schemas"]["HttpBodyMode"];
 
 export const HTTP_CONFIG_KEYS = [
   "url",
@@ -787,11 +786,8 @@ export function withRetrievalPolicy(
 // the run's results, with a label and an optional file name.
 // ---------------------------------------------------------------------------
 
-/**
- * The stored shape (`FlowStepDeliverable` in the core). Local until the API
- * types are generated with it; then it is replaced by the generated one.
- */
-export type StepDeliverable = { label: string; file_name?: string };
+/** The stored shape (`FlowStepDeliverable` in the core). */
+export type StepDeliverable = NonNullable<NonNullable<StepPatch["output_config"]>["deliverable"]>;
 
 /** The core's bounds for a deliverable's label and file name, in characters. */
 export const DELIVERABLE_LABEL_MAX = 120;
