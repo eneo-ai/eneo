@@ -7,7 +7,10 @@ import pytest
 from testcontainers.postgres import PostgresContainer
 
 from alembic import command
-from eneo.apps.app_runs.app_run_dispatch import stale_app_submissions
+from eneo.apps.app_runs.app_run_dispatch import (
+    interrupted_app_jobs,
+    retryable_app_submissions,
+)
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
 from tests.integration.migrations.test_restart_safe_knowledge_jobs import _prepared_plan
 
@@ -81,8 +84,11 @@ def test_recovery_indexes_wait_for_an_in_flight_job_write():
             assert {name for (name,) in query.fetchall()} == _INDEXES
             query.execute("SET enable_seqscan = off")
             query.execute("SET plan_cache_mode = force_generic_plan")
-            assert "ix_jobs_active_task_updated_id" in _prepared_plan(
-                connection,
-                name="app_recovery_scan",
-                statement=stale_app_submissions(datetime.now(timezone.utc)),
-            )
+            now = datetime.now(timezone.utc)
+            for name, statement in (
+                ("app_interruption_scan", interrupted_app_jobs(now)),
+                ("app_redispatch_scan", retryable_app_submissions(now)),
+            ):
+                assert "ix_jobs_active_task_updated_id" in _prepared_plan(
+                    connection, name=name, statement=statement
+                )
