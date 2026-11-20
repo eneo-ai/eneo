@@ -196,11 +196,10 @@ async def complete_template_fill_step(
             step_order=step.step_order, output_type=step.output_type
         )
         deps.logger.debug(
-            "flow_executor.template_fill.template_rendered run_id=%s step_order=%d template_file_id=%s filename=%s size=%d",
+            "flow_executor.template_fill.template_rendered run_id=%s step_order=%d template_file_id=%s size=%d",
             run.id,
             step.step_order,
             prepared.template_file_id,
-            filename,
             len(blob),
         )
     except TypedIOValidationException as exc:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -476,6 +477,35 @@ async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
         asset_id=template_asset_id,
         tenant_id=run.tenant_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_the_document_name_stays_out_of_the_worker_log() -> None:
+    # A name can carry form values, and the worker log is not purged with
+    # the run.
+    run = _run()
+    template_file = SimpleNamespace(
+        id=uuid4(),
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    logger = MagicMock()
+    deps = dataclasses.replace(
+        _runtime_deps(template_file=template_file), logger=logger
+    )
+
+    output = await execute_template_fill_step(
+        step=_step(template_asset_id=uuid4()),
+        run=run,
+        state=_state(result=_completed_result(run=run)),
+        deps=deps,
+    )
+
+    assert output.artifacts[0]["name"] == "Nämndmöte 2026-09-23.docx"
+    logged = [str(arg) for call in logger.method_calls for arg in call.args]
+    assert any("template_rendered" in text for text in logged)
+    assert not any("Nämndmöte" in text for text in logged)
 
 
 @pytest.mark.asyncio
