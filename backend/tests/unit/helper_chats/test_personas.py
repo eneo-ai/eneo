@@ -283,6 +283,18 @@ def test_the_assistant_fragment_explains_the_editors_rules_instead_of_working_ar
     ) in fragment
 
 
+def test_the_assistant_fragment_describes_a_function_as_the_editor_does():
+    fragment = _unwrapped(ASSISTANT_FRAGMENT)
+
+    # The helper's own tools (a runtime function among them) say how they are
+    # built; the assistant's function is described as the editor describes it.
+    assert (
+        "Describe a function in the editor's words, as the reads give them, and "
+        "say nothing about how it is built, such as the programming language it "
+        "runs: your own tools in this chat are not the assistant's functions."
+    ) in fragment
+
+
 def test_publishing_and_unpublishing_ask_the_person_with_their_own_approval():
     fragment = _unwrapped(ASSISTANT_FRAGMENT)
 
