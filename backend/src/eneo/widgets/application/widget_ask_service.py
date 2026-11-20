@@ -197,9 +197,9 @@ def is_external_tool_call(call: ToolCallMetadata) -> bool:
 class ExternalToolCallAudit:
     """Record each approved external tool attempt, even at zero retention.
 
-    The approval identifies the tool and its arguments. The result supplies
-    its final status. If the turn ends first, the outcome is unknown. Only
-    argument names may enter the audit trail or its fallback log.
+    The approval identifies the tool. The result supplies its final status.
+    If the turn ends first, the outcome is unknown. Argument names and values
+    can contain visitor text and are excluded from both log destinations.
     """
 
     def __init__(
@@ -277,7 +277,6 @@ class ExternalToolCallAudit:
             "tool_name": call.tool_name,
             "mcp_tool_name": call.mcp_tool_name,
             "result_status": status,
-            "argument_names": sorted(call.arguments or {}),
         }
 
     def _log_missing(self, reason: str, metadata: dict[str, object]) -> None:

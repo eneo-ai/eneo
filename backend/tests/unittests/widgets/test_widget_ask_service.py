@@ -878,7 +878,7 @@ async def test_every_external_tool_call_of_a_visitor_turn_is_audited_once():
     ) == ("call_9", "casefiles", "create_case", "casefiles__create_case", "succeeded")
     # The visitor's input is not copied into the trail; the external system
     # has its own record of what it received.
-    assert metadata["argument_names"] == ["body", "title"]
+    assert "argument_names" not in metadata
     assert "Trasig lampa" not in json.dumps(metadata, ensure_ascii=False)
     deps.usage.delete_session.assert_awaited_once()
 
@@ -961,7 +961,7 @@ async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
 
     async def turn():
         yield _external_event(_external_call(result_status="approved"), close_case)
-        # Only the approval is needed to attribute the original arguments.
+        # The approval identifies the tool even when the result omits its arguments.
         yield _external_event(_external_call(arguments=None))
         yield _external_event(
             _external_call(
@@ -977,12 +977,9 @@ async def test_two_calls_sharing_an_id_in_one_round_are_each_audited():
     )
     await _drain(response)
     entries = [call.kwargs["metadata"] for call in deps.audit.log_async.await_args_list]
-    assert [
-        (entry["tool_name"], entry["argument_names"], entry["result_status"])
-        for entry in entries
-    ] == [
-        ("create_case", ["body", "title"], "succeeded"),
-        ("close_case", ["case_id"], "failed"),
+    assert [(entry["tool_name"], entry["result_status"]) for entry in entries] == [
+        ("create_case", "succeeded"),
+        ("close_case", "failed"),
     ]
 
 
@@ -1020,8 +1017,8 @@ def _assert_audit_fallback(
     assert fields["widget_id"] == str(widget.id)
     assert fields["tool_call_id"] == call_id
     assert fields["result_status"] == status
-    assert fields["argument_names"] == ["body", "title"]
-    for expected in (str(widget.id), call_id, status, "body", "title"):
+    assert "argument_names" not in fields
+    for expected in (str(widget.id), call_id, status):
         assert expected in text
     for value in ("Trasig lampa", "Gatlyktan vid torget", SENTINEL):
         assert value not in text

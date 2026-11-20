@@ -43,8 +43,8 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
-from eneo.widgets.application.widget_ask_service import ExternalToolCallAudit
-from eneo.widgets.domain.widget import Widget
+from eneo.widgets.application import widget_ask_service
+from eneo.widgets.domain.widget import Widget, WidgetPrivacy
 from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
@@ -1204,6 +1204,7 @@ async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
         tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
     )
     widget.id = uuid4()
+    widget.privacy = WidgetPrivacy(retention_days=0)
     server_id = uuid4()
     server = MCPServer(
         id=server_id,
@@ -1215,7 +1216,10 @@ async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
                 mcp_server_id=server_id,
                 name="tool",
                 description="Test tool",
-                input_schema={},
+                input_schema={
+                    "type": "object",
+                    "properties": {"lookup_topic": {"type": "string"}},
+                },
             )
         ],
     )
@@ -1235,7 +1239,9 @@ async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
         ),
     )
     sink = AsyncMock()
-    audit = ExternalToolCallAudit(
+    # A failed enqueue exercises the audit payload and its fallback in the same turn.
+    sink.log_async.return_value = None
+    audit = widget_ask_service.ExternalToolCallAudit(
         sink,
         widget,
         visitor_id=uuid4(),
@@ -1243,16 +1249,18 @@ async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
         question_id=None,
         preview=False,
     )
+    arguments = {"lookup_topic": "synthetic-visitor-value", SENTINEL: "extra"}
     stream = PreparedModelStream(
-        stream=_AsyncChunkStream([_tool_call_chunk()]),
+        stream=_AsyncChunkStream([_tool_call_chunk(arguments=json.dumps(arguments))]),
         messages=[],
         kwargs={},
         mcp_proxy=proxy,
         has_tools=True,
     )
-    async for event in _make_adapter().iterate_stream(stream):
-        await audit.observe(event)
-    await audit.settle()
+    with emitted(widget_ask_service.logger) as records:
+        async for event in _make_adapter().iterate_stream(stream):
+            await audit.observe(event)
+        await audit.settle()
 
     client.call_tool.assert_not_awaited()
     sink.log_async.assert_awaited_once()
@@ -1263,6 +1271,12 @@ async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
         "call_1",
         "failed",
     )
+    [fallback] = [record for record in records if "not enqueued" in record.getMessage()]
+    assert vars(fallback)["result_status"] == "failed"
+    for logged in (repr(entry), fallback.getMessage(), repr(vars(fallback))):
+        assert "lookup_topic" not in logged
+        assert SENTINEL not in logged
+        assert "synthetic-visitor-value" not in logged
     assert "temporarily unavailable" in next(
         msg["content"] for msg in stream.messages if msg["role"] == "tool"
     )

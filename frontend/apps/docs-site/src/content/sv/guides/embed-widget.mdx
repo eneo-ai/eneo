@@ -1,6 +1,6 @@
 ---
 title: Bädda in en chattwidget på webbplatsen
-translationSource: guides/embed-widget.mdx@47e98b2c58c9
+translationSource: guides/embed-widget.mdx@e581adc2cd3c
 ---
 
 # Bädda in en chattwidget på webbplatsen
@@ -513,7 +513,7 @@ Webbsökning godkänns separat enligt beskrivningen nedan.
   (`widget_external_tool_called`), oavsett lagringstid och granskningsinställningar.
   Under en besökares tur godkänns försöket automatiskt. Posten anger widgeten,
   det pseudonyma besökar-id:t, konversationen, servern, verktyget och om
-  försöket gjordes i förhandsvisningen. För argumenten sparas bara namnen.
+  försöket gjordes i förhandsvisningen. Verktygets argument utelämnas både i granskningsposten och i felloggen.
   `succeeded` betyder att verktyget rapporterade att anropet lyckades.
   `failed` omfattar både verktygsfel och lokala avslag, till exempel när
   MCP-proxyns kretsbrytare stoppar anropet innan det når servern. `unknown`
