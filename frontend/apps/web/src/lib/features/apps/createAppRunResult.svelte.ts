@@ -1,6 +1,5 @@
 import type { App, AppRun, UploadedFile } from "@eneo/eneo-js";
 import { formatDateTime } from "$lib/core/formatting/dateTime";
-import { onMount } from "svelte";
 import { getEneo } from "$lib/core/Eneo";
 import { getEneoSocket } from "$lib/core/EneoSocket";
 import { getResultTitle } from "./getResultTitle";
@@ -18,32 +17,48 @@ export function createAppRunResult(getData: () => { app: App; result: AppRun }) 
   const eneo = getEneo();
   const { subscribe } = getEneoSocket();
 
-  let result = $state(getData().result);
+  let result = $derived(getData().result);
+  const runId = $derived(result.id);
   const isComplete = $derived(!(result.status === "in progress" || result.status === "queued"));
-  const transcribedFiles = $derived(
-    result.output ? result.input.files.filter(isTranscribedFile) : []
+  // Browser recordings can use a video container (WebM or MP4) for audio.
+  const recordings = $derived(
+    result.input.files.filter((file) => /^(audio|video)\//.test(file.mimetype))
   );
+  const transcribedFiles = $derived(result.input.files.filter(isTranscribedFile));
   const title = $derived(getResultTitle(result));
   const textFileName = $derived(`${getData().app.name} ${formatDateTime(result.created_at)}.txt`);
 
-  onMount(() => {
+  $effect(() => {
+    const id = runId;
     if (isComplete) return;
 
-    const unsubscribe = subscribe("app_run_updates", async (update) => {
-      if (update.id === getData().result.id) {
-        result = await eneo.apps.runs.get(result);
+    let disposed = false;
+    let reading = false;
+    async function refresh() {
+      if (disposed || reading || document.hidden) return;
+      reading = true;
+      try {
+        const updated = await eneo.apps.runs.get({ id });
+        if (!disposed) result = updated;
+      } catch {
+        // A lost connection can also drop the terminal event. The next visible poll retries.
+      } finally {
+        reading = false;
       }
-    });
-
-    // The run can switch from "queued" to "in progress" after the load function fetched it but
-    // before the subscription above exists, so fetch it once more to not miss that update.
-    if (result.status === "queued") {
-      eneo.apps.runs.get(result).then((updatedResult) => {
-        result = updatedResult;
-      });
     }
 
-    return unsubscribe;
+    const unsubscribe = subscribe("app_run_updates", (update) => {
+      if (update.id === id) void refresh();
+    });
+    void refresh();
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      disposed = true;
+      unsubscribe();
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   });
 
   return {
@@ -52,6 +67,9 @@ export function createAppRunResult(getData: () => { app: App; result: AppRun }) 
     },
     get isComplete() {
       return isComplete;
+    },
+    get recordings() {
+      return recordings;
     },
     get transcribedFiles() {
       return transcribedFiles;
