@@ -34,11 +34,11 @@ Everything in this table works with an ordinary GitHub account.
 Everyone contributes through pull requests, and Core Maintainers decide what is
 merged. The steps below are the same for all; this is what differs:
 
-| You are                                                                             | You work from              | Labels and checks                                                                                                                                                                                             |
-| ----------------------------------------------------------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Anyone with a GitHub account                                                        | A fork                     | If you are outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing runs before they start. A maintainer adds the labels unless you have been given Triage access. |
-| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork                     | With Triage access you label your own pull request. As a member of the `eneo-ai` organisation, your checks start without approval.                                                                            |
-| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo` | You review contributions from outside the team and add pull requests to the merge queue.                                                                                                                      |
+| You are                                                                             | You work from                                       | Labels and checks                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Anyone with a GitHub account                                                        | A fork                                              | If you are outside the `eneo-ai` organisation, a maintainer approves the CI, Dependency Review and User-facing runs before they start. A maintainer adds the labels unless you have been given Triage access. |
+| A Collaborator (`@eneo-ai/collaborators`, developers at partner organisations)      | A fork, your own or one shared by your organisation | With Triage access you label your own pull request. Your checks start without approval when you, and anyone else who pushes to the pull request, are members of the `eneo-ai` organisation.                   |
+| A Core Maintainer (`@eneo-ai/core-maintainers`, the Eneo team at Sundsvalls kommun) | A branch in `eneo-ai/eneo`                          | You review contributions from outside the team and add pull requests to the merge queue.                                                                                                                      |
 
 [Governance and Roles](/contributing/governance) explains the roles, why Core
 Maintainers is the only team with write access, and
@@ -103,8 +103,13 @@ Even a small fix needs an issue; for a typo, one line is enough.
 
 ### Fork and set up
 
-[Fork the repository](https://github.com/eneo-ai/eneo/fork), clone your fork and
-add the main repository as `upstream`:
+Several developers at a partner organisation who work on the same branches can
+share one fork in the organisation's GitHub account instead of a fork each. The
+development environment guide shows
+[how to set up a shared fork](https://github.com/eneo-ai/eneo/blob/develop/docs/CONTRIBUTING.md#working-as-a-team-at-a-partner-organisation).
+
+Otherwise, [fork the repository](https://github.com/eneo-ai/eneo/fork), clone
+your fork and add the main repository as `upstream`:
 
 ```bash
 git clone https://github.com/<your-username>/eneo.git
@@ -117,8 +122,8 @@ Open the folder in VS Code and choose **Reopen in Container**. The
 covers the rest of the setup.
 
 Already have a clone of `eneo-ai/eneo`? Without write access, a push to it is
-refused with 403. Run `gh repo fork --remote` in the clone and push to your
-fork; the same guide shows the steps.
+refused with 403. Run `gh repo fork --remote` in the clone to create a fork in
+your personal account, and push to that fork; the same guide shows the steps.
 
 ### Branch from the latest `develop`
 
@@ -157,8 +162,11 @@ Push the branch to your fork and open a pull request into `eneo-ai/eneo`'s
   **Testing**, and **Accessibility** for UI changes. The **User-facing
   section** check fails when **User-facing** is empty; write a sentence or
   `No`. The check runs again when you edit the description.
-- Leave **Allow edits by maintainers** ticked, so a maintainer can push a small
-  fix for you.
+- From a personal fork, leave **Allow edits and access to secrets by
+  maintainers** ticked, so a maintainer can push a small fix for you. It also
+  lets maintainers edit your fork's workflows, so do not tick it if you have
+  added secrets to your fork. GitHub does not offer it for a fork owned by an
+  organisation.
 - Open it as a **draft** if you want early feedback on the direction.
 
 ### Let the checks run
