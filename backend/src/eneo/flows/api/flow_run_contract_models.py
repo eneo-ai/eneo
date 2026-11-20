@@ -488,9 +488,11 @@ class FlowRunOutboundHttpResultPublic(BaseModel):
     kind: Literal["outbound_http"] = Field(
         description="Discriminator for a completed outbound HTTP delivery."
     )
-    delivery_status: Literal["delivered"] = Field(
+    delivery_status: Literal["pending", "delivered", "dead_lettered"] = Field(
         description=(
-            "Stable delivery receipt for a successfully completed outbound step. "
+            "Where the run's outbound delivery stands. A step that sends the run "
+            "result is sent when the run has completed, so a completed run can "
+            "still be `pending`, or `dead_lettered` when every attempt failed. "
             "Destination configuration and request payload are never exposed."
         ),
     )

@@ -46,4 +46,5 @@ def read_run_public(
         transcription_usage=view.transcription_usage,
         outputs=view.outputs,
         started_by=started_by,
+        final_delivery_status=view.final_delivery_status,
     )

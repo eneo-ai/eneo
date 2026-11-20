@@ -3216,6 +3216,8 @@
   "flow_runs_result_pending": "Resultatet visas här när körningen är klar.",
   "flow_runs_result_files": "Filer som körningen skapade",
   "flow_runs_result_delivered": "Resultatet skickades till mottagaren.",
+  "flow_runs_result_sending": "Körningen är klar och resultatet är på väg till mottagaren.",
+  "flow_runs_result_not_delivered": "Resultatet kunde inte skickas till mottagaren. Alla försök misslyckades.",
   "flow_runs_output_overflow": "Texten är förkortad här. Hela texten finns i filen.",
   "flow_runs_output_none": "Steget gav ingen text att visa.",
   "flow_runs_steps_heading": "Steg",

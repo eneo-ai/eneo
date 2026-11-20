@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from functools import partial
@@ -12,6 +12,7 @@ from uuid import UUID
 
 from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
 from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_repo import FileRepository
 from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
 from eneo.flows.application.flow_run_access_policy import (
@@ -51,6 +52,7 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
+    FlowOutputDelivery,
     FlowRunLifecycleSource,
     FlowRunPurpose,
     is_terminal_flow_run_status,
@@ -244,6 +246,8 @@ class FlowRunWithResultFilesAndUsage:
     token_usage: FlowRunTokenUsage | None
     transcription_usage: FlowRunTranscriptionUsage | None = None
     outputs: FlowRunOutputContract | None = None
+    # The latest delivery of the final step, for a run whose result is sent.
+    final_delivery_status: FlowOutboxDeliveryStatus | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1192,6 +1196,9 @@ class FlowRunService:
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
         outputs_by_version_ref = await self._outputs_for_runs(runs=runs)
+        delivery_statuses = await self.webhook_delivery_repo.latest_delivery_statuses(
+            run_ids=run_ids, tenant_id=self.user.tenant_id
+        )
         return tuple(
             FlowRunWithResultFilesAndUsage(
                 run=run,
@@ -1202,6 +1209,11 @@ class FlowRunService:
                     recording_seconds_by_run_id.get(run.id),
                 ),
                 outputs=outputs_by_version_ref.get((run.flow_id, run.flow_version)),
+                final_delivery_status=_final_delivery_status(
+                    run,
+                    outputs_by_version_ref.get((run.flow_id, run.flow_version)),
+                    delivery_statuses,
+                ),
             )
             for run in runs
         )
@@ -1323,3 +1335,16 @@ class FlowRunService:
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
         return result.run
+
+
+def _final_delivery_status(
+    run: FlowRun,
+    outputs: FlowRunOutputContract | None,
+    statuses: Mapping[tuple[UUID, UUID], FlowOutboxDeliveryStatus],
+) -> FlowOutboxDeliveryStatus | None:
+    final_output = outputs.final_output if outputs is not None else None
+    if final_output is None or final_output.delivery is not (
+        FlowOutputDelivery.OUTBOUND_HTTP
+    ):
+        return None
+    return statuses.get((run.id, final_output.step_id))

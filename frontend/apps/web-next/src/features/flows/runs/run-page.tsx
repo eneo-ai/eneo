@@ -182,7 +182,18 @@ function RunResult({
         />
       );
     case "outbound_http":
-      return <p className="text-ax-text text-sm">{t("flow_runs_result_delivered")}</p>;
+      // A run result is sent after the run completes, so it can still be on its way or given up.
+      return (
+        <p className="text-ax-text text-sm">
+          {t(
+            result.delivery_status === "delivered"
+              ? "flow_runs_result_delivered"
+              : result.delivery_status === "pending"
+                ? "flow_runs_result_sending"
+                : "flow_runs_result_not_delivered"
+          )}
+        </p>
+      );
   }
 }
 

@@ -2597,7 +2597,7 @@ def test_openapi_flow_run_result_is_closed_and_exhaustively_discriminated(
     assert _extract_enum_values(
         openapi_spec,
         outbound_properties["delivery_status"],
-    ) == {"delivered"}
+    ) == {"pending", "delivered", "dead_lettered"}
 
 
 def test_openapi_file_backed_text_describes_result_kind_and_availability(

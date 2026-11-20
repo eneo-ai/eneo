@@ -14,6 +14,7 @@ from uuid import UUID
 
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 
 from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure.completion_service import (
@@ -25,6 +26,8 @@ from eneo.database.tables.flow_tables import (
     FlowRuns,
     FlowRunWebhookDeliveries,
 )
+from eneo.flows.api.flow_run_contract_models import FlowRunOutboundHttpResultPublic
+from eneo.flows.api.flow_run_response import read_run_public
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
@@ -50,6 +53,7 @@ from eneo.flows.runtime.run_outcome import (
 )
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.config import get_settings
+from eneo.main.container.container import Container
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_queued_webhook_run,
     _create_running_webhook_run,
@@ -282,12 +286,38 @@ async def test_a_run_result_run_that_does_not_complete_keeps_no_delivery_row(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def _result_delivery_status(run, *, admin_user, test_tenant) -> str:
+    """The run's ``result.delivery_status`` as reading the run answers it."""
+    async with sessionmanager.session() as session, session.begin():
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        view = await container.flow_run_service().get_run_with_result_files_and_usage(
+            flow_id=run.flow_id, run_id=run.id
+        )
+    result = read_run_public(view, started_by=None).result
+    assert isinstance(result, FlowRunOutboundHttpResultPublic)
+    return result.delivery_status
+
+
 async def test_a_receiver_down_through_every_attempt_leaves_the_run_completed(
     setup_database,
     completed_run_result_run,
     monkeypatch,
+    admin_user,
+    test_tenant,
+    object_content_runtime_ready,
 ):
     run, delivery_id = await completed_run_result_run()
+    # The run completed before its result was sent, and says so.
+    assert (
+        await _result_delivery_status(
+            run, admin_user=admin_user, test_tenant=test_tenant
+        )
+        == "pending"
+    )
     send_http_request = AsyncMock(return_value=_response(503))
     terminalize_run = AsyncMock()
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send_http_request)
@@ -320,6 +350,12 @@ async def test_a_receiver_down_through_every_attempt_leaves_the_run_completed(
     assert run_state.error_json is None
     # A delivery for a run that has already ended never ends the run.
     terminalize_run.assert_not_awaited()
+    assert (
+        await _result_delivery_status(
+            run, admin_user=admin_user, test_tenant=test_tenant
+        )
+        == "dead_lettered"
+    )
 
 
 @pytest.mark.asyncio

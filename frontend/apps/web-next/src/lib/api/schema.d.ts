@@ -25174,10 +25174,10 @@ export interface components {
     FlowRunOutboundHttpResultPublic: {
       /**
        * Delivery Status
-       * @description Stable delivery receipt for a successfully completed outbound step. Destination configuration and request payload are never exposed.
-       * @constant
+       * @description Where the run's outbound delivery stands. A step that sends the run result is sent when the run has completed, so a completed run can still be `pending`, or `dead_lettered` when every attempt failed. Destination configuration and request payload are never exposed.
+       * @enum {string}
        */
-      delivery_status: "delivered";
+      delivery_status: "pending" | "delivered" | "dead_lettered";
       /**
        * @description Discriminator for a completed outbound HTTP delivery. (enum property replaced by openapi-typescript)
        * @enum {string}

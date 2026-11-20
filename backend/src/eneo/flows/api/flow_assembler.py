@@ -8,6 +8,7 @@ from uuid import UUID
 from pydantic import ValidationError
 
 from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api.flow_models import (
     FlowPublic,
     FlowRunDetailPublic,
@@ -150,6 +151,7 @@ class FlowAssembler:
         run: FlowRun,
         outputs: FlowRunOutputContract | None,
         result_files: Sequence[FlowRunStepResultFile] = (),
+        final_delivery_status: FlowOutboxDeliveryStatus | None = None,
     ) -> tuple[FlowRunResultPublic | None, list[FlowRunDeliverablePublic]]:
         """``run``'s ``result`` and ``deliverables`` from one output
         contract; ``result_files`` hold each step's current attempt."""
@@ -158,6 +160,7 @@ class FlowAssembler:
                 run=run,
                 final_output=outputs.final_output if outputs is not None else None,
                 result_files=result_files,
+                final_delivery_status=final_delivery_status,
             ),
             project_run_deliverables(
                 status=run.status, outputs=outputs, result_files=result_files
@@ -173,6 +176,7 @@ class FlowAssembler:
         transcription_usage: FlowRunTranscriptionUsage | None = None,
         outputs: FlowRunOutputContract | None = None,
         started_by: FlowRunStartedByPublic | None = None,
+        final_delivery_status: FlowOutboxDeliveryStatus | None = None,
     ) -> FlowRunPublic:
         public_token_usage = (
             FlowRunTokenUsagePublic.model_validate(token_usage)
@@ -185,7 +189,10 @@ class FlowAssembler:
             else None
         )
         result, deliverables = self.to_run_outputs_public(
-            run=run, outputs=outputs, result_files=result_files
+            run=run,
+            outputs=outputs,
+            result_files=result_files,
+            final_delivery_status=final_delivery_status,
         )
         return FlowRunPublic.model_validate(run).model_copy(
             update={
@@ -387,6 +394,7 @@ def _project_run_result(
     run: FlowRun,
     final_output: FlowFinalOutputContractPublic | None,
     result_files: Sequence[FlowRunStepResultFile],
+    final_delivery_status: FlowOutboxDeliveryStatus | None = None,
 ) -> FlowRunResultPublic | None:
     if run.status is not FlowRunStatus.COMPLETED:
         return None
@@ -396,9 +404,14 @@ def _project_run_result(
         )
 
     if final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP:
+        # A run whose final step sends its result completes before the
+        # result is sent, so the delivery reports its own state; an earlier
+        # read without it is a run that completed on delivery.
         return FlowRunOutboundHttpResultPublic(
             kind="outbound_http",
-            delivery_status="delivered",
+            delivery_status=(
+                final_delivery_status or FlowOutboxDeliveryStatus.DELIVERED
+            ).value,
         )
 
     if final_output.delivery is FlowOutputDelivery.ARTIFACT:
