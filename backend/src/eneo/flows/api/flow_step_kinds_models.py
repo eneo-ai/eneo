@@ -215,8 +215,8 @@ class FlowStepKindConfigurationPublic(BaseModel):
     output_config: dict[str, Any] | None = Field(
         description=(
             "The speaker mapping for `speakers`, the HTTP request for "
-            "`send_http` (its `url` empty for the author to enter), otherwise "
-            "null."
+            "`send_http` and `send_run_result` (its `url` empty for the author "
+            "to enter), otherwise null."
         ),
         examples=[None],
     )

@@ -263,7 +263,7 @@ async def test_run_purpose_is_checked_and_defaults_to_production(
             preseed_steps=[],
         )
         assert run.purpose == "production"
-        assert FlowAssembler.to_run_summary_public(run).purpose == "production"
+        assert FlowAssembler.to_run_status_public(run).purpose == "production"
         assert (
             await repo.get_status(run_id=run.id, tenant_id=admin_user.tenant_id)
         ).purpose == "production"

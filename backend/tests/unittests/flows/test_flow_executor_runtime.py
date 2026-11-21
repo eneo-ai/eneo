@@ -5394,6 +5394,51 @@ async def test_runtime_preflight_classifies_bound_steps_before_anything_complete
 
 
 @pytest.mark.asyncio
+async def test_runtime_preflight_asks_no_model_of_a_step_that_sends_the_run_result(
+    user,
+):
+    # The step sends the run's deliverables and calls no model: its weak
+    # assistant and the stale prompt and input left from an earlier mode are
+    # not judged, and what it sends keeps the highest earlier level, here of
+    # a step that is neither next to it nor delivered.
+    executor, _, _, _ = _build_executor(user)
+    strong = _security_assistant(uuid4(), model_level=3)
+    weak = _security_assistant(
+        uuid4(), model_level=1, prompt="{{ step_99.output.text }}"
+    )
+    space = _security_space(
+        space_id=uuid4(), assistants=[strong, weak], security_level=1
+    )
+    _stub_security_assistants(executor, space)
+    first = replace(
+        _security_step(step_order=1, assistant_id=strong.id),
+        output_classification_override=3,
+    )
+    unclassified = _security_step(step_order=2, assistant_id=weak.id)
+    sender = _security_step(
+        step_order=3,
+        assistant_id=weak.id,
+        input_source="previous_step",
+        input_bindings={"question": "{{ step_99.output.text }}"},
+        output_mode="http_post",
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+
+    levels = await executor._resolve_step_output_levels(
+        steps=[first, unclassified, sender],
+        state=_empty_execution_state(),
+        run=_levels_run(user),
+        tool_preflight=None,
+    )
+
+    assert levels == {1: 3, 2: 1, 3: 3}
+
+
+@pytest.mark.asyncio
 async def test_runtime_preflight_reads_prompt_references_when_underlag_is_literal(user):
     # The underlag reads no step, but the assistant prompt interpolates step 1:
     # the model still receives classified content.

@@ -5,10 +5,12 @@ fingerprint follows its premise and nothing else."""
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import replace
 from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.flows.domain.flow_suggestion_model import uses_completion_model
 from eneo.flows.domain.flow_suggestions import (
     MAX_FLOW_SUGGESTIONS,
     FlowSuggestion,
@@ -526,3 +528,38 @@ def test_every_suggestion_code_has_one_plain_authoring_rule() -> None:
         assert rule.endswith(".")
         assert "\n" not in rule
         assert chr(0x2014) not in rule
+
+
+def test_a_step_that_sends_the_run_result_is_not_a_model_step() -> None:
+    # Suggestions about a step's model follow the rule publishing and the
+    # classification use: a step that sends the run's result asks none.
+    request = {"url": "https://receiver.example.org/results", "auth": {"mode": "none"}}
+    post = _step(2, output_mode=FlowOutputMode.HTTP_POST)
+
+    assert uses_completion_model(
+        replace(post, output_config={**request, "body": {"mode": "auto"}})
+    )
+    assert not uses_completion_model(
+        replace(post, output_config={**request, "body": {"mode": "run_result"}})
+    )
+
+
+def test_no_suggestion_is_made_about_a_step_that_sends_the_run_result() -> None:
+    # Its step input is left from an earlier mode and read by nothing.
+    sender = replace(
+        _step(
+            3,
+            output_mode=FlowOutputMode.HTTP_POST,
+            input_bindings={
+                "question": "{{ step_1.output.text }} {{ step_1.output.text }}"
+            },
+        ),
+        output_config={
+            "url": "https://receiver.example.org/results",
+            "auth": {"mode": "none"},
+            "body": {"mode": "run_result"},
+        },
+    )
+    steps = [_step(1, prompt_text="Skriv."), _step(2, prompt_text="Skriv."), sender]
+
+    assert all(sender.id not in item.steps for item in _analyze(steps))

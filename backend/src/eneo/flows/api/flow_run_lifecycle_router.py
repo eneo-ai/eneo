@@ -47,7 +47,7 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunRedispatchRequest,
     FlowRunRedispatchResponse,
-    FlowRunSummaryPublic,
+    FlowRunStatusPublic,
     FlowRunWebhookDeliveryPublic,
     FlowRunWebhookRedeliveryRequest,
 )
@@ -251,6 +251,7 @@ _FLOW_RUN_STATUS_DESCRIPTION = """
     This is the routine polling contract. It contains lifecycle, timing, and bounded,
     secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
     terminal output, result-file metadata, provider usage, and webhook-delivery content.
+    `result_delivery` says only where the run's latest outbound delivery stands.
     Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
     15 seconds, and stop when the status capability `should_poll` is false.
 
@@ -724,7 +725,7 @@ async def list_flow_runs(
 
 @router.get(
     FLOW_RUN_STATUS_PATH,
-    response_model=FlowRunSummaryPublic,
+    response_model=FlowRunStatusPublic,
     status_code=status.HTTP_200_OK,
     operation_id="get_flow_run_status",
     summary="Get flow run status",
@@ -767,13 +768,16 @@ async def get_flow_run_status(
         allow_service_key_principals=True,
         history=True,
     )
-    run = await container.flow_run_service().get_run_status(
+    run_service = container.flow_run_service()
+    run = await run_service.get_run_status(
         run_id=run_id,
         flow_id=id,
         history=True,
     )
-    return FlowAssembler.to_run_summary_public(
-        run, started_by=await started_by_for_run(container, run)
+    return FlowAssembler.to_run_status_public(
+        run,
+        started_by=await started_by_for_run(container, run),
+        result_delivery=await run_service.latest_webhook_delivery(run_id=run.id),
     )
 
 
@@ -963,6 +967,20 @@ async def cancel_flow_run(
     Requires the right to edit the flow. Service keys cannot send a result again.
     """,
     responses={
+        400: error_response(
+            description=(
+                "The run's published snapshot failed integrity verification, so "
+                "the delivery was not reset. The machine-readable code is "
+                "`flow_definition_checksum_mismatch`; do not retry."
+            ),
+            message=(
+                "Published flow definition checksum does not match the stored "
+                "snapshot. Do not retry this pinned version. Publish a valid "
+                "version and start a new run."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH,
+        ),
         403: error_response(
             description="Caller lacks permission to edit this flow.",
             message="Insufficient permissions.",

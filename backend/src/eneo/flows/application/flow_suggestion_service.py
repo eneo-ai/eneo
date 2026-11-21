@@ -50,10 +50,10 @@ from eneo.flows.domain.flow_suggestions import (
     SuggestionStep,
     analyze_flow,
 )
-from eneo.flows.enums import flow_output_mode_uses_completion_model
 from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
 from eneo.flows.flow_metadata import normalize_persisted_flow_metadata
 from eneo.flows.flow_validators import publish_step_refusals
+from eneo.flows.http_transport.step_configs import step_calls_completion_model
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
@@ -72,7 +72,7 @@ def suggestion_step(
     """The analyzer's view of a saved step. The prompt counts as a read only
     when a completion model reads it, as the classification rule counts it."""
     assert step.id is not None, "a saved step has an id"
-    reads_prompt = flow_output_mode_uses_completion_model(step.output_mode)
+    reads_prompt = step_calls_completion_model(step.output_mode, step.output_config)
     return SuggestionStep(
         id=step.id,
         step_order=step.step_order,

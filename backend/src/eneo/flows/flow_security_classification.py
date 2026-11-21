@@ -10,12 +10,9 @@ from eneo.flows.domain.flow import FlowStep
 from eneo.flows.domain.flow_step_validation import FlowStepValidationError
 from eneo.flows.domain.tool_facts import UnattendedToolFactsSource
 from eneo.flows.domain.tool_input import read_stored_tool_input_config
-from eneo.flows.enums import (
-    FlowInputSource,
-    FlowOutputMode,
-    flow_output_mode_uses_completion_model,
-)
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.http_transport.step_configs import step_calls_completion_model
 from eneo.flows.step_lineage import (
     build_step_ref_mapping,
     resolve_step_upstream_orders,
@@ -249,6 +246,7 @@ def explain_step_security_classification(
     step_id: UUID | None = None,
     upstream_step_orders: Sequence[int],
     output_mode: FlowOutputMode | str,
+    output_config: Mapping[str, object] | None,
     output_classification_override: int | None,
     prior_output_levels_by_order: Mapping[int, int | None],
     assistant: Any,
@@ -262,7 +260,8 @@ def explain_step_security_classification(
     ``upstream_step_orders`` are the prior steps the step actually reads
     (``step_lineage.resolve_step_upstream_orders``): explicit underlag decides
     alone, otherwise the input source. The model requirement applies only to
-    output modes that run a completion model. A deterministic step (rendering,
+    a step that calls a completion model (``step_calls_completion_model``,
+    which reads the step's ``output_config``). A deterministic step (rendering,
     template fill, compose) has no model to clear the floor with, yet its
     output still carries the classification of what flowed into it.
 
@@ -315,7 +314,9 @@ def explain_step_security_classification(
 
     output_floor = _max_level(input_level, knowledge_level)
     required_model_level = (
-        output_floor if flow_output_mode_uses_completion_model(output_mode) else None
+        output_floor
+        if step_calls_completion_model(output_mode, output_config)
+        else None
     )
 
     violation: FlowStepClassificationViolation | None = None
@@ -442,6 +443,7 @@ def evaluate_step_security_classification(
     step_id: UUID | None = None,
     upstream_step_orders: Sequence[int],
     output_mode: FlowOutputMode | str,
+    output_config: Mapping[str, object] | None,
     output_classification_override: int | None,
     prior_output_levels_by_order: Mapping[int, int | None],
     assistant: Any,
@@ -456,6 +458,7 @@ def evaluate_step_security_classification(
         step_id=step_id,
         upstream_step_orders=upstream_step_orders,
         output_mode=output_mode,
+        output_config=output_config,
         output_classification_override=output_classification_override,
         prior_output_levels_by_order=prior_output_levels_by_order,
         assistant=assistant,
@@ -504,7 +507,7 @@ async def _explain_steps(
                 input_bindings=step.input_bindings,
                 prompt_template=(
                     assistant.get_prompt_text()
-                    if flow_output_mode_uses_completion_model(step.output_mode)
+                    if step_calls_completion_model(step.output_mode, step.output_config)
                     else None
                 ),
                 output_mode=step.output_mode,
@@ -514,6 +517,7 @@ async def _explain_steps(
                 max_prior_step_order=step.step_order - 1,
             ),
             output_mode=step.output_mode,
+            output_config=step.output_config,
             output_classification_override=step.output_classification_override,
             prior_output_levels_by_order=prior_output_levels,
             assistant=assistant,

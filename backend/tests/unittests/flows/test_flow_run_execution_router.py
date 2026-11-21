@@ -964,6 +964,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         dead_lettered_at=delivery_now,
         created_at=delivery_now,
         updated_at=delivery_now,
+        state="dead_lettered",
     )
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [
@@ -998,6 +999,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     )
     run_service.list_step_results_with_files.return_value = ()
     run_service.get_run_status.return_value = run
+    run_service.latest_webhook_delivery.return_value = webhook_delivery
     run_service.get_run.return_value = run
     container.flow_run_service.return_value = run_service
     run_service.evidence_access.return_value = FlowRunEvidenceAccess(
@@ -1072,6 +1074,11 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     assert "input_payload_json" not in status_response.model_dump()
     assert "token_usage" not in status_response.model_dump()
     assert "transcription_usage" not in status_response.model_dump()
+    # The status names where the delivery stands, and nothing it sends.
+    assert status_response.result_delivery is not None
+    assert status_response.result_delivery.state == "dead_lettered"
+    assert status_response.result_delivery.delivery_attempts == 5
+    run_service.latest_webhook_delivery.assert_awaited_once_with(run_id=run.id)
     public_delivery = get_response.webhook_deliveries[0]
     assert public_delivery.delivery_status == "dead_lettered"
     assert public_delivery.delivery_attempts == 5
@@ -1087,7 +1094,10 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         "dead_lettered_at",
         "created_at",
         "updated_at",
+        "state",
     }
+    assert public_delivery.state == "dead_lettered"
+    assert status_response.result_delivery.model_dump() == public_delivery.model_dump()
     assert step_response == []
     # Every endpoint authorizes through the gate's narrow history row, once
     # each, and never loads the live Flow aggregate.

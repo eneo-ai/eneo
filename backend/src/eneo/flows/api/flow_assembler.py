@@ -18,12 +18,12 @@ from eneo.flows.api.flow_models import (
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStartedByPublic,
+    FlowRunStatusPublic,
     FlowRunStepInputFilePublic,
     FlowRunStepPublic,
-    FlowRunSummaryPublic,
     FlowRunTokenUsagePublic,
     FlowRunTranscriptionUsagePublic,
-    FlowRunWebhookDeliveryPublic,
+    FlowRunWebhookDeliveryStatePublic,
     FlowSparsePublic,
     FlowStepCreateRequest,
     FlowStepDiagnosticPublic,
@@ -214,13 +214,21 @@ class FlowAssembler:
         )
 
     @staticmethod
-    def to_run_summary_public(
+    def to_run_status_public(
         run: FlowRunStatusSnapshot,
         *,
         started_by: FlowRunStartedByPublic | None = None,
-    ) -> FlowRunSummaryPublic:
-        return FlowRunSummaryPublic.model_validate(run).model_copy(
-            update={"started_by": started_by}
+        result_delivery: FlowRunWebhookDeliveryRead | None = None,
+    ) -> FlowRunStatusPublic:
+        return FlowRunStatusPublic.model_validate(run).model_copy(
+            update={
+                "started_by": started_by,
+                "result_delivery": (
+                    FlowRunWebhookDeliveryStatePublic.model_validate(result_delivery)
+                    if result_delivery is not None
+                    else None
+                ),
+            }
         )
 
     @staticmethod
@@ -279,7 +287,7 @@ class FlowAssembler:
             {
                 **run_payload,
                 "webhook_deliveries": [
-                    FlowRunWebhookDeliveryPublic.model_validate(delivery)
+                    FlowRunWebhookDeliveryStatePublic.model_validate(delivery)
                     for delivery in webhook_deliveries
                 ],
                 "error": (

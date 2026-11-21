@@ -51,6 +51,7 @@ class FlowStepKind(StrEnum):
     FETCH_HTTP = "fetch_http"
     TOOL = "tool"
     SEND_HTTP = "send_http"
+    SEND_RUN_RESULT = "send_run_result"
 
 
 # The input types whose content is uploaded files; only step 1 reads them.
@@ -76,6 +77,10 @@ STEP_KIND_DESCRIPTIONS: Final[Mapping[FlowStepKind, str]] = {
     FlowStepKind.FETCH_HTTP: "text fetched with an HTTP GET",
     FlowStepKind.TOOL: "an MCP tool's answer",
     FlowStepKind.SEND_HTTP: "the result sent with an HTTP POST",
+    FlowStepKind.SEND_RUN_RESULT: (
+        "the finished run's result sent with an HTTP POST once the run has "
+        "completed; only last, after a step"
+    ),
 }
 
 
@@ -249,6 +254,7 @@ STEP_KIND_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
     FlowStepKind.FETCH_HTTP: ("url", "http"),
     FlowStepKind.TOOL: ("tool",),
     FlowStepKind.SEND_HTTP: ("url", "http", "instruction"),
+    FlowStepKind.SEND_RUN_RESULT: ("url",),
 }
 STEP_KIND_REQUIRED_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
     FlowStepKind.AI: ("instruction",),
@@ -256,6 +262,7 @@ STEP_KIND_REQUIRED_VALUES: Final[Mapping[FlowStepKind, tuple[str, ...]]] = {
     FlowStepKind.FETCH_HTTP: ("url",),
     FlowStepKind.TOOL: ("tool",),
     FlowStepKind.SEND_HTTP: ("url",),
+    FlowStepKind.SEND_RUN_RESULT: ("url",),
 }
 
 # What http takes: the request besides its address, which is the value url.
@@ -493,6 +500,19 @@ def _kind_configuration(
                 output_mode=FlowOutputMode.HTTP_POST,
                 output_type=FlowOutputType.TEXT,
                 output_config=_http_config(values.url, direction="output"),
+            )
+        case FlowStepKind.SEND_RUN_RESULT:
+            # It reads the step before it, so the save refuses it first; what
+            # it sends is the run's result, not its input.
+            return _configuration(
+                input_source=FlowInputSource.PREVIOUS_STEP,
+                input_type=read_type,
+                output_mode=FlowOutputMode.HTTP_POST,
+                output_type=FlowOutputType.TEXT,
+                output_config={
+                    **_http_config(values.url, direction="output"),
+                    "body": {"mode": "run_result"},
+                },
             )
 
 

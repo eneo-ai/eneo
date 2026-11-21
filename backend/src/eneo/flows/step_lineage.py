@@ -198,17 +198,11 @@ def step_reads_by_channel(
     written; configuration reads follow, ``output_config`` before
     ``input_config``. ``input_source`` and ``output_mode`` fail closed as in
     the resolvers.
+
+    A step that sends the run's result reaches no model: its prompt and step
+    input are not read, and its body reads every earlier step, since any of
+    them may be a deliverable.
     """
-    reads = list(
-        _model_channel_reads(
-            input_source=input_source,
-            step_order=step_order,
-            input_bindings=input_bindings,
-            prompt_template=prompt_template,
-            step_ref_mapping=step_ref_mapping,
-            max_prior_step_order=max_prior_step_order,
-        )
-    )
     source = FlowInputSource(input_source)
     mode = FlowOutputMode(output_mode)
     configs: tuple[tuple[ConfigColumn, Mapping[str, object] | None], ...] = (
@@ -216,11 +210,18 @@ def step_reads_by_channel(
         ("input_config", input_config),
     )
     if sends_run_result(mode, output_config):
-        # A run result sends every deliverable, and any earlier step may be
-        # one, so the body reads each of them.
-        reads.extend(
+        reads = [
             StepRead("config", order, (), "output_config.body")
             for order in range(1, max_prior_step_order + 1)
+        ]
+    else:
+        reads = _model_channel_reads(
+            input_source=input_source,
+            step_order=step_order,
+            input_bindings=input_bindings,
+            prompt_template=prompt_template,
+            step_ref_mapping=step_ref_mapping,
+            max_prior_step_order=max_prior_step_order,
         )
     for column, config in configs:
         channel = config_channel(

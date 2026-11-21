@@ -886,8 +886,9 @@ endpoint before deciding whether to edit, approve, reject, or resume the run.
 
 The response models make the sensitivity boundary explicit. `POST /runs/`
 returns `FlowRunPublic`. `GET /runs/{run_id}/status/` returns
-`FlowRunSummaryPublic`, which omits accepted input, result, result-file metadata,
-terminal errors, provider usage, and webhook deliveries. History returns
+`FlowRunStatusPublic`, which omits accepted input, result, result-file metadata,
+terminal errors and provider usage. Its `result_delivery` names only where the
+latest outbound delivery stands, never its address, headers or content. History returns
 `FlowRunListItemPublic`: the same metadata plus recorded `token_usage` and
 `transcription_usage`, aggregated for the returned page. Missing measurements
 are null; incomplete totals carry completeness flags. The list does not read
