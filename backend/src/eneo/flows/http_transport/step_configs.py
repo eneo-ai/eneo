@@ -66,8 +66,9 @@ def step_calls_completion_model(
     output_config: Mapping[str, object] | None,
 ) -> bool:
     """Whether a step asks its assistant's completion model: its output mode
-    answers with one, unless the step sends the run's result, which is the
-    text it reads. The one rule publishing, the run's preflight and the
+    answers with one, unless the step sends the run's result, which reads
+    no prompt or step input and holds no content of its own. The one rule
+    publishing, the security classification, the run's preflight and the
     step's execution share; the editor keeps the same."""
     return flow_output_mode_uses_completion_model(output_mode) and not (
         sends_run_result(output_mode, output_config)

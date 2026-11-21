@@ -126,7 +126,11 @@ async def _execute(run) -> dict[str, str]:
 def queued_run_result_run(
     admin_user, completion_model_factory, space_factory, assistant_factory
 ):
-    async def create(*, include_prior_step: bool = True):
+    async def create(
+        *,
+        include_prior_step: bool = True,
+        webhook_question: str | None = "{{flow.input.question}}",
+    ):
         async with sessionmanager.session() as session:
             enable_autobegin_for_flow_task_session(session)
             _, run, _ = await _create_queued_webhook_run(
@@ -138,6 +142,7 @@ def queued_run_result_run(
                 output_config=RUN_RESULT_CONFIG,
                 include_prior_step=include_prior_step,
                 prior_step_output=MARKED_TEXT,
+                webhook_question=webhook_question,
             )
             await session.commit()
         return run
@@ -274,6 +279,33 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
             }
         ],
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_stale_read_in_the_step_input_of_a_run_result_step_is_not_run(
+    setup_database,
+    object_content_runtime_ready,
+    queued_run_result_run,
+    monkeypatch,
+):
+    """The step that sends the run's result reads no step input: a read of a
+    step the flow does not have, left from an earlier mode, neither stops
+    the run's preflight nor the step, and the result is sent."""
+    run = await queued_run_result_run(webhook_question="{{ step_99.output.text }}")
+
+    async def _answer(_self, **_kwargs):
+        return SimpleNamespace(completion="Klart.", total_token_count=1)
+
+    monkeypatch.setattr(CompletionService, "get_response", _answer)
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
+    outcome = await _run_outbox()
+
+    assert outcome["delivered"] == 1
+    send.assert_awaited_once()
 
 
 @pytest.mark.asyncio

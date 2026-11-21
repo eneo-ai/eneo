@@ -30,14 +30,14 @@ from eneo.flows.domain.flow_step_validation import (
     FlowStepValidationView,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.domain.run_deliverables import (
+    StepDeliverableFacts,
+    deliverable_positions,
+)
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
-)
-from eneo.flows.domain.run_deliverables import (
-    StepDeliverableFacts,
-    deliverable_positions,
 )
 from eneo.flows.domain.step_deliverable import (
     FLOW_STEP_DELIVERABLE_KEY,
@@ -64,7 +64,6 @@ from eneo.flows.enums import (
     FLOW_OUTPUT_TYPE_VALUES,
     FlowInputSource,
     FlowRuntimeInputFormat,
-    flow_output_mode_uses_completion_model,
     step_can_be_deliverable,
     step_delivers_artifact,
 )
@@ -105,7 +104,11 @@ from eneo.flows.flow_variable_definitions import (
     runtime_variable_shape,
     runtime_variables_for_step,
 )
-from eneo.flows.http_transport.step_configs import sends_http_config, sends_run_result
+from eneo.flows.http_transport.step_configs import (
+    sends_http_config,
+    sends_run_result,
+    step_calls_completion_model,
+)
 from eneo.flows.input_binding_contract_rules import (
     FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
     InputBindingContractError,
@@ -770,7 +773,10 @@ def collect_step_graph_issues(
                     lambda: _validate_output_contract_compatibility(step=step),
                 )
 
-        if step.input_bindings is not None:
+        # A step that sends the run's result reads no step input.
+        if step.input_bindings is not None and not sends_run_result(
+            step.output_mode, step.output_config
+        ):
             input_bindings = step.input_bindings
             if require_complete_template_fill_config:
                 _capture_flow_step_validation(
@@ -2819,11 +2825,16 @@ def _validate_run_input_alias_reads(
 
     if run_input.free_text:
         return
-    sites = [
-        ("input_bindings.question", question_binding(step.input_bindings)),
-        ("prompt", step.prompt_template),
-        ("output_config", _template_text(step.output_config)),
-    ]
+    sites = (
+        []
+        if sends_run_result(step.output_mode, step.output_config)
+        # A step that sends the run's result reads no step input or prompt.
+        else [
+            ("input_bindings.question", question_binding(step.input_bindings)),
+            ("prompt", step.prompt_template),
+        ]
+    )
+    sites.append(("output_config", _template_text(step.output_config)))
     if step.input_source == "http_get":
         # The fetch's URL, headers and body are interpolated with the run
         # context like a question is.
@@ -2872,7 +2883,7 @@ def _validate_template_reads(
     template fills and tool arguments by theirs."""
 
     sites: list[tuple[str, str, int, frozenset[str]]] = []
-    if flow_output_mode_uses_completion_model(step.output_mode):
+    if step_calls_completion_model(step.output_mode, step.output_config):
         sites.append(
             (
                 "prompt",

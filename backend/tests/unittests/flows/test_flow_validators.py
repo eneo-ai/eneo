@@ -4669,9 +4669,7 @@ def test_a_result_with_nothing_to_send_is_saved_and_refused_at_publish(
     sender = steps[-1].step_order
 
     assert draft_step_refusals(steps, metadata_json=None) == []
-    [refusal] = publish_step_refusals(
-        steps, metadata_json=None, prompt_templates={}
-    )
+    [refusal] = publish_step_refusals(steps, metadata_json=None, prompt_templates={})
 
     assert refusal.code == "flow_run_result_no_deliverables"
     assert refusal.context is not None
@@ -4690,3 +4688,56 @@ def test_a_result_with_something_to_send_publishes() -> None:
     ]
 
     assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []
+
+
+# A read of a step the flow does not have, and of free-text run input the run
+# form does not collect.
+_STALE_READS = "{{ step_99.output.text }} {{ flow_input.text }}"
+
+
+def test_a_run_result_step_is_not_judged_on_a_prompt_or_input_it_never_reads() -> None:
+    # The step sends the run's deliverables: a prompt and step input left from
+    # an earlier mode are never read, so a stale read in them refuses nothing.
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            input_bindings={"question": _STALE_READS},
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert draft_step_refusals(steps, metadata_json=_DELIVERABLE_FORM) == []
+    assert (
+        publish_step_refusals(
+            steps, metadata_json=_DELIVERABLE_FORM, prompt_templates={2: _STALE_READS}
+        )
+        == []
+    )
+
+
+def test_a_run_result_step_is_still_judged_on_its_headers() -> None:
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            output_config={
+                **_SEND_RUN_RESULT,
+                "custom_headers": [
+                    {"name": "X-Case", "value": "{{ step_99.output.text }}"}
+                ],
+            },
+        ),
+    ]
+
+    [refusal] = publish_step_refusals(
+        steps, metadata_json=_DELIVERABLE_FORM, prompt_templates={}
+    )
+
+    assert refusal.code == "flow_input_binding_unknown_step_order"
+    assert refusal.context is not None
+    assert refusal.context["field"] == "output_config.custom_headers.0.value"
