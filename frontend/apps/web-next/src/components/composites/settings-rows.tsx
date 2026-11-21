@@ -1,5 +1,73 @@
-import { useId } from "react";
+import { Token } from "@astryxdesign/core/Token";
+import { createContext, useContext, useId, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+
+/** What the page puts at the end of the heading row of the settings group inside. */
+const GroupActionContext = createContext<ReactNode>(null);
+
+/**
+ * Rows marked for a while, by their key (`SettingsRow`'s `markKey`, else its
+ * `htmlFor`, else its `id`), and what the mark says ("Ändrad från chatten").
+ */
+export type SettingsRowMarks = { rows: ReadonlySet<string>; label: string };
+
+const MarksContext = createContext<SettingsRowMarks | null>(null);
+
+/**
+ * Marks the rows below that `marks` names: a quiet tint and the mark's
+ * label beside the row's title, never colour alone. A row that is not a
+ * `SettingsRow` reads its mark with `useSettingsMark`.
+ */
+export function SettingsMarks({
+  marks,
+  children
+}: {
+  marks: SettingsRowMarks | null;
+  children: ReactNode;
+}) {
+  return <MarksContext.Provider value={marks}>{children}</MarksContext.Provider>;
+}
+
+/** The mark's label while the row `key` names is marked; null otherwise. */
+export function useSettingsMark(key: string | undefined): string | null {
+  const marks = useContext(MarksContext);
+  return key !== undefined && marks?.rows.has(key) ? marks.label : null;
+}
+
+/** The marks themselves, for a list that reads one per item. */
+export function useSettingsMarks(): SettingsRowMarks | null {
+  return useContext(MarksContext);
+}
+
+/** A marked row's tint: the margin it takes is given back as padding, so nothing moves. */
+export const MARKED_ROW_CLASS = "rounded-ax-element bg-ax-selected -mx-3 -my-2 px-3 py-2";
+
+/** A marked row's label, beside its title. */
+export function SettingsMarkLabel({ label }: { label: string }) {
+  return (
+    <Token
+      size="sm"
+      color="blue"
+      label={label}
+      className="motion-safe:animate-in motion-safe:fade-in"
+    />
+  );
+}
+
+/**
+ * Puts `action` at the end of the heading row of the settings group inside,
+ * after its own header actions (an editor's "Fråga" for each section). A
+ * group nested in that group does not repeat it.
+ */
+export function SettingsGroupAction({
+  action,
+  children
+}: {
+  action: ReactNode;
+  children: ReactNode;
+}) {
+  return <GroupActionContext.Provider value={action}>{children}</GroupActionContext.Provider>;
+}
 
 /**
  * The card's frame and inset give way to the page's gutter in an editor's
@@ -40,6 +108,31 @@ export function SettingsGroup({
   headerEnd?: React.ReactNode;
   children: React.ReactNode;
 }) {
+  const action = useContext(GroupActionContext);
+  // A lone title sits on its action's centre line (a 44 px touch button would leave
+  // it 10 px high); beside a title and a description the action stays at the top.
+  const align = description ? "items-start" : "items-center";
+  const heading = (
+    <div
+      className={cn(
+        "flex flex-wrap justify-between gap-3",
+        align,
+        // Beside the page's action it takes the rest of the row, never less than
+        // 10 rem or the widest thing in it that cannot wrap (a header button).
+        action ? "min-w-min grow basis-40" : undefined
+      )}
+    >
+      <div className="min-w-0">
+        <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
+        {description ? <p className="text-muted-foreground mt-0.5 text-sm">{description}</p> : null}
+      </div>
+      {headerEnd ? (
+        <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
+          {headerEnd}
+        </div>
+      ) : null}
+    </div>
+  );
   return (
     <section
       id={id}
@@ -47,28 +140,27 @@ export function SettingsGroup({
       className={cn("bg-card scroll-mt-32 rounded-xl border", IN_PHONE_SECTION.card)}
     >
       <div className={cn("border-b px-5 py-4", IN_PHONE_SECTION.header)}>
-        {/* A lone title sits on its action's centre line (a 44 px touch button would leave
-            it 10 px high); beside a title and a description the action stays at the top. */}
-        <div
-          className={cn(
-            "flex flex-wrap justify-between gap-3",
-            description ? "items-start" : "items-center"
-          )}
-        >
-          <div className="min-w-0">
-            <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
-            {description ? (
-              <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
-            ) : null}
-          </div>
-          {headerEnd ? (
-            <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
-              {headerEnd}
+        {action ? (
+          // The page's action keeps the end of the title's row: the description and the
+          // header's own actions wrap beside it. It goes under them only where they
+          // would not fit beside it.
+          <div className={cn("flex flex-wrap justify-between gap-3", align)}>
+            {heading}
+            <div data-settings-group-end="" className="flex shrink-0">
+              {action}
             </div>
-          ) : null}
-        </div>
+          </div>
+        ) : (
+          heading
+        )}
       </div>
-      <div className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}>{children}</div>
+      {/* Each child is a setting's row or card: what the editor shows whole for the setting. */}
+      <div
+        data-settings-group-body=""
+        className={cn("flex flex-col gap-6 px-5 py-5", IN_PHONE_SECTION.body)}
+      >
+        <GroupActionContext.Provider value={null}>{children}</GroupActionContext.Provider>
+      </div>
     </section>
   );
 }
@@ -83,6 +175,7 @@ export function SettingsGroup({
  * or custom widgets and the title labels the control region via `role="group"`.
  * `id` gives a save error a direct link to this row.
  * Omit `title` entirely for a row whose label would just repeat the card header.
+ * Under `SettingsMarks` a row is marked by `markKey`, else `htmlFor`, else `id`.
  */
 export function SettingsRow({
   id,
@@ -91,6 +184,7 @@ export function SettingsRow({
   description,
   htmlFor,
   inline,
+  markKey,
   children
 }: {
   id?: string;
@@ -99,26 +193,39 @@ export function SettingsRow({
   description?: string;
   htmlFor?: string;
   inline?: boolean;
+  /** The row's key among `SettingsMarks`, for a row without `htmlFor` or `id`. */
+  markKey?: string;
   children: React.ReactNode;
 }) {
   const reactId = useId();
   const titleId = `${reactId}-title`;
   const descriptionId = description ? `${reactId}-desc` : undefined;
-  const hasLabel = Boolean(title || description);
+  const mark = useSettingsMark(markKey ?? htmlFor ?? id);
+  const hasLabel = Boolean(title || description || mark);
+
+  const titleNode = title ? (
+    htmlFor ? (
+      <label htmlFor={htmlFor} className="text-sm font-medium">
+        {title}
+      </label>
+    ) : (
+      <span id={titleId} className="text-sm font-medium">
+        {title}
+      </span>
+    )
+  ) : null;
 
   const label = hasLabel ? (
     <div className="flex flex-col gap-0.5">
-      {title ? (
-        htmlFor ? (
-          <label htmlFor={htmlFor} className="text-sm font-medium">
-            {title}
-          </label>
-        ) : (
-          <span id={titleId} className="text-sm font-medium">
-            {title}
-          </span>
-        )
-      ) : null}
+      {mark ? (
+        // Beside the title, outside it: the field's name stays the title alone.
+        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          {titleNode}
+          <SettingsMarkLabel label={mark} />
+        </span>
+      ) : (
+        titleNode
+      )}
       {description ? (
         <p id={descriptionId} className="text-muted-foreground text-sm">
           {description}
@@ -137,7 +244,10 @@ export function SettingsRow({
       <div
         id={id}
         data-tour={tour}
-        className="flex scroll-mt-32 items-center justify-between gap-4"
+        className={cn(
+          "flex scroll-mt-32 items-center justify-between gap-4",
+          mark && MARKED_ROW_CLASS
+        )}
       >
         {label}
         <div className="flex min-w-0 shrink-0 flex-col items-end gap-2" {...groupAttrs}>
@@ -148,7 +258,11 @@ export function SettingsRow({
   }
 
   return (
-    <div id={id} data-tour={tour} className="flex scroll-mt-32 flex-col gap-2">
+    <div
+      id={id}
+      data-tour={tour}
+      className={cn("flex scroll-mt-32 flex-col gap-2", mark && MARKED_ROW_CLASS)}
+    >
       {label}
       <div className="flex w-full min-w-0 flex-col gap-2" {...groupAttrs}>
         {children}

@@ -22,9 +22,9 @@ from eneo.data_retention.infrastructure.empty_session_repo import (
 )
 from eneo.database.database import sessionmanager
 from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -309,7 +309,7 @@ async def _flow_authoring_chat(
     user_id: UUID,
     created_at: datetime,
     space_days: int | None = None,
-) -> FlowAuthoringChats:
+) -> HelperChats:
     """A Flow authoring chat that has not been asked anything yet, in a space
     whose conversation time is `space_days`."""
     space = await _space(session, tenant_id=tenant_id, user_id=user_id)
@@ -335,13 +335,14 @@ async def _flow_authoring_chat(
     session.add_all([flow, assistant])
     await session.flush()
     conversation = await _session(session, user_id=user_id, created_at=created_at)
-    chat = FlowAuthoringChats(
+    chat = HelperChats(
         session_id=conversation.id,
         assistant_id=assistant.id,
         tenant_id=tenant_id,
         space_id=space.id,
         user_id=user_id,
-        flow_id=flow.id,
+        target_type="flow",
+        target_id=flow.id,
     )
     session.add(chat)
     await session.flush()
@@ -371,12 +372,12 @@ async def test_an_empty_flow_authoring_chat_is_kept(
 
     assert report.counts == {"sessions.sessions_examined": 1}
     assert await retention_session.get(Sessions, chat_id) is not None
-    assert await retention_session.get(FlowAuthoringChats, chat_id) is not None
+    assert await retention_session.get(HelperChats, chat_id) is not None
 
 
 async def _due_authoring_chat(
     session: AsyncSession, *, tenant_id: UUID, user_id: UUID
-) -> FlowAuthoringChats:
+) -> HelperChats:
     """An authoring chat whose only question is past its space's 30 days."""
     old = datetime.now(timezone.utc) - timedelta(days=60)
     chat = await _flow_authoring_chat(
@@ -420,7 +421,7 @@ async def test_history_removes_an_authoring_chat_with_its_last_question(
     # The session row and its chat row.
     assert {chat_id: 2} in charged
     assert await retention_session.get(Sessions, chat_id) is None
-    assert await retention_session.get(FlowAuthoringChats, chat_id) is None
+    assert await retention_session.get(HelperChats, chat_id) is None
 
 
 async def _insights_conversation(

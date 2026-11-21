@@ -30,6 +30,7 @@ from eneo.assistants.api.assistant_router import (
     leave_feedback,
     update_assistant,
 )
+from eneo.assistants.application import assistant_update_operation
 from eneo.assistants.assistant import AssistantOrigin
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
@@ -159,7 +160,7 @@ def mock_container(mock_user, mock_assistant, mock_response, mock_space):
         None,
     )
     assistant_service.is_help_assistant.return_value = False
-    assistant_service.flow_authoring_chat_owner_id.return_value = None
+    assistant_service.helper_chat_owner_id.return_value = None
     container.assistant_service.return_value = assistant_service
 
     assistant_assembler = MagicMock()
@@ -654,7 +655,7 @@ async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
         for binding in after
     ]
     service = SimpleNamespace(
-        flow_authoring_chat_owner_id=AsyncMock(return_value=None),
+        helper_chat_owner_id=AsyncMock(return_value=None),
         get_assistant=AsyncMock(return_value=(old_assistant, [])),
         update_assistant=AsyncMock(return_value=(updated_assistant, [])),
     )
@@ -673,7 +674,7 @@ async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
     )
     response = SimpleNamespace(id=assistant_id)
     monkeypatch.setattr(
-        assistant_router,
+        assistant_update_operation,
         "_build_assistant_update_changes",
         MagicMock(return_value=({}, [])),
     )

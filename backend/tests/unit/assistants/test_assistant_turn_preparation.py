@@ -1,4 +1,5 @@
-"""Exercise preparation and ordinary asks through the real completion engine.
+"""Exercise preparation, ordinary asks and helper chat turns through the real
+completion engine.
 
 Only database repositories and the outbound provider are replaced. Assistant,
 Space, actor policy, context building and the model adapter remain real.
@@ -7,6 +8,7 @@ Space, actor policy, context building and the model adapter remain real.
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any, cast
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
@@ -27,6 +29,15 @@ from eneo.completion_models.infrastructure.completion_service import CompletionS
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
 from eneo.embedding_models.domain.embedding_model import EmbeddingModel
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
+from eneo.helper_chats.binding import HelperChatBinding
+from eneo.helper_chats.personas.shared import (
+    ASKING_NOW,
+    EDITING_NOW,
+    PROPOSING,
+    WITHOUT_TOOLS,
+    WITHOUT_TOOLS_NOW,
+)
+from eneo.internal_mcp.flows import EDIT_MODE_TOOLS as FLOW_EDIT_MODE_TOOLS
 from eneo.main.exceptions import (
     NotFoundException,
     SecurityClassificationMismatchException,
@@ -281,8 +292,12 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
 ):
     turn.assistant.hidden = True
     flow_id = uuid4()
-    bound = AsyncMock(return_value=(flow_id, True))
-    turn.service._authoring_chat_binding = bound
+    bound = AsyncMock(
+        return_value=HelperChatBinding(
+            target_type="flow", target_id=flow_id, editing=True
+        )
+    )
+    turn.service._helper_chat_binding = bound
 
     with pytest.raises(NotFoundException):
         await turn.service._prepare_turn(
@@ -299,8 +314,8 @@ async def test_a_hidden_assistant_answers_only_in_its_authoring_chat(
     bound.assert_awaited_once_with(
         session_id=turn.session.id, assistant_id=turn.assistant.id
     )
-    assert prepared.authoring_flow_id == flow_id
-    assert prepared.authoring_editing is True
+    assert prepared.helper_chat.target_id == flow_id
+    assert prepared.helper_chat.editing is True
 
 
 async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixture):
@@ -310,7 +325,144 @@ async def test_an_ordinary_assistant_turn_has_no_authoring_flow(turn: TurnFixtur
         session_id=turn.session.id,
     )
 
-    assert prepared.authoring_flow_id is None
+    assert prepared.helper_chat is None
+
+
+def _instructions(request: dict[str, object]) -> str:
+    """The system message the provider was sent."""
+    messages = cast(list[dict[str, Any]], request["messages"])
+    system = [message["content"] for message in messages if message["role"] == "system"]
+    assert len(system) == 1
+    return str(system[0])
+
+
+def _offered_tools(request: dict[str, object]) -> set[str]:
+    """The names of the tools the provider was offered, without the prefix
+    that says which server a tool is on."""
+    tools = cast(list[dict[str, Any]], request.get("tools") or [])
+    return {tool["function"]["name"].rsplit("__", 1)[-1] for tool in tools}
+
+
+def _bind_helper_chat(turn: TurnFixture, *, target_type: str, editing: bool) -> None:
+    model = turn.assistant.completion_model
+    assert model is not None
+    # Every tool of a flow's chat takes more than the fixture's small window.
+    model.max_input_tokens = 128_000
+    turn.assistant.hidden = True
+    turn.service._helper_chat_binding = AsyncMock(
+        return_value=HelperChatBinding(
+            target_type=target_type, target_id=uuid4(), editing=editing
+        )
+    )
+    turn.service.auth_service.create_scoped_mcp_token = Mock(return_value="scoped")
+
+
+@pytest.mark.parametrize(
+    ("editing", "note", "other_note"),
+    [(True, EDITING_NOW, ASKING_NOW), (False, ASKING_NOW, EDITING_NOW)],
+)
+async def test_a_flow_chat_turn_is_told_the_mode_its_tools_are_chosen_by(
+    turn: TurnFixture,
+    editing: bool,
+    note: str,
+    other_note: str,
+):
+    edit_tools = FLOW_EDIT_MODE_TOOLS
+    _bind_helper_chat(turn, target_type="flow", editing=editing)
+
+    await turn.service.ask(
+        question="Rename it",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    request = turn.requests[0]
+    instructions = _instructions(request)
+    assert instructions.startswith("Use the procurement policy.\n\n" + note)
+    assert other_note not in instructions
+    assert WITHOUT_TOOLS_NOW not in instructions
+    offered = _offered_tools(request)
+    assert offered
+    if editing:
+        assert edit_tools <= offered
+    else:
+        assert not edit_tools & offered
+    # The assistant's stored instructions stay as they are: the note is the
+    # turn's alone.
+    assert turn.assistant.get_prompt_text() == "Use the procurement policy."
+
+
+# A binding that says edit mode stands for a row that holds it: the turn of a
+# target without modes reads neither the column nor the binding's mode.
+@pytest.mark.parametrize("editing", [True, False])
+async def test_an_assistant_chat_turn_proposes_and_publishes_and_names_no_mode(
+    turn: TurnFixture,
+    editing: bool,
+):
+    _bind_helper_chat(turn, target_type="assistant", editing=editing)
+
+    await turn.service.ask(
+        question="Rename it",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    request = turn.requests[0]
+    instructions = _instructions(request)
+    assert instructions.startswith("Use the procurement policy.\n\n" + PROPOSING)
+    for note in (EDITING_NOW, ASKING_NOW, WITHOUT_TOOLS_NOW, WITHOUT_TOOLS):
+        assert note not in instructions
+    offered = _offered_tools(request)
+    assert {"propose_changes", "publish_assistant", "read_assistant"} <= offered
+    # The tool the note tells the model to call is one the turn offers.
+    assert "propose_changes" in PROPOSING
+
+
+@pytest.mark.parametrize(
+    ("target_type", "note", "other_notes"),
+    [
+        ("assistant", WITHOUT_TOOLS, (WITHOUT_TOOLS_NOW, PROPOSING)),
+        ("flow", WITHOUT_TOOLS_NOW, (WITHOUT_TOOLS, EDITING_NOW, ASKING_NOW)),
+    ],
+)
+async def test_a_helper_chat_turn_without_tool_calling_is_told_it_has_no_tools(
+    turn: TurnFixture,
+    target_type: str,
+    note: str,
+    other_notes: tuple[str, ...],
+):
+    model = turn.assistant.completion_model
+    assert model is not None
+    model.supports_tool_calling = False
+    _bind_helper_chat(turn, target_type=target_type, editing=True)
+
+    await turn.service.ask(
+        question="Rename it",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    request = turn.requests[0]
+    instructions = _instructions(request)
+    assert instructions.startswith("Use the procurement policy.\n\n" + note)
+    for other in other_notes:
+        assert other not in instructions
+    assert EDITING_NOW not in instructions
+    assert ASKING_NOW not in instructions
+    assert _offered_tools(request) == set()
+
+
+async def test_an_ordinary_assistant_turn_is_told_no_helper_chat_mode(
+    turn: TurnFixture,
+):
+    await turn.service.ask(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        session_id=turn.session.id,
+    )
+
+    instructions = _instructions(turn.requests[0])
+    assert instructions == "Use the procurement policy."
 
 
 async def test_prepare_does_not_start_inference_or_create_conversation(

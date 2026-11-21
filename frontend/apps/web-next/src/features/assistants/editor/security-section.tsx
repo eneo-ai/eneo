@@ -6,6 +6,7 @@ import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Input } from "@/components/ui/input";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
 import { useSpace } from "@/features/spaces/use-space";
+import { canEditAssistantRetention } from "./assistant-editor-rules";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 /**
@@ -18,7 +19,7 @@ export function SecuritySection({ assistant }: { assistant: Assistant }) {
   const { space, can } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const readOnlyHintId = useId();
-  const canEditRetention = space.personal || can("edit", "space");
+  const canEditRetention = canEditAssistantRetention(space, can("edit", "space"));
   const [daysVisited, setDaysVisited] = useState(false);
 
   const days = useAutosaveField({

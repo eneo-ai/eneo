@@ -32,8 +32,8 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.completion_model_migration_history_table import (
     CompletionModelMigrationHistory,
 )
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import Flows
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces
@@ -636,13 +636,14 @@ async def _flow_authoring_chat(
     session.add(conversation)
     await session.flush()
     session.add(
-        FlowAuthoringChats(
+        HelperChats(
             session_id=conversation.id,
             assistant_id=assistant.id,
             tenant_id=admin_user.tenant_id,
             space_id=space_id,
             user_id=admin_user.id,
-            flow_id=flow.id,
+            target_type="flow",
+            target_id=flow.id,
         )
     )
     await session.flush()

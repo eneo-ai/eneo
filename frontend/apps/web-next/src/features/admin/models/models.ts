@@ -409,6 +409,23 @@ export function adminModelsQueryOptions(api: EneoClient) {
   });
 }
 
+/**
+ * The completion models the organisation's default for chats that use tools
+ * may name (one value for the helper and the flow chat): enabled for the
+ * organisation, usable, not deprecated, and able to use tools.
+ */
+export function toolCapableCompletionModels(
+  catalog: ModelsPresentation | undefined
+): CompletionModelAdmin[] {
+  return (catalog?.completion_models ?? []).filter(
+    (model) =>
+      model.supports_tool_calling &&
+      model.is_org_enabled !== false &&
+      model.can_access !== false &&
+      !model.is_deprecated
+  );
+}
+
 export function isMigrationSecurityBlockerCode(code: string | undefined): boolean {
   return code?.startsWith("security_classification_insufficient") ?? false;
 }

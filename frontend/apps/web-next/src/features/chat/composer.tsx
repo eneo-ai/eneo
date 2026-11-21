@@ -351,7 +351,11 @@ function ComposerInput({
         composing.current = false;
       }}
       triggers={triggers}
-      className={cn("py-0.5", minRows === 2 && "[&_[contenteditable]]:min-h-[2.75rem]")}
+      // The field alone: a token in it is a contenteditable="false" span of one line.
+      className={cn(
+        "py-0.5",
+        minRows === 2 && "[&_[contenteditable]:not([contenteditable='false'])]:min-h-[2.75rem]"
+      )}
     />
   );
 }

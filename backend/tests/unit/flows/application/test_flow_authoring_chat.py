@@ -14,13 +14,12 @@ import pytest
 from sqlalchemy.dialects import postgresql
 
 from eneo.audit.domain.action_types import ActionType
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.flows.application import flow_authoring_chat
 from eneo.flows.application.flow_authoring_chat import (
     AUTHORING_INSTRUCTIONS,
     CONFIGURATION_EXAMPLES,
     starts_in_edit_mode,
-    tool_runtime_capabilities,
 )
 from eneo.flows.domain.flow_suggestions import (
     FLOW_SUGGESTION_AUTHORING_RULES,
@@ -28,6 +27,10 @@ from eneo.flows.domain.flow_suggestions import (
 )
 from eneo.flows.enums import FlowInputSource, FlowOutputDelivery, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.helper_chats.application import helper_chat_service
+from eneo.helper_chats.application.helper_chat_service import (
+    tool_runtime_capabilities,
+)
 from eneo.main.exceptions import BadRequestException
 from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
 
@@ -161,6 +164,17 @@ def test_the_instructions_name_the_switch_to_redigera_in_the_uis_words() -> None
     assert "read the flow again before you say" in instructions
     # HTTP or a named receiver already answers where the result goes.
     assert "the person has named no HTTP, address or receiving system" in (instructions)
+
+
+def test_the_instructions_take_the_mode_from_the_turns_note() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert (
+        'When the person asks for a change while the chat is in "Fråga" (the note '
+        "after these instructions says which mode it is in now)"
+    ) in instructions
+    # The mode is never read off the tools the turn offers.
+    assert "tools that change the flow are absent" not in instructions
 
 
 def test_the_instructions_say_what_a_word_step_and_a_delivery_step_can_do() -> None:
@@ -353,6 +367,20 @@ def test_the_instructions_take_a_contract_from_an_example() -> None:
     )
     assert "the example itself is not saved" in instructions
     assert "ask for one when the wanted result is structured" in instructions
+
+
+def test_the_instructions_help_write_a_steps_instruction_from_what_it_reads() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert (
+        "help writing or improving the instruction of a step, read that step in "
+        "full first" in instructions
+    )
+    assert "Ask only where the answer changes the instruction" in instructions
+    assert "never from invented facts" in instructions
+    assert "Keep the step's {{ ... }} reads as they are" in instructions
+    assert chr(0x2013) not in AUTHORING_INSTRUCTIONS
+    assert chr(0x2014) not in AUTHORING_INSTRUCTIONS
 
 
 def test_the_instructions_show_the_expected_result_without_doing_the_work() -> None:
@@ -554,6 +582,28 @@ def test_the_instructions_carry_what_the_tool_servers_notes_said() -> None:
     assert "or a change is refused because edit mode is off" in instructions
 
 
+async def test_the_flow_chat_does_not_follow_the_helper_chat_settings() -> None:
+    """The organisation's switch and guidance for the helper chat on
+    assistants leave the flow chat's persona and availability alone."""
+    container = MagicMock()
+    container.user.return_value = SimpleNamespace(
+        tenant_id=uuid4(),
+        tenant=SimpleNamespace(
+            flow_settings={
+                "helper_chat": {"enabled": False, "guidance": "Ange alltid källan."}
+            }
+        ),
+    )
+    container.feature_flag_service.return_value.check_is_feature_enabled = AsyncMock(
+        return_value=True
+    )
+
+    assert flow_authoring_chat.FLOW_TARGET.instructions(container) == (
+        AUTHORING_INSTRUCTIONS
+    )
+    assert await flow_authoring_chat.FLOW_TARGET.require_available(container) is None
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),
@@ -579,7 +629,7 @@ async def test_a_change_to_a_published_flow_is_refused_before_anything_happens(
     monkeypatch.setattr(
         flow_authoring_chat, "require_flow_edit_access", AsyncMock(return_value=access)
     )
-    chat = SimpleNamespace(editing=True, space_id=uuid4(), flow_id=uuid4())
+    chat = SimpleNamespace(editing=True, space_id=uuid4(), target_id=uuid4())
 
     with pytest.raises(BadRequestException) as refused:
         await flow_authoring_chat.require_authoring_edit(MagicMock(), chat, draft=True)
@@ -591,17 +641,37 @@ async def test_a_change_to_a_published_flow_is_refused_before_anything_happens(
     await flow_authoring_chat.require_authoring_edit(MagicMock(), chat)
 
 
+async def test_the_flow_chat_has_modes_and_a_published_flow_cannot_change(
+    monkeypatch,
+) -> None:
+    target = flow_authoring_chat.FLOW_TARGET
+    published = SimpleNamespace(published_version=2)
+    access = SimpleNamespace(flow=published)
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "require_flow_current_definition_access",
+        AsyncMock(return_value=access),
+    )
+
+    assert target.modes is not None
+    assert target.changeable(SimpleNamespace(published_version=None)) is True
+    assert target.changeable(published) is False
+    # The read check hands on the flow it loaded, so a turn asks no more.
+    assert await target.require_read(MagicMock(), MagicMock(), uuid4()) is published
+
+
 # --- Edit mode after a pause -------------------------------------------------
 
 
-def _chat(*, editing: bool) -> FlowAuthoringChats:
-    return FlowAuthoringChats(
+def _chat(*, editing: bool) -> HelperChats:
+    return HelperChats(
         session_id=uuid4(),
         assistant_id=uuid4(),
         tenant_id=uuid4(),
         space_id=uuid4(),
         user_id=uuid4(),
-        flow_id=uuid4(),
+        target_type="flow",
+        target_id=uuid4(),
         editing=editing,
         mode_changed_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
@@ -623,7 +693,7 @@ def _container(*scalars: object) -> MagicMock:
 
 def _idle(monkeypatch: pytest.MonkeyPatch, idle: bool) -> AsyncMock:
     measured = AsyncMock(return_value=idle)
-    monkeypatch.setattr(flow_authoring_chat, "_idle_since_last_activity", measured)
+    monkeypatch.setattr(helper_chat_service, "_idle_since_last_activity", measured)
     return measured
 
 
@@ -657,7 +727,7 @@ async def test_a_chat_loaded_after_a_pause_is_in_view_mode_and_cannot_write(
     assert chat.mode_changed_at == paused_since
     audit = container.audit_service.return_value.log_async.await_args.kwargs
     assert audit["action"] == ActionType.FLOW_AUTHORING_MODE_CHANGED
-    assert audit["entity_id"] == chat.flow_id
+    assert audit["entity_id"] == chat.target_id
     assert audit["metadata"]["extra"] == {
         "session_id": str(chat.session_id),
         "editing": False,
@@ -674,17 +744,17 @@ async def test_view_mode_is_written_only_over_the_chat_as_it_was_read(
     chat = _chat(editing=True)
     container = _container(chat.session_id)
 
-    await flow_authoring_chat._leave_edit_mode_after_pause(container, chat)
+    await helper_chat_service._leave_edit_mode_after_pause(container, chat)
 
     update = container.session.return_value.scalar.await_args.args[0]
     sql = str(update.compile(dialect=postgresql.dialect()))
     assert "SET editing=" in sql
     assert "mode_changed_at" not in sql.split("WHERE")[0]
     where = sql.split("WHERE")[1]
-    assert "flow_authoring_chats.session_id =" in where
-    assert "flow_authoring_chats.tenant_id =" in where
-    assert "flow_authoring_chats.editing IS true" in where
-    assert "flow_authoring_chats.mode_changed_at IS NOT DISTINCT FROM" in where
+    assert "helper_chats.session_id =" in where
+    assert "helper_chats.tenant_id =" in where
+    assert "helper_chats.editing IS true" in where
+    assert "helper_chats.mode_changed_at IS NOT DISTINCT FROM" in where
 
 
 async def test_a_mode_change_saved_meanwhile_is_kept(
@@ -695,7 +765,7 @@ async def test_a_mode_change_saved_meanwhile_is_kept(
     # The guarded update matched no row: the chat changed since it was read.
     container = _container(None)
 
-    await flow_authoring_chat._leave_edit_mode_after_pause(container, chat)
+    await helper_chat_service._leave_edit_mode_after_pause(container, chat)
 
     assert chat.editing is True
     container.audit_service.return_value.log_async.assert_not_awaited()
@@ -708,7 +778,7 @@ async def test_edit_mode_within_the_pause_is_kept(
     chat = _chat(editing=True)
     container = _container()
 
-    await flow_authoring_chat._leave_edit_mode_after_pause(container, chat)
+    await helper_chat_service._leave_edit_mode_after_pause(container, chat)
 
     assert chat.editing is True
     container.session.return_value.scalar.assert_not_awaited()
@@ -722,7 +792,7 @@ async def test_a_chat_in_view_mode_is_not_measured(
     chat = _chat(editing=False)
     container = _container()
 
-    await flow_authoring_chat._leave_edit_mode_after_pause(container, chat)
+    await helper_chat_service._leave_edit_mode_after_pause(container, chat)
 
     measured.assert_not_awaited()
     container.audit_service.return_value.log_async.assert_not_awaited()

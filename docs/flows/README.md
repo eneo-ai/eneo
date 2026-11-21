@@ -22,7 +22,8 @@ and partial-rerun surfaces.
 
 - Backend: `backend/src/eneo/flows`, layered per the package layout page.
 - Authoring: the editor (`PATCH /api/v1/flows/{id}/editor/`) and the flow's
-  authoring chat (`flows/application/flow_authoring_chat.py`, with its loopback
+  authoring chat (`flows/application/flow_authoring_chat.py`, the flow's target
+  for the helper chat mechanics in `backend/src/eneo/helper_chats`, with its loopback
   tools in `backend/src/eneo/internal_mcp/flows.py`) both save through
   `flows/application/flow_authoring_operations.py`.
 - Frontend: the new web app, `frontend/apps/web-next/src/features/flows`

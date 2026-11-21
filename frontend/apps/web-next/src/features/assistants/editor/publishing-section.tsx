@@ -12,6 +12,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { useSpace } from "@/features/spaces/use-space";
 import { PublishDialog } from "../publish-dialog";
+import { canToggleAssistantInsights } from "./assistant-editor-rules";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
@@ -39,7 +40,11 @@ function PublishStatusRow({ assistant }: { assistant: Assistant }) {
   });
 
   return (
-    <SettingsRow title={t("status")} description={t("publishing_description")}>
+    <SettingsRow
+      id="assistant-publish-status"
+      title={t("status")}
+      description={t("publishing_description")}
+    >
       <div className="flex items-center gap-3">
         <Badge variant={published ? "default" : "outline"}>
           {published ? t("published") : t("draft")}
@@ -72,13 +77,14 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
 
   const permissions = assistant.permissions ?? [];
   const canPublish = permissions.includes("publish");
-  const canToggleInsights = permissions.includes("insight_toggle");
+  const canToggleInsights = canToggleAssistantInsights(assistant);
   if (!canPublish && !canToggleInsights) return null;
 
   return (
     <SettingsGroup title={t("publishing")}>
       {canPublish && <PublishStatusRow assistant={assistant} />}
       <SettingsRow
+        id="assistant-insights"
         title={t("insights")}
         description={
           // Why the switch is off is written out: a title attribute is not shown on touch.

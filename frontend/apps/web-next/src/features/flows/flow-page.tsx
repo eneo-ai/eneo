@@ -61,9 +61,11 @@ import {
 import { parseFlowSearch } from "./flow-search";
 import { describeChanges, diffFlowSteps, hasChanges, type StepChange } from "./flow-changes";
 import type { ComposerInsert } from "@/features/chat/chat-references";
+import { HelperPanel } from "@/features/helper/helper-panel";
 import { FlowReferences, insertMessage } from "./chat/reference-pill";
-import { FlowChatPanel } from "./flow-chat-panel";
+import { useFlowChatReferences } from "./chat/use-flow-chat-references";
 import { FlowDraftCheck } from "./flow-draft-check-panel";
+import { useFlowHelper } from "./flow-helper";
 import { FlowPackageExportDialog } from "./flow-package-export-dialog";
 import { producesLabel, stepLabel } from "./flow-labels";
 import { flowRefusalMessage, refusalStep, STALE_REVISION } from "./flow-refusals";
@@ -257,6 +259,17 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     // Saved or dropped: "save or cancel first" is no longer true.
     if (!unsaved) setNotice((last) => (last?.cause === "unsaved" ? null : last));
   }, []);
+  // The open step's unsaved edits alone. The chat reads the saved flow, so a
+  // message waits while they stand, or while the settings form holds changes
+  // (`settingsDirty`, below): a form that is merely open holds nothing back.
+  const [stepUnsaved, setStepUnsaved] = useState(false);
+  const onStepUnsavedChange = useCallback(
+    (unsaved: boolean) => {
+      setStepUnsaved(unsaved);
+      onUnsavedChange(unsaved);
+    },
+    [onUnsavedChange]
+  );
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The last ask to bring the settings up, whether their form holds changes
@@ -264,8 +277,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const [settingsRequest, setSettingsRequest] = useState<SettingsRequest>();
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [draftProblems, setDraftProblems] = useState<number | null>(null);
-  // The chat's composer while it is on screen (the chat panel reports it).
-  const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
+  // What the chat can refer to, and its composer while it is on screen (the
+  // composer reports itself through the references).
+  const { references: chatReferences, composer: chatComposer } = useFlowChatReferences(flow);
   const searchParams = useSearchParams();
   // The open step lives in ?step=, so a refresh or a shared link opens it
   // again (an id the flow does not have shows the list).
@@ -303,6 +317,12 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     if (tab === "runs") selectTab("definition");
     if (!beside) setView("definition");
     setSettingsRequest((last) => ({ nonce: (last?.nonce ?? 0) + 1, focus }));
+  }
+
+  /** Below lg, shows the open step's editor from the chat, with focus on its region. */
+  function showEditor() {
+    flushSync(() => setView("definition"));
+    editorRef.current?.focus();
   }
 
   /** A refusal above both columns; a stale draft is reloaded first. */
@@ -610,6 +630,25 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       // The next action reads the flow again; a failed reread is not news.
     }
   }, [announce, flowId, queryClient, t]);
+
+  const helper = useFlowHelper({
+    flow,
+    references: chatReferences,
+    onAskChat: askChat,
+    onRefused: (error, title) => refused(error, title, steps),
+    onFlowMayHaveChanged: () => void refreshFromChat(),
+    unsaved: stepUnsaved || settingsDirty,
+    // Below lg the chat hides the definition: a held message's notice leads
+    // to the edits it waits for. Bringing the settings up answers an open
+    // form by focusing it, its changes kept.
+    unsavedAction: beside
+      ? null
+      : stepUnsaved
+        ? { label: t("flows_chat_send_held_show_step"), onAction: showEditor }
+        : settingsDirty
+          ? { label: t("flows_chat_send_held_show_settings"), onAction: () => openSettings() }
+          : null
+  });
 
   /**
    * Publishes the saved draft. A draft the page already knows cannot be
@@ -1107,7 +1146,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}
                     onCancel={closeStep}
-                    onUnsavedChange={onUnsavedChange}
+                    onUnsavedChange={onStepUnsavedChange}
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,
@@ -1164,13 +1203,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
               view !== "chat" && "max-lg:hidden"
             )}
           >
-            <FlowChatPanel
-              flow={flow}
-              onFlowMayHaveChanged={() => void refreshFromChat()}
-              onRefused={(error, title) => refused(error, title, steps)}
-              onComposer={setChatComposer}
-              onAskChat={askChat}
-            />
+            <HelperPanel adapter={helper} />
           </section>
         </div>
 

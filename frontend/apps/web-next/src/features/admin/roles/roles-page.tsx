@@ -88,6 +88,7 @@ const PERMISSION_KEYS: Partial<Record<Permission, string>> = {
   modules: "permission_modules",
   storage: "permission_storage",
   assistant_debug: "permission_assistant_debug",
+  helper_chat: "permission_helper_chat",
   web_search: "permission_web_search",
   image_generation: "permission_image_generation",
   flows_view: "flow_admin_permission_flows_view",

@@ -30,7 +30,7 @@ The final product deliberately has:
 | Published version | `flow_versions.definition_json` | Immutable, checksummed runtime snapshot. |
 | Run | `flow_runs` and runtime child tables | One execution pinned to one published version and tenant. |
 | Attempt | `flow_step_attempts` | Retry, recovery, and diagnostic evidence inside one run. |
-| Authoring chat | `flow_authoring_chats` | One per user and flow: an ordinary conversation and hidden assistant bound to the flow, with an edit-mode switch. |
+| Authoring chat | `helper_chats` (`target_type` `flow`) | One per user and flow: an ordinary conversation and hidden assistant bound to the flow, with an edit-mode switch. |
 
 Runtime must never read mutable draft steps. To repeat completed work, create a
 new run against an explicit published version.
@@ -61,7 +61,7 @@ not repeated automatically.
 | Draft lifecycle and publish | `flows/application/flow_service.py` |
 | Editor and authoring chat changes | `flows/application/flow_authoring_operations.py` |
 | Step move, insert and remove | `flows/application/flow_step_structure.py` |
-| Authoring chat and its tools | `flows/application/flow_authoring_chat.py` and `internal_mcp/flows.py` |
+| Authoring chat and its tools | `flows/application/flow_authoring_chat.py` (the flow as a target of the helper chat mechanics in `helper_chats/`) and `internal_mcp/flows.py` |
 | Publish validation | `flows/flow_validators.py` |
 | A step's reads, by channel | `flows/step_lineage.py` |
 | Flow suggestions | `flows/domain/flow_suggestions.py` and `flow_suggestion_*.py`, `flows/application/flow_suggestion_service.py` |

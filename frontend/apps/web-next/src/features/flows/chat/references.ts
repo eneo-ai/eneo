@@ -1,3 +1,8 @@
+import {
+  mentionParts as splitMentions,
+  mentionText,
+  parseBareMention
+} from "@/features/references/mentions";
 import { readMeaning, readTone, type ReadMeaning } from "../editor/request-preview";
 import { contractFields } from "../editor/step-variables";
 import type { FlowPublic, FlowStep } from "../editor/step-types";
@@ -13,11 +18,8 @@ import { templateParts } from "../flow-steps";
  */
 
 /** A step mention in a message: `@[<name>](step:<id>)`. */
-export const STEP_MENTION = /@\[([^\]\n]+)\]\(step:([^)\s]+)\)/g;
-
 export function stepMention(step: Pick<FlowStep, "id" | "user_description">): string {
-  const name = (step.user_description?.trim() || "").replace(/[[\]]/g, "") || "?";
-  return `@[${name}](step:${step.id})`;
+  return mentionText(step.user_description ?? "", "step", `${step.id}`);
 }
 
 export function valueReference(token: string): string {
@@ -60,16 +62,9 @@ export function valueOf(token: string, flow: Flow): Reference {
 }
 
 function mentionParts(text: string, flow: Flow): ReferencePart[] {
-  const parts: ReferencePart[] = [];
-  let cursor = 0;
-  for (const match of text.matchAll(STEP_MENTION)) {
-    const start = match.index ?? 0;
-    if (start > cursor) parts.push({ kind: "text", text: text.slice(cursor, start) });
-    parts.push({ ...stepReference(match[2]!, match[1]!, flow), raw: match[0] });
-    cursor = start + match[0].length;
-  }
-  if (cursor < text.length) parts.push({ kind: "text", text: text.slice(cursor) });
-  return parts;
+  return splitMentions(text, "step").map((part) =>
+    part.kind === "text" ? part : { ...stepReference(part.key, part.name, flow), raw: part.raw }
+  );
 }
 
 /** The text split into plain text, value references and step mentions. */
@@ -84,6 +79,22 @@ export function parseReference(raw: string, flow: Flow): Reference | null {
   const parts = referenceParts(raw, flow);
   const part = parts[0];
   return parts.length === 1 && part && part.kind !== "text" ? part : null;
+}
+
+/**
+ * What a reference in an answer is: one `parseReference` reads, or a step
+ * mention a model wrote without the scheme. `@[Steg 1](<id>)` is that step
+ * when the flow has a step with the id, and otherwise its name alone (a text
+ * part). Null for anything else.
+ */
+export function answerReference(raw: string, flow: Flow): ReferencePart | null {
+  const reference = parseReference(raw, flow);
+  if (reference) return reference;
+  const mention = parseBareMention(raw);
+  if (!mention) return null;
+  return flow.steps.some((step) => step.id === mention.key)
+    ? stepReference(mention.key, mention.name, flow)
+    : { kind: "text", text: mention.name };
 }
 
 /** The references a text holds, each once, in order of first appearance. */

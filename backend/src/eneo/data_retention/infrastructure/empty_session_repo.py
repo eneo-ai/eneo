@@ -11,8 +11,8 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from eneo.data_retention.domain.retention import RetentionKeyset
 from eneo.data_retention.infrastructure.retention_sql import outside_widgets, uuid_in
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.help_assistant_runs_table import HelpAssistantRuns
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.database.tables.insight_conversations_table import InsightConversations
 from eneo.database.tables.questions_table import Questions
 from eneo.database.tables.sessions_table import Sessions
@@ -21,7 +21,7 @@ from eneo.database.tables.sessions_table import Sessions
 class EmptySessionRepository:
     # The most one session's release reads and deletes: its lock and proof, the
     # session row and the one row its deletion cascades to, a help assistant's
-    # run, a Flow authoring chat or an insights conversation's link (each
+    # run, a helper chat or an insights conversation's link (each
     # UNIQUE on the session, and each makes its own session). Every caller that
     # funds a release before locking reserves this much.
     MAX_RELEASE_ROWS: Final = 3
@@ -54,22 +54,22 @@ class EmptySessionRepository:
         """The next `limit` sessions past the grace period in keyset order, each
         with whether another owner removes it, to be passed. Widget retention
         removes a widget's session, and the lock and the delete refuse it again.
-        Conversation history removes a Flow authoring chat's session with its
-        last question; before its first one the chat is empty, and its model and
+        Conversation history removes a helper chat's session with its last
+        question; before its first one the chat is empty, and its model and
         edit mode live in a row the session's deletion cascades to. An insights
         conversation is made with its first question, so an empty one is left
         over and goes like any other session, its link row with it. The keyset
         index reads exactly the rows returned, so passed sessions never make one
         window an unbounded read."""
-        authoring_chat = (
-            sa.select(FlowAuthoringChats.session_id)
-            .where(FlowAuthoringChats.session_id == Sessions.id)
+        helper_chat = (
+            sa.select(HelperChats.session_id)
+            .where(HelperChats.session_id == Sessions.id)
             .exists()
         )
         statement = sa.select(
             Sessions.id,
             Sessions.created_at,
-            (~outside_widgets() | authoring_chat).label("passed"),
+            (~outside_widgets() | helper_chat).label("passed"),
         ).where(Sessions.created_at < self.now - self.grace)
         if cursor is not None:
             statement = statement.where(
@@ -83,18 +83,18 @@ class EmptySessionRepository:
         )
 
     async def lock_empty(self, ids: Sequence[UUID]) -> Mapping[UUID, int]:
-        # The helper's, the authoring chat's and the insights link's UNIQUE
+        # The help assistant's, the helper chat's and the insights link's UNIQUE
         # session_id bound each cascade to at most one row.
         cost = (
             1
             + sa.case((HelpAssistantRuns.id.is_not(None), 1), else_=0)
-            + sa.case((FlowAuthoringChats.session_id.is_not(None), 1), else_=0)
+            + sa.case((HelperChats.session_id.is_not(None), 1), else_=0)
             + sa.case((InsightConversations.id.is_not(None), 1), else_=0)
         )
         statement = (
             sa.select(Sessions.id, cost)
             .outerjoin(HelpAssistantRuns, HelpAssistantRuns.session_id == Sessions.id)
-            .outerjoin(FlowAuthoringChats, FlowAuthoringChats.session_id == Sessions.id)
+            .outerjoin(HelperChats, HelperChats.session_id == Sessions.id)
             .outerjoin(
                 InsightConversations, InsightConversations.session_id == Sessions.id
             )

@@ -118,6 +118,7 @@ from eneo.flows.published_definition import (
     parse_published_runtime_steps,
 )
 from eneo.flows.runtime.document_runtime_preflight import require_document_runtime
+from eneo.helper_chats.targets import HelperChatTargetType
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import NOT_PROVIDED, NotProvided, ResourcePermission
 from eneo.settings.encryption_service import EncryptionService
@@ -527,10 +528,10 @@ class FlowService:
         assistants and conversations. A deleted flow is never restored and
         its chats can no longer be opened. API keys bound to such an assistant
         are revoked, as for every deleted assistant."""
-        assistant_ids = (
-            await self.assistant_service.repo.delete_flow_authoring_chat_assistants(
-                flow_id=flow_id, tenant_id=self.user.tenant_id
-            )
+        assistant_ids = await self.assistant_service.repo.delete_helper_chat_assistants(
+            target_type=HelperChatTargetType.FLOW,
+            target_id=flow_id,
+            tenant_id=self.user.tenant_id,
         )
         for assistant_id in assistant_ids:
             await self.assistant_service.api_key_scope_revoker.revoke_scope(

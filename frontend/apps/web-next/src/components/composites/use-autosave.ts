@@ -1,7 +1,7 @@
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";
-import { useSetSaveStatus } from "./save-status";
+import { usePendingSave, useSetSaveStatus } from "./save-status";
 
 /**
  * Wraps a save operation and drives the page-header status
@@ -12,12 +12,17 @@ import { useSetSaveStatus } from "./save-status";
  *
  * `key` should match the field's section/anchor id so the header error chip can
  * link back to it. The returned runner resolves to the operation's result, or
- * `undefined` if it failed (the error is already surfaced to the user).
+ * `undefined` if it failed (the error is already surfaced to the user). A page
+ * that saves what is pending (`useSavePendingNow`) waits for the saves on
+ * their way.
  */
 export function useAutosave(key: string) {
   const t = useTranslations();
   const setStatus = useSetSaveStatus();
   const state = useRef({ failed: false, pending: 0 });
+  // The saves on their way, each resolving whether it landed.
+  const running = useRef(new Set<Promise<boolean>>());
+  usePendingSave(async () => (await Promise.all([...running.current])).every(Boolean));
 
   // Don't strand a stale status when the field unmounts; a save still in
   // flight keeps reporting until it settles.
@@ -32,15 +37,21 @@ export function useAutosave(key: string) {
     async function run<T>(operation: () => Promise<T>): Promise<T | undefined> {
       state.current.pending += 1;
       setStatus?.(key, "saving");
+      let settle: (landed: boolean) => void = () => {};
+      const settled = new Promise<boolean>((resolve) => (settle = resolve));
+      running.current.add(settled);
       try {
         const result = await operation();
         state.current.failed = false;
+        settle(true);
         return result;
       } catch (error) {
         state.current.failed = true;
         toastApiError(error, t);
+        settle(false);
         return undefined;
       } finally {
+        running.current.delete(settled);
         state.current.pending = Math.max(0, state.current.pending - 1);
         if (state.current.failed) {
           setStatus?.(key, "error");
@@ -77,7 +88,10 @@ export function useDirtySaveStatus(key: string, dirty: boolean) {
  * a value already in flight is not sent again (a blur during a slow save would
  * otherwise create a second prompt version), `commit(value)` saves a value the
  * caller has just set before the draft state settles, and a dirty draft is
- * committed when the field unmounts (in-app navigation inside the debounce).
+ * committed when the field unmounts (in-app navigation inside the debounce)
+ * and when the page saves what is pending (`useSavePendingNow`). `commit`
+ * resolves false when its save failed, true otherwise (also when there was
+ * nothing to save, or nothing valid).
  */
 export function useAutosaveField<T, R = unknown>({
   key,
@@ -168,7 +182,7 @@ export function useAutosaveField<T, R = unknown>({
   );
 
   const commit = useCallback(
-    async (override?: T) => {
+    async (override?: T): Promise<boolean> => {
       window.clearTimeout(timer.current);
       const { autosave, draft, save, equals, validate, normalize, onSaved } = latest.current;
       const value = override === undefined ? draft : override;
@@ -176,20 +190,27 @@ export function useAutosaveField<T, R = unknown>({
       if (normalize && !equals(next, value)) setDraft(next);
       // Compare with what the server will hold: a value already in flight is not
       // sent again, and returning to the old value during a save is sent.
-      if (equals(next, serverNext())) return;
-      if (validate && !validate(next)) return;
+      if (equals(next, serverNext())) return true;
+      if (validate && !validate(next)) return true;
       const flight = { value: next };
       inFlight.current = flight;
+      let saved = false;
       await autosave(async () => {
         const result = await save(next);
         landed.current = flight;
+        saved = true;
         onSaved?.(result);
         return result;
       });
       if (inFlight.current === flight) inFlight.current = null;
+      return saved;
     },
     [serverNext]
   );
+
+  // A draft not yet sent goes when the page saves what is pending; one on its
+  // way is waited for by `useAutosave`.
+  usePendingSave(async () => (unsent() ? commit() : true));
 
   const reset = useCallback(() => setDraft(serverValue), [serverValue]);
 

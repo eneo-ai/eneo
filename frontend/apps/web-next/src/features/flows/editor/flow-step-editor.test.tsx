@@ -23,15 +23,6 @@ vi.mock("@/lib/api/browser", async () => {
   return { browserApi: api.stub.client };
 });
 
-// The Prompt Guide's answers stream from the help assistant; the availability read is real.
-const guide = vi.hoisted(() => ({ start: vi.fn(), next: vi.fn() }));
-vi.mock("@/features/help-assistants/prompt-guide/helper-runs", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/features/help-assistants/prompt-guide/helper-runs")>()),
-  startPromptGuideRun: guide.start,
-  continuePromptGuideRun: guide.next,
-  updateHelperRunStatus: vi.fn(async () => ({}))
-}));
-
 import { FlowStepEditor, type StepNavigation } from "./flow-step-editor";
 
 const EDITOR = "PATCH /api/v1/flows/{id}/editor/";
@@ -1073,60 +1064,33 @@ describe("FlowStepEditor", () => {
     ]);
   });
 
-  it("rewrites the instruction with the Prompt Guide into the draft, and its answers save no step", async () => {
-    api.routes["GET /api/v1/help-assistants/availability"] = () => ({ body: { available: true } });
-    guide.start.mockResolvedValue({ run: { id: "run-1" }, answer: "Vad ska steget göra?" });
-    guide.next.mockResolvedValue({
-      run: { id: "run-1" },
-      answer: "```prompt\nSammanfatta i tre punkter.\n```"
-    });
-    renderEditor(makeFlow());
+  it("puts a request for help with the instruction in the chat's composer, naming the step, and saves nothing", async () => {
+    const onAskChat = vi.fn();
+    renderEditor(makeFlow(), { onAskChat });
     await nameField();
     fireEvent.change(screen.getByLabelText(/^Instruktion/), { target: { value: "Mitt utkast." } });
 
-    fireEvent.click(await screen.findByRole("button", { name: messages.prompt_guide_button }));
-    const dialog = await screen.findByRole("dialog", { name: messages.prompt_guide_dialog_title });
-    // The guide starts from the draft's instruction, for the step's own assistant.
-    expect(guide.start.mock.calls[0]?.[0]).toMatchObject({ targetId: "assistant-1" });
-    expect(guide.start.mock.calls[0]?.[0].question).toContain("Mitt utkast.");
-    const answer = await within(dialog).findByRole("textbox", {
-      name: messages.prompt_guide_input_placeholder
-    });
-    fireEvent.change(answer, { target: { value: "Tre punkter." } });
     fireEvent.click(
-      within(dialog).getByRole("button", { name: messages.prompt_guide_question_send })
-    );
-    fireEvent.click(
-      await within(dialog).findByRole("button", { name: messages.prompt_guide_apply_button })
-    );
-    // The draft's own instruction is unsaved, so the guide asks before it replaces it.
-    const confirm = await screen.findByRole("alertdialog", {
-      name: messages.prompt_guide_apply_overwrite_title
-    });
-    fireEvent.click(
-      within(confirm).getByRole("button", { name: messages.prompt_guide_apply_button })
+      screen.getByRole("button", { name: messages.flow_step_editor_ask_instruction })
     );
 
-    await waitFor(() =>
-      expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
-        "Sammanfatta i tre punkter."
-      )
+    expect(onAskChat).toHaveBeenCalledWith(
+      "Hjälp mig skriva instruktionen för @[Sammanfatta](step:step-1)"
+    );
+    // The draft stays as it is, unsaved.
+    expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
+      "Mitt utkast."
     );
     expect(patchBodies()).toEqual([]);
   });
 
-  it("offers no Prompt Guide where the organisation has none for the caller", async () => {
-    api.routes["GET /api/v1/help-assistants/availability"] = () => ({
-      body: { available: false, disabled_reason: "no_assignment" }
-    });
+  it("offers no help with the instruction while the chat is not on the page", async () => {
     renderEditor(makeFlow());
     await nameField();
-    await waitFor(() =>
-      expect(
-        api.stub.calls.some((call) => call.path === "/api/v1/help-assistants/availability")
-      ).toBe(true)
-    );
-    expect(screen.queryByRole("button", { name: messages.prompt_guide_button })).toBeNull();
+    expect(screen.getByLabelText(/^Instruktion/)).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: messages.flow_step_editor_ask_instruction })
+    ).toBeNull();
   });
 
   it("keeps the edits when the draft moved on, and saves them on the reloaded revision", async () => {

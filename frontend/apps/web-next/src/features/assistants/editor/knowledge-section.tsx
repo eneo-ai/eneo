@@ -4,6 +4,7 @@ import { SettingsGroup, SettingsRow } from "@/components/composites/settings-row
 import { useAutosave } from "@/components/composites/use-autosave";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
+import { knowledgeBlockedByMcp } from "./assistant-editor-rules";
 import { RerankerRow } from "./reranker-row";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 import { MaterialHandling } from "./material-handling";
@@ -72,13 +73,12 @@ export function KnowledgeSection({
     });
   }
 
-  const hasAnyKnowledge =
+  const disabledByMcp = knowledgeBlockedByMcp(
     selections.collections.length +
       selections.websites.length +
-      selections.integrationKnowledge.length >
-    0;
-  const hasAnyMcp = (assistant.mcp_servers?.length ?? 0) > 0;
-  const disabledByMcp = hasAnyMcp && !hasAnyKnowledge;
+      selections.integrationKnowledge.length,
+    assistant.mcp_servers?.length ?? 0
+  );
 
   const warning = disabledByMcp && (
     <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
@@ -96,7 +96,11 @@ export function KnowledgeSection({
           assistantToolModel(space.completion_models, assistant)?.supports_tool_calling === true
         }
       />
-      <SettingsRow title={t("knowledge")} description={t("select_additional_knowledge")}>
+      <SettingsRow
+        id="assistant-knowledge"
+        title={t("knowledge")}
+        description={t("select_additional_knowledge")}
+      >
         <div className="flex flex-col gap-2">
           {warning}
           <KnowledgePicker

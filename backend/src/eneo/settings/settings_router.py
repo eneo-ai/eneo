@@ -41,6 +41,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionSpaceTargetPage,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.helper_chats.policy import HelperChatPolicyErrorCode
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, ErrorCodes
 from eneo.main.logging import get_logger
@@ -74,6 +75,8 @@ from eneo.settings.settings import (
     FlowRuntimePolicyPublic,
     FlowRuntimePolicyUpdate,
     GetModelsResponse,
+    HelperChatPolicyPublic,
+    HelperChatPolicyUpdate,
     SettingsBase,
     SettingsPublic,
     SkillExecutionBlockState,
@@ -921,6 +924,117 @@ async def update_flow_authoring_chat_policy(
 ) -> FlowAuthoringChatPolicyPublic:
     service = cast(_FlowSettingsServiceProtocol, container.settings_service())
     return await service.update_flow_authoring_chat_policy(payload)
+
+
+def _settings_admin_forbidden_response() -> dict[str, object]:
+    return _settings_error_response(
+        description="Caller lacks tenant admin permission to read or update settings.",
+        message="Insufficient permissions.",
+        eneo_error_code=ErrorCodes.UNAUTHORIZED,
+        code="insufficient_tenant_permission",
+    )
+
+
+def _helper_chat_policy_refusal(
+    code: HelperChatPolicyErrorCode, summary: str, message: str
+) -> tuple[str, dict[str, object]]:
+    value: dict[str, object] = {
+        "message": message,
+        "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+        "code": code.value,
+    }
+    if code != HelperChatPolicyErrorCode.INVALID_PAYLOAD:
+        value["context"] = {
+            "completion_model_id": "00000000-0000-0000-0000-000000000401"
+        }
+    return code.value, {"summary": summary, "value": value}
+
+
+_HELPER_CHAT_POLICY_REFUSALS = dict(
+    [
+        _helper_chat_policy_refusal(
+            HelperChatPolicyErrorCode.INVALID_PAYLOAD,
+            "Nothing to change",
+            "Send enabled, guidance or completion_model_id.",
+        ),
+        _helper_chat_policy_refusal(
+            HelperChatPolicyErrorCode.MODEL_UNAVAILABLE,
+            "The model is not enabled",
+            "The model is not one of the organisation's enabled models.",
+        ),
+        _helper_chat_policy_refusal(
+            HelperChatPolicyErrorCode.MODEL_WITHOUT_TOOLS,
+            "The model does not support tools",
+            "The helper chat needs a model that supports tools.",
+        ),
+    ]
+)
+
+
+@settings_admin_router.get(
+    "/helper-chat-policy",
+    response_model=HelperChatPolicyPublic,
+    operation_id="get_helper_chat_policy",
+    summary="Get the helper chat settings",
+    description=(
+        "Return the organisation's settings for the helper chat on assistants: "
+        "whether it is on, the organisation's guidance added to its persona "
+        "and the longest guidance that can be saved, and the default model "
+        "every helper chat shares with the flow chat. A setting never saved "
+        "has its default: on, no guidance, no default model."
+    ),
+    responses={403: _settings_admin_forbidden_response()},
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def get_helper_chat_policy(
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> HelperChatPolicyPublic:
+    return await container.settings_service().get_helper_chat_policy()
+
+
+@settings_admin_router.patch(
+    "/helper-chat-policy",
+    response_model=HelperChatPolicyPublic,
+    operation_id="update_helper_chat_policy",
+    summary="Update the helper chat settings",
+    description=(
+        "Change the fields sent and keep the others. `enabled: false` turns "
+        "the helper chat on assistants off for everyone: opening, changing "
+        "and continuing a chat and its tool calls are refused "
+        "(`helper_chat_disabled`) and its availability answers `disabled`; "
+        "conversations already held are kept, and the flow chat is not "
+        "affected. `guidance` is added to the helper's persona after its "
+        "base rules and reaches a chat the next time it is opened. "
+        "`completion_model_id` is the default model of every helper chat, the "
+        "flow chat's included: an enabled completion model of the "
+        "organisation that supports tools, or null to remove it."
+    ),
+    responses={
+        400: {
+            "model": GeneralError,
+            "description": (
+                "Nothing to change, or the model is not enabled or does not "
+                "support tools."
+            ),
+            "content": {"application/json": {"examples": _HELPER_CHAT_POLICY_REFUSALS}},
+        },
+        403: _settings_admin_forbidden_response(),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Permission.ADMIN,
+    reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+)
+async def update_helper_chat_policy(
+    payload: HelperChatPolicyUpdate,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+) -> HelperChatPolicyPublic:
+    return await container.settings_service().update_helper_chat_policy(payload)
 
 
 @flow_settings_admin_router.get(

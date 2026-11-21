@@ -70,6 +70,8 @@ from eneo.help_assistants.infrastructure.help_assistant_assignment_history_repo 
 from eneo.help_assistants.infrastructure.org_space_assistant_role_repo import (
     OrgSpaceAssistantRoleRepo,
 )
+from eneo.helper_chats.binding import HelperChatBinding
+from eneo.helper_chats.personas.shared import turn_note
 from eneo.icons.icon_repo import IconRepository
 from eneo.internal_mcp import (
     build_files_mcp_server,
@@ -326,10 +328,9 @@ class _PreparedAssistantTurn:
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
-    # The flow a hidden assistant's chat edits; its turns get the flows tools,
-    # the changing ones only while the chat is in edit mode.
-    authoring_flow_id: UUID | None = None
-    authoring_editing: bool = False
+    # The helper chat a hidden assistant answers in; its turns get the tools
+    # of the chat's target, the changing ones only while it is in edit mode.
+    helper_chat: HelperChatBinding | None = None
 
 
 @dataclass(frozen=True)
@@ -2765,22 +2766,53 @@ class AssistantService:
             personal_layer=skill_plan.personal_layer,
         )
 
-    async def flow_authoring_chat_owner_id(self, assistant_id: UUID) -> UUID | None:
-        """The person whose flow authoring chat ``assistant_id`` answers in, or
-        None when it is no flow authoring chat's assistant in the caller's
-        tenant."""
+    async def helper_chat_owner_id(self, assistant_id: UUID) -> UUID | None:
+        """The person whose helper chat ``assistant_id`` answers in, or None
+        when it is no helper chat's assistant in the caller's tenant."""
         import sqlalchemy as sa
 
-        from eneo.database.tables.flow_authoring_chats_table import (
-            FlowAuthoringChats,
-        )
+        from eneo.database.tables.helper_chats_table import HelperChats
 
         return await self.repo.session.scalar(
-            sa.select(FlowAuthoringChats.user_id).where(
-                FlowAuthoringChats.assistant_id == assistant_id,
-                FlowAuthoringChats.tenant_id == self.user.tenant_id,
+            sa.select(HelperChats.user_id).where(
+                HelperChats.assistant_id == assistant_id,
+                HelperChats.tenant_id == self.user.tenant_id,
             )
         )
+
+    async def lock_assistant(self, assistant_id: UUID) -> bool:
+        """Lock ``assistant_id`` in the caller's tenant for a change, in the
+        order an assistant save takes its locks: the tenant's fit token, then
+        the assistant's row. Whether the assistant exists."""
+        import sqlalchemy as sa
+
+        from eneo.database.tables.assistant_table import Assistants
+        from eneo.database.tables.spaces_table import Spaces
+
+        await self._acquire_personal_default_fit_lock(shared=True)
+        locked = await self.repo.session.scalar(
+            sa.select(Assistants.id)
+            .join(Spaces, Spaces.id == Assistants.space_id)
+            .where(
+                Assistants.id == assistant_id,
+                Spaces.tenant_id == self.user.tenant_id,
+            )
+            .with_for_update(of=Assistants)
+        )
+        return locked is not None
+
+    async def _delete_helper_chats(self, assistant_id: UUID) -> None:
+        """Delete the helper chats on ``assistant_id`` with their hidden
+        assistants and conversations. API keys bound to such an assistant are
+        revoked, as for every deleted assistant."""
+        from eneo.helper_chats.targets import HelperChatTargetType
+
+        for hidden_id in await self.repo.delete_helper_chat_assistants(
+            target_type=HelperChatTargetType.ASSISTANT,
+            target_id=assistant_id,
+            tenant_id=self.user.tenant_id,
+        ):
+            await self._revoke_assistant_api_keys(hidden_id)
 
     async def is_help_assistant(self, assistant_id: UUID) -> bool:
         """Whether ``assistant_id`` currently fills a Help Assistant role.
@@ -2930,6 +2962,8 @@ class AssistantService:
             )
 
         icon_id = await self.repo.delete(assistant_id, space.id)
+        # The people's helper chats on it go with it.
+        await self._delete_helper_chats(assistant_id)
 
         # After the delete: a widget created meanwhile holds the assistant row
         # until it commits, so it is archived here too.
@@ -3805,14 +3839,13 @@ class AssistantService:
             tool_assistant_id=tool_assistant_id,
         )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
-        authoring_flow_id: UUID | None = None
-        authoring_editing = False
+        helper_chat: HelperChatBinding | None = None
         if active_assistant.hidden:
-            # A hidden assistant answers only in the flow authoring chat it was
-            # made for, continued by the person the chat belongs to.
+            # A hidden assistant answers only in the helper chat it was made
+            # for, continued by the person the chat belongs to.
             if session_id is None or tool_assistant_id is not None:
                 raise NotFoundException("Assistant not found.")
-            authoring_flow_id, authoring_editing = await self._authoring_chat_binding(
+            helper_chat = await self._helper_chat_binding(
                 session_id=session_id, assistant_id=assistant_id
             )
         if tool_assistant_id is not None and any(
@@ -4079,27 +4112,25 @@ class AssistantService:
             model_route=model_route,
             initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
             is_personal_default=is_personal_default,
-            authoring_flow_id=authoring_flow_id,
-            authoring_editing=authoring_editing,
+            helper_chat=helper_chat,
         )
 
-    async def _authoring_chat_binding(
+    async def _helper_chat_binding(
         self, *, session_id: UUID, assistant_id: UUID
-    ) -> tuple[UUID, bool]:
-        """The flow the chat edits and whether it is in edit mode, after the
-        binding's own access checks."""
+    ) -> HelperChatBinding:
+        """The target the chat helps with and whether the turn runs in edit
+        mode, after the binding's own access checks."""
         from dependency_injector import providers
 
-        from eneo.flows.application.flow_authoring_chat import load_authoring_chat
+        from eneo.helper_chats.application.helper_chat_service import load_binding
         from eneo.main.container.container_overrides import override_user
         from eneo.main.container.request_container import request_container
 
         container = request_container(session=providers.Object(self.repo.session))
         override_user(container=container, user=self.user)
-        chat = await load_authoring_chat(
+        return await load_binding(
             container, session_id=session_id, assistant_id=assistant_id
         )
-        return chat.flow_id, chat.editing
 
     async def _execute_turn(
         self,
@@ -4134,9 +4165,9 @@ class AssistantService:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
                     assistant_id=prepared.assistant_to_ask.id,
-                    # The flows tools find their flow through the chat.
+                    # A helper chat's tools find their target through the chat.
                     session_id=(
-                        session.id if prepared.authoring_flow_id is not None else None
+                        session.id if prepared.helper_chat is not None else None
                     ),
                     table_tools=table_tools_attached,
                     derived_from=self.user.credential,
@@ -4178,20 +4209,36 @@ class AssistantService:
                 source_labels=prepared.assistant_to_ask.knowledge_source_labels(),
             )
 
-        # A flow authoring chat edits its flow through the loopback flows
-        # tools; a model without tool calling only talks about it.
-        flows_mcp_server = None
-        if (
-            prepared.authoring_flow_id is not None
-            and prepared.effective_completion_model.supports_tool_calling
-        ):
-            from eneo.internal_mcp.flows import build_flows_mcp_server
+        # A helper chat works on its target through the target's loopback
+        # tools; a model without tool calling only talks about it. The turn's
+        # instructions end with a note for the mode the tools are chosen by
+        # (none for a target without modes), so what the model is told and
+        # what it is offered agree; the note is appended, because the start
+        # of the prompt belongs to the Skill runtime.
+        helper_mcp_server = None
+        if prepared.helper_chat is not None:
+            from eneo.helper_chats.targets import target_for
 
-            flows_mcp_server = await build_flows_mcp_server(
-                token=mint_scoped_token(),
-                tenant_id=self.user.tenant_id,
-                editing=prepared.authoring_editing,
+            helper_target = target_for(prepared.helper_chat.target_type)
+            can_call_tools = prepared.effective_completion_model.supports_tool_calling
+            prompt_addendum = "\n\n".join(
+                part
+                for part in (
+                    prompt_addendum,
+                    turn_note(
+                        has_modes=helper_target.modes is not None,
+                        editing=prepared.helper_chat.editing,
+                        can_call_tools=can_call_tools,
+                    ),
+                )
+                if part
             )
+            if can_call_tools:
+                helper_mcp_server = await helper_target.build_tool_server(
+                    token=mint_scoped_token(),
+                    tenant_id=self.user.tenant_id,
+                    editing=prepared.helper_chat.editing,
+                )
 
         # Referenced attachments: whenever signed reference URLs render in the
         # prompt, attach the loopback files server so the model always has at
@@ -4307,7 +4354,7 @@ class AssistantService:
             knowledge_mcp_server=knowledge_mcp_server,
             internal_mcp_servers=[
                 server
-                for server in (files_mcp_server, flows_mcp_server)
+                for server in (files_mcp_server, helper_mcp_server)
                 if server is not None
             ],
         )

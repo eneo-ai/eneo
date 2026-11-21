@@ -10,6 +10,7 @@ import { flushSync } from "react-dom";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { HELPER_CHAT_POLICY_KEY } from "@/features/admin/helper-chat/helper-chat-policy";
 import { useFieldFocus } from "@/features/admin/models/provider-form-fields";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -123,6 +124,9 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
     setSettings(next);
     setDraft((current) => rebaseDraft(current, next, sections));
     queryClient.setQueryData(FLOW_SETTINGS_KEY, next);
+    // The helper chat's settings show the same default model.
+    if (sections.includes("authoringChat"))
+      void queryClient.invalidateQueries({ queryKey: HELPER_CHAT_POLICY_KEY });
   }
 
   // Save is never disabled: a problem shows at its field, which takes focus;

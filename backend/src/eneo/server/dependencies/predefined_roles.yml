@@ -50,6 +50,7 @@ roles:
       - shared_spaces
       - api_keys
       - assistant_debug
+      - helper_chat
       - web_search
       - image_generation
       - file_analysis

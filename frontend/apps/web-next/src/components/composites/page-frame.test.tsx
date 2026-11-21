@@ -33,6 +33,8 @@ describe("PageFrame", () => {
       "components/composites/icon-field.tsx",
       "features/account/",
       "features/chat/",
+      // An earlier helper conversation is read in the chat's reading column.
+      "features/helper/earlier-conversation.tsx",
       "features/spaces/chat/",
       "features/workspace/preview/"
     ];

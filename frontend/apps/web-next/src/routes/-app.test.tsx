@@ -481,7 +481,6 @@ it.each(["apps", "assistants", "group-chats"] as const)(
     replies.set("/api/v1/spaces/space-1/", makeSpace());
     for (const id of ["resource-1", "resource-2"])
       replies.set(`/api/v1/${kind}/${id}/`, { id, name: `Name ${id}` });
-    replies.set("/api/v1/help-assistants/availability", new Response(null, { status: 500 }));
     const base = `/spaces/space-1/${kind}`;
     const { router } = await renderRoute(
       `${base}/resource-1/edit`,
@@ -510,29 +509,27 @@ it.each(["apps", "assistants", "group-chats"] as const)(
   }
 );
 
-it.each([
-  { admin: true, destination: "/admin/help-assistants" },
-  { admin: false, destination: "/spaces/personal/chat" }
-])(
-  "redirects a help assistant through destination access (admin=$admin)",
-  async ({ admin, destination }) => {
+it.each([{ admin: true }, { admin: false }])(
+  "answers not found for a help assistant's edit link, as the chat pages do (admin=$admin)",
+  async ({ admin }) => {
     replies.set("/api/v1/users/me/", testAppContext({ permissions: admin ? ["admin"] : [] }).user);
     replies.set("/api/v1/spaces/space-1/", makeSpace());
     replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
-    replies.set("/api/v1/admin/help-assistants/roles/", { items: [] });
-    replies.set("/api/v1/admin/help-assistants/templates/", { items: [] });
     const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
-    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(router.state.location.pathname).toBe("/spaces/space-1/assistants/help/edit");
+    expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
     expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
-    expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
-    if (admin) {
-      await screen.findByRole("heading", {
-        name: messages.admin_help_assistants_page_title,
-        level: 1
-      });
-    } else {
-      expect(requestedPaths()).not.toContain("/api/v1/admin/help-assistants/roles/");
-    }
+    expect(requestedPaths()).toContain("/api/v1/assistants/help/");
+    // Nothing is read for a page that is not there: no warm-up, no settings.
+    expect(requestedPaths()).not.toContain("/api/v1/assistants/help/helper-chat/availability");
+    expect(
+      requestedPaths().filter(
+        (path) =>
+          path.startsWith("/api/v1/admin/help-assistants/") ||
+          path === "/api/v1/settings/helper-chat-policy"
+      )
+    ).toEqual([]);
   }
 );
 
@@ -1716,13 +1713,16 @@ it.each([
   "/admin/user-groups",
   "/admin/usage/users/missing",
   "/admin/roles",
-  "/admin/flow-settings"
+  "/admin/flow-settings",
+  "/admin/help-assistants"
 ])("denies an admin page before reading its data: %s", async (path) => {
   const { router } = await renderRoute(path);
   expect(router.state.location.pathname).toBe("/spaces/personal/chat");
   expect(
     requestedPaths().some((entry) =>
-      /\/admin\/|\/token-usage\/|\/roles\/|\/user-groups\/|\/settings\/flow-/.test(entry)
+      /\/admin\/|\/token-usage\/|\/roles\/|\/user-groups\/|\/settings\/(flow-|helper-chat-policy)/.test(
+        entry
+      )
     )
   ).toBe(false);
 });

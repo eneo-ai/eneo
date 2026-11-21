@@ -6,7 +6,11 @@ import { SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import {
+  rerankerShown,
+  selectableRerankModels,
+  spaceModelsQueryOptions
+} from "./assistant-editor-rules";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
 const NO_RERANKER = "none";
@@ -21,11 +25,7 @@ export function RerankerRow({ assistant }: { assistant: Assistant }) {
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("reranker");
-  const { data: models } = useQuery({
-    queryKey: ["ai-models", space.id],
-    queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/ai-models/", { params: { query: { space_id: space.id } } }))
-  });
+  const { data: models } = useQuery(spaceModelsQueryOptions(browserApi, space.id));
 
   const saved = assistant.rerank_model_id ?? null;
   const [choice, setChoice] = useState<string | null>(saved);
@@ -38,12 +38,10 @@ export function RerankerRow({ assistant }: { assistant: Assistant }) {
     setChoice((current) => (current === previous ? saved : current));
   }, [saved]);
 
-  const selectable = (models?.rerank_models ?? []).filter(
-    (model) => model.can_access && model.meets_security_classification !== false
-  );
+  const selectable = selectableRerankModels(models);
   const unavailable =
     models !== undefined && choice !== null && !selectable.some((model) => model.id === choice);
-  if (selectable.length === 0 && choice === null && saved === null) return null;
+  if (!rerankerShown(selectable, choice, saved)) return null;
 
   function handleChange(value: string) {
     const next = value === NO_RERANKER ? null : value;

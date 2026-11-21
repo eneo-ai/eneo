@@ -9,7 +9,10 @@ import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Switch } from "@astryxdesign/core/Switch";
 import { useAppContext } from "@/components/providers/app-context";
-import { adminModelsQueryOptions } from "@/features/admin/models/models";
+import {
+  adminModelsQueryOptions,
+  toolCapableCompletionModels
+} from "@/features/admin/models/models";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import {
@@ -495,13 +498,7 @@ export function AuthoringChatSection({ kit }: { kit: FieldKit }) {
   const t = useTranslations();
   const { tenant } = useAppContext();
   const catalog = useQuery(adminModelsQueryOptions(browserApi));
-  const models = (catalog.data?.completion_models ?? []).filter(
-    (model) =>
-      model.supports_tool_calling &&
-      model.is_org_enabled !== false &&
-      model.can_access !== false &&
-      !model.is_deprecated
-  );
+  const models = toolCapableCompletionModels(catalog.data);
   const problem = kit.problem("completion_model_id");
 
   return (

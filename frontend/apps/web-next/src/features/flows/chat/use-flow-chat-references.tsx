@@ -1,11 +1,13 @@
 import type { ChatComposerToken, ChatComposerTrigger } from "@astryxdesign/core/Chat";
-import { IconButton } from "@astryxdesign/core/IconButton";
 import { Text } from "@astryxdesign/core/Text";
-import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
-import { AtSign } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useMemo, useState } from "react";
 import type { ChatReferences, ComposerInsert } from "@/features/chat/chat-references";
+import {
+  ReferenceMenuButton,
+  referenceMenuTrigger,
+  type ReferenceMenuItem
+} from "@/features/references/reference-menu";
 import type { FlowPublic } from "../editor/step-types";
 import { stepLabel } from "../flow-labels";
 import { referenceComponents, referenceRemarkPlugins } from "./answer-references";
@@ -21,7 +23,6 @@ import {
 } from "./references";
 
 type Flow = Pick<FlowPublic, "steps" | "metadata_json">;
-type ChoiceItem = SearchableItem<{ choice: ReferenceChoice; group: string }>;
 
 function toReference(choice: ReferenceChoice, flow: Flow): Reference {
   if (choice.kind === "step") {
@@ -66,55 +67,44 @@ export function useFlowChatReferences(flow: Flow): {
 } {
   const t = useTranslations();
 
-  const items = useMemo<ChoiceItem[]>(
+  const items = useMemo<ReferenceMenuItem<ReferenceChoice>[]>(
     () =>
       [...referenceChoices(flow), ...RUN_CHOICES].map((choice) => ({
         id: choice.raw,
         // What the row's pill says.
         label: referenceLabel(toReference(choice, flow), flow, t),
-        auxiliaryData: {
-          choice,
-          group:
-            choice.kind === "run" ? t("flows_chat_reference_group_run") : stepLabel(choice.step, t)
-        }
+        group:
+          choice.kind === "run" ? t("flows_chat_reference_group_run") : stepLabel(choice.step, t),
+        keywords:
+          choice.kind === "run"
+            ? [choice.token]
+            : [
+                choice.step.user_description ?? "",
+                // "steg 1", "step_1" and "1" find the step as well as its name.
+                stepLabel(choice.step, t),
+                `step_${choice.step.step_order}`,
+                String(choice.step.step_order),
+                choice.kind === "value" ? choice.token : "",
+                choice.kind === "value" && choice.what.type === "field" ? choice.what.field : ""
+              ].filter(Boolean),
+        value: choice
       })),
     [flow, t]
   );
 
   const triggers = useMemo<ChatComposerTrigger[]>(
     () => [
-      {
-        character: "@",
-        searchSource: createStaticSource(items, {
-          keywords: (item) => {
-            const { choice } = item.auxiliaryData!;
-            if (choice.kind === "run") return [choice.token];
-            return [
-              choice.step.user_description ?? "",
-              // "steg 1", "step_1" and "1" find the step as well as its name.
-              stepLabel(choice.step, t),
-              `step_${choice.step.step_order}`,
-              String(choice.step.step_order),
-              choice.kind === "value" ? choice.token : "",
-              choice.kind === "value" && choice.what.type === "field" ? choice.what.field : ""
-            ].filter(Boolean);
-          }
-        }),
-        hasMultiWordQuery: true,
+      referenceMenuTrigger({
+        items,
         menuLabel: t("flows_chat_reference_menu"),
-        emptySearchText: t("flows_chat_reference_empty"),
+        emptyText: t("flows_chat_reference_empty"),
         loadingText: t("flows_chat_reference_searching"),
-        renderItem: (item) => (
-          <ReferenceRow choice={(item as ChoiceItem).auxiliaryData!.choice} flow={flow} />
-        ),
-        onSelect: (item) => {
-          const { choice } = (item as ChoiceItem).auxiliaryData!;
-          return {
-            value: choice.raw,
-            render: () => <ReferencePill reference={toReference(choice, flow)} />
-          };
-        }
-      }
+        renderItem: (choice) => <ReferenceRow choice={choice} flow={flow} />,
+        toToken: (choice) => ({
+          value: choice.raw,
+          render: () => <ReferencePill reference={toReference(choice, flow)} />
+        })
+      })
     ],
     [items, flow, t]
   );
@@ -130,13 +120,7 @@ export function useFlowChatReferences(flow: Flow): {
 
   const headerActions = useCallback(
     (input: ComposerInsert) => (
-      <IconButton
-        label={t("flows_chat_reference_button")}
-        icon={<AtSign aria-hidden="true" />}
-        variant="ghost"
-        size="sm"
-        onClick={() => input.insertText("@")}
-      />
+      <ReferenceMenuButton label={t("flows_chat_reference_button")} input={input} />
     ),
     [t]
   );

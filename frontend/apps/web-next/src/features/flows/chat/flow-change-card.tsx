@@ -2,9 +2,15 @@ import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { PencilLine } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useState, type ReactNode } from "react";
-import { IconTile } from "@/components/composites/icon-tile";
+import type { ReactNode } from "react";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
+import {
+  FieldBeforeAfter,
+  FOLDED_LINES,
+  HELPER_CARD_COLLAPSIBLE_CLASS,
+  HelperCardFrame,
+  isLongText
+} from "@/features/helper/helper-card";
 import { anchorForPath } from "../editor/field-problems";
 import {
   hasHttpConfig,
@@ -221,16 +227,8 @@ function changedLines(before: Shown, after: Shown): [Shown, Shown] {
   return keptBefore.length + keptAfter.length > 0 ? [keptBefore, keptAfter] : [before, after];
 }
 
-/** The lines a value folds to until "Visa hela", and the characters of text. */
-const FOLDED_LINES = 4;
-const FOLDED_CHARS = 200;
-
-// ponytail: length heuristic, not a measurement; measure the clamp if a
-// short value ever shows "Visa hela" without anything more to show.
 function isLong(shown: Shown): boolean {
-  return typeof shown === "string"
-    ? shown.length > FOLDED_CHARS || shown.split("\n").length > FOLDED_LINES
-    : shown.length > FOLDED_LINES;
+  return typeof shown === "string" ? isLongText(shown) : shown.length > FOLDED_LINES;
 }
 
 function ShownValue({ shown, folded }: { shown: Shown; folded: boolean }) {
@@ -261,46 +259,20 @@ function ShownValue({ shown, folded }: { shown: Shown; folded: boolean }) {
 /** One changed field, before and after, folded to a few lines with "Visa hela". */
 function FieldChange({ field }: { field: ChangedField }) {
   const t = useTranslations();
-  const [open, setOpen] = useState(false);
   const key = FIELD_LABEL_KEYS[field.field];
   const [before, after] = changedLines(
     shownValue(field.field, field.before, t),
     shownValue(field.field, field.after, t)
   );
-  const long = isLong(before) || isLong(after);
-  const folded = long && !open;
   return (
-    <li className="flex flex-col gap-1">
-      <p className="text-ax-text-secondary m-0 text-xs font-semibold">
-        {key ? t(key) : field.field}
-      </p>
-      <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[13px]">
-        <dt className="text-ax-text-tertiary">{t("flows_change_card_before")}</dt>
-        <dd className="text-ax-text-secondary m-0 min-w-0 break-words whitespace-pre-wrap">
-          <ShownValue shown={before} folded={folded} />
-        </dd>
-        <dt className="text-ax-text-tertiary">{t("flows_change_card_after")}</dt>
-        <dd className="text-ax-text m-0 min-w-0 break-words whitespace-pre-wrap">
-          <ShownValue shown={after} folded={folded} />
-        </dd>
-      </dl>
-      {long ? (
-        <div>
-          <Button
-            size="sm"
-            variant="ghost"
-            label={open ? t("flows_change_card_show_less") : t("flows_change_card_show_all")}
-            onClick={() => setOpen((value) => !value)}
-          />
-        </div>
-      ) : null}
-    </li>
+    <FieldBeforeAfter
+      label={key ? t(key) : field.field}
+      long={isLong(before) || isLong(after)}
+      before={(folded) => <ShownValue shown={before} folded={folded} />}
+      after={(folded) => <ShownValue shown={after} folded={folded} />}
+    />
   );
 }
-
-// Compact trigger rows, as the chat's activity disclosures have.
-const CARD_COLLAPSIBLE_CLASS =
-  "[&_.astryx-collapsible-trigger]:min-h-8 [&_.astryx-collapsible-trigger]:text-[13px] [&_.astryx-collapsible-trigger]:font-medium";
 
 /**
  * What a change of the chat did to the flow, drawn in the answer where the
@@ -334,15 +306,8 @@ export function FlowChangeCard({ steps }: { steps: ChangedStep[] }) {
   }
 
   return (
-    <section
-      aria-label={label}
-      className="border-ax-border bg-ax-sunken rounded-ax-container flex w-full flex-col gap-3 border p-3.5 font-sans"
-    >
-      <div className="flex items-center gap-2.5">
-        <IconTile size="sm" hue="blue" icon={<PencilLine className="size-4" />} />
-        <h3 className="m-0 text-[13.5px] font-semibold">{label}</h3>
-      </div>
-      <div className={CARD_COLLAPSIBLE_CLASS}>
+    <HelperCardFrame label={label} icon={<PencilLine className="size-4" />}>
+      <div className={HELPER_CARD_COLLAPSIBLE_CLASS}>
         {steps.map((step) => {
           const title = stepLabel({ user_description: step.name, step_order: step.stepOrder }, t);
           return (
@@ -373,6 +338,6 @@ export function FlowChangeCard({ steps }: { steps: ChangedStep[] }) {
           );
         })}
       </div>
-    </section>
+    </HelperCardFrame>
   );
 }

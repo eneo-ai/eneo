@@ -278,7 +278,11 @@ type ChatViewProps = {
   partnerToken?: ReactNode;
   activity: ActivityState | null;
   onActivityChange: (next: ActivityState | null) => void;
-  /** The row the side panel measures, and whether the conversation is on screen. */
+  /**
+   * The row the side panel measures, whether the conversation is on screen,
+   * and whether the chat is a column of a wider page (the panel then covers
+   * the conversation in that column where it has no room beside it).
+   */
   layout?: SidePanelLayout;
   /**
    * A tool call of this visit reached its result or failed, once per call
@@ -288,6 +292,18 @@ type ChatViewProps = {
   onToolCallFinished?: (call: ToolCallRecord) => void;
   /** An answer ended: finished, stopped or failed. */
   onAnswerFinished?: () => void;
+  /**
+   * A question left the composer (true), until its answer has ended or the
+   * question came back to the composer (false). Reported on each change.
+   */
+  onSendingChange?: (sending: boolean) => void;
+  /**
+   * Runs before a question's request is issued, once its files are on the
+   * server: the question waits in the conversation until it resolves, and
+   * goes back to the composer, nothing sent, when it resolves false (the
+   * page says why). For a page that saves its own state first.
+   */
+  beforeSend?: () => Promise<boolean>;
   /**
    * Outline level of the start state's heading: 1 (default) on a chat page,
    * lower where the chat sits inside a page with its own h1.
@@ -364,6 +380,8 @@ function ConversationView({
   layout,
   onToolCallFinished,
   onAnswerFinished,
+  onSendingChange,
+  beforeSend,
   startHeadingLevel,
   references,
   toolCards,
@@ -660,6 +678,13 @@ function ConversationView({
   // The composer is taken from the moment a question leaves it, uploads and
   // partner saves included.
   const sending = busy || pendingQuestion !== null || queuedQuestion !== null;
+  const reportSending = useEffectEvent((value: boolean) => onSendingChange?.(value));
+  const reportedSending = useRef(false);
+  useEffect(() => {
+    if (reportedSending.current === sending) return;
+    reportedSending.current = sending;
+    reportSending(sending);
+  }, [sending]);
 
   // Record client-side step timings for the answer being streamed.
   useEffect(() => {
@@ -1046,8 +1071,10 @@ function ConversationView({
     };
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
-    // The question waits in the conversation meanwhile: a stop takes it back, files included.
-    if (hasPendingPartnerUpdates()) {
+    // The page's own `beforeSend` runs then too, and may hold the question.
+    // The question waits in the conversation meanwhile: a stop or a hold takes
+    // it back, files included.
+    if (hasPendingPartnerUpdates() || beforeSend) {
       const controller = new AbortController();
       pendingAbort.current = controller;
       controller.signal.addEventListener("abort", () => {
@@ -1060,10 +1087,11 @@ function ConversationView({
         withdrawQuestion(draft, first);
       });
       setQueuedQuestion({ text, files });
-      void awaitPartnerUpdates().then(() => {
+      const ready = beforeSend ? beforeSend().catch(() => false) : true;
+      void Promise.all([awaitPartnerUpdates(), ready]).then(([, go]) => {
         if (controller.signal.aborted) return;
         // A view that has gone sends nothing, as for a question waiting for its uploads.
-        if (!mounted.current) {
+        if (!mounted.current || !go) {
           controller.abort();
           return;
         }

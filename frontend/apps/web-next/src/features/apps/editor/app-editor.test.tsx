@@ -76,3 +76,9 @@ it("lists its sections on a phone's index under the same groups as the assistant
     ["Åtkomst", ["security", "api-keys", "publishing"]]
   ]);
 });
+
+it("offers no helper on its sections: no 'Fråga' in a heading row", () => {
+  show(["read", "edit", "publish"]);
+  expect(screen.getByRole("heading", { name: "API-nycklar" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Fråga/ })).toBeNull();
+});

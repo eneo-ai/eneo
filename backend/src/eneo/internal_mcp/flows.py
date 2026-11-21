@@ -275,13 +275,13 @@ async def _call(
                     request = scoped_request(chat.space_id)
                     if not changes_draft:
                         return await operation(scope.container, chat, request)
-                    before = await _draft_suggestions(scope.container, chat.flow_id)
+                    before = await _draft_suggestions(scope.container, chat.target_id)
                     result = await operation(scope.container, chat, request)
                     result = await _with_introduced(
-                        result, scope.container, chat.flow_id, before
+                        result, scope.container, chat.target_id, before
                     )
                     result = await _with_publish_blockers(
-                        result, scope.container, chat.flow_id
+                        result, scope.container, chat.target_id
                     )
                     return _within_page_cap(result)
             except BadRequestException as exc:
@@ -395,7 +395,7 @@ async def _current_revision(scope: Any) -> int | None:
                 assistant_id=scope.assistant_id,
             )
             flow = await get_flow(
-                chat.flow_id, scoped_request(chat.space_id), scope.container
+                chat.target_id, scoped_request(chat.space_id), scope.container
             )
             return flow.draft_revision
     except Exception as exc:  # noqa: BLE001 - the refusal is reported either way
@@ -783,7 +783,7 @@ async def _readable_templates(container, chat: Any) -> dict[str, str]:
         await require_authoring_edit(container, chat)
     except (BadRequestException, UnauthorizedException):
         return {}
-    return await _flow_templates(container, chat.flow_id, whole_names=True)
+    return await _flow_templates(container, chat.target_id, whole_names=True)
 
 
 def _listed_templates(templates: dict[str, str]) -> list[dict[str, str]]:
@@ -857,7 +857,7 @@ async def read_flow(
         from eneo.flows.application.flow_authoring_operations import get_flow
         from eneo.flows.application.flow_authoring_reads import run_form_fields
 
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         if section == "all":
             value: Any = flow.model_dump(mode="json")
         elif section == "settings":
@@ -866,7 +866,7 @@ async def read_flow(
             if offer is not None:
                 value["transcription_offer"] = offer
         elif section == "blockers":
-            blockers = await _publish_blockers(container, chat.flow_id)
+            blockers = await _publish_blockers(container, chat.target_id)
             if blockers is None:
                 raise BadRequestException(
                     "The publish blockers could not be read now; try again."
@@ -885,7 +885,7 @@ async def read_flow(
             chosen = [
                 step for step in flow.steps if steps is None or step.step_order in steps
             ]
-            reads, prompts = await _saved_reads(container, chat.flow_id)
+            reads, prompts = await _saved_reads(container, chat.target_id)
             templates = await _readable_templates(container, chat)
             items: list[dict[str, Any]] = []
             for step in chosen:
@@ -949,10 +949,10 @@ async def update_flow_settings(
             )
         definition = changes
         if isinstance(changes.get("metadata_json"), dict):
-            saved = await get_flow(chat.flow_id, request, container)
+            saved = await get_flow(chat.target_id, request, container)
             definition = _merged_settings(changes, saved.metadata_json)
         flow = await apply_editor_update(
-            chat.flow_id,
+            chat.target_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {"expected_revision": expected_revision, "definition": definition}
@@ -961,7 +961,7 @@ async def update_flow_settings(
             audit_context=_CHAT_AUDIT,
         )
         return page_result(
-            {"saved": True}, flow_id=chat.flow_id, revision=flow.draft_revision
+            {"saved": True}, flow_id=chat.target_id, revision=flow.draft_revision
         )
 
     return await _call(ctx, operation, changes_draft=True)
@@ -977,12 +977,12 @@ async def read_step_assistant(
         from eneo.flows.api.flow_assistant_router import get_flow_assistant
         from eneo.flows.application.flow_authoring_operations import get_flow
 
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         step = next((item for item in flow.steps if item.id == step_id), None)
         if step is None:
             raise NotFoundException("Step not found.")
         assistant = await get_flow_assistant(
-            id=chat.flow_id,
+            id=chat.target_id,
             assistant_id=step.assistant_id,
             request=request,
             container=container,
@@ -991,7 +991,7 @@ async def read_step_assistant(
             assistant.model_dump(mode="json")
             if hasattr(assistant, "model_dump")
             else assistant,
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             offset=offset,
             revision=flow.draft_revision,
         )
@@ -1138,16 +1138,16 @@ async def update_step(
             get_flow,
         )
 
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         step = _saved_step(flow, step_id)
         before = await _assistant_before(
-            container, request, chat.flow_id, step, assistant_changes
+            container, request, chat.target_id, step, assistant_changes
         )
         edit = await _step_edit(
-            container, chat.flow_id, step, changes, assistant_changes, before
+            container, chat.target_id, step, changes, assistant_changes, before
         )
         updated = await apply_editor_update(
-            chat.flow_id,
+            chat.target_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {
@@ -1169,7 +1169,7 @@ async def update_step(
                 "changes": edit.fields,
             },
             [_changed_step(saved_step, edit.card_fields)],
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=updated.draft_revision,
         )
 
@@ -1409,7 +1409,7 @@ async def update_steps(
                 "Only name, description, metadata_json and form_field_renames "
                 "can be changed in settings."
             )
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         step_edits: list[dict[str, Any]] = []
         assistants: list[dict[str, Any]] = []
         edited: list[UUID] = []
@@ -1428,11 +1428,11 @@ async def update_steps(
                 raise BadRequestException("A step appears once per call.")
             step = _saved_step(flow, step_id)
             before = await _assistant_before(
-                container, request, chat.flow_id, step, edit.get("assistant_changes")
+                container, request, chat.target_id, step, edit.get("assistant_changes")
             )
             part = await _step_edit(
                 container,
-                chat.flow_id,
+                chat.target_id,
                 step,
                 edit.get("changes"),
                 edit.get("assistant_changes"),
@@ -1447,7 +1447,7 @@ async def update_steps(
         if isinstance(definition.get("metadata_json"), dict):
             definition = _merged_settings(definition, flow.metadata_json)
         updated = await apply_editor_update(
-            chat.flow_id,
+            chat.target_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {
@@ -1476,7 +1476,7 @@ async def update_steps(
                 ],
             },
             [_changed_step(by_id[step_id], card_fields[step_id]) for step_id in edited],
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=updated.draft_revision,
         )
 
@@ -1526,16 +1526,16 @@ async def contract_from_example(
             reading = read_example(example)
         except ExampleProblemError as error:
             raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         edit = await _step_edit(
             container,
-            chat.flow_id,
+            chat.target_id,
             _saved_step(flow, step_id),
             {"output_type": "json", "output_contract": reading.contract},
             None,
         )
         updated = await apply_editor_update(
-            chat.flow_id,
+            chat.target_id,
             request,
             FlowEditorUpdateRequest.model_validate(
                 {
@@ -1566,7 +1566,7 @@ async def contract_from_example(
                 ],
                 "notes": list(reading.notes),
             },
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=updated.draft_revision,
         )
 
@@ -1653,11 +1653,11 @@ async def add_step(
         check_step_kind_values(step_kind, chosen)
         templates: dict[str, str] = {}
         if step_kind is FlowStepKind.TEMPLATE:
-            templates = await _flow_templates(container, chat.flow_id)
+            templates = await _flow_templates(container, chat.target_id)
             chosen = _word_step_values(chosen, templates)
         flow = (
             await require_flow_current_definition_access(
-                request, container, flow_id=chat.flow_id
+                request, container, flow_id=chat.target_id
             )
         ).flow
         places = len(flow.steps) + 1
@@ -1696,7 +1696,7 @@ async def add_step(
         if isinstance(definition.get("metadata_json"), dict):
             definition = _merged_settings(definition, flow.metadata_json)
         updated = await apply_editor_update(
-            chat.flow_id,
+            chat.target_id,
             request,
             editor_update(
                 flow,
@@ -1716,7 +1716,7 @@ async def add_step(
         )
         by_id = {step.id: step for step in updated.steps}
         added = next(step for step in updated.steps if step.step_order == place)
-        reads, _prompts = await _saved_reads(container, chat.flow_id)
+        reads, _prompts = await _saved_reads(container, chat.target_id)
         return page_result(
             _addition_receipt(
                 added,
@@ -1731,7 +1731,7 @@ async def add_step(
                     for step_id, changes in change.step_edits
                 ],
             ),
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=updated.draft_revision,
         )
 
@@ -1857,7 +1857,7 @@ async def read_step_kinds(
 
         flow = (
             await require_flow_current_definition_access(
-                request, container, flow_id=chat.flow_id
+                request, container, flow_id=chat.target_id
             )
         ).flow
         places = len(flow.steps) + 1
@@ -1907,7 +1907,7 @@ async def read_step_kinds(
             kinds.append(item)
         return page_result(
             {"position": place, "kinds": kinds, "note": _STEP_KINDS_NOTE},
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             offset=offset,
             revision=flow.draft_revision,
         )
@@ -1925,7 +1925,7 @@ async def move_step(
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
 
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         ids = [step.id for step in flow.steps]
         if step_id not in ids:
             raise NotFoundException("Step not found.")
@@ -1947,7 +1947,7 @@ async def remove_step(
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
 
-        flow = await get_flow(chat.flow_id, request, container)
+        flow = await get_flow(chat.target_id, request, container)
         ids = [step.id for step in flow.steps]
         if step_id not in ids:
             raise NotFoundException("Step not found.")
@@ -1968,7 +1968,7 @@ async def _save_order(container, chat, request, expected_revision, ids):
     from eneo.flows.application.flow_authoring_operations import apply_editor_update
 
     updated = await apply_editor_update(
-        chat.flow_id,
+        chat.target_id,
         request,
         FlowEditorUpdateRequest.model_validate(
             {
@@ -1988,7 +1988,7 @@ async def _save_order(container, chat, request, expected_revision, ids):
                 for step in updated.steps
             ],
         },
-        flow_id=chat.flow_id,
+        flow_id=chat.target_id,
         revision=updated.draft_revision,
     )
 
@@ -2005,11 +2005,11 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
         )
 
         flow = await publish(
-            chat.flow_id, request, container, expected_revision=expected_revision
+            chat.target_id, request, container, expected_revision=expected_revision
         )
         return page_result(
             {"published_version": flow.published_version},
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=flow.draft_revision,
         )
 
@@ -2027,10 +2027,10 @@ async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
         from eneo.flows.api.flow_tool_options_router import list_flow_tool_options
 
         options = await list_flow_tool_options(
-            id=chat.flow_id, request=request, container=container
+            id=chat.target_id, request=request, container=container
         )
         return page_result(
-            options.model_dump(mode="json"), flow_id=chat.flow_id, offset=offset
+            options.model_dump(mode="json"), flow_id=chat.target_id, offset=offset
         )
 
     return await _call(ctx, operation)
@@ -2087,14 +2087,14 @@ async def read_flow_suggestions(
             else:
                 note = _NO_TRACE_NOTE
         suggestions = await read_flow_suggestions_answer(
-            id=chat.flow_id, request=request, runs=runs, container=container
+            id=chat.target_id, request=request, runs=runs, container=container
         )
         value = suggestions.model_dump(mode="json")
         if note is not None:
             value["note"] = note
         return page_result(
             value,
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             offset=offset,
             revision=suggestions.draft_revision,
         )
@@ -2137,7 +2137,7 @@ async def apply_flow_suggestions(
             {"fingerprints": fingerprints, "expected_revision": expected_revision}
         )
         result = await apply(
-            chat.flow_id,
+            chat.target_id,
             request,
             fingerprints=body.fingerprints,
             expected_revision=body.expected_revision,
@@ -2149,7 +2149,7 @@ async def apply_flow_suggestions(
                 "applied": list(result.applied),
                 "skipped": list(result.skipped),
             },
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
             revision=result.flow.draft_revision,
         )
 
@@ -2182,7 +2182,7 @@ async def dismiss_flow_suggestion(
 
         body = FlowSuggestionDismissalRequest.model_validate({"code": code})
         dismissal = await dismiss(
-            chat.flow_id,
+            chat.target_id,
             request,
             fingerprint=TypeAdapter(SuggestionFingerprint).validate_python(fingerprint),
             code=body.code,
@@ -2194,7 +2194,7 @@ async def dismiss_flow_suggestion(
                 "fingerprint": dismissal.fingerprint,
                 "code": dismissal.code,
             },
-            flow_id=chat.flow_id,
+            flow_id=chat.target_id,
         )
 
     return await _call(ctx, operation, editing=True)

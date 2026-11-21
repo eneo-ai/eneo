@@ -322,8 +322,9 @@ async def build_ephemeral_server(
     )
 
 
-def request_for_bound_space(space_id: UUID):
-    """Request scope for an already authenticated, session-bound internal tool.
+def request_for_bound_space(space_id: UUID, *, server_name: str):
+    """Request scope for an already authenticated, session-bound internal tool
+    of the loopback server ``server_name``.
 
     The caller must derive the space from its authorized durable binding, never
     from model arguments. Core REST access policies then enforce that scope.
@@ -334,7 +335,7 @@ def request_for_bound_space(space_id: UUID):
         {
             "type": "http",
             "method": "POST",
-            "path": "/internal-mcp/flows/mcp",
+            "path": f"/internal-mcp/{server_name}/mcp",
             "headers": [],
         }
     )

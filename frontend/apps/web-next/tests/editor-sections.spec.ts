@@ -517,41 +517,48 @@ test.describe("an editor on a tablet, at the card's height", () => {
   });
 });
 
-test.describe("an unavailable Promptguide", () => {
-  /** Opens the editor's instructions with the Promptguide reported unavailable. */
-  async function openInstructions(page: Page, section: string) {
+test.describe("the helper's help with the prompt", () => {
+  /** Opens the editor's instructions with the helper reported available or not. */
+  async function openInstructions(page: Page, section: string, available: boolean) {
     const { editor } = await assistantEditor(page);
-    // The real answer, so it keeps the session's headers; only its body says unavailable.
-    await page.route("**/api/v1/help-assistants/availability**", async (route) =>
+    // The real answer, so it keeps the session's headers; only its body is set here.
+    await page.route("**/api/v1/assistants/*/helper-chat/availability**", async (route) =>
       route.fulfill({
         response: await route.fetch(),
-        json: { available: false, disabled_reason: "no_assignment" }
+        json: available
+          ? { available: true, reason: null }
+          : { available: false, reason: "disabled" }
       })
     );
-    const availability = page.waitForResponse("**/api/v1/help-assistants/availability**");
+    const availability = page.waitForResponse("**/api/v1/assistants/*/helper-chat/availability**");
     await page.goto(`${editor}${section}`);
     await availability;
     await expect(page.getByRole("button", { name: "Visa prompthistorik" })).toBeVisible();
-    return page.getByRole("button", { name: "Promptguide", includeHidden: true });
+    return page.getByRole("button", {
+      name: "Hjälp mig skriva instruktionerna",
+      includeHidden: true
+    });
   }
+
+  test("is offered where the helper is available", async ({ page }) => {
+    const ask = await openInstructions(page, "", true);
+    await expect(ask).toBeVisible();
+    await expect(ask).toBeEnabled();
+  });
+
+  test("is left out where the helper is unavailable, with nothing in its place", async ({
+    page
+  }) => {
+    const ask = await openInstructions(page, "", false);
+    await expect(ask).toHaveCount(0);
+  });
 
   test.describe("on a phone", () => {
     test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-    test("is left out, as its reason's tooltip cannot be reached", async ({ page }) => {
-      const promptGuide = await openInstructions(page, "?section=instructions");
-      await expect(promptGuide).toBeAttached();
-      await expect(promptGuide).toBeHidden();
-    });
-  });
-
-  test.describe("on a tablet", () => {
-    test.use({ viewport: { width: 820, height: 1180 }, hasTouch: true });
-
-    test("is shown disabled, its reason in the tooltip", async ({ page }) => {
-      const promptGuide = await openInstructions(page, "");
-      await expect(promptGuide).toBeVisible();
-      await expect(promptGuide).toBeDisabled();
+    test("is offered beside the prompt's other buttons", async ({ page }) => {
+      const ask = await openInstructions(page, "?section=instructions", true);
+      await expect(ask).toBeVisible();
     });
   });
 });

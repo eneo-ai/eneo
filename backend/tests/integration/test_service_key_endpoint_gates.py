@@ -431,6 +431,32 @@ async def test_service_key_creation_endpoints_return_403_with_gate_code(
     assert _has_creation_gate_code(resp.json()), f"{method} {path}: {resp.text}"
 
 
+# Creation endpoints that take a signed-in session only. They carry the
+# creation gate too, but the session gate answers an API key first, so a
+# service key is refused with `session_auth_required` before the creation
+# gate is reached.
+_SESSION_ONLY_CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
+    # Opening a helper chat makes its first conversation, and with
+    # `fresh_start` a new one.
+    ("POST", f"/api/v1/assistants/{_STUB_ID}/helper-chat/?fresh_start=true", None),
+    ("POST", f"/api/v1/flows/{_STUB_ID}/authoring-chat/?fresh_start=true", None),
+]
+
+
+@pytest.mark.parametrize("method,path,body", _SESSION_ONLY_CREATION_ENDPOINTS)
+async def test_service_key_is_refused_a_session_only_creation_endpoint(
+    client, tenant_admin_service_secret, method, path, body
+):
+    resp = await client.request(
+        method,
+        path,
+        json=body,
+        headers={"X-API-Key": tenant_admin_service_secret},
+    )
+    assert resp.status_code == 403, f"{method} {path}: {resp.status_code} {resp.text}"
+    assert resp.json().get("code") == "session_auth_required", resp.text
+
+
 @pytest.mark.integration
 @pytest.mark.asyncio
 async def test_service_key_cannot_upload_a_user_owned_file(

@@ -856,7 +856,10 @@ A person can edit a draft from an ordinary assistant chat bound to the flow.
 The chat's loopback flow tools read the definition and change it through the
 same editor update, validation, permissions, classification and audit as the
 editor. The chat requires a user principal and edit mode in the editor; it is
-not a service-key authoring surface.
+not a service-key authoring surface. On a published flow a turn runs outside
+edit mode whatever mode the chat holds: it can read and run the flow, but it
+is offered no tool that changes it, and the chat keeps its mode for when the
+flow is a draft again.
 
 **Suggestions.** The chat reads the same suggestions as the editor
 (`read_flow_suggestions`) when asked to make a flow simpler or cheaper, applies

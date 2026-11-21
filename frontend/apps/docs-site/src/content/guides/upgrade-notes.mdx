@@ -122,6 +122,7 @@ flowchart TB
 | [HTTP hardening](#http-hardening) | Proxies that set HSTS or CSP | Decide who owns HSTS and CSP |
 | Password login: a correct password for an inactive account or suspended organisation answers `403` (9019, 9025) instead of `500`; `422` lists only `loc`, `type` and `msg`; an unexpected failure answers `500` with code `internal_error` and an `error_id` | Password API clients | Handle the two codes; update `422` parsing |
 | [Password lifecycle](#password-lifecycle) | Seeded users, password integrations | Check `DEFAULT_USER_PASSWORD` |
+| [The helper assistant replaces the Prompt Guide in the React web app](#helper-replaces-prompt-guide) | Administrators of organisations with a Prompt Guide | Move your own rules to the helper's guidance; check its switch and model; grant the permission to the roles that should have the helper |
 
 ### API contract [#api-contract]
 
@@ -320,6 +321,27 @@ Outside development, every `/api/` response gets HSTS for one year, unless the e
 Passwords set by an administrator must be changed at first sign-in (`403` code 9070 until then). When db-init creates the default user, it fails if `DEFAULT_USER_PASSWORD` is shorter than 12 characters or longer than 72 bytes.
 
 **Do:** check `DEFAULT_USER_PASSWORD`; integrations handle 9070 or use API keys.
+
+### The helper assistant replaces the Prompt Guide in the React web app [#helper-replaces-prompt-guide]
+
+In the React web app, the helper assistant takes the Prompt Guide's place. It is a sidebar beside an assistant's settings: "Help me write the instructions" beside the prompt opens it with a request ready to send. In a flow step, "Help me write the instruction" puts the same kind of request in the flow assistant's chat on the flow page. The Prompt Guide is unchanged in the Svelte web app. Each has its own switch: the helper's is in **Admin > Helper assistant**, and the flow assistant does not follow it.
+
+The upgrade seeds the helper's settings once, from an organisation's Prompt Guide:
+
+- The helper is off where the guide was disabled or hidden from users.
+- The guide's model becomes the default model of the helper and the flow assistant, which share it, if the model supports tool calling and no default was set.
+
+The helper does not take over:
+
+- The guide's editable prompt. Move your own rules into the organisation's guidance in **Admin > Helper assistant**, up to 4000 characters. The guidance applies to the helper in an assistant's settings, not to the flow assistant.
+- The guide's model settings (the person chooses the reasoning effort in the chat), its own knowledge, its result ranking and its MCP servers.
+- The guide's retention period. Helper conversations follow the space's retention, then the organisation's, and are removed with the assistant or flow they belong to.
+
+Helper conversations count as model use, also in the person's own usage, which the guide's conversations did not. The helper proposes each change to an assistant and saves nothing itself: the change is saved when the person applies the proposal, as the person's own change. Publishing or unpublishing from the helper waits for the person's approval in the chat. Both are audited as the person's own changes.
+
+The helper needs the **Helper assistant** permission in the person's role. The upgrade grants it to the predefined Owner role only. Without it the helper is not shown, and the person edits the assistant as before. The flow assistant does not follow this permission.
+
+**Do:** move your own rules from the guide's prompt into the helper's guidance, then check the switch and the default model in **Admin > Helper assistant**. Grant the **Helper assistant** permission to the roles that should have the helper.
 
 ## Details: API contract [#details-api-contract]
 

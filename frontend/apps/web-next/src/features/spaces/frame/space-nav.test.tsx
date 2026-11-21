@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { SideNav } from "@astryxdesign/core/SideNav";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi, type Mock } from "vitest";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
@@ -176,7 +176,11 @@ describe("SpaceNav", () => {
     const queryClient = client({ s1: SHARED });
     const { queryKey } = spacesListQueryOptions(browserApi);
     queryClient.removeQueries({ queryKey, exact: true });
-    const list = vi.spyOn(browserApi, "GET").mockRejectedValue(new Error("down"));
+    // Read as a plain mock: typed as the client's own GET, its calls are typed on
+    // every route of the API, which is more than the compiler instantiates.
+    const list = vi
+      .spyOn(browserApi, "GET")
+      .mockRejectedValue(new Error("down")) as unknown as Mock;
     renderNav("/spaces/s1/overview", { queryClient });
     fireEvent.click(screen.getByRole("button", { name: "Upphandling, Öppna meny" }));
     const retry = await screen.findByRole("menuitem", { name: /^Försök ladda ytorna igen/ });

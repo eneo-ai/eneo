@@ -131,6 +131,16 @@ describe("references in an answer", () => {
     expect(onConnectStep).toHaveBeenCalledWith("step-2", "output_config.http");
   });
 
+  it("draws a step mention without the scheme as the step's pill, and any other as its name", () => {
+    const { container } = renderAnswer(
+      "Ändra @[Steg 3](step-3), inte @[Steg 9](nonsense) eller @[sidan](https://example.com)."
+    );
+    expect(screen.getByRole("button", { name: "Steg 3: Bedömning" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Steg 9/ })).toBeNull();
+    expect(screen.getByRole("link", { name: "sidan" })).toBeTruthy();
+    expect(container.textContent).toContain("Ändra Steg 3: Bedömning, inte Steg 9 eller @sidan.");
+  });
+
   it("draws a reference the answer put in backticks, spaces and all", () => {
     renderAnswer("Läser `{{ step_1.output.structured.atgard }}` och `step_1`.");
     expect(screen.getByRole("button", { name: "Steg 1: Extrahera › atgard" })).toBeTruthy();

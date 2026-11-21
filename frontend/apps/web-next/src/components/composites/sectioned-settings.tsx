@@ -1,5 +1,6 @@
 import { SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { Token } from "@astryxdesign/core/Token";
 import type { LucideIcon } from "lucide-react";
 import {
   pushUrl,
@@ -11,11 +12,13 @@ import {
 } from "@/lib/navigation";
 import {
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
   type MouseEvent,
-  type ReactNode
+  type ReactNode,
+  type Ref
 } from "react";
 import { NAV_ITEM_CLASSES } from "@/components/shell/nav-styles";
 import { PageBar } from "@/components/shell/page-bar";
@@ -25,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { IndexGroup, IndexRow } from "./index-rows";
 import { inPlaceLink } from "./in-place-link";
 import { SaveStatusIndicator } from "./save-status";
+import { SettingsGroupAction } from "./settings-rows";
 
 export type SettingsSection = {
   id: string;
@@ -35,6 +39,12 @@ export type SettingsSection = {
   summary?: string;
   /** On a phone's index and in the list beside the form: the heading the section is listed under. */
   group?: string;
+  /**
+   * A short note on the section's link, in the list beside the form, the
+   * strip and a phone's index, read as part of its name ("2 ändrade"):
+   * what just happened to its settings.
+   */
+  mark?: string;
 };
 
 /** What a phone's settings index needs (decision 21): its page bar. */
@@ -48,6 +58,8 @@ export type SettingsPhoneIndex = {
   title: string;
   /** The index bar's actions ("Testa"). */
   actions?: ReactNode;
+  /** A section's bar's actions, after its save state. */
+  sectionActions?: ReactNode;
   /** Open on this section instead of the index: a resource just created opens General. */
   openFirst?: string;
 };
@@ -67,6 +79,25 @@ type SectionedSettingsProps = {
    * header's content, the pages' shared column, instead of centring.
    */
   isFramed?: boolean;
+  /** A control at the end of each section's heading row (its settings group's), such as "Fråga". */
+  sectionAction?: (section: SettingsSection) => ReactNode;
+  /** A way for the page to show a section or a control in it. */
+  handleRef?: Ref<SectionedSettingsHandle>;
+};
+
+/** What a page can ask of its settings editor. */
+export type SectionedSettingsHandle = {
+  /**
+   * Shows a section, or a control in it (`control`: the element's id, the
+   * control itself or a container whose first usable control is meant), and
+   * moves focus there, clear of the sticky header: on a phone's index its
+   * section opens first. A control's whole row or card is shown where it
+   * fits, clear of the view's bottom edge too, and nothing scrolls while it
+   * is in view already. A section, or a control that cannot take focus (a
+   * disabled field), puts focus on the section's heading. False when the
+   * section is not in the editor.
+   */
+  show: (target: { section: string; control?: string }) => boolean;
 };
 
 /**
@@ -125,6 +156,13 @@ type FocusNext = { section: string } | { row: string } | { element: HTMLElement 
  */
 const openedFromIndex = () => readUrlState().settingsSectionFromIndex === true;
 
+/** Focus a section's heading (made focusable for this), else the section itself. */
+function focusHeadingOf(section: HTMLElement | null, options?: FocusOptions) {
+  const heading = section?.querySelector<HTMLElement>("h2, h3") ?? section;
+  if (heading && heading.tabIndex < 0) heading.setAttribute("tabindex", "-1");
+  heading?.focus(options);
+}
+
 /**
  * Focus what a view shows: an element in it if it takes focus, else its
  * section's heading (made focusable for this), else the section itself.
@@ -138,13 +176,65 @@ function focusIn(root: HTMLElement, next: Exclude<FocusNext, null>) {
     next.element.focus();
     return;
   }
-  const section =
+  focusHeadingOf(
     "element" in next
       ? next.element.closest<HTMLElement>("[data-editor-section]")
-      : root.querySelector<HTMLElement>(`[data-editor-section="${next.section}"]`);
-  const heading = section?.querySelector<HTMLElement>("h2, h3") ?? section;
-  if (heading && heading.tabIndex < 0) heading.setAttribute("tabindex", "-1");
-  heading?.focus();
+      : root.querySelector<HTMLElement>(`[data-editor-section="${next.section}"]`)
+  );
+}
+
+const FOCUSABLE =
+  'input:not([type="hidden"]), select, textarea, button, a[href], [tabindex]:not([tabindex="-1"]), [contenteditable="true"]';
+
+/**
+ * The control an element stands for: itself when it takes focus, else the
+ * checked radio in it, else its first control that takes focus. Disabled
+ * controls do not; a group's heading actions are never a setting's control.
+ */
+function controlIn(element: HTMLElement): HTMLElement | null {
+  const usable = (candidate: HTMLElement) =>
+    !candidate.matches(":disabled") && !candidate.closest("[data-settings-group-end]");
+  if (element.matches(FOCUSABLE)) return usable(element) ? element : null;
+  const checked = element.querySelector<HTMLElement>('input[type="radio"]:checked');
+  if (checked && usable(checked)) return checked;
+  return [...element.querySelectorAll<HTMLElement>(FOCUSABLE)].find(usable) ?? null;
+}
+
+/** The nearest ancestor that scrolls up and down (the page's, or the editor's own), else the document's. */
+function scrollerOf(element: HTMLElement): Element | null {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return node;
+  }
+  return document.scrollingElement;
+}
+
+/** The bottom edge of what the window shows of `element`: the highest of the boxes that clip it. */
+function visibleBottom(element: HTMLElement): number {
+  let bottom = window.innerHeight;
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    if (getComputedStyle(node).overflowY !== "visible") {
+      bottom = Math.min(bottom, node.getBoundingClientRect().bottom);
+    }
+  }
+  return bottom;
+}
+
+/** The room a setting the editor shows keeps from the bottom edge of the view, in px. */
+const ROOM_BELOW = 24;
+
+/**
+ * Scrolls `element` into the view between `top` (the sticky header's edge)
+ * and `bottom`: below the header by its scroll margin, or `ROOM_BELOW` clear
+ * of the bottom edge. Nothing moves while it is in view already.
+ */
+function scrollIntoRoom(element: HTMLElement, top: number, bottom: number) {
+  const box = element.getBoundingClientRect();
+  if (box.top >= top && box.bottom <= bottom) return;
+  const margin = element.style.scrollMarginBottom;
+  element.style.scrollMarginBottom = `${ROOM_BELOW}px`;
+  element.scrollIntoView({ block: "nearest" });
+  element.style.scrollMarginBottom = margin;
 }
 
 /**
@@ -316,11 +406,31 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
 const PHONE_TITLE_CLASSES =
   "text-ax-text m-0 px-4 pt-4 text-2xl leading-tight font-semibold break-words";
 
+/**
+ * The note on a section's link (`SettingsSection.mark`), read after its
+ * name: "Allmänt, 2 ändrade".
+ */
+function SectionMark({ text }: { text: string }) {
+  return (
+    <>
+      <span className="sr-only">, </span>
+      <Token
+        size="sm"
+        color="blue"
+        label={text}
+        className="motion-safe:animate-in motion-safe:fade-in"
+      />
+    </>
+  );
+}
+
 function SettingsLayout({
   header,
   navigationLabel,
   sections,
   isFramed = false,
+  sectionAction,
+  handleRef,
   views
 }: Omit<SectionedSettingsProps, "phone"> & { views?: PhoneViews }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? "");
@@ -328,24 +438,8 @@ function SettingsLayout({
   const visibleActiveId = sections.some((section) => section.id === activeId)
     ? activeId
     : (sections[0]?.id ?? "");
-
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]) setActiveId(visible[0].target.id);
-      },
-      { rootMargin: "-128px 0px -55% 0px" }
-    );
-    for (const id of sectionIds.split(",")) {
-      const element = document.getElementById(id);
-      if (element) observer.observe(element);
-    }
-    return () => observer.disconnect();
-  }, [sectionIds]);
+  const ownRootRef = useRef<HTMLDivElement>(null);
+  const rootRef = views?.rootRef ?? ownRootRef;
 
   // The header's height, for the anchors' scroll margin and the list's sticky
   // offset: taller with the strip below 1024 px than without it. A phone hides
@@ -362,6 +456,64 @@ function SettingsLayout({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+
+  // The link marked is the section under the sticky header at the top of the
+  // view, and the last section once the view has reached the end, unless the
+  // person chose the link of one that could not come any higher. It follows
+  // whichever scroller shows the editor, the page's or its own beside an
+  // aside: scroll events do not bubble, but they pass the document on their
+  // way to their scroller.
+  const chosenRef = useRef<string | null>(null);
+  const choose = (id: string) => {
+    chosenRef.current = id;
+    setActiveId(id);
+  };
+  useEffect(() => {
+    const root = rootRef.current;
+    const header = headerRef.current;
+    if (!root || !header) return;
+    const ids = sectionIds.split(",");
+    let frame = 0;
+    const mark = () => {
+      frame = 0;
+      // A phone's index and its sections hide the header, and the links with it.
+      if (header.getClientRects().length === 0) return;
+      const shown = ids.flatMap((id) => {
+        const section = document.getElementById(id);
+        return section && section.getClientRects().length > 0 ? [section] : [];
+      });
+      const last = shown.at(-1);
+      if (!last) return;
+      const scroller = scrollerOf(root);
+      const end = scroller ? scroller.scrollHeight - scroller.clientHeight : 0;
+      // At the end, or with nothing to scroll: the view can come no further.
+      const atEnd = scroller !== null && scroller.scrollTop >= end - 1;
+      const chosen = atEnd ? shown.find((section) => section.id === chosenRef.current) : undefined;
+      if (!atEnd) chosenRef.current = null;
+      // The first section that still reaches below the header's edge.
+      const line = header.getBoundingClientRect().bottom + 1;
+      const under = shown.find((section) => section.getBoundingClientRect().bottom > line) ?? last;
+      setActiveId((chosen ?? (atEnd && end > 1 ? last : under)).id);
+    };
+    const schedule = (event?: Event) => {
+      // Another scroller (the aside's, a list's own) moved nothing of the editor.
+      if (event?.target instanceof Element && !event.target.contains(root)) return;
+      frame ||= requestAnimationFrame(mark);
+    };
+    const resized =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => schedule());
+    resized?.observe(root);
+    document.addEventListener("scroll", schedule, { capture: true, passive: true });
+    window.addEventListener("resize", schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      resized?.disconnect();
+      document.removeEventListener("scroll", schedule, { capture: true });
+      window.removeEventListener("resize", schedule);
+    };
+  }, [rootRef, sectionIds]);
+
   // Centred on its own page; under a frame's header, the pages' column (72rem) with this
   // layout's own px-6 on each side, so its text starts on the header's line.
   const width = isFramed ? "mx-auto max-w-[75rem]" : "mx-auto max-w-4xl lg:max-w-[74rem]";
@@ -383,11 +535,51 @@ function SettingsLayout({
     else views.open(section, field);
   };
 
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      show: ({ section, control }) => {
+        const root = rootRef.current;
+        const element = document.getElementById(section);
+        if (!root || !element || !root.contains(element)) return false;
+        const target = control ? document.getElementById(control) : null;
+        const focus = target && root.contains(target) ? controlIn(target) : null;
+        if (views && window.matchMedia(PHONE_SCREEN_QUERY).matches) {
+          // One section at a time: open it, or focus in the one in view.
+          if (views.view !== section) views.open(section, focus);
+          else if (focus) views.reveal(focus);
+          else focusHeadingOf(element);
+          return true;
+        }
+        // The scroll margin under the sticky header keeps both in view below it.
+        if (target && focus) {
+          focus.focus({ preventScroll: true });
+          // The setting's whole row or card where it fits in the view, else the
+          // setting itself; then its control, where that is still out of view.
+          const top = headerRef.current?.getBoundingClientRect().bottom ?? 0;
+          const bottom = visibleBottom(target);
+          const row = target.closest<HTMLElement>("[data-settings-group-body] > *");
+          const whole =
+            row && row.getBoundingClientRect().height <= bottom - top - 2 * ROOM_BELOW
+              ? row
+              : target;
+          scrollIntoRoom(whole, top, bottom);
+          if (focus !== whole) scrollIntoRoom(focus, top, bottom);
+        } else {
+          focusHeadingOf(element, { preventScroll: true });
+          element.scrollIntoView({ block: "start" });
+        }
+        return true;
+      }
+    }),
+    [rootRef, views]
+  );
+
   const PhoneTitle = views?.phone.parent ? "h1" : "h2";
 
   return (
     <div
-      ref={views?.rootRef}
+      ref={rootRef}
       data-space-full-bleed
       data-editor-view={views ? (shown ? "section" : "index") : undefined}
       onClickCapture={views ? openFailedField : undefined}
@@ -405,9 +597,18 @@ function SettingsLayout({
               actions={
                 // At large text (under 13 rem) the words no longer fit beside the back link:
                 // the state takes a line under the bar, as on the index.
-                <span data-editor-strip className="pe-2.5 @max-[12.25rem]/page-bar:hidden">
-                  <SaveStatusIndicator isQuiet isCompact />
-                </span>
+                views.phone.sectionActions ? (
+                  <span className="flex items-center gap-2 pe-2.5">
+                    <span data-editor-strip className="contents @max-[12.25rem]/page-bar:hidden">
+                      <SaveStatusIndicator isQuiet isCompact />
+                    </span>
+                    {views.phone.sectionActions}
+                  </span>
+                ) : (
+                  <span data-editor-strip className="pe-2.5 @max-[12.25rem]/page-bar:hidden">
+                    <SaveStatusIndicator isQuiet isCompact />
+                  </span>
+                )
               }
             />
           ) : views.phone.parent ? (
@@ -474,7 +675,7 @@ function SettingsLayout({
           {header}
           <TabList
             value={visibleActiveId}
-            onChange={setActiveId}
+            onChange={choose}
             overflow="scroll"
             aria-label={navigationLabel}
             className="-mb-px lg:hidden"
@@ -486,6 +687,7 @@ function SettingsLayout({
                 href={`#${section.id}`}
                 label={section.label}
                 icon={<section.icon aria-hidden="true" className="size-4" />}
+                endContent={section.mark ? <SectionMark text={section.mark} /> : undefined}
               />
             ))}
           </TabList>
@@ -525,7 +727,8 @@ function SettingsLayout({
                 icon={section.icon}
                 href={`#${section.id}`}
                 isSelected={section.id === visibleActiveId}
-                onClick={() => setActiveId(section.id)}
+                onClick={() => choose(section.id)}
+                endContent={section.mark ? <SectionMark text={section.mark} /> : undefined}
               />
             ));
             return group.label ? (
@@ -548,7 +751,9 @@ function SettingsLayout({
               data-current={views && section === shown ? "" : undefined}
               className={cn(views && section !== shown && "phone:hidden")}
             >
-              {section.node}
+              <SettingsGroupAction action={sectionAction?.(section) ?? null}>
+                {section.node}
+              </SettingsGroupAction>
             </div>
           ))}
         </div>
@@ -591,7 +796,11 @@ function PhoneIndex({
               data-editor-row={section.id}
               icon={section.icon}
               label={section.label}
-              summary={section.summary}
+              summary={
+                section.mark && section.summary
+                  ? `${section.mark}, ${section.summary}`
+                  : (section.mark ?? section.summary)
+              }
             />
           ))}
         </IndexGroup>

@@ -1,9 +1,10 @@
-"""Session-bound authorization for the ordinary chat used by the flow editor.
+"""The flow as the target of a helper chat: the chat used by the flow editor.
 
-A person has one chat per flow: a hidden assistant and the conversation that
-is current. Earlier conversations stay with the assistant for traceability,
-but only the current one is ever answered or sent to the model, because
-``load_authoring_chat`` admits only the session the chat points at.
+A person has one chat per flow. The package ``helper_chats`` runs it: the
+binding, edit mode, the idle rule, the model, conversations and the hidden
+assistant's upkeep. This module gives that package the flow's persona, access
+rules, fences and refusals (``FLOW_TARGET``) and keeps the flow's own entry
+points.
 """
 
 from __future__ import annotations
@@ -11,30 +12,21 @@ from __future__ import annotations
 import json
 import textwrap
 from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from enum import Enum
 from string import Template
-from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
+from typing import TYPE_CHECKING, Any, Iterable, cast
 from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import Request
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm.attributes import set_committed_value
 
-from eneo.ai_models.completion_models.completion_model import ModelKwargs
-from eneo.assistants.assistant import AssistantOrigin
-from eneo.assistants.assistant_update import AssistantUpdateCommand
-from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.database.tables.assistant_table import Assistants
-from eneo.database.tables.flow_authoring_chats_table import FlowAuthoringChats
 from eneo.database.tables.flow_tables import Flows
-from eneo.database.tables.questions_table import Questions
-from eneo.database.tables.sessions_table import Sessions
+from eneo.database.tables.helper_chats_table import HelperChats
 from eneo.flows.api.flow_definition_access import (
     require_flow_current_definition_access,
     require_flow_edit_access,
@@ -50,30 +42,29 @@ from eneo.flows.domain.flow_suggestions import (
 from eneo.flows.enums import FlowInputSource, FlowOutputDelivery, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.helper_chats.application import helper_chat_service
+from eneo.helper_chats.application.helper_chat_service import (
+    HelperChatConversationPublic,
+    OpenedChat,
+)
+from eneo.helper_chats.targets import (
+    HelperChatAudit,
+    HelperChatAuditEvent,
+    HelperChatTargetType,
+)
 from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException, NotFoundException
-from eneo.main.logging import get_logger
-from eneo.main.models import NOT_PROVIDED, NotProvided, is_provided
-from eneo.mcp_servers.application.capability_resolver import capability_availability
-from eneo.mcp_servers.domain.capabilities import (
-    CapabilityAvailability,
-    CapabilityPurpose,
-)
-from eneo.prompts.api.prompt_models import PromptCreate
-from eneo.sessions.session import SessionAdd
+from eneo.main.models import NOT_PROVIDED, NotProvided
 
 if TYPE_CHECKING:
-    from eneo.completion_models.domain import CompletionModel
     from eneo.flows.domain.flow import Flow
-    from eneo.spaces.space import Space
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
 
 def _session(container: Container) -> AsyncSession:
     return cast(AsyncSession, container.session())
 
-
-logger = get_logger(__name__)
 
 # The configuration examples the instruction shows, kept as data so a test
 # holds each against the rules a draft save and a publish apply; a section
@@ -146,11 +137,11 @@ answer says that nothing was changed and what stands in the way, in plain
 words; then offer the next step, for example: "Fältet diarienummer används fortfarande av steg 2, så det
 kan inte tas bort än. Ska jag ändra steg 2 först?" Quote a refusal's text only
 when it helps the person.
-When the tools that change the flow are absent, or a change is refused because
-edit mode is off, the chat is in the mode "Fråga": change nothing, say so in the
-first sentence, and say that the person switches the button "Fråga" beside the
-send button to "Redigera" and sends the request again; then say what you would
-change.
+When the person asks for a change while the chat is in "Fråga" (the note after
+these instructions says which mode it is in now), or a change is refused
+because edit mode is off: change nothing, say so in the first sentence, and say
+that the person switches the button "Fråga" beside the send button to
+"Redigera" and sends the request again; then say what you would change.
 A published flow (read_flow gives its published_version) is never changed by
 you, and you have no tool to unpublish it: say that the flow is published, that
 the "Avpublicera" button at the top of the flow page makes it a draft, and what
@@ -391,6 +382,23 @@ saved. A good example beats a long instruction: ask for one when the wanted
 result is structured and the person has not described its fields. A new
 structured step gets its example in add_step, written from the fields the
 work needs.
+"""
+
+_STEP_INSTRUCTION = """When the person asks for help writing or improving the
+instruction of a step, read that step in full first. When its instruction
+already says what the step does, say in a sentence or two what works and what
+could be clearer, then work on what is missing. Ask only where the answer
+changes the instruction: what the step gets, what it should give back, what it
+must always or never do, and what it does when its input lacks something; the
+rest of the question rules above apply. Then write it thorough and specific:
+the task this one step performs on what it reads, not a persona, in the
+person's language, built from what the person said and what the step's
+settings show, never from invented facts. Keep the step's {{ ... }} reads as
+they are, and do not restate the fields its output_contract already enforces.
+Use a few short sections rather than one block, and let every line earn its
+place: the person reads and edits the result. In edit mode, write it into the
+step with update_step; otherwise, as the mode rules above say, show the
+instruction you would write.
 """
 
 _COHERENT_CHANGES = """The tool calls of one round run at the same time on the same revision, so
@@ -646,6 +654,7 @@ AUTHORING_INSTRUCTIONS = (
     + _QUESTIONS
     + _EXPECTED_RESULT
     + _FROM_EXAMPLE
+    + _STEP_INSTRUCTION
     + _COHERENT_CHANGES
     + "Design every step by these rules from the start:\n"
     + _suggestion_rules()
@@ -662,13 +671,15 @@ AUTHORING_INSTRUCTIONS = (
 
 class FlowAuthoringChatPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
-    flow_id: UUID
+    # The binding row names its flow ``target_id``.
+    flow_id: UUID = Field(validation_alias=AliasChoices("flow_id", "target_id"))
     assistant_id: UUID
     session_id: UUID = Field(
         description=(
             "The chat's current conversation. Starting a new conversation "
-            "(explicitly, or by entering edit mode after a pause) replaces it; "
-            "earlier conversations are kept but never answered again."
+            "(explicitly, by entering edit mode after a pause, or by opening "
+            "with `fresh_start`) replaces it; earlier conversations are kept "
+            "and listed for their person but never answered again."
         )
     )
     editing: bool
@@ -697,79 +708,10 @@ class FlowAuthoringChatPublic(BaseModel):
 
 
 def scoped_request(space_id: UUID) -> Request:
+    from eneo.internal_mcp.constants import FLOWS_SERVER_NAME
     from eneo.internal_mcp.foundation import request_for_bound_space
 
-    return request_for_bound_space(space_id)
-
-
-async def load_authoring_chat(
-    container: Container,
-    *,
-    session_id: UUID,
-    assistant_id: UUID | None = None,
-    flow_id: UUID | None = None,
-    lock: bool = False,
-) -> FlowAuthoringChats:
-    """The caller's chat for ``session_id``, after the binding's access checks.
-
-    Opening the chat, the start of a turn and every flow tool call load the
-    chat here, so this is where a chat left in edit mode returns to view mode
-    after a pause (``_leave_edit_mode_after_pause``): the chat opened, or a
-    turn started on a tab left open, after the pause offers no writing tools,
-    and its tool calls are refused a change."""
-    user = container.user()
-    await require_flows_enabled(container.feature_flag_service(), user.tenant_id)
-    query = (
-        sa.select(FlowAuthoringChats)
-        .join(Sessions, Sessions.id == FlowAuthoringChats.session_id)
-        .join(Assistants, Assistants.id == FlowAuthoringChats.assistant_id)
-        .join(Flows, Flows.id == FlowAuthoringChats.flow_id)
-        .where(
-            FlowAuthoringChats.tenant_id == user.tenant_id,
-            FlowAuthoringChats.user_id == user.id,
-            FlowAuthoringChats.session_id == session_id,
-            Sessions.user_id == user.id,
-            Sessions.api_key_id.is_(None),
-            Sessions.assistant_id == FlowAuthoringChats.assistant_id,
-            Assistants.space_id == FlowAuthoringChats.space_id,
-            Assistants.hidden.is_(True),
-            Assistants.origin == AssistantOrigin.USER,
-            Flows.tenant_id == user.tenant_id,
-            Flows.space_id == FlowAuthoringChats.space_id,
-            Flows.deleted_at.is_(None),
-        )
-    )
-    if assistant_id is not None:
-        query = query.where(FlowAuthoringChats.assistant_id == assistant_id)
-    if flow_id is not None:
-        query = query.where(FlowAuthoringChats.flow_id == flow_id)
-    chat = await _session(container).scalar(query)
-    if chat is None:
-        raise NotFoundException("Flow authoring chat not found.")
-    request = scoped_request(chat.space_id)
-    await require_flow_current_definition_access(
-        request, container, flow_id=chat.flow_id
-    )
-    if lock:
-        # Every writer locks the flow before its chat/assistants, including
-        # mode changes, so leaving edit mode fences an in-flight tool call.
-        await _session(container).scalar(
-            sa.select(Flows.id)
-            .where(
-                Flows.tenant_id == user.tenant_id,
-                Flows.id == chat.flow_id,
-            )
-            .with_for_update()
-        )
-        chat = await _session(container).scalar(
-            query.with_for_update(of=FlowAuthoringChats).execution_options(
-                populate_existing=True
-            )
-        )
-        if chat is None:
-            raise NotFoundException("Flow authoring chat not found.")
-    await _leave_edit_mode_after_pause(container, chat)
-    return chat
+    return request_for_bound_space(space_id, server_name=FLOWS_SERVER_NAME)
 
 
 PUBLISHED_FLOW_MESSAGE = (
@@ -779,439 +721,279 @@ PUBLISHED_FLOW_MESSAGE = (
 )
 
 
-async def require_authoring_edit(
-    container: Container, chat: FlowAuthoringChats, *, draft: bool = False
-) -> None:
-    """Edit mode and edit access, and with ``draft`` also a flow that is not
-    published: the chat has no way to unpublish a flow, so a change to a
-    published one is refused before anything is read or written."""
-    if not chat.editing:
-        raise BadRequestException(
-            "Enter edit mode in the flow editor before changing this flow."
-        )
-    access = await require_flow_edit_access(
-        scoped_request(chat.space_id), container, flow_id=chat.flow_id
-    )
-    if draft and access.flow.published_version is not None:
-        raise BadRequestException(PUBLISHED_FLOW_MESSAGE, code="flow_published")
-
-
-# --- The chat's model -------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class _ChatModels:
-    """The models a flow chat in one space may answer with."""
-
-    usable: list[CompletionModel]
-    default: CompletionModel | None
-
-    def get(self, model_id: UUID | None) -> CompletionModel | None:
-        return next((model for model in self.usable if model.id == model_id), None)
-
-    def effective(self, chosen_id: UUID | None) -> CompletionModel | None:
-        """The person's model while the space allows it, else the default."""
-        return self.get(chosen_id) or self.default
-
-
-def _chat_models(container: Container, space: Space) -> _ChatModels:
-    # The space's usable models are those enabled in it that meet its
-    # classification, the same list an ordinary assistant's model comes from.
-    usable = [
-        model
-        for model in space.completion_models
-        if model.can_access and model.supports_tool_calling
-    ]
-    tenant = getattr(container.user(), "tenant", None)
-    organisation_default = resolve_flow_authoring_chat_model_id(
-        cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
-    )
-    default = next(
-        (model for model in usable if model.id == organisation_default), None
-    ) or space.select_default_completion_model(usable)
-    return _ChatModels(usable=usable, default=default)
-
-
-def _offered_reasoning_effort(
-    model: CompletionModel, reasoning_effort: str | None
-) -> str | None:
-    """The level when the model offers it, else None (the model's own default)."""
-    return (
-        ModelKwargs(reasoning_effort=reasoning_effort)
-        .filter_unsupported(model.get_supported_model_kwargs())
-        .reasoning_effort
-    )
-
-
-def _require_choosable_model(space: Space, model_id: UUID) -> CompletionModel:
-    """The model a person asks for, refused the way an assistant's model is."""
-    if space.is_completion_model_available(model_id):
-        model = space.get_completion_model(model_id)
-        if not model.supports_tool_calling:
-            raise FlowBadRequestException(
-                "The flow chat needs a model that supports tools.",
-                code=FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS,
-                context={"completion_model_id": str(model_id)},
-            )
-        return model
-    if any(
-        model.id == model_id and model.can_access
-        for model in space.completion_models_below_classification
-    ):
-        raise FlowBadRequestException(
-            "The model's security classification is below the space's.",
-            code=FlowApiErrorCode.AUTHORING_MODEL_BELOW_CLASSIFICATION,
-            context={"completion_model_id": str(model_id)},
-        )
-    raise FlowBadRequestException(
-        "The model is not enabled in the flow's space.",
-        code=FlowApiErrorCode.AUTHORING_MODEL_NOT_IN_SPACE,
-        context={"completion_model_id": str(model_id)},
-    )
-
-
-def _no_model() -> FlowBadRequestException:
-    return FlowBadRequestException(
-        "Choose a default model that supports tools for this space.",
-        code=FlowApiErrorCode.AUTHORING_CHAT_NO_MODEL,
-    )
-
-
-# The functions of the tool runtime the chat may use: reading an uploaded
-# file where it needs to, making a file or a chart, computing. Searching the
-# web and making images are not the chat's business.
-TOOL_RUNTIME_CAPABILITIES: tuple[CapabilityPurpose, ...] = (
-    "file_analysis",
-    "file_creation",
-    "charts",
-    "compute",
-)
-
-
-def tool_runtime_capabilities(
-    offered: Iterable[str], states: Iterable[CapabilityAvailability]
-) -> list[CapabilityPurpose]:
-    """The tool runtime's functions the chat's assistant gets: those its space
-    offers and a provider is ready for, in a fixed order."""
-    offered_set = set(offered)
-    ready = {state.purpose for state in states if state.available}
-    return [
-        purpose
-        for purpose in TOOL_RUNTIME_CAPABILITIES
-        if purpose in offered_set and purpose in ready
-    ]
-
-
-async def _load_space(container: Container, chat: FlowAuthoringChats) -> Space:
-    return await container.space_repo().one(
-        id=chat.space_id, hidden_assistant_ids={chat.assistant_id}
-    )
-
-
-async def _sync_assistant(
-    container: Container, chat: FlowAuthoringChats, space: Space | None = None
-) -> CompletionModel | None:
-    """Give the chat's assistant the current instructions and the model and
-    reasoning effort in force; write only what differs. Returns the default."""
-    space = space or await _load_space(container, chat)
-    models = _chat_models(container, space)
-    model = models.effective(chat.completion_model_id)
-    if model is None:
-        raise _no_model()
-    assistant = space.get_assistant(assistant_id=chat.assistant_id)
-    changes: dict[str, Any] = {}
-    if assistant.get_prompt_text() != AUTHORING_INSTRUCTIONS:
-        changes["prompt"] = PromptCreate(text=AUTHORING_INSTRUCTIONS)
-    model_changes = (
-        assistant.completion_model is None or assistant.completion_model.id != model.id
-    )
-    if model_changes:
-        changes["completion_model_id"] = model.id
-    stored = assistant.completion_model_kwargs or ModelKwargs()
-    effort = _offered_reasoning_effort(model, chat.reasoning_effort)
-    if stored.reasoning_effort != effort:
-        changes["completion_model_kwargs"] = stored.model_copy(
-            update={"reasoning_effort": effort}
-        )
-    if changes:
-        await container.assistant_service().update_assistant(
-            assistant_id=chat.assistant_id,
-            update=AssistantUpdateCommand(**changes),
-            include_hidden=True,
-        )
-    await _sync_tools(container, chat, space, assistant)
-    return models.default
-
-
-async def _sync_tools(
-    container: Container, chat: FlowAuthoringChats, space: Space, assistant: Any
-) -> None:
-    """Give the chat's assistant look-up mode for uploads and the tool
-    runtime's functions its space offers. Each goes in an update of its own:
-    a refusal (a provider that stopped meeting the space's classification, a
-    tool set that does not fit the model) is logged and leaves the chat as it
-    is, and never takes the other setting with it."""
-    # A file uploaded in the chat is looked up through the files tool where
-    # the model needs it, not put whole in the prompt: the chat is shown
-    # long material (a letter, a transcript) to build a flow around. A model
-    # without tool calling gets the text inlined anyway.
-    if assistant.inline_file_text:
-        await _update_tools(container, chat, "look-up mode", inline_file_text=False)
-    # The tool runtime's functions, as far as the space offers them and a
-    # provider is ready; a space setting that changed is followed here.
-    states = await capability_availability(
-        _session(container), chat.tenant_id, space.security_classification
-    )
-    wanted = tool_runtime_capabilities(space.enabled_capabilities, states)
-    if sorted(wanted) != sorted(assistant.enabled_capabilities):
-        await _update_tools(
-            container, chat, "the tool runtime's functions", enabled_capabilities=wanted
-        )
-
-
-async def _update_tools(
-    container: Container, chat: FlowAuthoringChats, what: str, **setting: Any
-) -> None:
-    try:
-        await container.assistant_service().update_assistant(
-            assistant_id=chat.assistant_id,
-            update=AssistantUpdateCommand(**setting),
-            include_hidden=True,
-        )
-    except BadRequestException as exc:
-        logger.warning(
-            "The flow chat's assistant %s did not get %s: %s",
-            chat.assistant_id,
-            what,
-            exc,
-        )
-
-
-def _public(
-    chat: FlowAuthoringChats, default: CompletionModel | None
-) -> FlowAuthoringChatPublic:
-    return FlowAuthoringChatPublic(
-        flow_id=chat.flow_id,
-        assistant_id=chat.assistant_id,
-        session_id=chat.session_id,
-        editing=chat.editing,
-        completion_model_id=chat.completion_model_id,
-        reasoning_effort=chat.reasoning_effort,
-        default_completion_model_id=default.id if default is not None else None,
-    )
-
-
-# --- Conversations ----------------------------------------------------------
-
-# Why a conversation started or the edit mode changed: the person asked, or
-# the chat had been idle.
-ChangeReason = Literal["requested", "idle"]
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-async def _idle_since_last_activity(
-    container: Container, chat: FlowAuthoringChats
-) -> bool:
-    """Whether the current conversation has questions and none of them, nor a
-    mode change, is newer than the idle threshold. An empty conversation is
-    never replaced: there is nothing in it to leave behind."""
-    last_question = await _session(container).scalar(
-        sa.select(sa.func.max(Questions.created_at)).where(
-            Questions.session_id == chat.session_id
-        )
-    )
-    if last_question is None:
-        return False
-    last_activity = max(
-        moment for moment in (last_question, chat.mode_changed_at) if moment
-    )
-    idle = timedelta(minutes=get_settings().flow_authoring_chat_idle_minutes)
-    return _now() - last_activity > idle
-
-
-async def _leave_edit_mode_after_pause(
-    container: Container, chat: FlowAuthoringChats
-) -> None:
-    """Turn edit mode off when the conversation has been idle, so a person who
-    comes back after the pause asks in view mode until they turn edit mode on.
-
-    ``mode_changed_at`` is left as it is: the idle measure counts the person's
-    own activity, so turning edit mode on after this still starts a new
-    conversation. The update matches only the chat as it was read, so a mode
-    change or a new conversation saved meanwhile is kept."""
-    if not chat.editing or not await _idle_since_last_activity(container, chat):
-        return
-    left = await _session(container).scalar(
-        sa.update(FlowAuthoringChats)
-        .where(
-            FlowAuthoringChats.tenant_id == chat.tenant_id,
-            FlowAuthoringChats.session_id == chat.session_id,
-            FlowAuthoringChats.editing.is_(True),
-            FlowAuthoringChats.mode_changed_at.is_not_distinct_from(
-                chat.mode_changed_at
-            ),
-        )
-        .values(editing=False)
-        .returning(FlowAuthoringChats.session_id)
-        .execution_options(synchronize_session=False)
-    )
-    if left is None:
-        return
-    # The row now says what the update wrote; the loaded chat says the same
-    # without being written again.
-    set_committed_value(chat, "editing", False)
-    await _audit_mode_change(container, chat, reason="idle")
-
-
-async def _audit_mode_change(
-    container: Container, chat: FlowAuthoringChats, *, reason: ChangeReason
-) -> None:
-    """The one audit entry for a change of edit mode, the person's or the
-    pause's, with the mode the chat is now in."""
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_AUTHORING_MODE_CHANGED,
-        entity_type=EntityType.FLOW,
-        entity_id=chat.flow_id,
-        description="Changed flow authoring edit mode.",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=await container.flow_service().get_flow(chat.flow_id),
-            extra={
-                "session_id": str(chat.session_id),
-                "editing": chat.editing,
-                "reason": reason,
-            },
-        ),
-    )
-
-
-async def _start_conversation(
-    container: Container, chat: FlowAuthoringChats, *, reason: ChangeReason
-) -> None:
-    """Point the chat at a new, empty conversation with the same assistant."""
-    user = container.user()
-    flow = await container.flow_service().get_flow(chat.flow_id)
-    previous = chat.session_id
-    # The caller's transaction, as when the chat was created.
-    conversation = await container.session_repo().add(
-        SessionAdd(name=flow.name, user_id=user.id, assistant_id=chat.assistant_id)
-    )
-    chat.session_id = conversation.id
-    await _session(container).flush()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
-        entity_type=EntityType.FLOW,
-        entity_id=chat.flow_id,
-        description="Started a new conversation in a flow authoring chat.",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=flow,
-            extra={
-                "session_id": str(conversation.id),
-                "previous_session_id": str(previous),
-                "reason": reason,
-            },
-        ),
-    )
-
-
-# --- Entry points -----------------------------------------------------------
-
-
 def starts_in_edit_mode(flow: Flow) -> bool:
     """A new chat on a flow nobody depends on yet, a draft without steps,
     starts in "Redigera": the first request there is to build the flow."""
     return not flow.steps and flow.published_version is None
 
 
-async def get_or_create_authoring_chat(
-    container: Container, *, flow_id: UUID, request: Request
-) -> FlowAuthoringChatPublic:
-    user = container.user()
-    await require_flows_enabled(container.feature_flag_service(), user.tenant_id)
-    access = await require_flow_edit_access(request, container, flow_id=flow_id)
-    # A delete that committed while this waited for the lock leaves no flow.
-    locked = await _session(container).scalar(
-        sa.select(Flows.id)
-        .where(
-            Flows.tenant_id == user.tenant_id,
-            Flows.id == flow_id,
-            Flows.deleted_at.is_(None),
+# --- The flow as a helper chat's target --------------------------------------
+
+
+class _FlowChatRefusals:
+    """The flows API's errors for what the chat refuses."""
+
+    def chat_not_found(self) -> Exception:
+        return NotFoundException("Flow authoring chat not found.")
+
+    def target_not_found(self) -> Exception:
+        return NotFoundException("Flow not found.")
+
+    def no_model(self) -> Exception:
+        return FlowBadRequestException(
+            "Choose a default model that supports tools for this space.",
+            code=FlowApiErrorCode.AUTHORING_CHAT_NO_MODEL,
         )
-        .with_for_update()
-    )
-    if locked is None:
-        raise NotFoundException("Flow not found.")
-    existing = await _session(container).scalar(
-        sa.select(FlowAuthoringChats).where(
-            FlowAuthoringChats.tenant_id == user.tenant_id,
-            FlowAuthoringChats.user_id == user.id,
-            FlowAuthoringChats.flow_id == flow_id,
+
+    def model_without_tools(self, model_id: UUID) -> Exception:
+        return FlowBadRequestException(
+            "The flow chat needs a model that supports tools.",
+            code=FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS,
+            context={"completion_model_id": str(model_id)},
         )
-    )
-    if existing is not None:
-        chat = await load_authoring_chat(
-            container, session_id=existing.session_id, flow_id=flow_id
+
+    def model_below_classification(self, model_id: UUID) -> Exception:
+        return FlowBadRequestException(
+            "The model's security classification is below the space's.",
+            code=FlowApiErrorCode.AUTHORING_MODEL_BELOW_CLASSIFICATION,
+            context={"completion_model_id": str(model_id)},
         )
-        return _public(chat, await _sync_assistant(container, chat))
-    space = await container.space_repo().one(id=access.flow.space_id)
-    if _chat_models(container, space).default is None:
-        raise _no_model()
-    assistant, _ = await container.assistant_service().create_assistant(
-        name=access.flow.name,
-        space_id=access.flow.space_id,
-        hidden=True,
-    )
-    # Use the caller's transaction: SessionService.create_session commits in
-    # a separate transaction, which cannot yet see this newly created parent.
-    conversation = await container.session_repo().add(
-        SessionAdd(
-            name=access.flow.name,
-            user_id=user.id,
-            assistant_id=assistant.id,
+
+    def model_not_in_space(self, model_id: UUID) -> Exception:
+        return FlowBadRequestException(
+            "The model is not enabled in the flow's space.",
+            code=FlowApiErrorCode.AUTHORING_MODEL_NOT_IN_SPACE,
+            context={"completion_model_id": str(model_id)},
         )
-    )
-    chat = (
-        await _session(container).scalars(
-            sa.insert(FlowAuthoringChats)
-            .values(
-                tenant_id=user.tenant_id,
-                user_id=user.id,
-                flow_id=flow_id,
-                space_id=access.flow.space_id,
-                assistant_id=assistant.id,
-                session_id=conversation.id,
-                editing=starts_in_edit_mode(access.flow),
-            )
-            .returning(FlowAuthoringChats)
-        )
-    ).one()
-    default = await _sync_assistant(container, chat)
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_AUTHORING_CHAT_CREATED,
-        entity_type=EntityType.FLOW,
-        entity_id=flow_id,
-        description="Created a flow authoring chat.",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=access.flow,
-            extra={
-                "assistant_id": str(assistant.id),
-                "session_id": str(conversation.id),
+
+    def reasoning_effort_unsupported(
+        self, reasoning_effort: str, model_id: UUID
+    ) -> Exception:
+        return FlowBadRequestException(
+            "The chat's model does not offer this reasoning effort.",
+            code=FlowApiErrorCode.AUTHORING_REASONING_EFFORT_UNSUPPORTED,
+            context={
+                "reasoning_effort": reasoning_effort,
+                "completion_model_id": str(model_id),
             },
+        )
+
+
+class _FlowModes:
+    """A flow's chat has "Fråga" and "Redigera". A new chat on a draft
+    without steps starts in "Redigera"; a mode change is fenced on the draft
+    revision the caller last read."""
+
+    mode_changed = HelperChatAuditEvent(
+        ActionType.FLOW_AUTHORING_MODE_CHANGED,
+        "Changed flow authoring edit mode.",
+    )
+
+    def not_editing(self) -> Exception:
+        return BadRequestException(
+            "Enter edit mode in the flow editor before changing this flow."
+        )
+
+    def starts_in_edit_mode(self, record: Flow) -> bool:
+        return starts_in_edit_mode(record)
+
+    def idle_after(self) -> timedelta:
+        return timedelta(minutes=get_settings().flow_authoring_chat_idle_minutes)
+
+    async def fence_mode_change(
+        self, container: Container, target_id: UUID, expected_revision: int | None
+    ) -> None:
+        if expected_revision is None:
+            raise BadRequestException(
+                "Send expected_revision with editing: a mode change is fenced "
+                "on the draft revision the caller last read."
+            )
+        await container.flow_service().reserve_draft_revision(
+            flow_id=target_id, expected_revision=expected_revision
+        )
+
+
+class _FlowTarget:
+    """A flow's chat: it reads the flow while the flow feature is on and the
+    person may read the flow's current definition, and changes the draft in
+    edit mode while the person may edit it and the flow is not published."""
+
+    target_type = HelperChatTargetType.FLOW
+    modes = _FlowModes()
+    tool_runtime = True
+    audit = HelperChatAudit(
+        entity_type=EntityType.FLOW,
+        chat_created=HelperChatAuditEvent(
+            ActionType.FLOW_AUTHORING_CHAT_CREATED, "Created a flow authoring chat."
+        ),
+        conversation_started=HelperChatAuditEvent(
+            ActionType.FLOW_AUTHORING_CONVERSATION_STARTED,
+            "Started a new conversation in a flow authoring chat.",
+        ),
+        model_changed=HelperChatAuditEvent(
+            ActionType.FLOW_AUTHORING_CHAT_MODEL_CHANGED,
+            "Changed the model of a flow authoring chat.",
         ),
     )
-    return _public(chat, default)
+    refusals = _FlowChatRefusals()
+
+    def instructions(self, container: Container) -> str:
+        # The same for every organisation.
+        return AUTHORING_INSTRUCTIONS
+
+    async def require_available(self, container: Container) -> None:
+        await require_flows_enabled(
+            container.feature_flag_service(), container.user().tenant_id
+        )
+
+    def target_exists(self, tenant_id: UUID) -> sa.ColumnElement[bool]:
+        return sa.exists().where(
+            Flows.id == HelperChats.target_id,
+            Flows.tenant_id == tenant_id,
+            Flows.space_id == HelperChats.space_id,
+            Flows.deleted_at.is_(None),
+        )
+
+    def scoped_request(self, space_id: UUID) -> Request:
+        return scoped_request(space_id)
+
+    async def require_read(
+        self, container: Container, request: Request, target_id: UUID
+    ) -> Flow:
+        access = await require_flow_current_definition_access(
+            request, container, flow_id=target_id
+        )
+        return access.flow
+
+    async def require_edit(
+        self, container: Container, request: Request, target_id: UUID
+    ) -> Flow:
+        access = await require_flow_edit_access(request, container, flow_id=target_id)
+        return access.flow
+
+    async def load(self, container: Container, target_id: UUID) -> Flow:
+        return await container.flow_service().get_flow(target_id)
+
+    def space_id(self, record: Flow) -> UUID:
+        return record.space_id
+
+    def name(self, record: Flow) -> str:
+        return record.name
+
+    async def lock(self, container: Container, target_id: UUID) -> bool:
+        alive = await _session(container).scalar(
+            sa.select(Flows.deleted_at.is_(None))
+            .where(
+                Flows.tenant_id == container.user().tenant_id,
+                Flows.id == target_id,
+            )
+            .with_for_update()
+        )
+        return bool(alive)
+
+    def changeable(self, record: Flow) -> bool:
+        # The chat has no way to unpublish a flow.
+        return record.published_version is None
+
+    def require_changeable(self, record: Flow) -> None:
+        if not self.changeable(record):
+            raise BadRequestException(PUBLISHED_FLOW_MESSAGE, code="flow_published")
+
+    def organisation_default_model_id(self, container: Container) -> UUID | None:
+        tenant = getattr(container.user(), "tenant", None)
+        return resolve_flow_authoring_chat_model_id(
+            cast(dict[str, Any] | None, getattr(tenant, "flow_settings", None))
+        )
+
+    async def build_tool_server(
+        self, *, token: str, tenant_id: UUID, editing: bool
+    ) -> MCPServer:
+        from eneo.internal_mcp.flows import build_flows_mcp_server
+
+        return await build_flows_mcp_server(
+            token=token, tenant_id=tenant_id, editing=editing
+        )
+
+
+FLOW_TARGET = _FlowTarget()
+
+
+# --- Entry points -----------------------------------------------------------
+
+
+def _public(opened: OpenedChat) -> FlowAuthoringChatPublic:
+    chat = opened.chat
+    return FlowAuthoringChatPublic(
+        flow_id=chat.target_id,
+        assistant_id=chat.assistant_id,
+        session_id=chat.session_id,
+        editing=chat.editing,
+        completion_model_id=chat.completion_model_id,
+        reasoning_effort=chat.reasoning_effort,
+        default_completion_model_id=opened.default_completion_model_id,
+    )
+
+
+async def load_authoring_chat(
+    container: Container,
+    *,
+    session_id: UUID,
+    assistant_id: UUID | None = None,
+    flow_id: UUID | None = None,
+    lock: bool = False,
+) -> HelperChats:
+    """The caller's chat on a flow for ``session_id``, after the binding's
+    access checks; a chat left in edit mode returns to view mode here after
+    a pause (``helper_chat_service.load_chat``)."""
+    return await helper_chat_service.load_chat(
+        container,
+        FLOW_TARGET,
+        session_id=session_id,
+        assistant_id=assistant_id,
+        target_id=flow_id,
+        lock=lock,
+    )
+
+
+async def require_authoring_edit(
+    container: Container, chat: HelperChats, *, draft: bool = False
+) -> None:
+    """Edit mode and edit access, and with ``draft`` also a flow that is not
+    published: the chat has no way to unpublish a flow, so a change to a
+    published one is refused before anything is read or written."""
+    await helper_chat_service.require_edit_mode(
+        container, FLOW_TARGET, chat, change=draft
+    )
+
+
+async def get_or_create_authoring_chat(
+    container: Container,
+    *,
+    flow_id: UUID,
+    request: Request,
+    fresh_start: bool = False,
+) -> FlowAuthoringChatPublic:
+    """The caller's chat, made on first use; with ``fresh_start`` on a new,
+    empty conversation (``helper_chat_service.get_or_create_chat``)."""
+    return _public(
+        await helper_chat_service.get_or_create_chat(
+            container,
+            FLOW_TARGET,
+            target_id=flow_id,
+            request=request,
+            fresh_start=fresh_start,
+        )
+    )
+
+
+async def list_authoring_conversations(
+    container: Container, *, flow_id: UUID, request: Request
+) -> list[HelperChatConversationPublic]:
+    """The caller's conversations in their chat on the flow that hold a
+    question, the latest question first."""
+    return await helper_chat_service.list_conversations(
+        container, FLOW_TARGET, target_id=flow_id, request=request
+    )
 
 
 async def update_authoring_chat(
@@ -1225,114 +1007,29 @@ async def update_authoring_chat(
     reasoning_effort: str | None | NotProvided = NOT_PROVIDED,
 ) -> FlowAuthoringChatPublic:
     """Change the chat's edit mode, model or reasoning effort, then bring its
-    assistant in line. Entering edit mode after a pause starts a new
-    conversation (see ``_idle_since_last_activity``)."""
-    chat = await load_authoring_chat(
-        container, session_id=session_id, flow_id=flow_id, lock=True
-    )
-    service = container.flow_service()
-    if editing is not None:
-        if expected_revision is None:
-            raise BadRequestException(
-                "Send expected_revision with editing: a mode change is fenced "
-                "on the draft revision the caller last read."
-            )
-        await service.reserve_draft_revision(
-            flow_id=flow_id, expected_revision=expected_revision
-        )
-        if editing:
-            await require_flow_edit_access(
-                scoped_request(chat.space_id), container, flow_id=flow_id
-            )
-        if chat.editing != editing:
-            if editing and await _idle_since_last_activity(container, chat):
-                await _start_conversation(container, chat, reason="idle")
-            chat.editing = editing
-            chat.mode_changed_at = _now()
-            await _audit_mode_change(container, chat, reason="requested")
-            await _session(container).flush()
-
-    space = await _load_space(container, chat)
-    if is_provided(completion_model_id) or is_provided(reasoning_effort):
-        await _change_model(
+    assistant in line. A mode change is fenced on ``expected_revision``, the
+    draft revision the caller last read; entering edit mode after a pause
+    starts a new conversation."""
+    return _public(
+        await helper_chat_service.update_chat(
             container,
-            chat,
-            space,
+            FLOW_TARGET,
+            target_id=flow_id,
+            session_id=session_id,
+            editing=editing,
+            expected_revision=expected_revision,
             completion_model_id=completion_model_id,
             reasoning_effort=reasoning_effort,
         )
-    return _public(chat, await _sync_assistant(container, chat, space))
-
-
-async def _change_model(
-    container: Container,
-    chat: FlowAuthoringChats,
-    space: Space,
-    *,
-    completion_model_id: UUID | None | NotProvided,
-    reasoning_effort: str | None | NotProvided,
-) -> None:
-    new_model_id = (
-        completion_model_id
-        if is_provided(completion_model_id)
-        else chat.completion_model_id
     )
-    new_effort = (
-        reasoning_effort if is_provided(reasoning_effort) else chat.reasoning_effort
-    )
-    if is_provided(completion_model_id) and completion_model_id is not None:
-        _require_choosable_model(space, completion_model_id)
-    if is_provided(reasoning_effort) and reasoning_effort is not None:
-        model = _chat_models(container, space).effective(new_model_id)
-        if model is None:
-            raise _no_model()
-        if _offered_reasoning_effort(model, reasoning_effort) != reasoning_effort:
-            raise FlowBadRequestException(
-                "The chat's model does not offer this reasoning effort.",
-                code=FlowApiErrorCode.AUTHORING_REASONING_EFFORT_UNSUPPORTED,
-                context={
-                    "reasoning_effort": reasoning_effort,
-                    "completion_model_id": str(model.id),
-                },
-            )
-    previous = (chat.completion_model_id, chat.reasoning_effort)
-    if previous == (new_model_id, new_effort):
-        return
-    chat.completion_model_id = new_model_id
-    chat.reasoning_effort = new_effort
-    user = container.user()
-    await container.audit_service().log_async(
-        tenant_id=user.tenant_id,
-        actor_id=user.id,
-        action=ActionType.FLOW_AUTHORING_CHAT_MODEL_CHANGED,
-        entity_type=EntityType.FLOW,
-        entity_id=chat.flow_id,
-        description="Changed the model of a flow authoring chat.",
-        metadata=AuditMetadata.standard(
-            actor=user,
-            target=await container.flow_service().get_flow(chat.flow_id),
-            extra={
-                "session_id": str(chat.session_id),
-                "completion_model_id": (
-                    str(new_model_id) if new_model_id is not None else None
-                ),
-                "reasoning_effort": new_effort,
-            },
-        ),
-    )
-    await _session(container).flush()
 
 
 async def start_authoring_conversation(
     container: Container, *, flow_id: UUID, session_id: UUID
 ) -> FlowAuthoringChatPublic:
     """Leave the current conversation behind and continue in a new one."""
-    chat = await load_authoring_chat(
-        container, session_id=session_id, flow_id=flow_id, lock=True
+    return _public(
+        await helper_chat_service.start_new_conversation(
+            container, FLOW_TARGET, target_id=flow_id, session_id=session_id
+        )
     )
-    await require_flow_edit_access(
-        scoped_request(chat.space_id), container, flow_id=flow_id
-    )
-    await _start_conversation(container, chat, reason="requested")
-    space = await _load_space(container, chat)
-    return _public(chat, _chat_models(container, space).default)

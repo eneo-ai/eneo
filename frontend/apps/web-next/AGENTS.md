@@ -204,7 +204,9 @@ and rows. Anchors and focused controls stay clear of the sticky header
 through its measured height (`--editor-header-h`); check keyboard navigation
 and narrow widths when changing the shared layout. A page under a frame's
 header (space settings) passes `isFramed` to start on its line instead of
-centring. An editor opened right after "Skapa …" gets the resource through
+centring. While the assistant editor's helper is open beside the form
+(`CompanionLayout`), the form scrolls in its own named region, its scrollbar
+beside it; otherwise `main#main-content` scrolls it. An editor opened right after "Skapa …" gets the resource through
 `useJustCreated` (`src/features/spaces/just-created.ts`): it focuses the
 default name and announces the creation; `createWithUniqueName` numbers the
 default name on a backend name collision (9017).
@@ -309,7 +311,11 @@ open), so the index has no bar of its own and names itself with a heading.
   beside or sheet from the width of the row they share (`useElementWidth`,
   decision 14: the conversation keeps 480 px), not from a media query; the
   chat page owns that row and the history gives way to a panel that opens
-  where both do not fit. Widths in that rule are px, set inline.
+  where both do not fit. Widths in that rule are px, set inline. A chat that
+  is a narrow column of a wider page (the helper panel) passes
+  `layout.inColumn`: where the panel does not fit beside, it covers the
+  conversation inside that column (a labelled region, the conversation inert
+  under it) instead of a sheet; a phone keeps the sheet.
 - **Collections of resources** (spaces, assistants, apps and the
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
   rows on a phone (`usePhoneScreen`), cards otherwise in a grid that fits as

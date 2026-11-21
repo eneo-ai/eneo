@@ -45,7 +45,7 @@ prepared against.
 | Step Result File | `flow_run_step_result_files` | Generated or declared artifact emitted by a step. |
 | Review Checkpoint | `flow_run_review_checkpoints` | Human review pause, editable payload, state, and revision. |
 | Audit/Webhook Outbox | `flow_run_audit_outbox`, `flow_run_webhook_deliveries` | Reliable outbound delivery records for audit and webhooks. |
-| Authoring Chat | `flow_authoring_chats` | One user's chat for one Flow: an ordinary conversation and hidden assistant bound to the Flow, with an edit-mode switch. |
+| Authoring Chat | `helper_chats` (`target_type` `flow`) | One user's chat for one Flow: an ordinary conversation and hidden assistant bound to the Flow, with an edit-mode switch. |
 
 ## Runtime API shape
 
@@ -478,7 +478,7 @@ of adding a parallel path.
 | Review checkpoints | run review checkpoint API and runtime services |
 | Draft changes from the editor and the authoring chat | `flow_authoring_operations.apply_editor_update` on `FlowService.update_flow` |
 | Step move, insert and remove | `flow_step_structure.restructure_steps` |
-| Authoring chat binding and edit mode | `flow_authoring_chat` and the loopback `internal_mcp/flows.py` server |
+| Authoring chat binding and edit mode | `helper_chat_service` with the flow target in `flow_authoring_chat`, and the loopback `internal_mcp/flows.py` server |
 | Publish validation | `flow_validators` |
 | A step's reads, by channel | `eneo.flows.step_lineage` |
 | Flow suggestions (rules, fingerprints, fixes) | `flow_suggestions` and the `flow_suggestion_*` domain modules, served by `flow_suggestion_service` |
@@ -681,5 +681,6 @@ the publish validators in `flow_validators`.
 - `backend/src/eneo/flows/application/flow_authoring_operations.py`
 - `backend/src/eneo/flows/application/flow_step_structure.py`
 - `backend/src/eneo/flows/application/flow_authoring_chat.py`
+- `backend/src/eneo/helper_chats/application/helper_chat_service.py`
 - `backend/src/eneo/internal_mcp/flows.py`
 - `backend/src/eneo/flows/flow_validators.py`

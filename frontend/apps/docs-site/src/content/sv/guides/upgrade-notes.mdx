@@ -1,6 +1,6 @@
 ---
 title: Uppgraderingsanteckningar
-translationSource: guides/upgrade-notes.mdx@48e43636809e
+translationSource: guides/upgrade-notes.mdx@df09980aa738
 ---
 
 import { Callout } from "nextra/components";
@@ -127,6 +127,7 @@ flowchart TB
 | [Härdning av HTTP](#http-hardening) | Proxyer som sätter HSTS eller CSP | Bestäm vem som äger HSTS och CSP |
 | Lösenordsinloggning: ett korrekt lösenord för ett inaktivt konto eller en avstängd organisation svarar `403` (9019, 9025) i stället för `500`; `422` listar bara `loc`, `type` och `msg`; ett oväntat fel svarar `500` med koden `internal_error` och ett `error_id` | API-klienter med lösenord | Hantera de två koderna; uppdatera tolkningen av `422` |
 | [Lösenordens livscykel](#password-lifecycle) | Förinlagda användare, lösenordsintegrationer | Kontrollera `DEFAULT_USER_PASSWORD` |
+| [Hjälpassistenten ersätter Promptguiden i React-webbappen](#helper-replaces-prompt-guide) | Administratörer i organisationer med en Promptguide | Flytta era egna regler till hjälpassistentens riktlinjer; kontrollera reglaget och modellen; ge behörigheten till de roller som ska ha hjälpassistenten |
 
 ### API-kontrakt [#api-contract]
 
@@ -325,6 +326,27 @@ Utanför utveckling får varje `/api/`-svar HSTS i ett år, om inte vägen sätt
 Lösenord som en administratör satt måste bytas vid första inloggningen (`403` kod 9070 tills dess). När db-init skapar standardanvändaren misslyckas den om `DEFAULT_USER_PASSWORD` är kortare än 12 tecken eller längre än 72 byte.
 
 **Gör:** kontrollera `DEFAULT_USER_PASSWORD`; integrationer hanterar 9070 eller använder API-nycklar.
+
+### Hjälpassistenten ersätter Promptguiden i React-webbappen [#helper-replaces-prompt-guide]
+
+I React-webbappen tar hjälpassistenten Promptguidens plats. Den finns i en sidopanel bredvid en assistents inställningar. Knappen "Hjälp mig skriva instruktionerna" bredvid prompten öppnar den med en färdig fråga att skicka. I ett flödessteg lägger "Hjälp mig skriva instruktionen" en sådan fråga i Flödesassistentens chatt på flödessidan. Promptguiden är oförändrad i Svelte-webbappen. De har var sitt reglage: hjälpassistentens finns under **Admin > Hjälpassistent**, och Flödesassistenten följer det inte.
+
+Uppgraderingen fyller i hjälpassistentens inställningar en gång, utifrån organisationens Promptguide:
+
+- Hjälpassistenten är av om guiden var avstängd eller dold för användare.
+- Guidens modell blir standardmodell för hjälpassistenten och Flödesassistenten, som delar den. Det gäller om modellen kan använda verktyg och ingen standardmodell var vald.
+
+Det här tar hjälpassistenten inte över:
+
+- Guidens redigerbara prompt. Flytta era egna regler till organisationens riktlinjer under **Admin > Hjälpassistent**, högst 4000 tecken. Riktlinjerna gäller hjälpassistenten i en assistents inställningar, inte Flödesassistenten.
+- Guidens modellinställningar (personen väljer resonemangsnivå i chatten), dess egen kunskap, rankningen av träffar och dess MCP-servrar.
+- Guidens gallringstid. Hjälpassistentens konversationer följer ytans gallringstid, annars organisationens. De tas bort tillsammans med assistenten eller flödet de hör till.
+
+Hjälpassistentens konversationer räknas som modellanvändning, också i personens egen användning. Det gjorde inte guidens konversationer. Hjälpassistenten föreslår varje ändring av en assistent och sparar inget själv. Ändringen sparas när personen använder förslaget, och då är den personens egen. Publicering och avpublicering via hjälpassistenten väntar tills personen godkänner dem i chatten. Båda loggas i granskningsloggen som personens egna ändringar.
+
+Hjälpassistenten kräver behörigheten **Hjälpassistent** i personens roll. Uppgraderingen ger den bara till den fördefinierade rollen Owner. Utan behörigheten visas inte hjälpassistenten, och personen redigerar assistenten som förut. Flödesassistenten följer inte behörigheten.
+
+**Gör:** flytta era egna regler från guidens prompt till hjälpassistentens riktlinjer. Kontrollera sedan reglaget och standardmodellen under **Admin > Hjälpassistent**. Ge behörigheten **Hjälpassistent** till de roller som ska ha hjälpassistenten.
 
 ## Detaljer: API-kontrakt [#details-api-contract]
 

@@ -1,4 +1,4 @@
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BookOpen,
   BookOpenCheck,
@@ -15,16 +15,25 @@ import {
   Sparkles
 } from "lucide-react";
 import Link from "@/lib/link";
-import { useTranslations } from "use-intl";
-import { SaveStatusProvider } from "@/components/composites/save-status";
+import { useFormatter, useTranslations } from "use-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { CompanionLayout } from "@/components/composites/companion-layout";
+import { SaveStatusProvider, useSavePendingNow } from "@/components/composites/save-status";
 import {
   SectionedSettings,
+  type SectionedSettingsHandle,
   type SettingsSection
 } from "@/components/composites/sectioned-settings";
+import { SettingsMarks } from "@/components/composites/settings-rows";
+import { useAppContext } from "@/components/providers/app-context";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { ResourceApiKeysSection } from "@/features/api-keys/resource-api-keys-section";
+import { availableDocumentTemplatesQueryOptions } from "@/features/document-templates/document-templates";
+import { HelperPanel } from "@/features/helper/helper-panel";
+import { ReferenceMenuButton } from "@/features/references/reference-menu";
 import { editorSummaries } from "@/features/spaces/editor-summaries";
 import {
   EditorHeader,
@@ -38,6 +47,19 @@ import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
+import { spaceModelsQueryOptions } from "./assistant-editor-rules";
+import { AskHelperButton, AssistantHelperToggle, useAssistantHelper } from "./assistant-helper";
+import { assistantHelperAvailabilityQueryOptions } from "./assistant-helper-api";
+import { settingLabel } from "./assistant-helper-cards";
+import { useChatChangeMarks } from "./assistant-helper-feedback";
+import { AssistantHelperFormProvider } from "./assistant-helper-form";
+import { isPromptLocked, lockedAssistantModel } from "./effective-config";
+import {
+  SettingReferences,
+  insertSettingMessage,
+  useSettingReferenceMenu
+} from "./setting-reference-pills";
+import { settingMention, settingReferences, type AssistantSectionId } from "./setting-references";
 import { useAssistantAiDraft } from "./use-assistant-ai-draft";
 import { GeneralSection } from "./general-section";
 import { AttachmentsSection } from "./attachments-section";
@@ -56,6 +78,16 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  * breadcrumb back to the space's assistants, the name, the aggregate save
  * state and a shortcut into chat, then the section links. Opened right after
  * "Skapa assistent", it focuses the (default) name and announces the creation.
+ *
+ * "Hjälpassistent" in the header (and in a phone's bar) opens the helper chat
+ * beside the settings, or over them where the row has no room; it follows
+ * the helper's availability. The personal chat's own assistant has no helper
+ * (decision 11). Each visit starts the helper on a new, empty conversation
+ * the first time it is shown; closing and opening it again within the visit
+ * keeps the conversation. While the helper is available, each section's
+ * "Fråga" and "Hjälp mig välja modell" under the chat model put a reference
+ * to the setting in its composer (never sending it), and a reference pill in
+ * the chat shows its setting in the form.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
   return (
@@ -67,6 +99,8 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
 
 function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
+  const format = useFormatter();
+  const { settings } = useAppContext();
   const { space, routeId } = useSpace();
   const canAttachSkills = useCanAttachSkills();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
@@ -77,6 +111,69 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
+  const personalDefault = space.personal && space.default_assistant?.id === assistant.id;
+  const availabilityQuery = useQuery({
+    ...assistantHelperAvailabilityQueryOptions(browserApi, assistantId),
+    enabled: !personalDefault
+  });
+  const availability = personalDefault ? undefined : availabilityQuery.data;
+  // Ways into the helper from the form exist only where they can lead somewhere.
+  const helperAvailable = availability?.available === true;
+  const [helperOpen, setHelperOpen] = useState(false);
+  const savePending = useSavePendingNow();
+  // A prepared message for the composer, put there once the helper shows one.
+  const pendingAsk = useRef<string | null>(null);
+  const [askRequest, setAskRequest] = useState(0);
+  // Set while the helper closes to show a setting: focus goes there, not to the toggle.
+  const focusElsewhere = useRef(false);
+  const changeHelperOpen = (open: boolean) => {
+    if (!open) pendingAsk.current = null;
+    setHelperOpen(open);
+  };
+  /** Opens the helper with `text` in its composer at the caret; nothing is sent. */
+  const askHelper = (text: string) => {
+    pendingAsk.current = text;
+    setHelperOpen(true);
+    setAskRequest((count) => count + 1);
+  };
+  const headerToggle = useRef<HTMLButtonElement>(null);
+  const phoneToggle = useRef<HTMLButtonElement>(null);
+  const settingsView = useRef<SectionedSettingsHandle>(null);
+  const helperToggle = (compact: boolean) => (
+    <AssistantHelperToggle
+      ref={compact ? phoneToggle : headerToggle}
+      availability={availability}
+      open={helperOpen}
+      onOpenChange={changeHelperOpen}
+      compact={compact}
+    />
+  );
+  /**
+   * Where focus returns when the helper closes: the toggle on screen (the
+   * header's, or a phone's bar's); nowhere when it closed to show a setting,
+   * which takes the focus itself.
+   */
+  const returnFocus = () => {
+    if (focusElsewhere.current) {
+      focusElsewhere.current = false;
+      return null;
+    }
+    const toggles = [headerToggle.current, phoneToggle.current];
+    return (
+      toggles.find((toggle) => toggle?.isConnected && toggle.getClientRects().length > 0) ??
+      toggles.find((toggle) => toggle?.isConnected) ??
+      null
+    );
+  };
+
+  // What the result ranking and the document template rows read (shared with
+  // them through the cache), so the helper's references follow the rows.
+  const { data: spaceModels } = useQuery(spaceModelsQueryOptions(browserApi, space.id));
+  const { data: documentTemplates } = useQuery({
+    ...availableDocumentTemplatesQueryOptions(browserApi),
+    enabled: selectedCapabilities(assistant).includes("file_creation")
+  });
+
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
   const summary = editorSummaries(t);
@@ -84,7 +181,34 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   const model = t("editor_group_model");
   const access = t("editor_group_access");
 
-  const sections: SettingsSection[] = [
+  // The model can be chosen here: by someone who may edit, where no policy sets it.
+  const canChooseModel =
+    permissions.includes("edit") &&
+    lockedAssistantModel(space.completion_models, assistant.effective_config) === null;
+  const askAboutModel =
+    helperAvailable && canChooseModel
+      ? () =>
+          askHelper(
+            t("helper_ask_model_question", {
+              setting: settingMention({
+                key: "completion_model",
+                label: settingLabel("completion_model", t)
+              })
+            })
+          )
+      : undefined;
+  // The prompt can be written here: by someone who may edit, where no policy sets it.
+  const askAboutPrompt =
+    helperAvailable && permissions.includes("edit") && !isPromptLocked(assistant.effective_config)
+      ? () =>
+          askHelper(
+            t("helper_ask_prompt_question", {
+              setting: settingMention({ key: "prompt", label: settingLabel("prompt", t) })
+            })
+          )
+      : undefined;
+
+  const sections: (SettingsSection & { id: AssistantSectionId })[] = [
     {
       id: "general",
       label: t("general"),
@@ -104,6 +228,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
           assistant={assistant}
           contextModel={ai.effectiveModel}
           modelConfirmed={ai.confirmed}
+          onAskPrompt={askAboutPrompt}
         />
       )
     },
@@ -127,7 +252,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     ...(canAttachSkills && (!space.personal || space.default_assistant?.id !== assistant.id)
       ? [
           {
-            id: "skills",
+            id: "skills" as const,
             label: t("skills"),
             icon: BookOpenCheck,
             group: content,
@@ -164,7 +289,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       icon: Sparkles,
       group: model,
       summary: summary.model(assistant.completion_model),
-      node: <AiSection assistant={assistant} draft={ai} />
+      node: <AiSection assistant={assistant} draft={ai} onAskModel={askAboutModel} />
     },
     {
       id: "capabilities",
@@ -198,7 +323,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     ...(permissions.includes("edit")
       ? [
           {
-            id: "widget",
+            id: "widget" as const,
             label: t("widget_admin_title"),
             icon: MessageSquareCode,
             group: access,
@@ -209,7 +334,7 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     ...(hasPublishing
       ? [
           {
-            id: "publishing",
+            id: "publishing" as const,
             label: t("publishing"),
             icon: Send,
             group: access,
@@ -219,6 +344,75 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
         ]
       : [])
   ];
+
+  // What the helper chat can refer to: the sections in this list and the settings they show.
+  const referenceList = settingReferences({
+    sections,
+    assistant,
+    model: ai.toolModel,
+    kwargsModel: ai.model,
+    kwargs: ai.kwargs,
+    fileReferences: settings.file_references_enabled === true,
+    space,
+    spaceModels,
+    documentTemplates: documentTemplates?.items,
+    t,
+    format
+  });
+  const {
+    references: chatReferences,
+    composer,
+    byKey: referenceMap
+  } = useSettingReferenceMenu(referenceList);
+  // What a change from the chat touched, marked in the form for a while.
+  const { marks, show: showChanges } = useChatChangeMarks(referenceMap);
+  const markLabel = t("helper_mark_changed");
+  const rowMarks = useMemo(
+    () => (marks ? { rows: marks.rows, label: markLabel } : null),
+    [marks, markLabel]
+  );
+  const markedSections = sections.map((section) => {
+    const count = marks?.sections.get(section.id);
+    return count ? { ...section, mark: t("helper_mark_section_count", { count }) } : section;
+  });
+  const helperForm = useMemo(() => ({ savePending, showChanges }), [savePending, showChanges]);
+  const helper = useAssistantHelper({
+    assistant,
+    availability,
+    references: chatReferences,
+    footerActions: composer ? (
+      <ReferenceMenuButton label={t("helper_reference_button")} input={composer} />
+    ) : null,
+    onChanged: (fields) => showChanges(fields, "helper"),
+    // The helper reads what is on screen: what the form has not saved goes first.
+    beforeSend: async () => ((await savePending()) ? null : t("helper_send_held_unsaved"))
+  });
+
+  // A prepared message goes in once the helper is open and its composer is on screen.
+  useEffect(() => {
+    const text = pendingAsk.current;
+    if (text === null || !helperOpen || !composer) return;
+    pendingAsk.current = null;
+    insertSettingMessage(composer, text, referenceMap);
+  }, [askRequest, helperOpen, composer, referenceMap]);
+
+  /**
+   * A pill pressed in the chat: the form shows its setting and focus moves
+   * to it (to the lock's notice while the form is locked). Where the helper
+   * covers the form (a narrow row, a phone), the helper closes first so the
+   * person sees it.
+   */
+  const showSetting = (key: string) => {
+    const reference = referenceMap.get(key);
+    if (!reference) return;
+    // The aside's frame says where it is (the form's own inert is the lock's, not the cover's).
+    const presentation = document.querySelector("[data-companion]")?.getAttribute("data-companion");
+    if (helperOpen && presentation && presentation !== "beside") {
+      focusElsewhere.current = true;
+      flushSync(() => changeHelperOpen(false));
+    }
+    settingsView.current?.show({ section: reference.section, control: reference.control });
+  };
 
   const test = (
     <Button asChild size="sm">
@@ -232,23 +426,79 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
     section: "assistants",
     name: assistant.name,
     actions: (
-      <AstryxButton
-        href={chatHref}
-        variant="secondary"
-        icon={<Play aria-hidden="true" className="size-4" />}
-        label={t("test")}
-      />
+      <>
+        {helperToggle(true)}
+        <AstryxButton
+          href={chatHref}
+          variant="secondary"
+          icon={<Play aria-hidden="true" className="size-4" />}
+          label={t("test")}
+        />
+      </>
     ),
     created
   });
 
   return (
-    <SectionedSettings
-      navigationLabel={t("editor_sections_label")}
-      sections={sections}
-      phone={phone}
-      header={<EditorHeader section="assistants" name={assistant.name} actions={test} />}
-    />
+    <SettingReferences references={referenceMap} show={showSetting}>
+      <AssistantHelperFormProvider value={helperForm}>
+        <CompanionLayout
+          open={helperOpen}
+          label={t("helper_heading")}
+          contentLabel={t("helper_settings_region")}
+          resizeLabel={t("helper_resize")}
+          widthStorageKey="eneo:assistant-helper-width"
+          returnFocus={returnFocus}
+          onClose={() => changeHelperOpen(false)}
+          aside={(presentation) => (
+            <HelperPanel
+              adapter={helper}
+              open={helperOpen}
+              close={{
+                label: presentation === "phone" ? t("helper_back") : t("helper_close"),
+                onClose: () => changeHelperOpen(false),
+                asBack: presentation === "phone"
+              }}
+            />
+          )}
+        >
+          <SettingsMarks marks={rowMarks}>
+            <SectionedSettings
+              handleRef={settingsView}
+              navigationLabel={t("editor_sections_label")}
+              sections={markedSections}
+              // A section's own bar has the helper's toggle too, as the index's has.
+              phone={{ ...phone, sectionActions: helperToggle(true) }}
+              sectionAction={
+                helperAvailable
+                  ? (section) => (
+                      <AskHelperButton
+                        section={section.label}
+                        onAsk={() => {
+                          const reference = referenceMap.get(`section:${section.id}`);
+                          if (reference) askHelper(settingMention(reference));
+                        }}
+                      />
+                    )
+                  : undefined
+              }
+              header={
+                <EditorHeader
+                  section="assistants"
+                  name={assistant.name}
+                  actions={
+                    <>
+                      {helperToggle(false)}
+                      {test}
+                    </>
+                  }
+                />
+              }
+            />
+          </SettingsMarks>
+        </CompanionLayout>
+      </AssistantHelperFormProvider>
+    </SettingReferences>
   );
 }
 

@@ -225,6 +225,8 @@ function Harness({
   onTitle,
   onToolCallFinished,
   onAnswerFinished,
+  onSendingChange,
+  beforeSend,
   chatPartner = partner,
   initialMessages,
   modelSelector
@@ -233,6 +235,8 @@ function Harness({
   onTitle?: (title: string) => void;
   onToolCallFinished?: (call: ToolCallRecord) => void;
   onAnswerFinished?: () => void;
+  onSendingChange?: (sending: boolean) => void;
+  beforeSend?: () => Promise<boolean>;
   chatPartner?: ChatPartner;
   initialMessages?: EneoUIMessage[];
   modelSelector?: ReactNode;
@@ -248,6 +252,8 @@ function Harness({
       onTitle={onTitle}
       onToolCallFinished={onToolCallFinished}
       onAnswerFinished={onAnswerFinished}
+      onSendingChange={onSendingChange}
+      beforeSend={beforeSend}
       modelSelector={modelSelector}
     />
   );
@@ -662,6 +668,98 @@ describe("ChatView streaming an answer", () => {
 
     await waitFor(() => expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true));
     expect(queryClient.getQueryState(history)?.isInvalidated).toBe(true);
+  });
+});
+
+describe("ChatView with a page that acts before a question goes", () => {
+  const composerText = () =>
+    (screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement).value;
+
+  it("issues the request only once the page's beforeSend lets the question go", async () => {
+    spies.mode = "answer";
+    let release!: (go: boolean) => void;
+    const beforeSend = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        })
+    );
+    renderInApp(<Harness beforeSend={beforeSend} />);
+    ask("Vilken gräns gäller?");
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 30)));
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+    expect(spies.sent).toHaveLength(0);
+    expect(spies.announce).not.toHaveBeenCalledWith("Assistenten skriver ett svar");
+
+    await act(async () => release(true));
+    await waitFor(() => expect(spies.sent).toHaveLength(1));
+    expect(spies.sent[0]?.text).toBe("Vilken gräns gäller?");
+  });
+
+  it("puts a question the page holds back in the composer, and sends nothing", async () => {
+    spies.mode = "answer";
+    const beforeSend = vi.fn(async () => false);
+    renderInApp(<Harness beforeSend={beforeSend} />);
+    ask("Vilken gräns gäller?");
+
+    await waitFor(() => expect(composerText()).toBe("Vilken gräns gäller?"));
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+    expect(spies.sent).toHaveLength(0);
+    expect(spies.announce).not.toHaveBeenCalledWith("Assistenten skriver ett svar");
+  });
+
+  it("asks the page again for a retry", async () => {
+    spies.mode = "fail";
+    const beforeSend = vi.fn(async () => true);
+    renderInApp(<Harness beforeSend={beforeSend} />);
+    ask("Vilken gräns gäller?");
+    const retry = await screen.findByRole("button", { name: "Försök igen" });
+
+    spies.mode = "answer";
+    fireEvent.click(retry);
+    await waitFor(() => expect(spies.sent).toHaveLength(2));
+    expect(beforeSend).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("ChatView telling the page a question is on its way", () => {
+  it("reports from the moment a question leaves the composer until its answer has ended", async () => {
+    spies.mode = "answer";
+    const onSendingChange = vi.fn();
+    renderInApp(<Harness onSendingChange={onSendingChange} />);
+    expect(onSendingChange).not.toHaveBeenCalled();
+
+    ask("Vilken gräns gäller?");
+    await waitFor(() => expect(onSendingChange).toHaveBeenCalledWith(true));
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
+    await waitFor(() => expect(onSendingChange.mock.calls).toEqual([[true], [false]]));
+  });
+
+  it("reports the end of an answer that was stopped, or failed", async () => {
+    spies.mode = "hold";
+    const onSendingChange = vi.fn();
+    renderInApp(<Harness onSendingChange={onSendingChange} />);
+    ask("Vilken gräns gäller?");
+    fireEvent.click(await screen.findByRole("button", { name: "Stoppa generering" }));
+    await waitFor(() => expect(onSendingChange.mock.calls).toEqual([[true], [false]]));
+    cleanup();
+
+    spies.mode = "fail";
+    onSendingChange.mockClear();
+    renderInApp(<Harness onSendingChange={onSendingChange} />);
+    ask("Vilken gräns gäller?");
+    await screen.findByRole("button", { name: "Försök igen" });
+    expect(onSendingChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it("reports the end of a question the page held back, from the moment it left the composer", async () => {
+    spies.mode = "answer";
+    const onSendingChange = vi.fn();
+    renderInApp(<Harness onSendingChange={onSendingChange} beforeSend={async () => false} />);
+    ask("Vilken gräns gäller?");
+    await waitFor(() => expect(onSendingChange.mock.calls).toEqual([[true], [false]]));
+    expect(spies.sent).toHaveLength(0);
   });
 });
 

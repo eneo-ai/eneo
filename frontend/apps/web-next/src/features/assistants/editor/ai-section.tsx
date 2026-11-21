@@ -1,6 +1,6 @@
-import { Brain, Eye, Wrench } from "lucide-react";
+import { Brain, Eye, Sparkles, Wrench } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { Button as RetryButton } from "@astryxdesign/core/Button";
+import { Button } from "@astryxdesign/core/Button";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -68,7 +68,20 @@ function ModelSummary({
   );
 }
 
-export function AiSection({ assistant, draft }: { assistant: Assistant; draft: AssistantAiDraft }) {
+export function AiSection({
+  assistant,
+  draft,
+  onAskModel
+}: {
+  assistant: Assistant;
+  draft: AssistantAiDraft;
+  /**
+   * "Hjälp mig välja modell" under the chat model: opens the helper with a
+   * question about it in the composer. Absent, it is not offered (no
+   * helper, or no model the person may choose here).
+   */
+  onAskModel?: () => void;
+}) {
   const t = useTranslations();
   const { space } = useSpace();
   const { tenant } = useAppContext();
@@ -108,13 +121,24 @@ export function AiSection({ assistant, draft }: { assistant: Assistant; draft: A
           </p>
         )}
         {draft.isError && (
-          <RetryButton label={t("retry")} onClick={() => void persist(modelId, kwargs)} />
+          <Button label={t("retry")} onClick={() => void persist(modelId, kwargs)} />
         )}
         {(lockedSummaryModel ?? model) && (
           <ModelSummary
             model={(lockedSummaryModel ?? model)!}
             showPricing={showModelPricing}
             t={t}
+          />
+        )}
+        {onAskModel && (
+          // A quiet action under the setting; its inset is pulled back so the icon starts on the row's edge.
+          <Button
+            variant="ghost"
+            size="sm"
+            icon={<Sparkles aria-hidden="true" className="size-4" />}
+            label={t("helper_ask_model")}
+            onClick={onAskModel}
+            className="-ms-2.5 self-start"
           />
         )}
       </SettingsRow>

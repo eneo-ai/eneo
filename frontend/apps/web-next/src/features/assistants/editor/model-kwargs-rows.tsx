@@ -28,7 +28,8 @@ import {
   type NumericSettingName
 } from "./model-kwargs";
 
-const BEHAVIOUR_LABEL_KEYS: Record<ModelBehaviour, string> = {
+/** What each behaviour preset is called in the behaviour select. */
+export const BEHAVIOUR_LABEL_KEYS: Record<ModelBehaviour, string> = {
   creative: "creative",
   default: "default_behavior",
   deterministic: "deterministic",
@@ -48,6 +49,15 @@ export function modelKwargFieldId(
   return behaviourFromKwargs(kwargs) === "custom"
     ? `${idPrefix}-custom-temperature`
     : `${idPrefix}-model-behaviour`;
+}
+
+/**
+ * The key the model settings row (the settings the model itself offers) is
+ * marked by among `SettingsMarks`; the behaviour row is marked by its
+ * select's id, `${idPrefix}-model-behaviour`.
+ */
+export function modelSettingsMarkKey(idPrefix: string): string {
+  return `${idPrefix}-model-settings`;
 }
 
 /**
@@ -199,7 +209,11 @@ export function ModelKwargsRows({
       </SettingsRow>
 
       {specificKwargs.length > 0 && (
-        <SettingsRow title={t("model_settings")} description={t("model_settings_description")}>
+        <SettingsRow
+          title={t("model_settings")}
+          description={t("model_settings_description")}
+          markKey={modelSettingsMarkKey(idPrefix)}
+        >
           <div className="flex flex-col gap-3">
             {specificKwargs.map((name) => {
               if (!isSelectKwarg(name)) {

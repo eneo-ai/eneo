@@ -3821,6 +3821,106 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/assistants/{id}/helper-chat/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Open Assistant Helper Chat
+     * @description Open the caller's helper chat on this assistant, creating it on first use. The chat is an ordinary conversation with a hidden assistant of the caller's own in the assistant's space, whose tools reach only this assistant; send its questions to `assistant_id`. Each user has one chat per assistant; calling again returns it with its current conversation, or with `fresh_start` on a new, empty one (an empty current conversation is kept, so repeated opens leave no empty conversation behind), and gives its assistant the current instructions (with the organisation's guidance for helper chats after the base persona) and the model in force: the caller's own choice, else the organisation's default for helper chats when the space allows it, else the space's default among models that support tools. The chat has one mode: it proposes each change for the person to apply, and publishes or unpublishes the assistant only once the person approves. Refused while the organisation has turned the helper chat off, for an assistant the caller may not edit and for one configured elsewhere (a helper chat's own, a help assistant, a flow step's).
+     */
+    post: operations["get_or_create_assistant_helper_chat"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/assistants/{id}/helper-chat/availability": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Assistant Helper Chat Availability
+     * @description Whether opening the caller's helper chat on this assistant would succeed, and if not why, by the same checks the open endpoint makes. Creates and changes nothing. An assistant that does not exist or cannot be read answers `no_edit_rights`, like one the caller may not edit.
+     */
+    get: operations["get_assistant_helper_chat_availability"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/assistants/{id}/helper-chat/conversations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Assistant Helper Chat Conversations
+     * @description The caller's conversations in their helper chat on this assistant that hold a question, the latest question first, at most 50. Each names its first question as its title and says whether it is the chat's current conversation; read one with `GET /api/v1/conversations/{session_id}/`. Only the current conversation is ever answered. The checks are the open endpoint's, and a caller without a chat on the assistant gets not found. Creates and changes nothing.
+     */
+    get: operations["list_assistant_helper_chat_conversations"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/assistants/{id}/helper-chat/{session_id}/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update Assistant Helper Chat
+     * @description Choose the helper chat's model or reasoning effort. A model is checked like an assistant's model (enabled in the space and meeting its classification) and must support tools; null returns to the default. The chat's assistant follows the change before the response.
+     */
+    patch: operations["update_assistant_helper_chat"];
+    trace?: never;
+  };
+  "/api/v1/assistants/{id}/helper-chat/{session_id}/conversations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Start a New Assistant Helper Chat Conversation
+     * @description Leave the helper chat's current conversation and continue in a new, empty one with the same assistant and model. Earlier conversations are kept for traceability and listed for their person (`GET .../helper-chat/conversations/`), but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`.
+     */
+    post: operations["start_assistant_helper_chat_conversation"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v1/assistants/{id}/mcp-servers/": {
     parameters: {
       query?: never;
@@ -4084,7 +4184,7 @@ export interface paths {
     };
     /**
      * Get per-action audit configuration
-     * @description Retrieve all 234 actions with their enabled status for the modal UI.
+     * @description Retrieve all 238 actions with their enabled status for the modal UI.
      */
     get: operations["get_action_config_api_v1_audit_config_actions_get"];
     put?: never;
@@ -5572,9 +5672,29 @@ export interface paths {
     put?: never;
     /**
      * Open Flow Authoring Chat
-     * @description Open the caller's chat for editing this flow with an assistant, creating it on first use. The chat is an ordinary conversation whose assistant reaches only this flow through its tools, and it starts in view mode: the tools read the flow but change nothing until the caller turns on edit mode. Each user has one chat per flow; calling again returns it with its current conversation, and gives its assistant the current instructions and the model in force: the caller's own choice, else the organisation's default for flow chats when the space allows it, else the space's default among models that support tools.
+     * @description Open the caller's chat for editing this flow with an assistant, creating it on first use. The chat is an ordinary conversation whose assistant reaches only this flow through its tools, and it starts in view mode: the tools read the flow but change nothing until the caller turns on edit mode. Each user has one chat per flow; calling again returns it with its current conversation, or with `fresh_start` on a new, empty one (an empty current conversation is kept, so repeated opens leave no empty conversation behind), and gives its assistant the current instructions and the model in force: the caller's own choice, else the organisation's default for flow chats when the space allows it, else the space's default among models that support tools.
      */
     post: operations["get_or_create_flow_authoring_chat"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v1/flows/{id}/authoring-chat/conversations/": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * List Flow Authoring Conversations
+     * @description The caller's conversations in their chat on this flow that hold a question, the latest question first, at most 50. Each names its first question as its title and says whether it is the chat's current conversation; read one with `GET /api/v1/conversations/{session_id}/`. Only the current conversation is ever answered. The checks are the open endpoint's, and a caller without a chat on the flow gets not found. Creates and changes nothing: a chat left in edit mode stays in it until it is opened or used.
+     */
+    get: operations["list_flow_authoring_conversations"];
+    put?: never;
+    post?: never;
     delete?: never;
     options?: never;
     head?: never;
@@ -5612,7 +5732,7 @@ export interface paths {
     put?: never;
     /**
      * Start a New Flow Authoring Conversation
-     * @description Leave the chat's current conversation and continue in a new, empty one with the same assistant, edit mode and model. Earlier conversations are kept for traceability but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`; the flow itself, its revisions and the audit log stay the record of what changed.
+     * @description Leave the chat's current conversation and continue in a new, empty one with the same assistant, edit mode and model. Earlier conversations are kept for traceability and listed for their person (`GET .../authoring-chat/conversations/`), but are never answered or sent to the model again: asking in one returns not found. The response carries the new `session_id`; the flow itself, its revisions and the audit log stay the record of what changed.
      */
     post: operations["start_flow_authoring_conversation"];
     delete?: never;
@@ -9521,6 +9641,30 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v1/settings/helper-chat-policy": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /**
+     * Get the helper chat settings
+     * @description Return the organisation's settings for the helper chat on assistants: whether it is on, the organisation's guidance added to its persona and the longest guidance that can be saved, and the default model every helper chat shares with the flow chat. A setting never saved has its default: on, no guidance, no default model.
+     */
+    get: operations["get_helper_chat_policy"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    /**
+     * Update the helper chat settings
+     * @description Change the fields sent and keep the others. `enabled: false` turns the helper chat on assistants off for everyone: opening, changing and continuing a chat and its tool calls are refused (`helper_chat_disabled`) and its availability answers `disabled`; conversations already held are kept, and the flow chat is not affected. `guidance` is added to the helper's persona after its base rules and reaches a chat the next time it is opened. `completion_model_id` is the default model of every helper chat, the flow chat's included: an enabled completion model of the organisation that supports tools, or null to remove it.
+     */
+    patch: operations["update_helper_chat_policy"];
+    trace?: never;
+  };
   "/api/v1/settings/models/": {
     parameters: {
       query?: never;
@@ -13266,6 +13410,10 @@ export interface components {
       | "flow_authoring_mode_changed"
       | "flow_authoring_chat_model_changed"
       | "flow_authoring_conversation_started"
+      | "helper_chat_created"
+      | "helper_chat_mode_changed"
+      | "helper_chat_model_changed"
+      | "helper_chat_conversation_started"
       | "flow_deleted"
       | "flow_published"
       | "flow_unpublished"
@@ -15006,6 +15154,75 @@ export interface components {
        */
       on_fail_message?: string;
     };
+    /** AssistantHelperChatAvailability */
+    AssistantHelperChatAvailability: {
+      /**
+       * Available
+       * @description Whether opening the chat on this assistant would succeed.
+       */
+      available: boolean;
+      /**
+       * Reason
+       * @description Why not: `disabled` when the organisation has turned the helper chat off (checked first); `no_permission` when the caller's role lacks the `helper_chat` permission (checked next); `no_model` when the space has no model that supports tools; `no_edit_rights` when the caller may not edit the assistant, which is also the answer for one that does not exist or cannot be read; `not_supported` for an assistant that is configured elsewhere (a helper chat's own, a help assistant or a flow step's). Null when available.
+       */
+      reason?:
+        ("disabled" | "no_permission" | "no_model" | "no_edit_rights" | "not_supported") | null;
+    };
+    /** AssistantHelperChatPublic */
+    AssistantHelperChatPublic: {
+      /**
+       * Assistant Id
+       * Format: uuid
+       * @description The chat's own assistant, hidden from every list: the chat's questions are sent to it.
+       */
+      assistant_id: string;
+      /**
+       * Completion Model Id
+       * @description The model the caller chose for this chat; null follows the default (`default_completion_model_id`).
+       */
+      completion_model_id?: string | null;
+      /**
+       * Default Completion Model Id
+       * @description The model the chat answers with while `completion_model_id` is null: the organisation's default for helper chats when this space allows it, else the space's default among models that support tools.
+       */
+      default_completion_model_id?: string | null;
+      /**
+       * Reasoning Effort
+       * @description The reasoning effort the caller chose; null uses the model's own default. Applied only when the chat's model offers that level.
+       */
+      reasoning_effort?: string | null;
+      /**
+       * Session Id
+       * Format: uuid
+       * @description The chat's current conversation. Starting a new conversation, or opening with `fresh_start`, replaces it; earlier conversations are kept and listed for their person but never answered again.
+       */
+      session_id: string;
+      /**
+       * Target Id
+       * Format: uuid
+       * @description The assistant the chat is about.
+       */
+      target_id: string;
+    };
+    /**
+     * AssistantHelperChatUpdateRequest
+     * @example {
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
+     *       "reasoning_effort": "high"
+     *     }
+     */
+    AssistantHelperChatUpdateRequest: {
+      /**
+       * Completion Model Id
+       * @description The model this chat answers with: one enabled in the assistant's space, meeting its security classification, that supports tools. Null returns to the default; omit to keep the current choice.
+       */
+      completion_model_id?: string | null;
+      /**
+       * Reasoning Effort
+       * @description A reasoning effort the chat's model offers (`supported_model_kwargs.reasoning_effort`). Null uses the model's default; omit to keep the current choice.
+       */
+      reasoning_effort?: string | null;
+    };
     /** AssistantInTemplatePublic */
     AssistantInTemplatePublic: {
       completion_model: components["schemas"]["CompletionModelPublicAssistantTemplate"] | null;
@@ -15543,7 +15760,7 @@ export interface components {
      *           ]
      *         },
      *         {
-     *           "action_count": 95,
+     *           "action_count": 99,
      *           "category": "user_actions",
      *           "enabled": true,
      *           "example_actions": [
@@ -20068,7 +20285,7 @@ export interface components {
       /**
        * Session Id
        * Format: uuid
-       * @description The chat's current conversation. Starting a new conversation (explicitly, or by entering edit mode after a pause) replaces it; earlier conversations are kept but never answered again.
+       * @description The chat's current conversation. Starting a new conversation (explicitly, by entering edit mode after a pause, or by opening with `fresh_start`) replaces it; earlier conversations are kept and listed for their person but never answered again.
        */
       session_id: string;
     };
@@ -31357,6 +31574,98 @@ export interface components {
       updated_at?: string | null;
     };
     /**
+     * HelperChatConversationPublic
+     * @description One of the person's conversations in their chat on a target.
+     */
+    HelperChatConversationPublic: {
+      /**
+       * Current
+       * @description Whether it is the chat's current conversation, the one its questions go to. Every other conversation is read only: asking in one returns not found.
+       */
+      current: boolean;
+      /**
+       * Last Asked At
+       * Format: date-time
+       * @description When the conversation's last question was asked.
+       */
+      last_asked_at: string;
+      /**
+       * Session Id
+       * Format: uuid
+       * @description The conversation. Read it with `GET /api/v1/conversations/{session_id}/`.
+       */
+      session_id: string;
+      /**
+       * Started At
+       * Format: date-time
+       * @description When the conversation started.
+       */
+      started_at: string;
+      /**
+       * Title
+       * @description The conversation's first question, its whitespace collapsed, cut to 200 characters. Mentions stay as they were written (`@[Namn](setting:key)`).
+       */
+      title: string;
+    };
+    /**
+     * HelperChatPolicyPublic
+     * @example {
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000401",
+     *       "enabled": true,
+     *       "guidance": "Tilltala alltid personen med du. Ange alltid källan.",
+     *       "guidance_max_length": 4000
+     *     }
+     */
+    HelperChatPolicyPublic: {
+      /**
+       * Completion Model Id
+       * @description The organisation's default model for every helper chat, on flows and on assistants: the flow chat policy's own value. A chat whose user has not chosen a model answers with it where the space allows it, and with the space's default among models that support tools otherwise. Null: always the space's default.
+       */
+      completion_model_id?: string | null;
+      /**
+       * Enabled
+       * @description Whether people may open and continue a helper chat on an assistant. Off refuses opening, changing and continuing every chat, its turns and its tool calls; conversations already held are kept. The flow chat does not follow it.
+       */
+      enabled: boolean;
+      /**
+       * Guidance
+       * @description The organisation's own rules for the helper, added to its persona after the base rules and under a heading that says they cannot change what the helper's tools may do. Empty: none. A chat takes a change the next time it is opened.
+       */
+      guidance: string;
+      /**
+       * Guidance Max Length
+       * @description The longest guidance the organisation can save, in characters.
+       */
+      guidance_max_length: number;
+    };
+    /**
+     * HelperChatPolicyUpdate
+     * @description Omit a field to keep it unchanged; null is not a value of `enabled` or
+     *     `guidance`.
+     * @example {
+     *       "completion_model_id": "00000000-0000-0000-0000-000000000401",
+     *       "enabled": true,
+     *       "guidance": "Tilltala alltid personen med du. Ange alltid källan."
+     *     }
+     */
+    HelperChatPolicyUpdate: {
+      /**
+       * Completion Model Id
+       * @description An enabled completion model of the organisation that supports tools, or null to remove the default. It is the flow chat's default too.
+       */
+      completion_model_id?: string | null;
+      /**
+       * Enabled
+       * @description Turn the helper chat on or off for the organisation.
+       */
+      enabled?: boolean;
+      /**
+       * Guidance
+       * @description The organisation's rules for the helper, in plain words. Surrounding whitespace is dropped; send an empty string to remove the guidance.
+       */
+      guidance?: string;
+    };
+    /**
      * HelperKind
      * @description Kinds of Help Assistants shipped with Eneo.
      * @enum {string}
@@ -36068,6 +36377,19 @@ export interface components {
        */
       items: components["schemas"]["GroupPublicWithMetadata"][];
     };
+    /** PaginatedResponse[HelperChatConversationPublic] */
+    PaginatedResponse_HelperChatConversationPublic_: {
+      /**
+       * Count
+       * @description Number of items returned in the response
+       */
+      readonly count: number;
+      /**
+       * Items
+       * @description List of items returned in the response
+       */
+      items: components["schemas"]["HelperChatConversationPublic"][];
+    };
     /** PaginatedResponse[HelperTemplatePublic] */
     PaginatedResponse_HelperTemplatePublic_: {
       /**
@@ -37175,6 +37497,7 @@ export interface components {
       | "modules"
       | "widgets"
       | "assistant_debug"
+      | "helper_chat"
       | "web_search"
       | "image_generation"
       | "file_analysis"
@@ -59093,6 +59416,341 @@ export interface operations {
       };
     };
   };
+  get_or_create_assistant_helper_chat: {
+    parameters: {
+      query?: {
+        /** @description Open on a new, empty conversation: a current conversation that holds a question is left for a new one, as starting a new conversation does, and an empty one is kept as it is. The model choice stays. */
+        fresh_start?: boolean;
+      };
+      header?: never;
+      path: {
+        /** @description Identifier of the assistant the chat is about. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
+           *       "session_id": "00000000-0000-0000-0000-000000000301",
+           *       "target_id": "00000000-0000-0000-0000-000000000001"
+           *     }
+           */
+          "application/json": components["schemas"]["AssistantHelperChatPublic"];
+        };
+      };
+      /** @description The assistant is configured elsewhere, or its space has no model the chat can use. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller's chat is not this conversation, or the assistant was deleted meanwhile. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  get_assistant_helper_chat_availability: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the assistant the chat is about. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AssistantHelperChatAvailability"];
+        };
+      };
+      /** @description Called with an API key: the chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_assistant_helper_chat_conversations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the assistant the chat is about. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "count": 2,
+           *       "items": [
+           *         {
+           *           "current": true,
+           *           "last_asked_at": "2026-11-19T09:20:41Z",
+           *           "session_id": "00000000-0000-0000-0000-000000000301",
+           *           "started_at": "2026-11-19T09:12:00Z",
+           *           "title": "Hjälp mig skriva @[Instruktioner](setting:prompt)"
+           *         },
+           *         {
+           *           "current": false,
+           *           "last_asked_at": "2026-11-18T14:05:37Z",
+           *           "session_id": "00000000-0000-0000-0000-000000000300",
+           *           "started_at": "2026-11-18T14:02:10Z",
+           *           "title": "Vilken modell passar för korta svar?"
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["PaginatedResponse_HelperChatConversationPublic_"];
+        };
+      };
+      /** @description The assistant is configured elsewhere. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller has no helper chat on the assistant. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_assistant_helper_chat: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the assistant the chat is about. */
+        id: string;
+        /** @description Identifier of the chat's current conversation, as the chat last returned it. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssistantHelperChatUpdateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "completion_model_id": "00000000-0000-0000-0000-000000000402",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
+           *       "reasoning_effort": "high",
+           *       "session_id": "00000000-0000-0000-0000-000000000301",
+           *       "target_id": "00000000-0000-0000-0000-000000000001"
+           *     }
+           */
+          "application/json": components["schemas"]["AssistantHelperChatPublic"];
+        };
+      };
+      /** @description The model or reasoning effort cannot be used by this chat. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller's chat is not this conversation, or the assistant was deleted meanwhile. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  start_assistant_helper_chat_conversation: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the assistant the chat is about. */
+        id: string;
+        /** @description Identifier of the chat's current conversation, as the chat last returned it. */
+        session_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "assistant_id": "00000000-0000-0000-0000-000000000201",
+           *       "default_completion_model_id": "00000000-0000-0000-0000-000000000401",
+           *       "session_id": "00000000-0000-0000-0000-000000000302",
+           *       "target_id": "00000000-0000-0000-0000-000000000001"
+           *     }
+           */
+          "application/json": components["schemas"]["AssistantHelperChatPublic"];
+        };
+      };
+      /** @description The assistant is configured elsewhere. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller may not edit the assistant, or it does not exist or cannot be read: the three answer alike. The organisation has turned the helper chat off (`helper_chat_disabled`), or the caller's role lacks the `helper_chat` permission (`helper_chat_no_permission`). An API key gets 403 too (`session_auth_required`): the chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller's chat is not this conversation, or the assistant was deleted meanwhile. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
   get_assistant_mcp_servers_api_v1_assistants__id__mcp_servers__get: {
     parameters: {
       query?: never;
@@ -66873,7 +67531,10 @@ export interface operations {
   };
   get_or_create_flow_authoring_chat: {
     parameters: {
-      query?: never;
+      query?: {
+        /** @description Open on a new, empty conversation: a current conversation that holds a question is left for a new one, as starting a new conversation does, and an empty one is kept as it is. The mode and the model choice stay. */
+        fresh_start?: boolean;
+      };
       header?: never;
       path: {
         /** @description Identifier of the draft flow to edit. */
@@ -66915,6 +67576,94 @@ export interface operations {
            *     }
            */
           "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_space_permission",
+           *       "context": {
+           *         "auth_layer": "space_membership"
+           *       },
+           *       "eneo_error_code": 9001,
+           *       "message": "You do not have permission to edit flows in this space."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description The flow, or the caller's chat for it, is not in the caller's scope. */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "not_found",
+           *       "eneo_error_code": 9000,
+           *       "message": "Flow authoring chat not found."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  list_flow_authoring_conversations: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path: {
+        /** @description Identifier of the draft flow to edit. */
+        id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "count": 2,
+           *       "items": [
+           *         {
+           *           "current": true,
+           *           "last_asked_at": "2026-11-19T09:20:41Z",
+           *           "session_id": "00000000-0000-0000-0000-000000000301",
+           *           "started_at": "2026-11-19T09:12:00Z",
+           *           "title": "Lägg till ett steg efter @[Steg 1](step:1)"
+           *         },
+           *         {
+           *           "current": false,
+           *           "last_asked_at": "2026-11-18T14:05:37Z",
+           *           "session_id": "00000000-0000-0000-0000-000000000300",
+           *           "started_at": "2026-11-18T14:02:10Z",
+           *           "title": "Bygg ett flöde som sammanfattar ett protokoll"
+           *         }
+           *       ]
+           *     }
+           */
+          "application/json": components["schemas"]["PaginatedResponse_HelperChatConversationPublic_"];
         };
       };
       /** @description The caller cannot edit this flow, or called with an API key: the authoring chat takes a signed-in session. */
@@ -80774,6 +81523,100 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["PaginatedResponse_str_"];
+        };
+      };
+    };
+  };
+  get_helper_chat_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperChatPolicyPublic"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+    };
+  };
+  update_helper_chat_policy: {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["HelperChatPolicyUpdate"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["HelperChatPolicyPublic"];
+        };
+      };
+      /** @description Nothing to change, or the model is not enabled or does not support tools. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Caller lacks tenant admin permission to read or update settings. */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "insufficient_tenant_permission",
+           *       "eneo_error_code": 9001,
+           *       "message": "Insufficient permissions."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
     };

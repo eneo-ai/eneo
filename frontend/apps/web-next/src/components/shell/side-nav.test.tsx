@@ -338,7 +338,9 @@ describe("DesktopSideNav (main)", () => {
         attempts += 1;
         if (attempts === 1) return Promise.reject(new Error("offline"));
         return retryResponse;
-      }) as unknown as typeof browserApi.GET);
+        // Typed as the client's own GET, the implementation is checked against
+        // every route of the API, which is more than the compiler instantiates.
+      }) as never);
 
       const { container } = renderInApp(<RailedSideNav variant="main" navId="side-nav" />, {
         queryClient
@@ -574,6 +576,12 @@ describe("DesktopSideNav (admin)", () => {
       "/admin/crawler",
       "/admin/settings"
     ]);
+    // The helper assistant's settings, at the old help assistants' address.
+    expect(
+      within(within(navigation).getByRole("group", { name: "Organisation" }))
+        .getByRole("link", { name: "Hjälpassistent" })
+        .getAttribute("href")
+    ).toBe("/admin/help-assistants");
     expect(within(navigation).getByRole("link", { name: "Översikt" }).getAttribute("href")).toBe(
       "/admin"
     );

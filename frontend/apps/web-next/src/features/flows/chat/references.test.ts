@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { makeFlow, makeStep } from "../flow-fixtures";
 import {
+  answerReference,
   parseReference,
   referenceChoices,
   referenceParts,
@@ -92,6 +93,21 @@ describe("referenceParts", () => {
   it("is not a reference when the text holds more than one, or none", () => {
     expect(parseReference("{{step_1.output.text}} x", flow)).toBeNull();
     expect(parseReference("hej", flow)).toBeNull();
+  });
+});
+
+describe("answerReference", () => {
+  it("reads a step's bare id as the step, and any other bare mention as its name", () => {
+    const step = answerReference("@[Steg 3](step-3)", flow);
+    expect(step?.kind === "step" && [step.raw, step.step?.step_order]).toEqual([
+      "@[Steg 3](step:step-3)",
+      3
+    ]);
+    expect(answerReference("@[Steg 9](nonsense)", flow)).toEqual({ kind: "text", text: "Steg 9" });
+    // With the scheme, a step the flow no longer has is still a reference to it.
+    const gone = answerReference("@[Borta](step:step-9)", flow);
+    expect(gone?.kind === "step" && referenceTone(gone)).toBe("missing");
+    expect(answerReference("@[sidan](https://example.com)", flow)).toBeNull();
   });
 });
 

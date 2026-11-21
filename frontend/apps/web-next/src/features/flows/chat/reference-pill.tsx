@@ -1,7 +1,6 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Text } from "@astryxdesign/core/Text";
-import { Token } from "@astryxdesign/core/Token";
 import { CircleAlert, Plug, TriangleAlert } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {
@@ -13,6 +12,8 @@ import {
   type RefObject
 } from "react";
 import type { ComposerInsert } from "@/features/chat/chat-references";
+import { insertParts, type InsertPart } from "@/features/references/reference-menu";
+import { PillButton, ReferenceToken } from "@/features/references/reference-pill";
 import { cn } from "@/lib/utils";
 import { meaningLabel, readWarning } from "../editor/step-labels";
 import type { FlowPublic } from "../editor/step-types";
@@ -104,22 +105,20 @@ function SuggestedPill({ token }: { token: string }) {
   if (!refs.composer) return <ReferencePill reference={reference} />;
   const composer = refs.composer;
   return (
-    <button
-      type="button"
-      onClick={() => insertReference(composer, reference)}
-      className="focus-visible:outline-ring rounded-ax-inner inline-block focus-visible:outline-2 focus-visible:outline-offset-2"
-    >
+    <PillButton onClick={() => insertReference(composer, reference)}>
       <ReferencePill reference={reference} />
-    </button>
+    </PillButton>
   );
+}
+
+/** A reference as the pill the composer holds: its value is the reference as written. */
+function referenceToken(reference: Reference) {
+  return { value: reference.raw, render: () => <ReferencePill reference={reference} /> };
 }
 
 /** Puts a reference into the composer as a pill at the caret, focus with it. */
 export function insertReference(composer: ComposerInsert, reference: Reference) {
-  composer.insertToken({
-    value: reference.raw,
-    render: () => <ReferencePill reference={reference} />
-  });
+  composer.insertToken(referenceToken(reference));
 }
 
 /**
@@ -128,18 +127,12 @@ export function insertReference(composer: ComposerInsert, reference: Reference) 
  * as the pill a pick from the reference menu makes. Nothing is sent.
  */
 export function insertMessage(composer: ComposerInsert, text: string, flow: Flow) {
-  let afterPill = false;
-  for (const part of referenceParts(text, flow)) {
-    if (part.kind === "text") {
-      // A pill brings the space after it, as a pick from the menu does.
-      const typed = afterPill && part.text.startsWith(" ") ? part.text.slice(1) : part.text;
-      if (typed) composer.insertText(typed);
-      afterPill = false;
-    } else {
-      insertReference(composer, part);
-      afterPill = true;
-    }
-  }
+  insertParts(
+    composer,
+    referenceParts(text, flow).map((part): InsertPart =>
+      part.kind === "text" ? part : { kind: "token", token: referenceToken(part) }
+    )
+  );
 }
 
 /**
@@ -173,13 +166,11 @@ export function ReferencePill({
       <TriangleAlert aria-hidden="true" className="size-3.5" />
     ) : undefined;
   return (
-    <Token
-      size="sm"
+    <ReferenceToken
       color={color}
       icon={icon}
       label={referenceLabel(reference, refs.flow, t)}
-      // In running text: centred on the line, never cut short by the line's width.
-      className={cn("max-w-none align-middle", className)}
+      className={className}
     />
   );
 }
@@ -196,16 +187,15 @@ export function ReferencePillButton({ reference }: { reference: Reference }) {
   if (!refs) return <>{reference.raw}</>;
   const open = refs.card?.anchor === element && element !== null;
   return (
-    <button
+    <PillButton
       ref={setElement}
-      type="button"
       aria-haspopup="dialog"
       aria-expanded={open}
       onClick={(event) => refs.openCard(reference, event.currentTarget)}
-      className="focus-visible:outline-ring rounded-ax-inner inline-block align-middle focus-visible:outline-2 focus-visible:outline-offset-2"
+      className="align-middle"
     >
       <ReferencePill reference={reference} />
-    </button>
+    </PillButton>
   );
 }
 
