@@ -562,3 +562,26 @@ it("shows the document being written on a narrow screen when the reader asks", (
   expect(preview.shown).toBe(true);
   expect(preview.draft?.callId).toBe("one");
 });
+
+it("holds a change of conversation back until the reader lets unsaved edits go", async () => {
+  const preview = panel();
+  const document = { ...file, name: "report.md", mimetype: "text/markdown" };
+  vi.mocked(loadPreview).mockResolvedValue({ kind: "markdown", text: "# Draft", truncated: false });
+  preview.open(document);
+  await vi.waitFor(() => expect(preview.status).toBe("ready"));
+  const leave = vi.fn();
+
+  preview.beforeLeaving(leave);
+  expect(leave).toHaveBeenCalledOnce();
+
+  preview.setEdits(document.id, "# Edited\n");
+  preview.beforeLeaving(leave);
+  preview.keepEditing();
+  expect(leave).toHaveBeenCalledOnce();
+  expect(preview.dirty).toBe(true);
+
+  preview.beforeLeaving(leave);
+  preview.pendingDiscard?.proceed();
+  expect(leave).toHaveBeenCalledTimes(2);
+  expect(preview.dirty).toBe(false);
+});

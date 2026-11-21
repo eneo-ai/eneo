@@ -96,3 +96,34 @@ describe("ChatService answers that break off mid-stream", () => {
     expect(chat.currentConversation.messages.at(-1)?.answer).toBe("Biblioteket har öppet ");
   });
 });
+
+describe("ChatService answers left behind", () => {
+  it("ends an answer that is still writing a tool call when another conversation opens", async () => {
+    const ask = vi.fn().mockImplementation(async ({ callbacks, abortController }) => {
+      await callbacks.onOpen();
+      callbacks.onFirstChunk({
+        id: "message-1",
+        session_id: "session-1",
+        answer: "",
+        references: []
+      });
+      // Only tool call arguments arrive from here on: no text event follows.
+      await new Promise<void>((_, reject) => {
+        abortController.signal.addEventListener("abort", () =>
+          reject(new DOMException("Aborted", "AbortError"))
+        );
+      });
+    });
+    const chat = chatService(ask);
+    const abortController = new AbortController();
+
+    const answer = chat.askQuestion("Skriv ett dokument", [], undefined, false, abortController);
+    await vi.waitFor(() => expect(chat.currentConversation.id).toBe("session-1"));
+    chat.newConversation();
+    await answer;
+
+    expect(abortController.signal.aborted).toBe(true);
+    expect(chat.askQuestion.isLoading).toBe(false);
+    expect(chat.currentConversation.messages).toHaveLength(0);
+  });
+});

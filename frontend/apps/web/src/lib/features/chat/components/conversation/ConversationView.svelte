@@ -104,7 +104,14 @@
           message.files?.some((file) => file.id === fileId) ||
           message.generated_files?.some((file) => file.id === fileId)
       );
-    if (previewedId && !present(previewedId)) untrack(() => filePreview.close());
+    // Edits to a file that has left the conversation have nowhere to be
+    // saved; whoever opened the other conversation asked about them first.
+    if (previewedId && !present(previewedId)) {
+      untrack(() => {
+        filePreview.dropEdits();
+        filePreview.close();
+      });
+    }
     if (quotedId && !present(quotedId)) filePreview.quote = null;
   });
 
@@ -154,8 +161,13 @@
       }
     };
   }
-  // Leaving the conversation would lose unsaved edits to a document. On a
-  // reload or a closed tab the browser asks with its own dialog.
+  // Leaving the conversation would lose unsaved edits to a document. Another
+  // conversation opened on this page waits for the reader's answer in the
+  // panel; on a reload or a closed tab the browser asks with its own dialog.
+  chat.leaveGuard = (leave) => filePreview.beforeLeaving(leave);
+  onDestroy(() => {
+    chat.leaveGuard = null;
+  });
   beforeNavigate((navigation) => {
     if (!filePreview.unsaved) return;
     if (navigation.type === "leave" || !confirm(m.unsaved_changes_warning())) {
