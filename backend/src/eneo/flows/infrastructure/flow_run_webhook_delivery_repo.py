@@ -14,7 +14,10 @@ from eneo.database.tables.flow_tables import (
     FlowOutboxDeliveryStatus,
     FlowRunWebhookDeliveries,
 )
-from eneo.flows.domain.flow_webhook_delivery import WebhookDeliveryIntent
+from eneo.flows.domain.flow_webhook_delivery import (
+    FlowWebhookDeliveryState,
+    WebhookDeliveryIntent,
+)
 from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
 
 
@@ -34,9 +37,38 @@ class FlowRunWebhookDeliveryRow:
     created_at: datetime
 
 
+def webhook_delivery_state(
+    *,
+    delivery_status: FlowOutboxDeliveryStatus,
+    delivery_attempts: int,
+    claim_expires_at: datetime | None,
+    next_delivery_at: datetime | None,
+    now: datetime,
+) -> FlowWebhookDeliveryState:
+    """Where a delivery stands at ``now``. A pending delivery is
+    ``retry_scheduled`` only between attempts: one has been made, no claim on
+    it is in force and the next attempt is still ahead. Before the first
+    attempt, while an attempt is sent (the claim charges it) and once the next
+    one is due it is ``sending``, so a time in the past is never shown as the
+    next attempt. The one rule the run's status and its detail read."""
+    if delivery_status is not FlowOutboxDeliveryStatus.PENDING:
+        # A final status is its own state.
+        return cast(FlowWebhookDeliveryState, delivery_status.value)
+    claimed = claim_expires_at is not None and claim_expires_at > now
+    if (
+        delivery_attempts >= 1
+        and not claimed
+        and next_delivery_at is not None
+        and next_delivery_at > now
+    ):
+        return "retry_scheduled"
+    return "sending"
+
+
 @dataclass(frozen=True, slots=True)
 class FlowRunWebhookDeliveryRead:
-    """Tenant-scoped, secret-free delivery lifecycle projection for public reads."""
+    """Tenant-scoped, secret-free delivery lifecycle projection for public
+    reads. ``state`` is ``webhook_delivery_state`` at the time of the read."""
 
     id: UUID
     step_id: UUID
@@ -49,6 +81,7 @@ class FlowRunWebhookDeliveryRead:
     dead_lettered_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    state: FlowWebhookDeliveryState
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,22 +105,32 @@ _READ_COLUMNS = (
     FlowRunWebhookDeliveries.dead_lettered_at,
     FlowRunWebhookDeliveries.created_at,
     FlowRunWebhookDeliveries.updated_at,
+    # Read only to tell an attempt being sent from one ahead.
+    FlowRunWebhookDeliveries.claim_expires_at,
 )
 
 
-def _to_read(row: sa.Row[Any]) -> FlowRunWebhookDeliveryRead:
+def _to_read(row: sa.Row[Any], *, now: datetime) -> FlowRunWebhookDeliveryRead:
+    delivery_status = FlowOutboxDeliveryStatus(cast(str, row.delivery_status))
     return FlowRunWebhookDeliveryRead(
         id=row.id,
         step_id=row.step_id,
         step_order=row.step_order,
         attempt_no=row.attempt_no,
-        delivery_status=FlowOutboxDeliveryStatus(cast(str, row.delivery_status)),
+        delivery_status=delivery_status,
         delivery_attempts=row.delivery_attempts,
         next_delivery_at=row.next_delivery_at,
         delivered_at=row.delivered_at,
         dead_lettered_at=row.dead_lettered_at,
         created_at=row.created_at,
         updated_at=row.updated_at,
+        state=webhook_delivery_state(
+            delivery_status=delivery_status,
+            delivery_attempts=row.delivery_attempts,
+            claim_expires_at=row.claim_expires_at,
+            next_delivery_at=row.next_delivery_at,
+            now=now,
+        ),
     )
 
 
@@ -192,7 +235,8 @@ class FlowRunWebhookDeliveryRepository:
         if limit is not None:
             stmt = stmt.limit(limit)
         rows = (await self.session.execute(stmt)).all()
-        return [_to_read(row) for row in rows]
+        now = datetime.now(timezone.utc)
+        return [_to_read(row, now=now) for row in rows]
 
     async def latest_delivery_statuses(
         self, *, run_ids: Sequence[UUID], tenant_id: UUID
@@ -234,7 +278,7 @@ class FlowRunWebhookDeliveryRepository:
                 .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
             )
         ).one_or_none()
-        return None if row is None else _to_read(row)
+        return None if row is None else _to_read(row, now=datetime.now(timezone.utc))
 
     async def redeliver_dead_lettered(
         self,
@@ -277,7 +321,7 @@ class FlowRunWebhookDeliveryRepository:
                 .returning(*_READ_COLUMNS)
             )
         ).one_or_none()
-        return None if row is None else _to_read(row)
+        return None if row is None else _to_read(row, now=now)
 
     async def claim_due_delivery_rows(
         self,

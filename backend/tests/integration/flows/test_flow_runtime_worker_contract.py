@@ -1541,7 +1541,7 @@ async def test_contract_violation_fact_reaches_fresh_sessions_detail_and_evidenc
         assert detail["error"]["details"]["contract_violation"] == fact
         statuses = await run_service.list_run_statuses(flow_id=context.flow_id)
         summaries = [
-            FlowAssembler.to_run_summary_public(status).model_dump(mode="json")
+            FlowAssembler.to_run_status_public(status).model_dump(mode="json")
             for status in statuses
         ]
         assert [summary["id"] for summary in summaries] == [str(context.run_id)]

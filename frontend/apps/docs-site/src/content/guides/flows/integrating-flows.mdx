@@ -2140,13 +2140,20 @@ and the file ids, never the content.
 
 **Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
 `delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
-lists each delivery with its number of attempts. A dead-lettered result can be sent again with
+lists each delivery with its number of attempts. To poll without reading
+content, `GET /runs/{run_id}/status/` carries the latest delivery as
+`result_delivery`, with a `state`: `sending` (not tried yet, being sent, or
+the next attempt is due), `retry_scheduled` (an attempt failed and the next is
+at `next_delivery_at`), `delivered` or `dead_lettered`. The detail's
+`webhook_deliveries` carry the same `state`. A dead-lettered result can be sent again with
 `POST /api/v1/flows/{id}/runs/{run_id}/webhook-deliveries/{delivery_id}/redeliver/`
 and the body `{"expected_dead_lettered_at": "<dead_lettered_at from the run>"}`.
 It needs edit access to the flow and returns the delivery, now pending again
 with a fresh set of attempts. A delivery that is not dead-lettered, or whose
 dead letter has changed since it was read, answers `409`
 (`flow_run_webhook_redelivery_conflict`, with the reason in `context.reason`).
+A run whose pinned version fails its integrity check answers `400`
+(`flow_definition_checksum_mismatch`); do not retry it.
 
 ## Testing an authored HTTP step
 

@@ -6161,6 +6161,7 @@ export interface paths {
      *         This is the routine polling contract. It contains lifecycle, timing, and bounded,
      *         secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
      *         terminal output, result-file metadata, provider usage, and webhook-delivery content.
+     *         `result_delivery` says only where the run's latest outbound delivery stands.
      *         Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
      *         15 seconds, and stop when the status capability `should_poll` is false.
      *
@@ -23119,6 +23120,7 @@ export interface components {
      *           "delivery_attempts": 1,
      *           "delivery_status": "delivered",
      *           "id": "00000000-0000-0000-0000-000000000601",
+     *           "state": "delivered",
      *           "step_id": "00000000-0000-0000-0000-000000000101",
      *           "step_order": 1,
      *           "updated_at": "2026-03-17T10:05:31Z"
@@ -23304,7 +23306,7 @@ export interface components {
        * Webhook Deliveries
        * @description Secret-free outbound HTTP delivery attempts for this run. The field is always present and is empty unless the flow's final step was authored with outbound HTTP delivery. Eneo has no inbound webhook subscription surface, so this reports deliveries the flow author configured, never callbacks a client registered.
        */
-      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryPublic"][];
+      webhook_deliveries: components["schemas"]["FlowRunWebhookDeliveryStatePublic"][];
     };
     /**
      * FlowRunDispatchError
@@ -26718,6 +26720,175 @@ export interface components {
       running: number;
     };
     /**
+     * FlowRunStatusPublic
+     * @description A run's status as polled: its lifecycle and where its outbound
+     *     delivery stands, without run content.
+     * @example {
+     *       "created_at": "2026-03-17T10:05:00Z",
+     *       "dispatch_attempt_count": 1,
+     *       "dispatch_last_attempt_at": "2026-03-17T10:05:00Z",
+     *       "dispatched_at": "2026-03-17T10:05:00Z",
+     *       "finished_at": "2026-03-17T10:05:30Z",
+     *       "flow_id": "00000000-0000-0000-0000-000000000001",
+     *       "flow_version": 3,
+     *       "id": "00000000-0000-0000-0000-000000000301",
+     *       "job_id": "00000000-0000-0000-0000-000000000401",
+     *       "principal_type": "user",
+     *       "purpose": "production",
+     *       "result_delivery": {
+     *         "attempt_no": 1,
+     *         "created_at": "2026-03-17T10:05:30Z",
+     *         "delivery_attempts": 1,
+     *         "delivery_status": "pending",
+     *         "id": "00000000-0000-0000-0000-000000000601",
+     *         "next_delivery_at": "2026-03-17T10:06:30Z",
+     *         "state": "retry_scheduled",
+     *         "step_id": "00000000-0000-0000-0000-000000000101",
+     *         "step_order": 1,
+     *         "updated_at": "2026-03-17T10:05:31Z"
+     *       },
+     *       "revision": 1,
+     *       "run_label": "Case 123",
+     *       "started_at": "2026-03-17T10:05:01Z",
+     *       "started_by": {
+     *         "display_name": "Alex Example",
+     *         "email": "alex.example@example.com",
+     *         "id": "00000000-0000-0000-0000-000000000030",
+     *         "principal_type": "user"
+     *       },
+     *       "status": "completed",
+     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
+     *       "trace_id": "00000000-0000-0000-0000-000000000302",
+     *       "updated_at": "2026-03-17T10:05:30Z"
+     *     }
+     */
+    FlowRunStatusPublic: {
+      /**
+       * Cancelled At
+       * @description When the run was cancelled. Null unless `status` is `cancelled`.
+       */
+      cancelled_at?: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       * @description When the run row was created.
+       */
+      created_at: string;
+      /**
+       * Dispatch Attempt Count
+       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
+       */
+      dispatch_attempt_count: number;
+      /**
+       * Dispatch Exhausted At
+       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
+       */
+      dispatch_exhausted_at?: string | null;
+      /**
+       * Dispatch Last Attempt At
+       * @description Timestamp of the latest claimed broker dispatch attempt.
+       */
+      dispatch_last_attempt_at?: string | null;
+      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
+      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
+      /**
+       * Dispatch Next Attempt At
+       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
+       */
+      dispatch_next_attempt_at?: string | null;
+      /**
+       * Dispatch Pending Since
+       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
+       */
+      dispatch_pending_since?: string | null;
+      /**
+       * Dispatched At
+       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
+       */
+      dispatched_at?: string | null;
+      /**
+       * Finished At
+       * @description When the run reached a terminal status. Null while non-terminal.
+       */
+      finished_at?: string | null;
+      /**
+       * Flow Id
+       * Format: uuid
+       * @description Identifier of the flow that owns this run.
+       */
+      flow_id: string;
+      /**
+       * Flow Version
+       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
+       */
+      flow_version: number;
+      /**
+       * Id
+       * Format: uuid
+       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
+       */
+      id: string;
+      /**
+       * Job Id
+       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
+       */
+      job_id?: string | null;
+      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
+      principal_type?: components["schemas"]["PrincipalType"] | null;
+      /**
+       * Purpose
+       * @description Immutable purpose recorded when the run was created.
+       * @enum {string}
+       */
+      purpose: "production" | "test";
+      /** @description The latest delivery of the run's last step when that step sends over HTTP (the run's result, or its own answer with a plain POST); null when the run has none yet or its last step sends nothing. It names no address, header or content. The same delivery is last in the detail's `webhook_deliveries`. */
+      result_delivery?: components["schemas"]["FlowRunWebhookDeliveryStatePublic"] | null;
+      /**
+       * Revision
+       * @description Monotonic run lifecycle compare token.
+       */
+      revision: number;
+      /**
+       * Run Date
+       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
+       * @example 2026-10-01
+       */
+      run_date?: string | null;
+      /**
+       * Run Label
+       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
+       * @example Case 123
+       */
+      run_label?: string | null;
+      /**
+       * Started At
+       * @description When a worker began executing the first step. Null while queued.
+       */
+      started_at?: string | null;
+      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
+      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
+      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
+      status: components["schemas"]["FlowRunStatus"];
+      /**
+       * Tenant Id
+       * Format: uuid
+       * @description Tenant that owns the run and its data.
+       */
+      tenant_id: string;
+      /**
+       * Trace Id
+       * Format: uuid
+       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
+       */
+      trace_id: string;
+      /**
+       * Updated At
+       * Format: date-time
+       * @description When the run row last changed. It moves on every status change.
+       */
+      updated_at: string;
+    };
+    /**
      * FlowRunStepInputFilePublic
      * @example {
      *       "file_id": "00000000-0000-0000-0000-000000000701",
@@ -27156,157 +27327,6 @@ export interface components {
       /** @description Opaque authored JSON value produced by the published final step. Interpret it with `output_contract` and the enclosing run's `flow_version`. */
       value: components["schemas"]["JsonValue"];
     };
-    /**
-     * FlowRunSummaryPublic
-     * @example {
-     *       "created_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_attempt_count": 0,
-     *       "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
-     *       "dispatch_pending_since": "2026-03-17T10:05:00Z",
-     *       "flow_id": "00000000-0000-0000-0000-000000000001",
-     *       "flow_version": 3,
-     *       "id": "00000000-0000-0000-0000-000000000301",
-     *       "job_id": "00000000-0000-0000-0000-000000000401",
-     *       "principal_type": "user",
-     *       "purpose": "production",
-     *       "revision": 1,
-     *       "run_label": "Case 123",
-     *       "started_by": {
-     *         "display_name": "Alex Example",
-     *         "email": "alex.example@example.com",
-     *         "id": "00000000-0000-0000-0000-000000000030",
-     *         "principal_type": "user"
-     *       },
-     *       "status": "queued",
-     *       "tenant_id": "00000000-0000-0000-0000-000000000010",
-     *       "trace_id": "00000000-0000-0000-0000-000000000302",
-     *       "updated_at": "2026-03-17T10:05:00Z"
-     *     }
-     */
-    FlowRunSummaryPublic: {
-      /**
-       * Cancelled At
-       * @description When the run was cancelled. Null unless `status` is `cancelled`.
-       */
-      cancelled_at?: string | null;
-      /**
-       * Created At
-       * Format: date-time
-       * @description When the run row was created.
-       */
-      created_at: string;
-      /**
-       * Dispatch Attempt Count
-       * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
-       */
-      dispatch_attempt_count: number;
-      /**
-       * Dispatch Exhausted At
-       * @description Timestamp when bounded attempts were exhausted for this dispatch epoch.
-       */
-      dispatch_exhausted_at?: string | null;
-      /**
-       * Dispatch Last Attempt At
-       * @description Timestamp of the latest claimed broker dispatch attempt.
-       */
-      dispatch_last_attempt_at?: string | null;
-      /** @description Last bounded, secret-free diagnosis for the most recent dispatch epoch. A later successful dispatch preserves this diagnostic. */
-      dispatch_last_error?: components["schemas"]["FlowRunDispatchError"] | null;
-      /**
-       * Dispatch Next Attempt At
-       * @description Sole dispatch eligibility clock. It remains set while a queued broker delivery awaits worker claim or bounded recovery, and becomes null after claim, exhaustion, or another lifecycle transition.
-       */
-      dispatch_next_attempt_at?: string | null;
-      /**
-       * Dispatch Pending Since
-       * @description Stable timestamp when the most recent queue-entry dispatch epoch began. It does not move when dispatch is retried.
-       */
-      dispatch_pending_since?: string | null;
-      /**
-       * Dispatched At
-       * @description Timestamp when this dispatch epoch first became possibly accepted: either the broker confirmed acceptance or a later claim proved an earlier attempt ended without a durable rejection receipt.
-       */
-      dispatched_at?: string | null;
-      /**
-       * Finished At
-       * @description When the run reached a terminal status. Null while non-terminal.
-       */
-      finished_at?: string | null;
-      /**
-       * Flow Id
-       * Format: uuid
-       * @description Identifier of the flow that owns this run.
-       */
-      flow_id: string;
-      /**
-       * Flow Version
-       * @description Published flow version this run is pinned to. It is the version the run executes against even after the flow is republished.
-       */
-      flow_version: number;
-      /**
-       * Id
-       * Format: uuid
-       * @description Durable run identifier. Use it as the `{run_id}` path segment for polling, review, cancel, and artifact requests.
-       */
-      id: string;
-      /**
-       * Job Id
-       * @description Background job that owns the current execution attempt. Diagnostic only; it is not addressable through the public API.
-       */
-      job_id?: string | null;
-      /** @description Principal kind that created the run, once resolved. Service-key callers only see runs their own key created. */
-      principal_type?: components["schemas"]["PrincipalType"] | null;
-      /**
-       * Purpose
-       * @description Immutable purpose recorded when the run was created.
-       * @enum {string}
-       */
-      purpose: "production" | "test";
-      /**
-       * Revision
-       * @description Monotonic run lifecycle compare token.
-       */
-      revision: number;
-      /**
-       * Run Date
-       * @description The day the run is about (a meeting's), from the value of the flow's form field with the role `run_date`. Run metadata like `run_label`; null when the flow has no such field or it was left empty.
-       * @example 2026-10-01
-       */
-      run_date?: string | null;
-      /**
-       * Run Label
-       * @description The run's name, as the caller supplied it on creation or else the value of the flow's form field with the role `run_label` (NFC, trimmed, one line). It also heads the names of the documents the run generates. It is run metadata, not run content: it is returned by the content-free list and status reads and matched by the list's `search`, so it should name the run (a case number, a meeting), not carry what the run is about. Null when the run has none.
-       * @example Case 123
-       */
-      run_label?: string | null;
-      /**
-       * Started At
-       * @description When a worker began executing the first step. Null while queued.
-       */
-      started_at?: string | null;
-      /** @description Who started the run, by id and name. It is shown to every caller who may see the run: the starter, tenant admins, and admins and owners of the flow's space. A service key sees only runs it started, so only its own name. Null when the run has no resolved principal. */
-      started_by?: components["schemas"]["FlowRunStartedByPublic"] | null;
-      /** @description Current lifecycle status. `queued` and `running` are active, `awaiting_review` means a human review checkpoint is open and the run will not advance until it is approved and resumed, and `completed`, `failed`, and `cancelled` are terminal. Call `GET {api_prefix}/flows/runs/status-capabilities/` for the machine-readable matrix that says which statuses to keep polling, cancel, or redispatch. */
-      status: components["schemas"]["FlowRunStatus"];
-      /**
-       * Tenant Id
-       * Format: uuid
-       * @description Tenant that owns the run and its data.
-       */
-      tenant_id: string;
-      /**
-       * Trace Id
-       * Format: uuid
-       * @description Correlation id shared by this run's audit and evidence records. Quote it in support requests.
-       */
-      trace_id: string;
-      /**
-       * Updated At
-       * Format: date-time
-       * @description When the run row last changed. It moves on every status change.
-       */
-      updated_at: string;
-    };
     /** FlowRunTemplateFill */
     FlowRunTemplateFill: {
       /**
@@ -27464,6 +27484,71 @@ export interface components {
       id: string;
       /** Next Delivery At */
       next_delivery_at?: string | null;
+      /**
+       * Step Id
+       * Format: uuid
+       */
+      step_id: string;
+      /** Step Order */
+      step_order: number;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * FlowRunWebhookDeliveryStatePublic
+     * @description A delivery as it stands when read. The run's evidence keeps the
+     *     delivery's record without it.
+     * @example {
+     *       "attempt_no": 1,
+     *       "created_at": "2026-03-17T10:05:30Z",
+     *       "delivered_at": "2026-03-17T10:05:31Z",
+     *       "delivery_attempts": 1,
+     *       "delivery_status": "delivered",
+     *       "id": "00000000-0000-0000-0000-000000000601",
+     *       "state": "delivered",
+     *       "step_id": "00000000-0000-0000-0000-000000000101",
+     *       "step_order": 1,
+     *       "updated_at": "2026-03-17T10:05:31Z"
+     *     }
+     */
+    FlowRunWebhookDeliveryStatePublic: {
+      /** Attempt No */
+      attempt_no: number;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Dead Lettered At */
+      dead_lettered_at?: string | null;
+      /** Delivered At */
+      delivered_at?: string | null;
+      /**
+       * Delivery Attempts
+       * @description Persisted delivery attempts charged when the sender claims work.
+       */
+      delivery_attempts: number;
+      /**
+       * Delivery Status
+       * @enum {string}
+       */
+      delivery_status: "pending" | "delivered" | "dead_lettered";
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Next Delivery At */
+      next_delivery_at?: string | null;
+      /**
+       * State
+       * @description Where the delivery stands when read. `sending`: not tried yet, an attempt is being sent, or the next one is due. `retry_scheduled`: an attempt failed and the next is at `next_delivery_at`, still ahead. `delivered` and `dead_lettered` are final, as in `delivery_status`. Branch on this rather than on `delivery_attempts`, which counts an attempt while it is being sent.
+       * @enum {string}
+       */
+      state: "sending" | "retry_scheduled" | "delivered" | "dead_lettered";
       /**
        * Step Id
        * Format: uuid
@@ -67946,7 +68031,7 @@ export interface operations {
           [name: string]: unknown;
         };
         content: {
-          "application/json": components["schemas"]["FlowRunSummaryPublic"];
+          "application/json": components["schemas"]["FlowRunStatusPublic"];
         };
       };
       /** @description Forbidden. Caller scope, tenant or space permission, and run visibility are evaluated before returning Flow runtime data. Machine-readable codes include `insufficient_scope`, `flow_run_access_denied`, and `flow_service_key_principal_not_supported`. */
@@ -68665,6 +68750,22 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["FlowRunWebhookDeliveryPublic"];
+        };
+      };
+      /** @description The run's published snapshot failed integrity verification, so the delivery was not reset. The machine-readable code is `flow_definition_checksum_mismatch`; do not retry. */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          /**
+           * @example {
+           *       "code": "flow_definition_checksum_mismatch",
+           *       "eneo_error_code": 9007,
+           *       "message": "Published flow definition checksum does not match the stored snapshot. Do not retry this pinned version. Publish a valid version and start a new run."
+           *     }
+           */
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Caller lacks permission to edit this flow. */

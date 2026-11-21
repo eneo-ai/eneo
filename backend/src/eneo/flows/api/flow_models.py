@@ -103,6 +103,7 @@ from eneo.flows.domain.flow_step_attempt_input import (
     attempt_tool_call_state,
     parse_flow_step_attempt_input,
 )
+from eneo.flows.domain.flow_webhook_delivery import FlowWebhookDeliveryState
 from eneo.flows.domain.live_fallback import LiveFallbackReason
 from eneo.flows.domain.long_material import LongMaterialConfig, LongMaterialCoverage
 from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS
@@ -481,6 +482,32 @@ FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE: dict[str, Any] = {
     "dead_lettered_at": None,
     "created_at": "2026-03-17T10:05:30Z",
     "updated_at": "2026-03-17T10:05:31Z",
+}
+
+FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE,
+    "state": "delivered",
+}
+
+FLOW_RUN_STATUS_PUBLIC_EXAMPLE: dict[str, Any] = {
+    **FLOW_RUN_SUMMARY_PUBLIC_EXAMPLE,
+    "status": "completed",
+    "dispatch_pending_since": None,
+    "dispatch_attempt_count": 1,
+    "dispatch_last_attempt_at": "2026-03-17T10:05:00Z",
+    "dispatch_next_attempt_at": None,
+    "dispatched_at": "2026-03-17T10:05:00Z",
+    "started_at": "2026-03-17T10:05:01Z",
+    "finished_at": "2026-03-17T10:05:30Z",
+    "updated_at": "2026-03-17T10:05:30Z",
+    "result_delivery": {
+        **FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE,
+        "next_delivery_at": "2026-03-17T10:06:30Z",
+        "delivery_status": "pending",
+        "delivered_at": None,
+        "updated_at": "2026-03-17T10:05:31Z",
+        "state": "retry_scheduled",
+    },
 }
 
 FLOW_RUN_QUEUED_AFTER_DISPATCH_EXAMPLE: dict[str, object] = {
@@ -1919,6 +1946,51 @@ class FlowRunWebhookDeliveryPublic(BaseModel):
     updated_at: datetime
 
 
+class FlowRunWebhookDeliveryStatePublic(FlowRunWebhookDeliveryPublic):
+    """A delivery as it stands when read. The run's evidence keeps the
+    delivery's record without it."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE},
+    )
+
+    state: FlowWebhookDeliveryState = Field(
+        description=(
+            "Where the delivery stands when read. `sending`: not tried yet, "
+            "an attempt is being sent, or the next one is due. "
+            "`retry_scheduled`: an attempt failed and the next is at "
+            "`next_delivery_at`, still ahead. `delivered` and "
+            "`dead_lettered` are final, as in `delivery_status`. Branch on "
+            "this rather than on `delivery_attempts`, which counts an "
+            "attempt while it is being sent."
+        ),
+    )
+
+
+class FlowRunStatusPublic(FlowRunSummaryPublic):
+    """A run's status as polled: its lifecycle and where its outbound
+    delivery stands, without run content."""
+
+    model_config = ConfigDict(
+        from_attributes=True,
+        extra="forbid",
+        json_schema_extra={"example": FLOW_RUN_STATUS_PUBLIC_EXAMPLE},
+    )
+
+    result_delivery: FlowRunWebhookDeliveryStatePublic | None = Field(
+        default=None,
+        description=(
+            "The latest delivery of the run's last step when that step sends "
+            "over HTTP (the run's result, or its own answer with a plain POST); "
+            "null when the run has none yet or its last step sends nothing. "
+            "It names no address, header or content. The same delivery is "
+            "last in the detail's `webhook_deliveries`."
+        ),
+    )
+
+
 FLOW_RUN_ERROR_PUBLIC_EXAMPLE: dict[str, Any] = {
     "schema_version": 1,
     "code": FlowApiErrorCode.STEP_TIMEOUT.value,
@@ -2119,7 +2191,7 @@ FLOW_RUN_DETAIL_PUBLIC_EXAMPLE: dict[str, Any] = {
             "files": [_REPORT_DOCUMENT_EXAMPLE],
         },
     ],
-    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_EXAMPLE],
+    "webhook_deliveries": [FLOW_RUN_WEBHOOK_DELIVERY_STATE_EXAMPLE],
     "evidence_access": FLOW_RUN_EVIDENCE_ACCESS_PUBLIC_EXAMPLE,
 }
 
@@ -2130,7 +2202,7 @@ class FlowRunDetailPublic(FlowRunPublic):
         json_schema_extra={"example": FLOW_RUN_DETAIL_PUBLIC_EXAMPLE},
     )
 
-    webhook_deliveries: list[FlowRunWebhookDeliveryPublic] = Field(
+    webhook_deliveries: list[FlowRunWebhookDeliveryStatePublic] = Field(
         description=(
             "Secret-free outbound HTTP delivery attempts for this run. The field is always "
             "present and is empty unless the flow's final step was authored with outbound "

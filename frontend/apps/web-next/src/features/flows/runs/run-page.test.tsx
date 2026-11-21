@@ -464,7 +464,8 @@ describe("FlowRunPage", () => {
             delivery_attempts: 5,
             dead_lettered_at: "2026-10-21T09:00:00Z",
             created_at: "2026-10-21T08:01:00Z",
-            updated_at: "2026-10-21T09:00:00Z"
+            updated_at: "2026-10-21T09:00:00Z",
+            state: "dead_lettered"
           }
         ]
       })
@@ -578,7 +579,8 @@ describe("FlowRunPage", () => {
       delivery_attempts: attempts,
       next_delivery_at: attempts > 0 ? "2026-10-21T08:05:00Z" : null,
       created_at: "2026-10-21T08:01:00Z",
-      updated_at: "2026-10-21T08:01:00Z"
+      updated_at: "2026-10-21T08:01:00Z",
+      state: attempts > 0 ? ("retry_scheduled" as const) : ("sending" as const)
     });
     answerRun(
       running,

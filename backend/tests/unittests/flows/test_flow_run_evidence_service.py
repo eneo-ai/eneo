@@ -559,6 +559,7 @@ async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
         dead_lettered_at=now,
         created_at=now,
         updated_at=now,
+        state="dead_lettered",
     )
     flow_run_repo.get.return_value = run
     flow_run_repo.list_step_results.return_value = []

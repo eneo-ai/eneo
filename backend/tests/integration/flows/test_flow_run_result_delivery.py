@@ -833,3 +833,109 @@ async def test_markdown_near_the_inline_limit_is_sent_whole_beside_a_prompt(
     )
     assert attempt.requested_model is None
     assert attempt.provider is None
+
+
+@pytest.fixture
+async def admin_token(db_container, patch_auth_service_jwt, admin_user) -> str:
+    async with db_container(user=admin_user) as container:
+        return container.auth_service().create_access_token_for_user(admin_user)
+
+
+async def _claim(*, claim_ttl_seconds: float) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        [_] = await FlowRunWebhookDeliveryRepository(
+            session=session
+        ).claim_due_delivery_rows(
+            now=datetime.now(timezone.utc),
+            limit=1,
+            claim_ttl_seconds=claim_ttl_seconds,
+            max_attempts=FLOW_WEBHOOK_MAX_ATTEMPTS,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_the_run_status_says_where_its_result_delivery_stands(
+    setup_database,
+    completed_run_result_run,
+    client,
+    admin_token,
+    admin_user,
+):
+    """``/status/`` names the delivery's state from its outbox row, as the
+    detail does, without content and without an audit row: an attempt being
+    sent, or one whose next attempt is due, is "sending"; only a failed
+    attempt with the next one ahead is "retry_scheduled"."""
+    run, delivery_id = await completed_run_result_run()
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    status_url = f"/api/v1/flows/{run.flow_id}/runs/{run.id}/status/"
+    # Without access to the flow's space the status, and its delivery, stay shut.
+    refused = await client.get(status_url, headers=headers)
+    assert refused.status_code == 403, refused.text
+    assert "result_delivery" not in refused.text
+    async with sessionmanager.session() as session, session.begin():
+        # The reader edits the flow's space, as a person who runs it does.
+        await session.execute(
+            sa.text(
+                "INSERT INTO spaces_users (space_id, user_id, role) "
+                "SELECT space_id, :user_id, 'editor' FROM flows WHERE id = :flow_id"
+            ),
+            {"user_id": str(admin_user.id), "flow_id": str(run.flow_id)},
+        )
+    audit_rows = sa.select(sa.func.count()).select_from(AuditLog)
+    audit_rows_before = await _read_scalar(audit_rows)
+
+    async def state() -> tuple[str, int]:
+        response = await client.get(status_url, headers=headers)
+        assert response.status_code == 200, response.text
+        delivery = response.json()["result_delivery"]
+        assert delivery["id"] == str(delivery_id)
+        return delivery["state"], delivery["delivery_attempts"]
+
+    assert await state() == ("sending", 0)
+
+    # The first attempt, claimed and charged while it is sent.
+    await _claim(claim_ttl_seconds=300)
+    assert await state() == ("sending", 1)
+
+    # It failed, and the next attempt is an hour ahead.
+    next_attempt = datetime.now(timezone.utc) + timedelta(hours=1)
+    async with sessionmanager.session() as session, session.begin():
+        claim_token = await session.scalar(
+            sa.select(FlowRunWebhookDeliveries.claim_token).where(
+                FlowRunWebhookDeliveries.id == delivery_id
+            )
+        )
+        assert await FlowRunWebhookDeliveryRepository(
+            session=session
+        ).record_delivery_failure(
+            delivery_id=delivery_id,
+            claim_token=claim_token,
+            error_message="Receiver answered 503.",
+            next_delivery_at=next_attempt,
+            dead_lettered_at=None,
+        )
+    assert await state() == ("retry_scheduled", 1)
+    detail = await client.get(
+        f"/api/v1/flows/{run.flow_id}/runs/{run.id}/", headers=headers
+    )
+    assert detail.status_code == 200, detail.text
+    [listed] = detail.json()["webhook_deliveries"]
+    assert listed["state"] == "retry_scheduled"
+    assert listed["next_delivery_at"] is not None
+
+    # The next attempt is due: it is never shown as ahead.
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.id == delivery_id)
+            .values(next_delivery_at=datetime.now(timezone.utc) - timedelta(minutes=1))
+        )
+    assert await state() == ("sending", 1)
+
+    # A claim that ran out before its attempt was booked.
+    await _claim(claim_ttl_seconds=-1)
+    assert await state() == ("sending", 2)
+
+    # Polling the status writes no audit row; the one read of the detail does.
+    assert await _read_scalar(audit_rows) == audit_rows_before + 1

@@ -1169,6 +1169,42 @@ def test_openapi_flow_status_and_history_document_content_boundary(
         assert "terminal errors" in description
 
 
+def test_openapi_flow_run_status_names_where_the_result_delivery_stands(
+    openapi_spec: dict,
+) -> None:
+    path = "/api/v1/flows/{id}/runs/{run_id}/status/"
+    operation = _get_operation(openapi_spec, path, "get")
+    assert "`result_delivery`" in str(operation.get("description"))
+    schema = _resolve_component_ref(
+        openapi_spec,
+        operation["responses"]["200"]["content"]["application/json"]["schema"],
+    )
+    delivery = _resolve_component_ref(
+        openapi_spec,
+        next(
+            option
+            for option in schema["properties"]["result_delivery"]["anyOf"]
+            if "$ref" in option
+        ),
+    )
+    assert delivery["properties"]["state"]["enum"] == [
+        "sending",
+        "retry_scheduled",
+        "delivered",
+        "dead_lettered",
+    ]
+    assert {"url", "headers", "body", "payload_ref"}.isdisjoint(delivery["properties"])
+
+
+def test_openapi_result_redelivery_declares_the_integrity_refusal(
+    openapi_spec: dict,
+) -> None:
+    path = _path_for_operation_id(openapi_spec, "redeliver_flow_run_webhook_delivery")
+    response = _get_operation(openapi_spec, path, "post")["responses"]["400"]
+    example = response["content"]["application/json"]["example"]
+    assert example["code"] == "flow_definition_checksum_mismatch"
+
+
 def test_openapi_flow_run_list_filters_to_the_callers_own_runs(
     openapi_spec: dict,
 ) -> None:
