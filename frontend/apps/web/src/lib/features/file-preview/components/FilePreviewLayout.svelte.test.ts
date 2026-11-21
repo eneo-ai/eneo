@@ -131,3 +131,17 @@ it("returns from an interactive view to the overview", async () => {
   await expect.element(page.getByRole("button", { name: /Budget chart/ })).toBeVisible();
   await expect.element(launcher()).not.toBeVisible();
 });
+
+it("lays nothing over the page while its tab is not on show", async () => {
+  await page.viewport(1100, 800);
+  const preview = new FilePreview({ resolveOriginalUrl: async () => "/original" } as never);
+  const view = render(Harness, { preview, contents });
+  await vi.waitFor(() => expect(preview.besideConversation).toBe(true));
+  await launcher().click();
+
+  await view.rerender({ hidden: true });
+
+  await expect.element(page.getByRole("dialog")).not.toBeInTheDocument();
+  expect(preview.besideConversation).toBe(true);
+  expect(preview.overviewShown).toBe(true);
+});

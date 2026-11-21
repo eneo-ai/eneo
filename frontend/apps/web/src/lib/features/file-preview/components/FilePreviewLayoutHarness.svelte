@@ -6,7 +6,11 @@
   import type { PanelContents } from "../panelContents";
   import FilePreviewLayout from "./FilePreviewLayout.svelte";
 
-  let { preview, contents }: { preview: FilePreview; contents: PanelContents } = $props();
+  let {
+    preview,
+    contents,
+    hidden = false
+  }: { preview: FilePreview; contents: PanelContents; hidden?: boolean } = $props();
   let activeView = $state<string | null>(null);
   const items = $derived({
     ...contents,
@@ -29,7 +33,7 @@
   >
 {/snippet}
 
-<div style="width: 100vw; height: 600px">
+<div style="width: 100vw; height: 600px" {hidden}>
   <FilePreviewLayout
     {preview}
     contents={items}

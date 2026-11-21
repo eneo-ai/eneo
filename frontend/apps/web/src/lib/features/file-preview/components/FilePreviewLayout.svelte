@@ -105,7 +105,14 @@
   // space left for it depends on the navigation and any other open panel.
   const SPLIT_MIN_WIDTH = 720;
   let width = $state(0);
-  const split = $derived(width >= SPLIT_MIN_WIDTH);
+  // A layout that is not on show (another tab of the page is) measures no
+  // width. It keeps the form it had: as a sheet there, its overlay would lie
+  // over the tab on show and take the first click.
+  const onShow = $derived(width > 0);
+  let split = $state(false);
+  $effect(() => {
+    if (onShow) split = width >= SPLIT_MIN_WIDTH;
+  });
 
   $effect(() => {
     preview.besideConversation = split;
@@ -261,7 +268,7 @@
   </aside>
 {:else if !split}
   <Sheet.Root
-    open={shown}
+    open={shown && onShow}
     onOpenChange={(open) => {
       if (!open) close();
     }}

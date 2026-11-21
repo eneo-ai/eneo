@@ -38,24 +38,28 @@
     });
   });
 
-  async function loadConversation(conversation: { id: string; name: string | null }) {
-    const loaded = await chat.loadConversation(conversation);
-    if (loaded) {
-      showHistory = false;
-      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant and conversation IDs
-      pushState(`/dashboard/${chat.partner.id}/${loaded.id}`, {
-        conversation: loaded,
-        tab: "chat"
-      });
-    }
+  function loadConversation(conversation: { id: string; name: string | null }) {
+    chat.whenLeavable(async () => {
+      const loaded = await chat.loadConversation(conversation);
+      if (loaded) {
+        showHistory = false;
+        // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant and conversation IDs
+        pushState(`/dashboard/${chat.partner.id}/${loaded.id}`, {
+          conversation: loaded,
+          tab: "chat"
+        });
+      }
+    });
   }
 
   function startNewConversation() {
-    chat.newConversation();
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant ID
-    pushState(`/dashboard/${chat.partner.id}?tab=chat`, {
-      conversation: undefined,
-      tab: "chat"
+    chat.whenLeavable(() => {
+      chat.newConversation();
+      // eslint-disable-next-line svelte/no-navigation-without-resolve -- dynamic URL with assistant ID
+      pushState(`/dashboard/${chat.partner.id}?tab=chat`, {
+        conversation: undefined,
+        tab: "chat"
+      });
     });
   }
 </script>

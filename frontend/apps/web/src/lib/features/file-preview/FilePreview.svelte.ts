@@ -306,6 +306,14 @@ export class FilePreview {
     };
   }
 
+  /**
+   * Runs `leave` at once, or once the reader has agreed to lose their edits:
+   * for what takes the conversation itself away, and the document with it.
+   */
+  beforeLeaving(leave: () => void) {
+    this.#guarded(leave);
+  }
+
   #showReplacement() {
     if (this.#replacementReady && this.replacementFile && this.replacementContent) {
       this.finishReplacement(this.replacementFile.id);

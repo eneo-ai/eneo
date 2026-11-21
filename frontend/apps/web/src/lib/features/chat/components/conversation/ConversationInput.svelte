@@ -202,7 +202,7 @@
     clearUploadError();
     errorInputSnapshot = { question: "", attachmentIds: "" };
     if (onNewConversation) onNewConversation();
-    else chat.newConversation();
+    else chat.whenLeavable(() => chat.newConversation());
   };
 
   // Set synchronously on send and held until the conversation request has

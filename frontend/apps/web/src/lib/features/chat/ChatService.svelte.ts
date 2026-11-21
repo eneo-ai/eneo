@@ -359,6 +359,10 @@ export class ChatService {
   #streamRef: ConversationMessage | null = null;
   #streamFlushInterval = 33; // ~30fps target, imperceptible delay but smoother rendering
   #streamGen = 0;
+  // The request of the answer being written. Leaving its conversation ends it:
+  // an answer that only streams a tool call (a document being written) sends
+  // no text for a long while, and would otherwise run on unseen.
+  #streamAbort: AbortController | null = null;
   #producerFlushThreshold = 2048; // Safety flush for background tabs or fast streams
 
   // Off for the widget, which reports a broken-off answer itself; the
@@ -397,6 +401,24 @@ export class ChatService {
       }
       this.#clearPreflight();
     });
+  }
+
+  /**
+   * Set by the conversation's view: holds a change of conversation back while
+   * something in the open one would be lost by it (unsaved edits to a
+   * document), until the reader has decided.
+   */
+  leaveGuard: ((leave: () => void) => void) | null = null;
+
+  /**
+   * Runs `leave`, which opens another conversation in place of this one, once
+   * this one may be left. For a change the reader asks for; one that has
+   * already happened elsewhere (a deleted conversation, another page) does
+   * not wait.
+   */
+  whenLeavable(leave: () => void) {
+    if (this.leaveGuard) this.leaveGuard(leave);
+    else leave();
   }
 
   newConversation() {
@@ -788,6 +810,7 @@ export class ChatService {
       this.#viewCallIds.clear();
       this.#partialInputs.clear();
       const streamGen = ++this.#streamGen;
+      this.#streamAbort = abortController ?? null;
       this.#activeDiagnosticsStreamGeneration = streamGen;
       let inrefBuffer = "";
       const isStale = () => this.#streamGen !== streamGen;
@@ -1193,6 +1216,7 @@ export class ChatService {
       } finally {
         stopMirroringUploads?.();
         if (this.#streamGen === streamGen) {
+          this.#streamAbort = null;
           flushReceivedContent();
           this.#activeDiagnosticsStreamGeneration = null;
           if (this.debugPanelOpen) {
@@ -1224,6 +1248,8 @@ export class ChatService {
   #resetConversationDiagnostics() {
     this.#finalizeStream();
     this.#streamGen += 1;
+    this.#streamAbort?.abort();
+    this.#streamAbort = null;
     this.#activeDiagnosticsStreamGeneration = null;
     this.setDebugPanelOpen(false);
     this.#pendingDiagnosticsMessageIds = [];
