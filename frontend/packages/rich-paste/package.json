@@ -1,0 +1,11 @@
+{
+  "name": "@eneo/rich-paste",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clipboard HTML as Markdown, shared by the chat composers of the web app and web-next",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "sideEffects": false
+}

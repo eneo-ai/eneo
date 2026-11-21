@@ -1,6 +1,7 @@
 import { dynamicColour } from "$lib/core/colours";
 import { createContext } from "$lib/core/context";
 import type { ConversationTools } from "@eneo/eneo-js";
+import { clipboardMarkdown } from "@eneo/rich-paste";
 import type { ActionReturn } from "svelte/action";
 import { derived, get, readonly, writable } from "svelte/store";
 
@@ -44,6 +45,12 @@ export function createMentionInput(params: MentionInputParams) {
   const mentions = writable<AssistantSuggestion[]>([]);
   const question = writable("");
   let inputNode: HTMLElement | undefined;
+  // Shift held at the paste is the browser's "paste as plain text" shortcut;
+  // Shift+Insert is an ordinary paste.
+  let plainPaste = false;
+  const trackShift = (event: KeyboardEvent) => {
+    plainPaste = event.shiftKey && event.key !== "Insert";
+  };
 
   function input(node: HTMLElement): ActionReturn {
     inputNode = node;
@@ -51,6 +58,8 @@ export function createMentionInput(params: MentionInputParams) {
     node.addEventListener("input", handleInputSuggestions);
     node.addEventListener("click", handleInputClick);
     node.addEventListener("keydown", handleInputKeydown);
+    node.addEventListener("keydown", trackShift);
+    node.addEventListener("keyup", trackShift);
     node.addEventListener("paste", handlePaste);
 
     const observer = new MutationObserver(handleInputMutation);
@@ -69,6 +78,8 @@ export function createMentionInput(params: MentionInputParams) {
       destroy() {
         window.removeEventListener("click", handleWindowClick);
         node.removeEventListener("keydown", handleInputKeydown);
+        node.removeEventListener("keydown", trackShift);
+        node.removeEventListener("keyup", trackShift);
         node.removeEventListener("click", handleInputClick);
         node.removeEventListener("input", handleInputSuggestions);
         node.removeEventListener("paste", handlePaste);
@@ -480,15 +491,16 @@ export function createMentionInput(params: MentionInputParams) {
   }
 
   function handlePaste(event: ClipboardEvent) {
-    // This function should allow to paste text content into the mention input.
-    // - We want to strip all formatting (contenteditable would keep colours, sizes, etc.)
-    // - We only want the text
+    // The input holds text only (contenteditable would keep colours, sizes, etc.).
+    // - Formatted text arrives as Markdown, so its links, headings, lists and
+    //   emphasis reach the assistant. Pasting as plain text keeps only the text.
     // - There is a separate event handler registered for uploading images, directly in the component
 
     // No default event handling
     event.preventDefault();
 
-    const text = event.clipboardData?.getData("text/plain");
+    const markdown = plainPaste ? null : clipboardMarkdown(event.clipboardData);
+    const text = markdown ?? event.clipboardData?.getData("text/plain");
     if (!text) return;
 
     // Use execCommand to insert text, which preserves undo history
