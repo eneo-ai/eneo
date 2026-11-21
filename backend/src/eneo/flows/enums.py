@@ -171,7 +171,7 @@ def step_delivers_artifact(
 ) -> bool:
     """Whether a step's output is a file a client downloads: a document it
     renders, fills or passes through, never one it posts elsewhere. Only such
-    a step can be one of a run's deliverables."""
+    a deliverable has a file, and a file name."""
     return (
         final_output_delivery(
             output_type=FlowOutputType(output_type),
@@ -179,6 +179,23 @@ def step_delivers_artifact(
         )
         is FlowOutputDelivery.ARTIFACT
     )
+
+
+_DELIVERABLE_OUTPUT_TYPES = frozenset(
+    {FlowOutputType.TEXT, FlowOutputType.DOCX, FlowOutputType.PDF}
+)
+
+
+def step_can_be_deliverable(
+    *, output_type: FlowOutputType | str, output_mode: FlowOutputMode | str
+) -> bool:
+    """Whether a step's output can be one of a run's deliverables: text or a
+    document of its own, never a request it sends or a mapping of speakers.
+    A document is delivered as its file (``step_delivers_artifact``), text as
+    itself."""
+    return FlowOutputType(output_type) in _DELIVERABLE_OUTPUT_TYPES and FlowOutputMode(
+        output_mode
+    ) not in {FlowOutputMode.HTTP_POST, FlowOutputMode.SPEAKER_MAPPING}
 
 
 class FlowAuthoringOutputMode(str, Enum):

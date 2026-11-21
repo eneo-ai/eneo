@@ -259,12 +259,13 @@ FlowStepOutputConfigRequest: TypeAlias = Annotated[
                 FLOW_STEP_DELIVERABLE_KEY: {
                     **FlowStepDeliverable.model_json_schema(),
                     "description": (
-                        "Marks this step as one of the run's deliverables: a "
-                        "document a client lists with its label in "
+                        "Marks this step as one of the run's deliverables: text "
+                        "or a document a client lists with its label in "
                         "`deliverables` on the run contract and the run. Only a "
-                        "step whose output is a downloadable document can carry "
-                        "it: saving any other step removes the key, and "
-                        "publishing or importing one refuses it."
+                        "step whose output is text or a document of its own can "
+                        "carry it, and only a document step a `file_name`: "
+                        "saving any other step removes what it cannot carry, "
+                        "and publishing or importing one refuses it."
                     ),
                 },
             },

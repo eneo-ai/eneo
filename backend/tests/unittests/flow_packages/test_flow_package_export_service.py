@@ -1984,7 +1984,7 @@ def test_export_reads_a_deliverable_label_as_literal_text() -> None:
     }
 
 
-def test_export_drops_a_deliverable_from_a_step_without_a_document() -> None:
+def test_export_carries_a_text_steps_deliverable() -> None:
     assistant_id = uuid4()
     envelope = _build_envelope(
         flow=_flow(
@@ -1993,6 +1993,28 @@ def test_export_drops_a_deliverable_from_a_step_without_a_document() -> None:
                     1,
                     assistant_id=assistant_id,
                     output_mode="compose_text",
+                    output_config={"deliverable": {"label": "Plan"}},
+                )
+            ]
+        ),
+        assistant_snapshots={assistant_id: _snapshot(model_ref=None)},
+        resource_bindings=tuple(),
+    )
+
+    assert envelope.draft.spec.steps[0].output_config == {
+        "deliverable": {"label": "Plan"}
+    }
+
+
+def test_export_drops_a_deliverable_from_a_step_that_cannot_be_one() -> None:
+    assistant_id = uuid4()
+    envelope = _build_envelope(
+        flow=_flow(
+            steps=[
+                _step(
+                    1,
+                    assistant_id=assistant_id,
+                    output_type="json",
                     output_config={"deliverable": {"label": "Plan"}},
                 )
             ]

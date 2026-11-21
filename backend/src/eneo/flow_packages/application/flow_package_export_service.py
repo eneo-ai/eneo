@@ -539,7 +539,8 @@ def _portable_template_config(
 def _portable_deliverable(step: FlowStep) -> FlowPersistedJsonObject | None:
     """The step's deliverable as a package carries it: without the keys it
     leaves out, so a package without a file name holds no null. Export runs
-    after the cleanup that drops it from a step without a document."""
+    after the cleanup that drops it, or its file name, from a step that
+    cannot carry them."""
     try:
         deliverable = parse_flow_step_deliverable(step.output_config)
     except ValueError as exc:

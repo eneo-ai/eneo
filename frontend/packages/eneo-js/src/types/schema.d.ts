@@ -29442,17 +29442,17 @@ export interface components {
         | ({
             /**
              * FlowStepDeliverable
-             * @description Marks this step as one of the run's deliverables: a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is a downloadable document can carry it: saving any other step removes the key, and publishing or importing one refuses it.
+             * @description Marks this step as one of the run's deliverables: text or a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is text or a document of its own can carry it, and only a document step a `file_name`: saving any other step removes what it cannot carry, and publishing or importing one refuses it.
              */
             deliverable?: {
               /**
                * File Name
-               * @description Name the document is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               * @description Only for a document. The name it is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
                */
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
+               * @description What a client calls this text or document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };
@@ -35927,17 +35927,17 @@ export interface components {
         | ({
             /**
              * FlowStepDeliverable
-             * @description Marks this step as one of the run's deliverables: a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is a downloadable document can carry it: saving any other step removes the key, and publishing or importing one refuses it.
+             * @description Marks this step as one of the run's deliverables: text or a document a client lists with its label in `deliverables` on the run contract and the run. Only a step whose output is text or a document of its own can carry it, and only a document step a `file_name`: saving any other step removes what it cannot carry, and publishing or importing one refuses it.
              */
             deliverable?: {
               /**
                * File Name
-               * @description Name the document is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
+               * @description Only for a document. The name it is saved under, without extension: fixed text mixed with `{{ flow_input.<field> }}` for a field of the flow's form. The run's day is added after it, and equal names are numbered. One line of at most 200 characters. Left out, the document is named as before.
                */
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
+               * @description What a client calls this text or document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };

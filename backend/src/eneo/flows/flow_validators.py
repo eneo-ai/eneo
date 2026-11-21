@@ -61,6 +61,7 @@ from eneo.flows.enums import (
     FlowInputSource,
     FlowRuntimeInputFormat,
     flow_output_mode_uses_completion_model,
+    step_can_be_deliverable,
     step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
@@ -1072,8 +1073,9 @@ def _validate_deliverable(
     form_field_names: AbstractSet[str] | None,
     run_date_field_names: AbstractSet[str],
 ) -> None:
-    """A deliverable sits on a step that delivers a document, and its file
-    name reads only fields of the form that may name a file. The fields are
+    """A deliverable sits on a step whose text or document can be delivered,
+    a file name only on a document, and the file name reads only fields of
+    the form that may name a file. The fields are
     judged when ``form_field_names`` is given, which publishing and importing
     do; a missing form then has no field to read."""
 
@@ -1094,14 +1096,22 @@ def _validate_deliverable(
         ) from exc
     if deliverable is None:
         return
-    if not step_delivers_artifact(
+    if not step_can_be_deliverable(
         output_type=step.output_type, output_mode=step.output_mode
     ):
         raise refuse(
-            "is only for a step whose output is a document a client downloads "
-            "(DOCX or PDF, not posted elsewhere). Remove it, or change the "
-            "step's output to a document.",
+            "is only for a step whose output is text or a document of its own "
+            "(not JSON, a mapping of speakers or a request it sends). Remove it, "
+            "or change the step's output.",
             path=_DELIVERABLE_PATH,
+        )
+    if deliverable.file_name is not None and not step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        raise refuse(
+            "names a file, and only a document step has one. Remove it; text "
+            "is delivered under its label.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
         )
     if "{{" in deliverable.label or "}}" in deliverable.label:
         raise refuse(

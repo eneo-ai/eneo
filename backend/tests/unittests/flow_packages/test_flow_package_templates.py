@@ -454,7 +454,7 @@ async def test_a_package_deliverable_on_a_step_without_a_document_is_refused() -
     envelope.spec.form_fields = [FormFieldSpec(name="name", type="text", label="Name")]
     step = envelope.spec.steps[1]
     step.output_mode = OutputMode.PASS_THROUGH
-    step.output_type = OutputType.TEXT
+    step.output_type = OutputType.JSON
     step.output_config = {"deliverable": {"label": "Text"}}
     envelope.spec.steps[0].output_config["bindings"] = {
         "dokument": "{{ flow_input.name }}"

@@ -1,10 +1,11 @@
 """A step its author marks as one of a run's deliverables.
 
 The mark lives in the step's ``output_config`` under ``deliverable``: the
-label a client shows for the document and, optionally, the name the document
-is saved under. Only a step that delivers an artifact
-(``step_delivers_artifact``) can carry it; saving a step that does not drops
-the key, and publishing or importing one refuses it.
+label a client shows for the text or document and, for a document,
+optionally the name it is saved under. Only a step that can be a deliverable
+(``step_can_be_deliverable``) carries it, and only a document step a file
+name; saving a step drops what it cannot carry, and publishing or importing
+refuses it.
 """
 
 from __future__ import annotations
@@ -36,14 +37,15 @@ def _as_written_one_line(value: str, *, max_chars: int) -> str:
 
 
 class FlowStepDeliverable(BaseModel):
-    """One document a run delivers: what a client calls it and what it is
-    saved as."""
+    """One text or document a run delivers: what a client calls it and, for
+    a document, what it is saved as."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     label: str = Field(
         description=(
-            "What a client calls this document, for example `Standup Eneo`. One "
+            "What a client calls this text or document, for example `Standup "
+            "Eneo`. One "
             f"line of at most {DELIVERABLE_LABEL_MAX_CHARS} characters, shown as "
             "written: publishing refuses `{{` or `}}` in it."
         ),
@@ -51,7 +53,8 @@ class FlowStepDeliverable(BaseModel):
     file_name: str | None = Field(
         default=None,
         description=(
-            "Name the document is saved under, without extension: fixed text "
+            "Only for a document. The name it is saved under, without "
+            "extension: fixed text "
             "mixed with `{{ flow_input.<field> }}` for a field of the flow's "
             "form. The run's day is added after it, and equal names are "
             "numbered. One line of at most "

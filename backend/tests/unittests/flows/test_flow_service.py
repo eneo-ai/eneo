@@ -4760,12 +4760,12 @@ async def test_a_step_timeout_within_the_maximum_saves(user):
 @pytest.mark.parametrize(
     ("output_mode", "output_type", "kept"),
     [
-        ("render_verbatim", "pdf", True),
-        ("compose_text", "text", False),
-        ("pass_through", "json", False),
+        ("render_verbatim", "pdf", {"label": "Plan", "file_name": "Plan"}),
+        ("compose_text", "text", {"label": "Plan"}),
+        ("pass_through", "json", None),
     ],
 )
-async def test_update_flow_keeps_a_deliverable_only_on_a_document_step(
+async def test_update_flow_keeps_a_deliverable_only_where_it_can_be_one(
     user, output_mode, output_type, kept
 ):
     repo = AsyncMock()
@@ -4782,7 +4782,7 @@ async def test_update_flow_keeps_a_deliverable_only_on_a_document_step(
     updated = await _write_new_steps(service, repo, [step])
 
     assert updated.steps[0].output_config == (
-        {"deliverable": deliverable, "extension": "kept"}
-        if kept
+        {"deliverable": kept, "extension": "kept"}
+        if kept is not None
         else {"extension": "kept"}
     )

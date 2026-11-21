@@ -4461,9 +4461,9 @@ def test_deliverable_with_a_file_name_from_form_fields_publishes(
 
 @pytest.mark.parametrize(
     ("output_mode", "output_type"),
-    [("compose_text", "text"), ("pass_through", "json")],
+    [("pass_through", "json")],
 )
-def test_deliverable_on_a_step_that_delivers_no_artifact_is_refused(
+def test_deliverable_on_a_step_that_cannot_be_one_is_refused(
     output_mode: str, output_type: str
 ) -> None:
     step = _step(
@@ -4477,6 +4477,50 @@ def test_deliverable_on_a_step_that_delivers_no_artifact_is_refused(
 
     assert "output_config.deliverable" in str(caught.value)
     assert caught.value.context["field"] == "output_config.deliverable"
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "input_type"),
+    [("compose_text", "text"), ("pass_through", "text")],
+)
+def test_a_text_step_marked_as_a_deliverable_publishes(
+    output_mode: str, input_type: str
+) -> None:
+    _publish(
+        _step(
+            output_mode=output_mode,
+            input_type=input_type,
+            output_type="text",
+            output_config={"deliverable": {"label": "Sammanfattning"}},
+        )
+    )
+
+
+def test_a_transcription_marked_as_a_deliverable_publishes() -> None:
+    _publish(
+        _step(
+            output_mode="transcribe_only",
+            input_type="audio",
+            output_type="text",
+            output_config={"deliverable": {"label": "Transkription"}},
+        ),
+        metadata_json=_audio_metadata(),
+    )
+
+
+def test_a_file_name_on_a_text_deliverable_is_refused_at_the_file_name() -> None:
+    step = _step(
+        output_mode="compose_text",
+        output_type="text",
+        output_config={
+            "deliverable": {"label": "Sammanfattning", "file_name": "Standup"}
+        },
+    )
+
+    with pytest.raises(BadRequestException) as caught:
+        _publish(step)
+
+    assert caught.value.context["field"] == "output_config.deliverable.file_name"
 
 
 @pytest.mark.parametrize(

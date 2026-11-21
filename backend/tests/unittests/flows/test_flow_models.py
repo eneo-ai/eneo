@@ -1479,7 +1479,7 @@ def test_flow_step_request_schema_documents_deliverable() -> None:
 
     deliverable = output_config["properties"]["deliverable"]
     assert set(deliverable["properties"]) == {"label", "file_name"}
-    assert "removes the key" in deliverable["description"]
+    assert "removes what it cannot carry" in deliverable["description"]
 
 
 def _document_file(run, *, step_id, availability: str = "available"):
