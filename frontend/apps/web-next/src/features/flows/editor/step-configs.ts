@@ -8,7 +8,7 @@ import {
   type OutputMode,
   type ReviewPolicy,
   type StepConfig,
-  type StepPatch
+  type StepDeliverable
 } from "./step-types";
 
 /**
@@ -820,12 +820,21 @@ export function withRetrievalPolicy(
 // the run's results, with a label and an optional file name.
 // ---------------------------------------------------------------------------
 
-/** The stored shape (`FlowStepDeliverable` in the core). */
-export type StepDeliverable = NonNullable<NonNullable<StepPatch["output_config"]>["deliverable"]>;
-
 /** The core's bounds for a deliverable's label and file name, in characters. */
 export const DELIVERABLE_LABEL_MAX = 120;
 export const DELIVERABLE_FILE_NAME_MAX = 200;
+
+/**
+ * Whether a label or file name is one line as the core keeps it as written:
+ * no line breaks or invisible characters, and no double, leading or trailing
+ * spaces.
+ */
+export function isOneLine(value: string): boolean {
+  return (
+    value === value.trim().split(/\s+/).join(" ") &&
+    !/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(value)
+  );
+}
 
 /**
  * Whether the step's output is a file of the run, the only kind of step that

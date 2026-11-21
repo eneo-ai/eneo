@@ -20,6 +20,10 @@ export type InputType = Schemas["FlowInputType"];
 export type OutputMode = Schemas["FlowOutputMode"];
 export type OutputType = Schemas["FlowOutputType"];
 export type ReviewPolicy = Schemas["FlowStepReviewPolicy"];
+/** `output_config.deliverable` (`FlowStepDeliverable` in the core). */
+export type StepDeliverable = NonNullable<
+  NonNullable<Schemas["FlowStepUpdateRequest"]["output_config"]>["deliverable"]
+>;
 export type ModelKwargs = Schemas["ModelKwargs"];
 export type Collection = Schemas["CollectionPublic"];
 export type Website = Schemas["WebsitePublic"];

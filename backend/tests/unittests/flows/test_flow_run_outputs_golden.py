@@ -9,6 +9,7 @@ moves any of these values changes what existing integrations read.
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -748,6 +749,7 @@ def _file_names(
         flow_name=flow_name,
         steps=steps,
         run_created_at=_CREATED_AT,
+        form_values={},
         run_label=run_label,
         run_date=run_date,
     )
@@ -963,3 +965,55 @@ def test_a_run_that_has_not_completed_delivers_nothing() -> None:
 
     assert run.deliverables == []
     assert exported["summary"]["deliverables"] == []
+
+
+_MARKER = "MARKER7f3a"
+
+
+def test_a_masked_form_value_reaches_no_name_title_or_export() -> None:
+    _, version, steps = _definition(
+        {
+            15: {
+                "label": "Brukarversion",
+                "file_name": "Brukarversion {{ flow_input.Kontakt }}",
+            }
+        }
+    )
+    names = GeneratedFileNames.for_run(
+        flow_name="Genomförandeplan",
+        steps=steps,
+        run_created_at=_CREATED_AT,
+        form_values={"Kontakt": f"token={_MARKER}"},
+    )
+    name = names.name(step_order=15, output_type="pdf")
+    title = names.stem(step_order=15, output_type="pdf")
+    by_order = {step.step_order: step for step in steps}
+    # A row stored before the rule, with a credential in its name.
+    stored_before = f"Bearer {_MARKER}{_MARKER}{_MARKER}.pdf"
+    files = [
+        _attempt_file(
+            by_order[order], attempt_no=1, source="declared_artifact", name=file_name
+        )
+        for order, file_name in ((15, name), (17, stored_before))
+    ]
+    history = (
+        [_step_result(by_order[order], current_attempt_no=1) for order in (15, 17)],
+        [_attempt(by_order[order], attempt_no=1, failed=False) for order in (15, 17)],
+        files,
+    )
+
+    redacted = _evidence_export(version, steps, redacted=True, history=history)
+
+    # The export lists both current documents, so the check below sees them.
+    assert [
+        [file["file_id"] for file in item["files"]]
+        for item in redacted["summary"]["deliverables"]
+    ] == [[str(file.file_id)] for file in files]
+    assert _MARKER not in name
+    assert _MARKER not in title
+    assert name.startswith("Brukarversion ")
+    assert _MARKER not in json.dumps(redacted["summary"]["deliverables"])
+    assert [item["label"] for item in redacted["summary"]["deliverables"]] == [
+        "Brukarversion",
+        "17. Skapa PDF av LifeCare-versionen",
+    ]

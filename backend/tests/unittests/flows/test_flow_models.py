@@ -273,6 +273,60 @@ def test_flow_run_public_examples_exactly_match_their_typed_contracts() -> None:
     assert summary.id == detail.id
 
 
+def test_the_contract_and_run_detail_examples_describe_one_flow() -> None:
+    # A client joins a run's deliverables to the contract by step_id.
+    from eneo.flows.api.flow_models import (
+        FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE,
+        FLOW_RUN_DETAIL_PUBLIC_EXAMPLE,
+        FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+    )
+
+    contract = FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE
+    detail = FLOW_RUN_DETAIL_PUBLIC_EXAMPLE
+    steps = [
+        contract["final_output"],
+        *contract["deliverables"],
+        *contract["steps_requiring_input"],
+        *contract["steps_requiring_review"],
+        FLOW_RUN_REVIEW_CHECKPOINT_PUBLIC_EXAMPLE,
+        *detail["result_files"],
+    ]
+    order_by_step: dict[str, set[int]] = {}
+    for step in steps:
+        order_by_step.setdefault(step["step_id"], set()).add(step["step_order"])
+    step_by_order: dict[int, set[str]] = {}
+    for step_id, orders in order_by_step.items():
+        for order in orders:
+            step_by_order.setdefault(order, set()).add(step_id)
+
+    assert all(len(orders) == 1 for orders in order_by_step.values())
+    assert all(len(step_ids) == 1 for step_ids in step_by_order.values())
+    assert [
+        (item["step_id"], item["step_order"], item["label"], item["output_type"])
+        for item in detail["deliverables"]
+    ] == [
+        (item["step_id"], item["step_order"], item["label"], item["output_type"])
+        for item in contract["deliverables"]
+    ]
+    for item in detail["deliverables"]:
+        assert {(file["step_id"], file["step_order"]) for file in item["files"]} == {
+            (item["step_id"], item["step_order"])
+        }
+    assert {file["step_id"] for file in detail["result"]["files"]} == {
+        contract["final_output"]["step_id"]
+    }
+    # Readiness is reported only for a step that fills a Word template.
+    template_fill_steps = {
+        step["step_id"]
+        for step in (contract["final_output"], *contract["deliverables"])
+        if step["output_mode"] == "template_fill"
+    }
+    assert {
+        item["step_id"] for item in contract["template_readiness"]
+    } <= template_fill_steps
+    assert detail["webhook_deliveries"]
+
+
 def test_flow_run_status_snapshot_rejects_content_fields() -> None:
     with pytest.raises(ValidationError) as exc_info:
         FlowRunStatusSnapshot.model_validate(
@@ -863,6 +917,34 @@ def test_run_public_fails_explicitly_when_completed_artifact_is_missing() -> Non
                 )
             ),
         )
+
+
+def test_a_last_document_step_with_only_a_text_file_keeps_its_result() -> None:
+    # The result fails only when the last step has no file rows at all; with
+    # a text file and no document the result holds that file, and the step's
+    # deliverable lists no document.
+    first_id, last_id = uuid4(), uuid4()
+    run = _completed_run(output_payload_json={"text": "rendered"})
+    text_file = _document_file(run, step_id=last_id).model_copy(
+        update={
+            "source": "generated_output",
+            "name": "lifecare.txt",
+            "mimetype": "text/plain",
+        }
+    )
+
+    public = FlowAssembler().to_run_public(
+        run, result_files=(text_file,), outputs=_two_document_outputs(first_id, last_id)
+    )
+
+    assert public.result is not None
+    assert public.result.model_dump(mode="json")["files"] == [
+        text_file.model_dump(mode="json")
+    ]
+    assert [(item.step_id, item.files) for item in public.deliverables] == [
+        (first_id, []),
+        (last_id, []),
+    ]
 
 
 def test_run_public_fails_explicitly_without_completed_run_contract() -> None:
@@ -1487,3 +1569,71 @@ def test_a_sparse_step_patch_may_carry_only_a_deliverable() -> None:
         FlowEditorStepPatch.model_validate(
             {"output_config": {"deliverable": {"label": "Plan", "kind": "x"}}}
         )
+
+
+@pytest.mark.parametrize(
+    ("deliverable", "field", "error_type"),
+    [
+        ({"label": " Standup"}, "label", "value_error"),
+        ({"label": "Standup\nEneo"}, "label", "value_error"),
+        ({"label": "x" * 121}, "label", "value_error"),
+        ({}, "label", "missing"),
+        (
+            {"label": "Standup", "file_name": "Standup  Eneo"},
+            "file_name",
+            "value_error",
+        ),
+        ({"label": "Standup", "file_name": "a\r\nb"}, "file_name", "value_error"),
+        ({"label": "Standup", "file_name": "x" * 201}, "file_name", "value_error"),
+    ],
+)
+def test_a_malformed_deliverable_is_reported_at_its_field(
+    deliverable: dict[str, object], field: str, error_type: str
+) -> None:
+    # The editor places an error by its location: one ending on
+    # `output_config` would land on the step's other output settings.
+    from eneo.flows.api.flow_models import FlowEditorStepChange
+
+    output_config = {"deliverable": deliverable}
+    with pytest.raises(ValidationError) as full:
+        FlowUpdateRequest.model_validate(
+            {
+                "steps": [
+                    _payload(
+                        output_mode="render_verbatim",
+                        output_type="docx",
+                        output_config=output_config,
+                    )
+                ]
+            }
+        )
+    with pytest.raises(ValidationError) as sparse:
+        FlowEditorStepChange.model_validate(
+            {"step_id": str(uuid4()), "changes": {"output_config": output_config}}
+        )
+
+    for caught in (full, sparse):
+        errors = caught.value.errors()
+        assert [(error["loc"][-3:], error["type"]) for error in errors] == [
+            (("output_config", "deliverable", field), error_type)
+        ]
+
+
+def test_a_step_request_with_a_deliverable_dumps_as_it_was_sent() -> None:
+    import warnings
+
+    output_config = {"deliverable": {"label": "Plan"}, "citation_mode": "off"}
+    request = FlowStepCreateRequest.model_validate(
+        _payload(
+            output_mode="render_verbatim",
+            output_type="docx",
+            output_config=output_config,
+        )
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        dumped = request.model_dump(mode="json")
+        request.model_dump()
+
+    assert dumped["output_config"] == output_config

@@ -22164,7 +22164,7 @@ export interface components {
      *           "output_mode": "pass_through",
      *           "output_type": "docx",
      *           "step_id": "00000000-0000-0000-0000-000000000104",
-     *           "step_order": 3
+     *           "step_order": 4
      *         }
      *       ],
      *       "final_output": {
@@ -22173,7 +22173,7 @@ export interface components {
      *         "output_mode": "pass_through",
      *         "output_type": "docx",
      *         "step_id": "00000000-0000-0000-0000-000000000104",
-     *         "step_order": 3
+     *         "step_order": 4
      *       },
      *       "flow_id": "00000000-0000-0000-0000-000000000001",
      *       "form_fields": [
@@ -22229,18 +22229,10 @@ export interface components {
      *           "output_type": "json",
      *           "review_mode": "edit",
      *           "step_id": "00000000-0000-0000-0000-000000000103",
-     *           "step_order": 2
+     *           "step_order": 3
      *         }
      *       ],
-     *       "template_readiness": [
-     *         {
-     *           "can_download": false,
-     *           "can_edit": false,
-     *           "published_flow_version": 3,
-     *           "status": "unavailable",
-     *           "step_id": "00000000-0000-0000-0000-000000000102"
-     *         }
-     *       ],
+     *       "template_readiness": [],
      *       "transcription": {
      *         "live": {
      *           "available": true
@@ -22977,17 +22969,17 @@ export interface components {
      *               "ordinal": 0,
      *               "size": 14012,
      *               "source": "declared_artifact",
-     *               "step_id": "00000000-0000-0000-0000-000000000103",
-     *               "step_order": 3,
-     *               "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *               "step_id": "00000000-0000-0000-0000-000000000104",
+     *               "step_order": 4,
+     *               "step_result_id": "00000000-0000-0000-0000-000000000454",
      *               "tenant_id": "00000000-0000-0000-0000-000000000010"
      *             }
      *           ],
      *           "kind": "artifact",
      *           "label": "Report",
      *           "output_type": "docx",
-     *           "step_id": "00000000-0000-0000-0000-000000000103",
-     *           "step_order": 3
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 4
      *         }
      *       ],
      *       "dispatch_attempt_count": 1,
@@ -23026,9 +23018,9 @@ export interface components {
      *             "ordinal": 0,
      *             "size": 14012,
      *             "source": "declared_artifact",
-     *             "step_id": "00000000-0000-0000-0000-000000000103",
-     *             "step_order": 3,
-     *             "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *             "step_id": "00000000-0000-0000-0000-000000000104",
+     *             "step_order": 4,
+     *             "step_result_id": "00000000-0000-0000-0000-000000000454",
      *             "tenant_id": "00000000-0000-0000-0000-000000000010"
      *           }
      *         ],
@@ -23066,9 +23058,9 @@ export interface components {
      *           "ordinal": 0,
      *           "size": 14012,
      *           "source": "declared_artifact",
-     *           "step_id": "00000000-0000-0000-0000-000000000103",
-     *           "step_order": 3,
-     *           "step_result_id": "00000000-0000-0000-0000-000000000453",
+     *           "step_id": "00000000-0000-0000-0000-000000000104",
+     *           "step_order": 4,
+     *           "step_result_id": "00000000-0000-0000-0000-000000000454",
      *           "tenant_id": "00000000-0000-0000-0000-000000000010"
      *         }
      *       ],
@@ -23085,7 +23077,19 @@ export interface components {
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "trace_id": "00000000-0000-0000-0000-000000000302",
      *       "updated_at": "2026-03-17T10:06:10Z",
-     *       "webhook_deliveries": []
+     *       "webhook_deliveries": [
+     *         {
+     *           "attempt_no": 1,
+     *           "created_at": "2026-03-17T10:05:30Z",
+     *           "delivered_at": "2026-03-17T10:05:31Z",
+     *           "delivery_attempts": 1,
+     *           "delivery_status": "delivered",
+     *           "id": "00000000-0000-0000-0000-000000000601",
+     *           "step_id": "00000000-0000-0000-0000-000000000101",
+     *           "step_order": 1,
+     *           "updated_at": "2026-03-17T10:05:31Z"
+     *         }
+     *       ]
      *     }
      */
     FlowRunDetailPublic: {
@@ -24011,7 +24015,7 @@ export interface components {
      *             "state": "resumed",
      *             "step_id": "00000000-0000-0000-0000-000000000103",
      *             "step_label": "Review transcription",
-     *             "step_order": 2,
+     *             "step_order": 3,
      *             "tenant_id": "00000000-0000-0000-0000-000000000010",
      *             "updated_at": "2026-03-17T10:05:30Z"
      *           }
@@ -24097,7 +24101,7 @@ export interface components {
      *           }
      *         ]
      *       },
-     *       "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
+     *       "content_hash": "9a108ff7ef46fdb5eb4ec83a7af89ec0e01aeac5450854ebeec8d0518e98bd4e",
      *       "generated_at": "2026-03-31T12:00:00Z",
      *       "manifest": {
      *         "actor": {
@@ -24133,7 +24137,7 @@ export interface components {
      *           "total_size_bytes": 14012,
      *           "tracking_state": "tracked"
      *         },
-     *         "content_hash": "80c48fd41127875b330cd1342521885ab81c98c520ca43476d755769ba13c65d",
+     *         "content_hash": "9a108ff7ef46fdb5eb4ec83a7af89ec0e01aeac5450854ebeec8d0518e98bd4e",
      *         "content_hash_input": "redacted",
      *         "detail_mode": "redacted",
      *         "export_reason": "support_debug",
@@ -24728,7 +24732,7 @@ export interface components {
      *           "state": "resumed",
      *           "step_id": "00000000-0000-0000-0000-000000000103",
      *           "step_label": "Review transcription",
-     *           "step_order": 2,
+     *           "step_order": 3,
      *           "tenant_id": "00000000-0000-0000-0000-000000000010",
      *           "updated_at": "2026-03-17T10:05:30Z"
      *         }
@@ -26083,7 +26087,7 @@ export interface components {
      *       "state": "resumed",
      *       "step_id": "00000000-0000-0000-0000-000000000103",
      *       "step_label": "Review transcription",
-     *       "step_order": 2,
+     *       "step_order": 3,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -26230,7 +26234,7 @@ export interface components {
      *       "state": "awaiting_review",
      *       "step_id": "00000000-0000-0000-0000-000000000103",
      *       "step_label": "Review transcription",
-     *       "step_order": 2,
+     *       "step_order": 3,
      *       "tenant_id": "00000000-0000-0000-0000-000000000010",
      *       "updated_at": "2026-03-17T10:05:30Z"
      *     }
@@ -26423,7 +26427,7 @@ export interface components {
      *         "state": "resumed",
      *         "step_id": "00000000-0000-0000-0000-000000000103",
      *         "step_label": "Review transcription",
-     *         "step_order": 2,
+     *         "step_order": 3,
      *         "tenant_id": "00000000-0000-0000-0000-000000000010",
      *         "updated_at": "2026-03-17T10:05:30Z"
      *       },
@@ -29448,7 +29452,7 @@ export interface components {
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };
@@ -35933,7 +35937,7 @@ export interface components {
               file_name?: string | null;
               /**
                * Label
-               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, read as literal text: `{{ }}` is not filled in.
+               * @description What a client calls this document, for example `Standup Eneo`. One line of at most 120 characters, shown as written: publishing refuses `{{` or `}}` in it.
                */
               label: string;
             };
@@ -67003,7 +67007,7 @@ export interface operations {
            *       "state": "edited",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -67141,7 +67145,7 @@ export interface operations {
            *         "state": "resumed",
            *         "step_id": "00000000-0000-0000-0000-000000000103",
            *         "step_label": "Review transcription",
-           *         "step_order": 2,
+           *         "step_order": 3,
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "updated_at": "2026-03-17T10:05:30Z"
            *       },
@@ -67320,7 +67324,7 @@ export interface operations {
            *       "state": "approved",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -67562,7 +67566,7 @@ export interface operations {
            *       "state": "rejected",
            *       "step_id": "00000000-0000-0000-0000-000000000103",
            *       "step_label": "Review transcription",
-           *       "step_order": 2,
+           *       "step_order": 3,
            *       "tenant_id": "00000000-0000-0000-0000-000000000010",
            *       "updated_at": "2026-03-17T10:05:30Z"
            *     }
@@ -67700,7 +67704,7 @@ export interface operations {
            *         "state": "resumed",
            *         "step_id": "00000000-0000-0000-0000-000000000103",
            *         "step_label": "Review transcription",
-           *         "step_order": 2,
+           *         "step_order": 3,
            *         "tenant_id": "00000000-0000-0000-0000-000000000010",
            *         "updated_at": "2026-03-17T10:05:30Z"
            *       },

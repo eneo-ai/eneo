@@ -6,12 +6,12 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Token } from "@astryxdesign/core/Token";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useMutation } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { TextInput } from "@/components/astryx/text-input";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { tokensOf } from "../flow-steps";
 import { isJsonObject } from "./step-types";
 import { testHttp, type HttpTestResponse } from "./editor-api";
@@ -276,7 +276,8 @@ function HttpTest({
     announce(next.detail ? `${next.title}. ${next.detail}` : next.title);
   }
 
-  const test = useMutation({
+  // The config can carry a typed credential, so it stays out of React Query's cache.
+  const test = useSecretMutation({
     mutationFn: ({
       testConfig,
       testVariables

@@ -37,6 +37,7 @@ from eneo.flows.domain.speaker_mapping_config import (
 )
 from eneo.flows.domain.step_deliverable import (
     FLOW_STEP_DELIVERABLE_KEY,
+    FlowStepDeliverableError,
     file_name_expressions,
     form_field_read_by,
     parse_flow_step_deliverable,
@@ -131,6 +132,7 @@ from eneo.flows.output_processing import (
     validate_against_contract,
     validate_schema_syntax,
 )
+from eneo.flows.runtime.generated_file_names import file_name_reads_as_credential
 from eneo.flows.runtime.output_formats import resolve_format_spec
 from eneo.flows.source_identity import has_required_runtime_managed_source_fields
 from eneo.flows.step_chain_rules import iter_step_chain_violations
@@ -1060,6 +1062,7 @@ def _validate_review_policy(step: FlowStepValidationView) -> None:
 
 
 _DELIVERABLE_PATH = f"output_config.{FLOW_STEP_DELIVERABLE_KEY}"
+_DELIVERABLE_LABEL_PATH = f"{_DELIVERABLE_PATH}.label"
 _DELIVERABLE_FILE_NAME_PATH = f"{_DELIVERABLE_PATH}.file_name"
 
 
@@ -1083,11 +1086,11 @@ def _validate_deliverable(
 
     try:
         deliverable = parse_flow_step_deliverable(step.output_config)
-    except ValueError as exc:
+    except FlowStepDeliverableError as exc:
         raise FlowStepValidationError(
             f"Step {step.step_order}: {exc}",
             step_order=step.step_order,
-            context={"field": _DELIVERABLE_PATH},
+            context={"field": exc.field},
         ) from exc
     if deliverable is None:
         return
@@ -1099,6 +1102,13 @@ def _validate_deliverable(
             "(DOCX or PDF, not posted elsewhere). Remove it, or change the "
             "step's output to a document.",
             path=_DELIVERABLE_PATH,
+        )
+    if "{{" in deliverable.label or "}}" in deliverable.label:
+        raise refuse(
+            "is shown as written and never filled in, so it cannot hold `{{` or "
+            "`}}`. Write the label as plain text; a form value belongs in "
+            "`file_name`.",
+            path=_DELIVERABLE_LABEL_PATH,
         )
     if deliverable.file_name is None or form_field_names is None:
         return
@@ -1136,6 +1146,12 @@ def _validate_deliverable(
                 "name stays visible in lists and downloads. Use another field.",
                 path=_DELIVERABLE_FILE_NAME_PATH,
             )
+    if file_name_reads_as_credential(deliverable.file_name):
+        raise refuse(
+            "reads as a credential (such as `Basic …`, `Bearer …` or "
+            "`token=…`) for an ordinary form value. Reword the fixed text.",
+            path=_DELIVERABLE_FILE_NAME_PATH,
+        )
 
 
 def _validate_retrieval_policy(step: FlowStepValidationView) -> None:

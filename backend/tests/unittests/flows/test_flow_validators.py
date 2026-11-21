@@ -4492,6 +4492,10 @@ def test_deliverable_on_a_step_that_delivers_no_artifact_is_refused(
         ("{{ flow_input.password }}", "sensitive"),
         ("Standup {{ flow_input.Team", "unmatched"),
         ("Standup }}", "unmatched"),
+        ("Basic plan {{ flow_input.Team }}", "reads as a credential"),
+        ("Weekly digest {{ flow_input.Team }}", "reads as a credential"),
+        ("token={{ flow_input.Team }}", "reads as a credential"),
+        ("Bearer/{{ flow_input.Team }}", "reads as a credential"),
     ],
 )
 def test_deliverable_file_name_reads_only_fields_of_the_form(
@@ -4543,3 +4547,39 @@ def test_validate_steps_rejects_a_run_result_step_whose_output_is_not_text(
 
 def test_validate_steps_accepts_a_run_result_step_whose_output_is_text() -> None:
     validate_steps([_run_result_step("text")])
+
+
+@pytest.mark.parametrize(
+    ("deliverable", "field"),
+    [
+        ({"label": " Standup"}, "label"),
+        ({}, "label"),
+        ({"label": "Standup", "file_name": "a\nb"}, "file_name"),
+        ({"label": "Standup", "file_name": "x" * 201}, "file_name"),
+    ],
+)
+def test_a_malformed_deliverable_is_refused_at_its_field(
+    deliverable: dict[str, object], field: str
+) -> None:
+    # A step copied without validation (as a rewrite of its references makes
+    # it) reaches publish unchecked.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step(deliverable))
+
+    assert caught.value.context["field"] == f"output_config.deliverable.{field}"
+
+
+@pytest.mark.parametrize(
+    "label", ["Report {{ flow_input.text }}", "Report {{", "Report }}"]
+)
+def test_a_deliverable_label_with_braces_is_refused_at_the_label(label: str) -> None:
+    # A label is shown as written and never filled in.
+    with pytest.raises(BadRequestException) as caught:
+        _publish(_document_step({"label": label}))
+
+    assert caught.value.context["field"] == "output_config.deliverable.label"
+    assert "shown as written" in str(caught.value)
+
+
+def test_a_deliverable_label_of_plain_text_publishes() -> None:
+    _publish(_document_step({"label": "Rapport: vecka 47 (utkast) – 50 %"}))

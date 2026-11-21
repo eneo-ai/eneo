@@ -45,6 +45,7 @@ import {
   DELIVERABLE_FILE_NAME_MAX,
   DELIVERABLE_LABEL_MAX,
   httpUrlProblem,
+  isOneLine,
   readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
@@ -77,6 +78,7 @@ import {
   assistantConfigOf,
   EDITABLE_STEP_FIELDS,
   sameJson,
+  sameStepField,
   stepConfigOf,
   type AssistantConfig,
   type EditableStepField,
@@ -632,14 +634,28 @@ function StepEditorSession({
     const changed = EDITABLE_STEP_FIELDS.filter((field) => !sameJson(current[field], next[field]));
     if (changed.length === 0) return;
     const saved = session.saved;
-    setStepBases((bases) => ({
-      ...Object.fromEntries(changed.map((field) => [field, saved[field]])),
-      ...bases
-    }));
-    setStepEdits((edits) => ({
-      ...edits,
-      ...Object.fromEntries(changed.map((field) => [field, next[field]]))
-    }));
+    // A field changed back to its saved value is no edit: the form follows a
+    // newer version of it again, and a save leaves it out.
+    const reverted = new Set(
+      changed.filter((field) => sameStepField(field, saved[field], next[field]))
+    );
+    const edited = changed.filter((field) => !reverted.has(field));
+    const withoutReverted = (values: StepEdits) =>
+      Object.fromEntries(
+        Object.entries(values).filter(([field]) => !reverted.has(field as keyof StepConfig))
+      ) as StepEdits;
+    setStepBases((bases) =>
+      withoutReverted({
+        ...Object.fromEntries(edited.map((field) => [field, saved[field]])),
+        ...bases
+      })
+    );
+    setStepEdits((edits) =>
+      withoutReverted({
+        ...edits,
+        ...Object.fromEntries(edited.map((field) => [field, next[field]]))
+      })
+    );
     setServerProblems((problems) => {
       const cleared = new Set(changed.flatMap(anchorsOf));
       return Object.fromEntries(
@@ -778,11 +794,19 @@ function StepEditorSession({
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
+      } else if (!isOneLine(deliverable.label)) {
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_one_line"
+        );
       }
       if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
           "flow_step_editor_deliverable_file_name_too_long",
           { max: DELIVERABLE_FILE_NAME_MAX }
+        );
+      } else if (!isOneLine(deliverable.file_name ?? "")) {
+        problems["output_config.deliverable.file_name"] = t(
+          "flow_step_editor_deliverable_file_name_one_line"
         );
       }
     }

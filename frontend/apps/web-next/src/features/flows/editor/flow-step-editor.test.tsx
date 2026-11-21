@@ -1334,6 +1334,37 @@ describe("FlowStepEditor", () => {
     });
   }, 20_000);
 
+  it.each([
+    ["answered", () => ({ body: { success: false, status_code: 401, response_preview: null } })],
+    ["refused", () => ({ status: 500, body: { message: "Internal error", error_id: "error-1" } })]
+  ])(
+    "sends a typed credential with the HTTP test but keeps it out of React Query when %s",
+    async (_outcome, answer) => {
+      const secret = "sk-synthetic-test-token-4711";
+      const path = "/api/v1/flows/{id}/http-test";
+      api.routes[`POST ${path}`] = answer;
+      const { container, queryClient } = renderEditor(
+        httpFlow({ mode: "bearer_token", token: { $secret: "stored" } })
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Ersätt: Token" }));
+      const token = container.querySelector("input[type=password]") as HTMLInputElement;
+      fireEvent.change(token, { target: { value: secret } });
+      fireEvent.click(screen.getByRole("button", { name: messages.http_test_button }));
+
+      await waitFor(() =>
+        expect(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .some((mutation) => ["success", "error"].includes(mutation.state.status))
+        ).toBe(true)
+      );
+      expect(JSON.stringify(api.stub.calls.filter((call) => call.path === path))).toContain(secret);
+      expect(cachedText(queryClient)).not.toContain(secret);
+    },
+    20_000
+  );
+
   it("sets a tool step's arguments, one whole reference or a typed value each", async () => {
     api.routes["GET /api/v1/flows/{id}/tool-options"] = () => ({
       body: {
@@ -2334,7 +2365,15 @@ describe("FlowStepEditor deliverables", () => {
           details: {
             errors: [
               {
-                location: "body.step_edits.0.changes.output_config.deliverable.file_name",
+                location: [
+                  "body",
+                  "step_edits",
+                  0,
+                  "changes",
+                  "output_config",
+                  "deliverable",
+                  "file_name"
+                ],
                 message: "x"
               }
             ]
@@ -2389,6 +2428,84 @@ describe("FlowStepEditor deliverables", () => {
       (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
         .changes
     ).toEqual({ user_description: "Standup för alla" });
+  }, 20_000);
+
+  it("keeps a switch turned on and off out of the edits, so a newer version's deliverable stays", async () => {
+    const flow = deliveryFlow();
+    const start = {
+      ...flow,
+      steps: flow.steps.map((step) =>
+        step.id === "step-1" ? { ...step, output_config: {} } : step
+      )
+    };
+    // Someone else marks the document as a deliverable meanwhile.
+    const newer = {
+      ...start,
+      draft_revision: start.draft_revision + 1,
+      steps: start.steps.map((step) =>
+        step.id === "step-1"
+          ? { ...step, output_config: { deliverable: { label: "Till ledningen" } } }
+          : step
+      )
+    };
+    storeEdits(newer);
+    const { rerender } = renderEditor(start);
+    fireEvent.click(await deliverySwitch());
+    await labelField();
+    fireEvent.click(await deliverySwitch());
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_deliverable_label}`)
+        })
+      ).toBeNull()
+    );
+    rerender(
+      <FlowStepEditor
+        flow={newer}
+        stepId="step-1"
+        readOnly={false}
+        onSaved={() => {}}
+        onCancel={() => {}}
+      />
+    );
+
+    expect((await labelField()).value).toBe("Till ledningen");
+    fireEvent.change(await nameField(), { target: { value: "Standup för alla" } });
+    await saveStep();
+    expect(
+      (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
+        .changes
+    ).toEqual({ user_description: "Standup för alla" });
+  }, 20_000);
+
+  it("says a label or file name must be one line, as the core keeps them as written", async () => {
+    renderEditor(deliveryFlow());
+    fireEvent.click(await deliverySwitch());
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "Till  Eneo" } });
+    fireEvent.change(fileNameField(), { target: { value: " Standup {{flow_input.team}}" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
+    ).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
+    expect(document.activeElement).toBe(label);
+
+    fireEvent.change(label, { target: { value: "Till Eneo " } });
+    fireEvent.change(fileNameField(), { target: { value: "Standup\t{{flow_input.team}}" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
+    ).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
+    expect(patchBodies()).toHaveLength(0);
+
+    fireEvent.change(label, { target: { value: "Till Eneo" } });
+    fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.team}}" } });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    await saveStep();
+    expect(patchBodies()).toHaveLength(1);
   }, 20_000);
 
   it("counts the label and file name in characters, and refuses a label of only spaces", async () => {

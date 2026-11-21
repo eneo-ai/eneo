@@ -198,6 +198,28 @@ describe("classificationPreviewRequest", () => {
     }
   });
 
+  it("leaves out a deliverable still being written, which the save sends as typed", () => {
+    const document = makeStep({
+      output_type: "docx",
+      output_config: { future: true }
+    });
+    const saved = stepConfigOf(document);
+    const draft = draftStep(saved, { output_config: { future: true, deliverable: { label: "" } } });
+    const request = classificationPreviewRequest({
+      flow: makeFlow({ steps: [document] }),
+      stepId: "step-1",
+      draft,
+      assistantId: "assistant-1",
+      assistant: null,
+      savedAssistant: null
+    });
+    const [step] = request.steps as unknown as { output_config: Record<string, unknown> }[];
+    expect(step?.output_config).toEqual({ future: true });
+    expect(stepChanges(saved, draft)).toEqual({
+      output_config: { future: true, deliverable: { label: "" } }
+    });
+  });
+
   it("puts the draft in place of its step and leaves the other steps as saved", () => {
     const second = makeStep({
       id: "step-2",
