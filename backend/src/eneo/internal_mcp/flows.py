@@ -7,12 +7,13 @@ import inspect
 import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping
-from typing import Any, Literal, cast
+from typing import Any, Final, Literal, cast
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.types import CallToolResult, TextContent, ToolAnnotations
 from pydantic import (
+    AfterValidator,
     ConfigDict,
     Field,
     TypeAdapter,
@@ -1573,8 +1574,32 @@ async def contract_from_example(
     return await _call(ctx, operation, changes_draft=True)
 
 
+# The kinds the chat offers and adds. The step that sends the run's result
+# is set up by a person in the editor, who chooses where the result goes; the
+# chat neither sees nor adds it.
+_CHAT_STEP_KINDS: Final = tuple(
+    kind for kind in FlowStepKind if kind is not FlowStepKind.SEND_RUN_RESULT
+)
+
+
+def _chat_step_kind(kind: FlowStepKind) -> FlowStepKind:
+    if kind not in _CHAT_STEP_KINDS:
+        raise ValueError("The chat does not add this kind of step.")
+    return kind
+
+
+ChatStepKind = Annotated[
+    FlowStepKind,
+    AfterValidator(_chat_step_kind),
+    WithJsonSchema(
+        {"type": "string", "enum": [kind.value for kind in _CHAT_STEP_KINDS]}
+    ),
+]
+
+
 def _kinds_appendix() -> str:
-    """Each kind, what it does and the values it takes, from their owner."""
+    """Each kind the chat adds, what it does and the values it takes, from
+    their owner."""
 
     def takes(kind: FlowStepKind) -> str:
         required, optional = step_kind_value_names(kind)
@@ -1586,8 +1611,8 @@ def _kinds_appendix() -> str:
     return (
         "\nThe kinds: "
         + "; ".join(
-            f"{kind.value} ({text}): {takes(kind)}"
-            for kind, text in STEP_KIND_DESCRIPTIONS.items()
+            f"{kind.value} ({STEP_KIND_DESCRIPTIONS[kind]}): {takes(kind)}"
+            for kind in _CHAT_STEP_KINDS
         )
         + "."
     )
@@ -1598,7 +1623,7 @@ async def add_step(
     ctx: Context,
     expected_revision: int,
     name: str,
-    kind: FlowStepKind,
+    kind: ChatStepKind,
     values: Annotated[
         dict[str, Any] | None,
         WithJsonSchema({"anyOf": [_closed_schema(StepKindValues), {"type": "null"}]}),
@@ -1877,6 +1902,8 @@ async def read_step_kinds(
         orders = {step.id: step.step_order for step in flow.steps}
         kinds: list[dict[str, Any]] = []
         for option in answer.insertions[0].options:
+            if option.kind not in _CHAT_STEP_KINDS:
+                continue
             configuration = option.change.configuration
             item: dict[str, Any] = {
                 "kind": option.kind.value,

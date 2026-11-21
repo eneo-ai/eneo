@@ -28994,7 +28994,8 @@ export interface components {
       | "review"
       | "fetch_http"
       | "tool"
-      | "send_http";
+      | "send_http"
+      | "send_run_result";
     /**
      * FlowStepKindConfigurationPublic
      * @description A kind's starting configuration at its place. It is valid as
@@ -29050,7 +29051,7 @@ export interface components {
       input_type: components["schemas"]["FlowInputType"];
       /**
        * Output Config
-       * @description The speaker mapping for `speakers`, the HTTP request for `send_http` (its `url` empty for the author to enter), otherwise null.
+       * @description The speaker mapping for `speakers`, the HTTP request for `send_http` and `send_run_result` (its `url` empty for the author to enter), otherwise null.
        * @example null
        */
       output_config: {
@@ -29112,7 +29113,7 @@ export interface components {
       /** @description The configuration the kind starts with here: of the new step, or the saved step's new configuration (its name and assistant stay). */
       configuration: components["schemas"]["FlowStepKindConfigurationPublic"];
       /**
-       * @description What the step does: `ai` (a model writes text), `structured` (a model writes JSON), `compose` (text put together without a model), `document` (text rendered as a Word document; `pdf` is the other output type it takes), `template` (a Word template filled in), `transcribe` (an uploaded recording transcribed), `speakers` (the speakers of the transcript before it named, confirmed by a person), `review` (a person reviews and may edit what the step before it gave), `fetch_http` (text fetched with an HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result sent with an HTTP POST).
+       * @description What the step does: `ai` (a model writes text), `structured` (a model writes JSON), `compose` (text put together without a model), `document` (text rendered as a Word document; `pdf` is the other output type it takes), `template` (a Word template filled in), `transcribe` (an uploaded recording transcribed), `speakers` (the speakers of the transcript before it named, confirmed by a person), `review` (a person reviews and may edit what the step before it gave), `fetch_http` (text fetched with an HTTP GET), `tool` (an MCP tool's answer), `send_http` (the result sent with an HTTP POST), `send_run_result` (the finished run's result sent with an HTTP POST once the run has completed; only last, after a step).
        * @example ai
        */
       kind: components["schemas"]["FlowStepKind"];

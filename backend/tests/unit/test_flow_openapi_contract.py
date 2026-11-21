@@ -1205,6 +1205,17 @@ def test_openapi_result_redelivery_declares_the_integrity_refusal(
     assert example["code"] == "flow_definition_checksum_mismatch"
 
 
+def test_openapi_step_kinds_name_the_step_that_sends_the_run_result(
+    openapi_spec: dict,
+) -> None:
+    option = openapi_spec["components"]["schemas"]["FlowStepKindOptionPublic"]
+    kind = _resolve_component_ref(openapi_spec, option["properties"]["kind"])
+    assert "send_run_result" in kind["enum"]
+    assert "`send_run_result` (the finished run's result" in str(
+        option["properties"]["kind"].get("description")
+    )
+
+
 def test_openapi_flow_run_list_filters_to_the_callers_own_runs(
     openapi_spec: dict,
 ) -> None:
