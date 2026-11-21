@@ -8,7 +8,7 @@ from uuid import UUID
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
 from sqlalchemy.sql.dml import ReturningInsert, ReturningUpdate
 
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
@@ -23,6 +23,7 @@ from eneo.database.tables.ai_models_table import (
     EmbeddingModels,
     TranscriptionModels,
 )
+from eneo.database.tables.base_class import BasePublic
 from eneo.database.tables.app_table import Apps, AppsFiles, AppsPrompts
 from eneo.database.tables.app_template_table import AppTemplates
 from eneo.database.tables.assistant_table import Assistants, AssistantsFiles
@@ -448,6 +449,26 @@ class SpaceRepository:
             .on_conflict_do_nothing()
         )
 
+    async def _desired_ids_keeping_deprecated(
+        self,
+        space_id: UUID,
+        desired: Collection[UUID],
+        owner: InstrumentedAttribute[UUID],
+        target: InstrumentedAttribute[UUID],
+        model_table: type[BasePublic],
+    ) -> set[UUID]:
+        """Deprecated models never reach a read projection, so a list edit
+        cannot name their links; keep them instead of deleting what the
+        caller never saw."""
+        deprecated = set(
+            await self.session.scalars(
+                sa.select(target)
+                .join(model_table, model_table.id == target)
+                .where(owner == space_id, model_table.is_deprecated.is_(True))
+            )
+        )
+        return set(desired) | deprecated
+
     async def update_settings(self, space_id: UUID, change: SpaceUpdate) -> None:
         await self.lock(space_id)
         values = change.scalar_values()
@@ -462,7 +483,13 @@ class SpaceRepository:
                 SpacesCompletionModels.space_id,
                 space_id,
                 SpacesCompletionModels.completion_model_id,
-                change.completion_model_ids,
+                await self._desired_ids_keeping_deprecated(
+                    space_id,
+                    change.completion_model_ids,
+                    SpacesCompletionModels.space_id,
+                    SpacesCompletionModels.completion_model_id,
+                    CompletionModels,
+                ),
             )
         if change.embedding_model_ids is not None:
             await replace_association_ids(
@@ -471,7 +498,13 @@ class SpaceRepository:
                 SpacesEmbeddingModels.space_id,
                 space_id,
                 SpacesEmbeddingModels.embedding_model_id,
-                change.embedding_model_ids,
+                await self._desired_ids_keeping_deprecated(
+                    space_id,
+                    change.embedding_model_ids,
+                    SpacesEmbeddingModels.space_id,
+                    SpacesEmbeddingModels.embedding_model_id,
+                    EmbeddingModels,
+                ),
             )
         if change.transcription_model_ids is not None:
             await replace_association_ids(
@@ -480,7 +513,13 @@ class SpaceRepository:
                 SpacesTranscriptionModels.space_id,
                 space_id,
                 SpacesTranscriptionModels.transcription_model_id,
-                change.transcription_model_ids,
+                await self._desired_ids_keeping_deprecated(
+                    space_id,
+                    change.transcription_model_ids,
+                    SpacesTranscriptionModels.space_id,
+                    SpacesTranscriptionModels.transcription_model_id,
+                    TranscriptionModels,
+                ),
             )
         if change.mcp_server_ids is not None:
             await replace_association_ids(
