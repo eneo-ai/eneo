@@ -4,6 +4,7 @@ import {
   contentTypeHeaderPart,
   longMaterialEligibility,
   newSourceRef,
+  oneLineStart,
   readHttpConfig,
   readInputBindings,
   readLongMaterial,
@@ -11,6 +12,7 @@ import {
   readDeliverable,
   readTemplateFill,
   runResultUrlFixed,
+  stepCanBeDeliverable,
   stepDeliversArtifact,
   toolArguments,
   withDeliverable,
@@ -329,6 +331,24 @@ describe("long material", () => {
 });
 
 describe("deliverable", () => {
+  it("makes a name one line and cuts it to the core's bound", () => {
+    expect(oneLineStart("  Möte\n med\u200B  styrelsen\t ")).toBe("Möte med styrelsen");
+    expect(oneLineStart(`${"a".repeat(119)} bcd`)).toBe("a".repeat(119));
+    expect(oneLineStart("ä".repeat(121))).toBe("ä".repeat(120));
+    expect(oneLineStart("   ")).toBe("");
+  });
+
+  it("can be text or a document of the step's own", () => {
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "pass_through" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "compose_text" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "docx", output_mode: "template_fill" })).toBe(true);
+    expect(stepCanBeDeliverable({ output_type: "json", output_mode: "pass_through" })).toBe(false);
+    expect(stepCanBeDeliverable({ output_type: "text", output_mode: "http_post" })).toBe(false);
+    expect(stepCanBeDeliverable({ output_type: "json", output_mode: "speaker_mapping" })).toBe(
+      false
+    );
+  });
+
   const stored = {
     template_asset_id: "asset-1",
     bindings: { namn: "{{flow_input.namn}}" },

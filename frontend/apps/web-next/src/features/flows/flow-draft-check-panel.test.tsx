@@ -96,6 +96,41 @@ describe("FlowDraftCheck", () => {
     );
   });
 
+  it("says nothing is chosen to send, as publishing does, and opens the step that sends", async () => {
+    route({ ...ASSISTANTS, "assistant-3": makeAssistant({ id: "assistant-3" }) });
+    const onOpenStep = vi.fn();
+    const flow = makeFlow({
+      steps: [
+        makeStep(1, { user_description: "Sammanfatta" }),
+        makeStep(2, { user_description: "Plocka ut", output_type: "json" }),
+        makeStep(3, {
+          user_description: "Skicka",
+          output_mode: "http_post",
+          output_config: {
+            url: "https://receiver.example.org/eneo",
+            auth: { mode: "none" },
+            body: { mode: "run_result" }
+          }
+        })
+      ]
+    });
+    renderInApp(
+      <FlowDraftCheck
+        flow={flow}
+        transcription={{ models: [], services: [] }}
+        onOpenStep={onOpenStep}
+      />
+    );
+
+    expect(
+      await screen.findByText(
+        "Inget är valt att skicka. Välj eller lägg till ett steg som skapar text eller dokument före utskicket."
+      )
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna Steg 3: Skicka" }));
+    expect(onOpenStep).toHaveBeenCalledWith(flow.steps[2], null);
+  });
+
   it("replaces a read of a removed step with an earlier answer in one choice", async () => {
     route({
       "assistant-1": makeAssistant({ id: "assistant-1" }),

@@ -86,6 +86,7 @@ function renderEditor(
     suggestionDismissal?: SuggestionDismissal;
     suggestionRuns?: number;
     navigation?: StepNavigation;
+    onAddStep?: (position: number) => void;
     /** The step assistant as the step list already read it. */
     cachedAssistant?: ReturnType<typeof makeAssistant>;
     stepId?: string;
@@ -113,6 +114,7 @@ function renderEditor(
       suggestionDismissal={overrides.suggestionDismissal}
       suggestionRuns={overrides.suggestionRuns}
       navigation={overrides.navigation}
+      onAddStep={overrides.onAddStep}
     />,
     { queryClient }
   );
@@ -298,8 +300,8 @@ describe("FlowStepEditor", () => {
     });
   });
 
-  it("shows a body that sends the run's result by name, and does not test it", async () => {
-    renderEditor(
+  it("shows the step that sends the run's result as what it sends and to whom, untested", async () => {
+    const { container } = renderEditor(
       makeFlow({
         steps: [
           makeStep({
@@ -320,11 +322,67 @@ describe("FlowStepEditor", () => {
       name: new RegExp(`^${messages.flow_step_editor_http_body}`)
     });
     expect(body.textContent).toContain(messages.flow_step_editor_http_body_run_result);
-    const test = screen.getByRole("button", { name: messages.http_test_button });
-    expect(test.getAttribute("aria-disabled")).toBe("true");
-    expect(screen.getByText(messages.flow_step_editor_http_test_run_result)).toBeTruthy();
-    fireEvent.click(test);
-    expect(api.stub.calls.some((call) => call.path === "/api/v1/flows/{id}/http-test")).toBe(false);
+    expect(screen.getByText(messages.flow_step_editor_run_result_description)).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+      })
+    ).toBeTruthy();
+    const headings = screen
+      .getAllByRole("heading", { level: 3 })
+      .map((heading) => heading.textContent);
+    // No review, and the space does not classify: no empty control section.
+    expect(headings).toEqual([
+      messages.flow_step_editor_run_result_sends_title,
+      messages.flow_step_editor_run_result_receiver_title
+    ]);
+    // Nothing it does not use: no input, AI, review, test, citations or the call's preview.
+    expect(screen.queryByRole("button", { name: messages.http_test_button })).toBeNull();
+    expect(
+      screen.queryByRole("radiogroup", { name: new RegExp(messages.flow_step_review_policy) })
+    ).toBeNull();
+    expect(
+      screen.queryByRole("switch", { name: new RegExp(`^${messages.flow_step_citation_mode}`) })
+    ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Visa anropet/ })).toBeNull();
+    await expectNoAxeViolations(container);
+  }, 20_000);
+
+  it("keeps the classification of the step that sends the run's result, without a review", async () => {
+    const space = makeSpace({
+      overrides: {
+        security_classification: {
+          id: "c-1",
+          name: "Intern",
+          description: null,
+          security_level: 1
+        }
+      }
+    });
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              body: { mode: "run_result" }
+            }
+          })
+        ]
+      }),
+      { space }
+    );
+    expect(
+      await screen.findByRole("heading", {
+        level: 3,
+        name: messages.flow_step_editor_control_title
+      })
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("radiogroup", { name: new RegExp(messages.flow_step_review_policy) })
+    ).toBeNull();
   }, 20_000);
 
   it("shows an AI step's task, input, result and control as labelled sections", async () => {
@@ -2246,45 +2304,101 @@ describe("FlowStepEditor deliverables", () => {
     });
   }, 30_000);
 
-  it("keeps an untouched last document unmarked, and a customisation can be removed", async () => {
+  it("includes the last document by its place, unmarked until it is kept or renamed", async () => {
     const current = storeEdits(
       makeFlow({
-        steps: [makeStep({ output_mode: "render_verbatim", output_type: "pdf" })]
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf"
+          })
+        ]
       })
     );
     const view = renderEditor(current());
-    expect(await screen.findByText(messages.flow_step_editor_deliverable_always)).toBeTruthy();
+    expect(await screen.findByText(messages.flow_step_editor_deliverable_included)).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_place_last)).toBeTruthy();
+    // No locked switch.
     expect(
       screen.queryByRole("switch", {
         name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
       })
     ).toBeNull();
-    fireEvent.change(await nameField(), { target: { value: "Protokoll" } });
+    fireEvent.change(await nameField(), { target: { value: "Protokoll till nämnden" } });
     await saveStep();
-    expect(patchBodies()[0]).toMatchObject({
-      step_edits: [{ step_id: "step-1", changes: { user_description: "Protokoll" } }]
-    });
     expect(current().steps[0]!.output_config).toBeNull();
 
-    // Opening the fields marks nothing; the first change does, and focus is on the label.
+    // Opening the fields marks nothing: the name follows the step's until it is changed.
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_step_editor_deliverable_customise })
     );
     const label = await labelField();
     expect(document.activeElement).toBe(label);
+    expect(label.value).toBe("Protokoll till nämnden");
     expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
-    fireEvent.change(label, { target: { value: "Protokoll till nämnden" } });
+    fireEvent.change(label, { target: { value: "Till nämnden" } });
     expect(screen.getByText("1 ändring som inte är sparad")).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_deliverable_kept)).toBeTruthy();
+    // Its own name goes with the choice, and the step stays in by its place.
+    expect(
+      screen.getByText(messages.flow_step_editor_deliverable_reset_named_document_last)
+    ).toBeTruthy();
     await expectNoAxeViolations(view.container);
 
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
     );
-    const customise = await screen.findByRole("button", {
-      name: messages.flow_step_editor_deliverable_customise
+    const keep = await screen.findByRole("button", {
+      name: messages.flow_step_editor_deliverable_keep
     });
-    expect(document.activeElement).toBe(customise);
+    expect(document.activeElement).toBe(keep);
     expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
+
+    // "Behåll" marks it under the step's name.
+    fireEvent.click(keep);
+    expect(screen.getByText(messages.flow_step_editor_deliverable_reset_last)).toBeTruthy();
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
+    );
+    await saveStep();
+    expect(current().steps[0]!.output_config).toEqual({
+      deliverable: { label: "Protokoll till nämnden" }
+    });
+  }, 30_000);
+
+  it("names a text step by its place right before the step that sends, without a file name", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ user_description: "Sammanfatta" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            user_description: "Skicka",
+            input_source: "previous_step",
+            output_mode: "http_post",
+            output_config: {
+              url: "https://receiver.example.org/eneo",
+              auth: { mode: "none" },
+              body: { mode: "run_result" }
+            }
+          })
+        ]
+      })
+    );
+    expect(
+      await screen.findByText(messages.flow_step_editor_deliverable_place_before_send)
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_customise_text })
+    );
+    expect((await labelField()).value).toBe("Sammanfatta");
+    expect(
+      screen.queryByRole("textbox", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_file_name}`)
+      })
+    ).toBeNull();
   }, 20_000);
 
   it("removes a saved customisation of the last document, which restores the default", async () => {
@@ -2313,6 +2427,9 @@ describe("FlowStepEditor deliverables", () => {
   it("focuses an empty label instead of saving, and holds the label and file name to their limits", async () => {
     renderEditor(deliveryFlow());
     fireEvent.click(await deliverySwitch());
+    // The switch names the result after the step.
+    expect((await labelField()).value).toBe("Standup för Eneo");
+    fireEvent.change(await labelField(), { target: { value: "" } });
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
     expect(
       await screen.findByText(messages.flow_step_editor_deliverable_label_required)
@@ -2479,33 +2596,39 @@ describe("FlowStepEditor deliverables", () => {
     ).toEqual({ user_description: "Standup för alla" });
   }, 20_000);
 
-  it("says a label or file name must be one line, as the core keeps them as written", async () => {
-    renderEditor(deliveryFlow());
+  it("names the result after a long step name cut to the bound, so the step can be saved", async () => {
+    const long = `${"Möte ".repeat(24)}och mer`;
+    const flow = deliveryFlow();
+    const current = storeEdits({
+      ...flow,
+      steps: flow.steps.map((step) =>
+        step.id === "step-1" ? { ...step, user_description: long } : step
+      )
+    });
+    renderEditor(current());
     fireEvent.click(await deliverySwitch());
     const label = await labelField();
-    fireEvent.change(label, { target: { value: "Till  Eneo" } });
-    fireEvent.change(fileNameField(), { target: { value: " Standup {{flow_input.team}}" } });
-    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
-    expect(
-      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
-    ).toBeTruthy();
-    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
-    expect(document.activeElement).toBe(label);
-
-    fireEvent.change(label, { target: { value: "Till Eneo " } });
-    fireEvent.change(fileNameField(), { target: { value: "Standup\t{{flow_input.team}}" } });
-    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
-    expect(
-      await screen.findByText(messages.flow_step_editor_deliverable_label_one_line)
-    ).toBeTruthy();
-    expect(screen.getByText(messages.flow_step_editor_deliverable_file_name_one_line)).toBeTruthy();
-    expect(patchBodies()).toHaveLength(0);
-
-    fireEvent.change(label, { target: { value: "Till Eneo" } });
-    fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.team}}" } });
-    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    expect(Array.from(label.value)).toHaveLength(119);
+    expect(label.value).toBe("Möte ".repeat(24).trimEnd());
     await saveStep();
-    expect(patchBodies()).toHaveLength(1);
+    expect(current().steps[0]!.output_config).toEqual({
+      deliverable: { label: "Möte ".repeat(24).trimEnd() }
+    });
+  }, 20_000);
+
+  it("makes the label and file name one line when the field is left and when the step is saved", async () => {
+    const current = storeEdits(deliveryFlow());
+    renderEditor(current());
+    fireEvent.click(await deliverySwitch());
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: " Till  Eneo\n" } });
+    fireEvent.blur(label);
+    expect(label.value).toBe("Till Eneo");
+    fireEvent.change(fileNameField(), { target: { value: "Standup\t{{flow_input.team}} " } });
+    await saveStep();
+    expect(current().steps[0]!.output_config).toEqual({
+      deliverable: { label: "Till Eneo", file_name: "Standup {{flow_input.team}}" }
+    });
   }, 20_000);
 
   it("counts the label and file name in characters, and refuses a label of only spaces", async () => {
@@ -2543,61 +2666,31 @@ describe("FlowStepEditor deliverables", () => {
     });
   }, 20_000);
 
-  it("unmarks the last document when its label and file name are emptied, with the fields kept open", async () => {
-    const current = storeEdits(
-      makeFlow({ steps: [makeStep({ output_mode: "render_verbatim", output_type: "pdf" })] })
-    );
-    let view = renderEditor(current());
-    fireEvent.click(
-      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
-    );
-    const label = await labelField();
-    fireEvent.change(label, { target: { value: "P" } });
-    fireEvent.change(label, { target: { value: "" } });
-    expect(await labelField()).toBe(label);
-    expect(screen.queryByText(/ändring som inte är sparad/)).toBeNull();
-    // An emptied customisation does not hold up another save.
-    fireEvent.change(await nameField(), { target: { value: "Protokoll" } });
-    await saveStep();
-    expect(
-      (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] }).step_edits[0]!
-        .changes
-    ).toEqual({ user_description: "Protokoll" });
-    view.unmount();
-
-    // A saved customisation emptied the same way removes the key, and the fields stay.
-    view = renderEditor({
-      ...current(),
-      steps: current().steps.map((step) => ({
-        ...step,
-        output_config: { deliverable: { label: "Protokoll" } }
-      }))
-    });
-    fireEvent.change(await labelField(), { target: { value: "" } });
-    expect((await labelField()).value).toBe("");
-    await saveStep();
-    expect(patchBodies()[1]).toMatchObject({
-      step_edits: [{ changes: { output_config: null } }]
-    });
-  }, 20_000);
-
-  it("does not check a stale deliverable on a step that delivers no file", async () => {
+  it("does not check a stale deliverable on a step that cannot be delivered", async () => {
     api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
     renderEditor(
-      makeFlow({ steps: [makeStep({ output_config: { deliverable: { label: "" } } })] })
+      makeFlow({
+        steps: [makeStep({ output_type: "json", output_config: { deliverable: { label: "" } } })]
+      })
     );
     fireEvent.change(await nameField(), { target: { value: "Sammanfatta mötet" } });
     await saveStep();
     expect(patchBodies()).toHaveLength(1);
   }, 20_000);
 
-  it("drops the deliverable when a marked document is turned to text and saved", async () => {
+  it("keeps a marked document's name when it is turned to text, and drops its file name", async () => {
     const flow = deliveryFlow();
     const current = storeEdits({
       ...flow,
       steps: flow.steps.map((step) =>
         step.id === "step-1"
-          ? { ...step, output_config: { deliverable: { label: "Till Eneo" }, future: 1 } }
+          ? {
+              ...step,
+              output_config: {
+                deliverable: { label: "Till Eneo", file_name: "Standup" },
+                future: 1
+              }
+            }
           : step
       )
     });
@@ -2617,8 +2710,8 @@ describe("FlowStepEditor deliverables", () => {
     await saveStep();
     const changes = (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] })
       .step_edits[0]!.changes;
-    expect(changes).toMatchObject({ output_type: "text", output_config: { future: 1 } });
-    expect(JSON.stringify(changes)).not.toContain("deliverable");
+    expect(changes).toMatchObject({ output_type: "text" });
+    expect(changes.output_config).toEqual({ deliverable: { label: "Till Eneo" }, future: 1 });
   }, 20_000);
 
   /** A marked document, then a step that sends its call last. */
@@ -2694,20 +2787,11 @@ describe("FlowStepEditor deliverables", () => {
         })
       ).toBeNull()
     );
-    expect(
-      screen.getByText(messages.flow_step_editor_http_body_run_result_description)
-    ).toBeTruthy();
-    expect(
-      screen.getByText(
-        messages.flow_step_editor_http_body_run_result_deliverables.replace(
-          "{labels}",
-          "Till Startsidan"
-        )
-      )
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("button", { name: messages.http_test_button }).getAttribute("aria-disabled")
-    ).toBe("true");
+    const sends = screen.getByRole("region", {
+      name: messages.flow_step_editor_run_result_sends_title
+    });
+    expect(within(sends).getByText("Till Startsidan")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: messages.http_test_button })).toBeNull();
     await expectNoAxeViolations(view.container);
     await saveStep();
     expect(outputConfigOf(0).body).toEqual({ mode: "run_result" });
@@ -2719,17 +2803,101 @@ describe("FlowStepEditor deliverables", () => {
     );
     await chooseBody(messages.flow_step_editor_http_body_auto);
     expect(
-      screen.queryByText(messages.flow_step_editor_http_body_run_result_description)
+      screen.queryByRole("heading", { name: messages.flow_step_editor_run_result_sends_title })
     ).toBeNull();
     await saveStep();
     expect(outputConfigOf(1).body).toEqual({ mode: "auto" });
   }, 30_000);
 
-  it("says only the text is sent when no document is marked", async () => {
+  it("lists the step before the send by its name when nothing is marked", async () => {
     renderEditor(resultFlow({ body: { mode: "run_result" } }, null), { stepId: "step-2" });
-    expect(
-      await screen.findByText(messages.flow_step_editor_http_body_run_result_text_only)
-    ).toBeTruthy();
+    const sends = await screen.findByRole("region", {
+      name: messages.flow_step_editor_run_result_sends_title
+    });
+    expect(within(sends).getByText("Protokoll")).toBeTruthy();
+    expect(within(sends).getByText(messages.flow_output_type_docx)).toBeTruthy();
+  }, 20_000);
+
+  /** Text, then JSON (or only JSON), then the step that sends: nothing is sent. */
+  function nothingFlow(withText: boolean) {
+    const sender = (order: number) =>
+      makeStep({
+        id: "step-send",
+        step_order: order,
+        user_description: "Skicka",
+        input_source: "previous_step",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://receiver.example.org/eneo",
+          auth: { mode: "none" },
+          body: { mode: "run_result" }
+        }
+      });
+    const json = (order: number) =>
+      makeStep({
+        id: "step-json",
+        step_order: order,
+        user_description: "Plocka ut",
+        input_source: order === 1 ? "flow_input" : "previous_step",
+        output_type: "json"
+      });
+    return makeFlow({
+      steps: withText
+        ? [makeStep({ user_description: "Sammanfatta" }), json(2), sender(3)]
+        : [json(1), sender(2)]
+    });
+  }
+
+  const navigationTo = (onGo: (id: string) => void): StepNavigation => ({
+    position: 3,
+    count: 3,
+    previous: null,
+    next: null,
+    steps: [],
+    onGo
+  });
+
+  it("says nothing is sent yet, without a warning, and opens a step that can be included", async () => {
+    const onGo = vi.fn();
+    const view = renderEditor(nothingFlow(true), {
+      stepId: "step-send",
+      navigation: navigationTo(onGo)
+    });
+    expect(await screen.findByText(messages.flow_step_editor_run_result_empty_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_run_result_empty_candidates)).toBeTruthy();
+    // No warning while the author is still building: the draft check names it before publishing.
+    expect(screen.queryByText(messages.flow_error_flow_run_result_no_deliverables)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna steg 1 – Sammanfatta" }));
+    expect(onGo).toHaveBeenCalledWith("step-1");
+    await expectNoAxeViolations(view.container);
+  }, 20_000);
+
+  it("offers to add a step before the send when no step before it can be included", async () => {
+    const onAddStep = vi.fn();
+    renderEditor(nothingFlow(false), { stepId: "step-send", onAddStep });
+    expect(await screen.findByText(messages.flow_step_editor_run_result_empty_none)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_run_result_add_before })
+    );
+    expect(onAddStep).toHaveBeenCalledWith(2);
+  }, 20_000);
+
+  it("names the steps that could be included too, under what is sent", async () => {
+    const onGo = vi.fn();
+    const flow = resultFlow({ body: { mode: "run_result" } }, null);
+    renderEditor(
+      {
+        ...flow,
+        steps: [
+          makeStep({ id: "step-0", step_order: 0, user_description: "Anteckningar" }),
+          ...flow.steps
+        ]
+      },
+      { stepId: "step-2", navigation: navigationTo(onGo) }
+    );
+    expect(await screen.findByText(messages.flow_step_editor_run_result_more_title)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Öppna steg 0 – Anteckningar" }));
+    expect(onGo).toHaveBeenCalledWith("step-0");
   }, 20_000);
 
   it("calls no model when it sends the run's result: the AI's task goes and the result is text", async () => {
@@ -2781,7 +2949,7 @@ describe("FlowStepEditor deliverables", () => {
     ).toBeTruthy();
     expect(document.activeElement).toBe(
       screen.getByRole("textbox", {
-        name: new RegExp(`^${messages.flow_step_editor_http_url_post}`)
+        name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
       })
     );
     view.unmount();
@@ -2808,7 +2976,7 @@ describe("FlowStepEditor deliverables", () => {
       message: messages.flow_step_editor_http_run_result_url_fixed,
       focused: () =>
         screen.getByRole("textbox", {
-          name: new RegExp(`^${messages.flow_step_editor_http_url_post}`)
+          name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
         })
     },
     {

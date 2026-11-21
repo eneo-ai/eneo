@@ -45,13 +45,14 @@ import {
   DELIVERABLE_FILE_NAME_MAX,
   DELIVERABLE_LABEL_MAX,
   httpUrlProblem,
-  isOneLine,
   readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
   readToolConfig,
   runResultUrlFixed,
-  stepDeliversArtifact
+  sendsRunResult,
+  stepCanBeDeliverable,
+  withTidyDeliverable
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
 import {
@@ -72,6 +73,7 @@ import { stepNameTaken } from "./step-kinds";
 import { stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
+import { StepRunResultSections } from "./step-run-result-section";
 import { StepRequestPreviewButton } from "./step-request-preview";
 import { stepUsesModel } from "./step-rules";
 import {
@@ -119,6 +121,8 @@ type EditorProps = {
   anchorRequest?: { anchor: FieldAnchor } | null;
   /** Told true while the step has edits that are not saved, and false once it has none. */
   onUnsavedChange?: (unsaved: boolean) => void;
+  /** Opens "Lägg till steg" at a place in the flow; absent, no step is offered to add. */
+  onAddStep?: (position: number) => void;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -262,7 +266,11 @@ export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX
             </div>
           }
         >
-          <StepEditorSession key={`${props.flow.id}:${props.stepId}`} {...props} />
+          <StepEditorSession
+            key={`${props.flow.id}:${props.stepId}`}
+            {...props}
+            onGoStep={navigation?.onGo}
+          />
         </Suspense>
       </SpaceProvider>
     </div>
@@ -345,8 +353,10 @@ function StepEditorSession({
   suggestionDismissal,
   suggestionRuns = 0,
   anchorRequest = null,
-  onUnsavedChange
-}: Omit<EditorProps, "navigation">) {
+  onUnsavedChange,
+  onAddStep,
+  onGoStep
+}: Omit<EditorProps, "navigation"> & { onGoStep?: (stepId: string) => void }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -605,6 +615,9 @@ function StepEditorSession({
 
   const { draft, stepOrder, flow } = session;
   const usesModel = stepUsesModel(draft);
+  // The step that sends the run's result reads nothing and calls no model:
+  // it shows what is sent and to whom.
+  const sendsResult = sendsRunResult(draft);
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
   // Only the AI instruction runs once per section, so only it reads the section's number.
@@ -779,8 +792,8 @@ function StepEditorSession({
         }
       }
     }
-    // A stale value on a step that delivers no file is not shown, and the core drops it.
-    const deliverable = stepDeliversArtifact(current)
+    // A stale value on a step that cannot be delivered is not shown, and the core drops it.
+    const deliverable = stepCanBeDeliverable(current)
       ? readDeliverable(current.output_config)
       : null;
     if (deliverable) {
@@ -794,19 +807,11 @@ function StepEditorSession({
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
-      } else if (!isOneLine(deliverable.label)) {
-        problems["output_config.deliverable.label"] = t(
-          "flow_step_editor_deliverable_label_one_line"
-        );
       }
       if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
           "flow_step_editor_deliverable_file_name_too_long",
           { max: DELIVERABLE_FILE_NAME_MAX }
-        );
-      } else if (!isOneLine(deliverable.file_name ?? "")) {
-        problems["output_config.deliverable.file_name"] = t(
-          "flow_step_editor_deliverable_file_name_one_line"
         );
       }
     }
@@ -833,7 +838,16 @@ function StepEditorSession({
     // tree through its portal too; only this form saves the step.
     if (event.target !== event.currentTarget) return;
     if (!session || save.isPending || effectiveReadOnly) return;
-    const problems = localProblems(session.draft);
+    // Spaces typed into the result's names are tidied as the save sends them.
+    const output_config = withTidyDeliverable(
+      session.draft.output_config
+    ) as StepConfig["output_config"];
+    const current =
+      output_config === session.draft.output_config
+        ? session
+        : { ...session, draft: { ...session.draft, output_config } };
+    if (current !== session) changeStep(current.draft);
+    const problems = localProblems(current.draft);
     const first = FIELD_ANCHORS.find((anchor) => problems[anchor]);
     if (first) {
       flushSync(() => setChecked(true));
@@ -845,7 +859,7 @@ function StepEditorSession({
       return;
     }
     setFormProblems([]);
-    save.mutate(session);
+    save.mutate(current);
   }
 
   const changeCount =
@@ -859,12 +873,18 @@ function StepEditorSession({
       <Heading level={2} id={headingId}>
         {name}
       </Heading>
-      <StepRequestPreviewButton
-        flow={flow}
-        stepOrder={stepOrder}
-        draft={draft}
-        assistant={assistantDraft}
-      />
+      {sendsResult ? (
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {t("flow_step_editor_run_result_description")}
+        </Text>
+      ) : (
+        <StepRequestPreviewButton
+          flow={flow}
+          stepOrder={stepOrder}
+          draft={draft}
+          assistant={assistantDraft}
+        />
+      )}
     </header>
   );
 
@@ -1036,44 +1056,62 @@ function StepEditorSession({
                 />
               )}
 
-              <StepInputSection
-                formId={formId}
-                sectionId={`${formId}-input`}
-                flow={flow}
-                stepId={stepId}
-                stepOrder={stepOrder}
-                draft={draft}
-                onChange={changeStep}
-                problems={shownProblems}
-                groups={groups}
-                toolGroups={wholeValueGroups}
-                showUnderlag={
-                  draft.output_mode !== "transcribe_only" && draft.output_mode !== "template_fill"
-                }
-              />
+              {sendsResult ? (
+                <StepRunResultSections
+                  formId={formId}
+                  flow={flow}
+                  stepId={stepId}
+                  stepOrder={stepOrder}
+                  draft={draft}
+                  onChange={changeStep}
+                  problems={shownProblems}
+                  onGoStep={onGoStep}
+                  onAddStepBefore={onAddStep}
+                />
+              ) : (
+                <>
+                  <StepInputSection
+                    formId={formId}
+                    sectionId={`${formId}-input`}
+                    flow={flow}
+                    stepId={stepId}
+                    stepOrder={stepOrder}
+                    draft={draft}
+                    onChange={changeStep}
+                    problems={shownProblems}
+                    groups={groups}
+                    toolGroups={wholeValueGroups}
+                    showUnderlag={
+                      draft.output_mode !== "transcribe_only" &&
+                      draft.output_mode !== "template_fill"
+                    }
+                  />
 
-              <StepOutputSection
-                formId={formId}
-                sectionId={`${formId}-output`}
-                flow={flow}
-                stepId={stepId}
-                stepOrder={stepOrder}
-                draft={draft}
-                isLast={isLast}
-                onChange={changeStep}
-                problems={shownProblems}
-                groups={groups}
-                onContractProposed={(contract) => {
-                  // The advanced section shows the accepted contract, not text typed before it.
-                  setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
-                  changeStep({ ...draft, output_contract: contract });
-                  announce(t("flow_editor_tools_contract_example_accepted"));
-                }}
-              />
+                  <StepOutputSection
+                    formId={formId}
+                    sectionId={`${formId}-output`}
+                    flow={flow}
+                    stepId={stepId}
+                    stepOrder={stepOrder}
+                    draft={draft}
+                    isLast={isLast}
+                    onChange={changeStep}
+                    problems={shownProblems}
+                    groups={groups}
+                    onContractProposed={(contract) => {
+                      // The advanced section shows the accepted contract, not text typed before it.
+                      setContractDrafts((drafts) => ({ ...drafts, output_contract: undefined }));
+                      changeStep({ ...draft, output_contract: contract });
+                      announce(t("flow_editor_tools_contract_example_accepted"));
+                    }}
+                  />
+                </>
+              )}
 
               <StepControlSection
                 formId={formId}
                 sectionId={`${formId}-control`}
+                hasReview={!sendsResult}
                 draft={draft}
                 onChange={changeStep}
                 problems={shownProblems}
@@ -1084,18 +1122,20 @@ function StepEditorSession({
                 }}
               />
 
-              <StepAdvancedSection
-                formId={formId}
-                sectionId={`${formId}-advanced`}
-                draft={draft}
-                onChange={changeStep}
-                drafts={contractDrafts}
-                onDraftsChange={(next) => {
-                  pin();
-                  setContractDrafts(next);
-                }}
-                problems={shownProblems}
-              />
+              {!sendsResult && (
+                <StepAdvancedSection
+                  formId={formId}
+                  sectionId={`${formId}-advanced`}
+                  draft={draft}
+                  onChange={changeStep}
+                  drafts={contractDrafts}
+                  onDraftsChange={(next) => {
+                    pin();
+                    setContractDrafts(next);
+                  }}
+                  problems={shownProblems}
+                />
+              )}
             </div>
           </TemplateScope>
         </RecordUploadProvider>

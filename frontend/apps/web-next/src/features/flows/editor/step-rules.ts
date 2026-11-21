@@ -1,6 +1,7 @@
 import {
   FILE_INPUT_TYPES,
   hasUnderlag,
+  readDeliverable,
   readRuntimeInput,
   readSpeakerMapping,
   readTemplateFill,
@@ -12,6 +13,7 @@ import {
   reviewLocked,
   sendsRunResult,
   reviewSupported,
+  stepCanBeDeliverable,
   stepDeliversArtifact,
   supportsCitations,
   supportsRetrievalPolicy,
@@ -313,12 +315,16 @@ export function chainIssue(
  * Settings that belong to one output mode and that the core refuses under
  * another: citations and the retrieval policy need a model's answer, review
  * cannot follow outbound delivery, a speaker mapping is always reviewed, a
- * step that sends the run's result sends text.
+ * step that sends the run's result sends text and reads and checks nothing,
+ * so it keeps no contracts it no longer shows.
  */
 function settle(step: StepConfig): StepConfig {
   let next = step;
-  if (sendsRunResult(next) && next.output_type !== "text") {
-    next = { ...next, output_type: "text", output_contract: null };
+  if (
+    sendsRunResult(next) &&
+    (next.output_type !== "text" || next.input_contract !== null || next.output_contract !== null)
+  ) {
+    next = { ...next, output_type: "text", input_contract: null, output_contract: null };
   }
   if (!supportsCitations(next)) {
     const output_config = withCitations(next.output_config, false);
@@ -328,9 +334,16 @@ function settle(step: StepConfig): StepConfig {
     const output_config = withRetrievalPolicy(next.output_config, null);
     if (output_config !== next.output_config) next = { ...next, output_config };
   }
-  // Only a step whose output is a file of the run can be one of its deliverables.
-  if (!stepDeliversArtifact(next) && "deliverable" in objectOf(next.output_config)) {
+  // Only a step whose text or document can be delivered keeps the mark, and
+  // only a document has a file name; a document turned text keeps its name.
+  const deliverable = readDeliverable(next.output_config);
+  if ("deliverable" in objectOf(next.output_config) && !stepCanBeDeliverable(next)) {
     next = { ...next, output_config: withDeliverable(next.output_config, null) };
+  } else if (deliverable?.file_name && !stepDeliversArtifact(next)) {
+    next = {
+      ...next,
+      output_config: withDeliverable(next.output_config, { label: deliverable.label })
+    };
   }
   if (reviewLocked(next.output_mode)) {
     if (next.review_policy?.mode !== "edit") {

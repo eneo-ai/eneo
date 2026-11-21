@@ -235,7 +235,7 @@ type TestConfig = Parameters<typeof testHttp>[1]["config"];
 
 /**
  * The settings as the test takes them, or null for a body that sends the
- * run's result: the test has no run to send.
+ * run's result, which is never tested (the form leaves the test out).
  */
 function testableConfig(config: HttpConfig): TestConfig | null {
   const { mode } = config.body;
@@ -262,7 +262,6 @@ function HttpTest({
   const t = useTranslations();
   const announce = useAnnounce();
   const previewId = useId();
-  const untestableId = useId();
   const testable = testableConfig(config);
   // Follows the call's references until the author edits it.
   const [editedVariables, setVariables] = useState<string | null>(null);
@@ -380,15 +379,9 @@ function HttpTest({
           isLoading={test.isPending}
           isInterruptible
           isDisabled={!testable}
-          aria-describedby={testable ? undefined : untestableId}
           onClick={run}
         />
       </div>
-      {!testable && (
-        <Text id={untestableId} type="supporting" size="sm" as="p" display="block" className="m-0">
-          {t("flow_step_editor_http_test_run_result")}
-        </Text>
-      )}
       {outcome && (
         <div className="flex flex-col gap-2">
           <p
@@ -438,8 +431,7 @@ export function HttpFields({
   config,
   onChange,
   groups,
-  problems,
-  deliverableLabels = []
+  problems
 }: {
   formId: string;
   flowId: string;
@@ -449,8 +441,6 @@ export function HttpFields({
   onChange: (config: HttpConfig) => void;
   groups: VariableGroup[];
   problems: FieldProblems;
-  /** The labels of the flow's marked documents, which a body that sends the run's result carries. */
-  deliverableLabels?: readonly string[];
 }) {
   const t = useTranslations();
   // A refused save lands at the part it is about (`field-problems.ts`).
@@ -523,9 +513,15 @@ export function HttpFields({
           label={
             direction === "input"
               ? t("flow_step_editor_http_url_get")
-              : t("flow_step_editor_http_url_post")
+              : sendsRunResult
+                ? t("flow_step_editor_http_url_run_result")
+                : t("flow_step_editor_http_url_post")
           }
-          description={t("flow_step_editor_http_url_description")}
+          description={
+            sendsRunResult
+              ? t("flow_step_editor_http_url_run_result_description")
+              : t("flow_step_editor_http_url_description")
+          }
           value={config.url}
           onChange={(next) => onChange({ ...config, url: next })}
           onBlur={() => setShowUrlProblem(true)}
@@ -649,20 +645,6 @@ export function HttpFields({
               status={problemStatus(bodyProblem)}
             />
           )}
-          {sendsRunResult && (
-            <div className="flex max-w-prose flex-col gap-1">
-              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                {t("flow_step_editor_http_body_run_result_description")}
-              </Text>
-              <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-                {deliverableLabels.length > 0
-                  ? t("flow_step_editor_http_body_run_result_deliverables", {
-                      labels: deliverableLabels.join(", ")
-                    })
-                  : t("flow_step_editor_http_body_run_result_text_only")}
-              </Text>
-            </div>
-          )}
         </Anchor>
       )}
 
@@ -752,7 +734,10 @@ export function HttpFields({
         </section>
       </Anchor>
 
-      <HttpTest flowId={flowId} stepId={stepId} direction={direction} config={config} />
+      {/* A body that sends the run's result has no run to send in a test. */}
+      {!sendsRunResult && (
+        <HttpTest flowId={flowId} stepId={stepId} direction={direction} config={config} />
+      )}
     </div>
   );
 }

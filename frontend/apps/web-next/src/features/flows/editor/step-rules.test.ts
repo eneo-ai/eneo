@@ -112,13 +112,25 @@ describe("changing one setting keeps the step valid", () => {
     expect(applyOutputModeChange(step, "compose_text").output_config).toEqual({ future: true });
   });
 
-  it("drops the deliverable when the step stops delivering a file, and nothing else", () => {
+  it("keeps a document's name when it becomes text, and drops only the file name", () => {
+    const document = later({
+      input_type: "json",
+      output_type: "docx",
+      output_config: { deliverable: { label: "Eneo", file_name: "Standup" }, future: true }
+    });
+    expect(applyOutputTypeChange(document, "text").output_config).toEqual({
+      deliverable: { label: "Eneo" },
+      future: true
+    });
+  });
+
+  it("drops the deliverable when the step can no longer be one, and nothing else", () => {
     const document = later({
       input_type: "json",
       output_type: "docx",
       output_config: { deliverable: { label: "Eneo" }, future: true }
     });
-    expect(applyOutputTypeChange(document, "text").output_config).toEqual({ future: true });
+    expect(applyOutputTypeChange(document, "json").output_config).toEqual({ future: true });
     expect(applyOutputModeChange(document, "http_post").output_config).not.toHaveProperty(
       "deliverable"
     );
@@ -186,6 +198,21 @@ describe("a step that sends the run's result", () => {
     expect(outputTypeOptions(step).map((option) => option.value)).toEqual(["text"]);
     expect(supportsCitations(step)).toBe(false);
     expect(longMaterialEligibility(step)).toBe("output");
+  });
+
+  it("drops the contracts, which it no longer shows, even from a text step", () => {
+    const step = withBody(
+      outbound(
+        { mode: "auto" },
+        {
+          output_type: "text",
+          input_contract: { type: "object" },
+          output_contract: { type: "string" }
+        }
+      ),
+      "run_result"
+    );
+    expect(step).toMatchObject({ input_contract: null, output_contract: null });
   });
 
   it("leaves an ordinary outbound step as it is when its call changes", () => {

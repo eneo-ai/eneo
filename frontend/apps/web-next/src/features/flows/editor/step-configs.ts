@@ -816,8 +816,9 @@ export function withRetrievalPolicy(
 }
 
 // ---------------------------------------------------------------------------
-// Deliverable: `output_config.deliverable` marks a step whose file is one of
-// the run's results, with a label and an optional file name.
+// Deliverable: `output_config.deliverable` marks a step whose text or
+// document is one of the run's results, with a label and, for a document, an
+// optional file name.
 // ---------------------------------------------------------------------------
 
 /** The core's bounds for a deliverable's label and file name, in characters. */
@@ -825,28 +826,57 @@ export const DELIVERABLE_LABEL_MAX = 120;
 export const DELIVERABLE_FILE_NAME_MAX = 200;
 
 /**
- * Whether a label or file name is one line as the core keeps it as written:
- * no line breaks or invisible characters, and no double, leading or trailing
- * spaces.
+ * `value` made one line as the core makes a deliverable's label (`one_line_start`):
+ * NFC, characters that break the line or cannot be seen go, whitespace
+ * collapses to single spaces, and the text is cut to `max` characters.
  */
-export function isOneLine(value: string): boolean {
+export function oneLineStart(value: string, max = DELIVERABLE_LABEL_MAX): string {
+  const visible = Array.from(value.normalize("NFC"))
+    .filter((char) => /\s/u.test(char) || !/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(char))
+    .join("");
+  const line = visible.trim().split(/\s+/u).join(" ");
+  return Array.from(line).slice(0, max).join("").trimEnd();
+}
+
+/**
+ * Whether the step's output can be one of the run's deliverables: text or a
+ * document of its own, never a request it sends or a mapping of speakers
+ * (the core's `step_can_be_deliverable`).
+ */
+export function stepCanBeDeliverable(
+  step: Pick<StepConfig, "output_type" | "output_mode">
+): boolean {
   return (
-    value === value.trim().split(/\s+/).join(" ") &&
-    !/[\p{Cc}\p{Cf}\p{Cs}\p{Zl}\p{Zp}]/u.test(value)
+    ["text", "docx", "pdf"].includes(step.output_type) &&
+    step.output_mode !== "http_post" &&
+    step.output_mode !== "speaker_mapping"
   );
 }
 
 /**
- * Whether the step's output is a file of the run, the only kind of step that
- * can be a deliverable: a document the step does not send away over HTTP
- * (the core's `final_output_delivery` is `artifact`).
+ * Whether the step's output is a file of the run: a deliverable document,
+ * the only kind that has a file name (the core's `step_delivers_artifact`).
  */
 export function stepDeliversArtifact(
   step: Pick<StepConfig, "output_type" | "output_mode">
 ): boolean {
-  return (
-    step.output_mode !== "http_post" && (step.output_type === "pdf" || step.output_type === "docx")
-  );
+  return stepCanBeDeliverable(step) && step.output_type !== "text";
+}
+
+/**
+ * `output_config` with the deliverable's name and file name made one line,
+ * as a save sends them (not cut: a name over the bound is refused and said).
+ */
+export function withTidyDeliverable(outputConfig: unknown): unknown {
+  const deliverable = readDeliverable(outputConfig);
+  if (!deliverable) return outputConfig;
+  const tidy = (value: string) => oneLineStart(value, Number.POSITIVE_INFINITY);
+  const label = tidy(deliverable.label);
+  const fileName = deliverable.file_name ? tidy(deliverable.file_name) : undefined;
+  if (label === deliverable.label && fileName === (deliverable.file_name || undefined)) {
+    return outputConfig;
+  }
+  return withDeliverable(outputConfig, fileName ? { label, file_name: fileName } : { label });
 }
 
 export function readDeliverable(outputConfig: unknown): StepDeliverable | null {

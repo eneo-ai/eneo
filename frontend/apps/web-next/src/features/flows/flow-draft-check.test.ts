@@ -179,6 +179,49 @@ describe("checkDraft", () => {
     expect(problemsOf("run_result")).toEqual([]);
   });
 
+  it("says nothing is chosen to send when the step that sends has nothing before it", () => {
+    const sender = (order: number) =>
+      makeStep(order, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://receiver.example.org/eneo",
+          auth: { mode: "none" },
+          body: { mode: "run_result" }
+        }
+      });
+    const json = makeStep(2, { output_type: "json" });
+    const sendsNothing = makeFlow({ steps: [makeStep(1), json, sender(3)] });
+    const check = checkDraft(sendsNothing, none);
+    expect(check.steps).toEqual([
+      { step: sendsNothing.steps[2], problems: [{ code: "run_result_no_deliverables" }] }
+    ]);
+    expect(problemAnchor({ code: "run_result_no_deliverables" })).toBeNull();
+
+    // A text kept before the JSON, or text right before the send, is something to send.
+    const kept = makeStep(1, { output_config: { deliverable: { label: "Svar" } } });
+    expect(checkDraft(makeFlow({ steps: [kept, json, sender(3)] }), none).steps).toEqual([]);
+    expect(checkDraft(makeFlow({ steps: [makeStep(1), sender(2)] }), none).steps).toEqual([]);
+  });
+
+  it("does not judge underlag the step that sends the run's result never reads", () => {
+    const sender = makeStep(2, {
+      output_mode: "http_post",
+      input_bindings: { question: "{{step_99.output.text}}" },
+      output_config: {
+        url: "https://receiver.example.org/eneo",
+        auth: { mode: "none" },
+        body: { mode: "run_result" },
+        custom_headers: [{ name: "X-Case", value: "{{flow_input.okand}}", secret: false }]
+      }
+    });
+    const problems =
+      checkDraft(makeFlow({ steps: [makeStep(1), sender] }), none).steps[0]?.problems ?? [];
+    expect(problems.map((problem) => problem.code === "reference" && problem.anchor)).toEqual([
+      "output_config.http.more"
+    ]);
+  });
+
   it("counts a Word field filled from a source the flow no longer has as unfilled", () => {
     const template = (bindings: Record<string, string>) =>
       makeFlow({

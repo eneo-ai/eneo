@@ -26,7 +26,7 @@ import {
   readToolConfig,
   reviewChoiceOf,
   sourceRefKey,
-  stepDeliversArtifact
+  stepCanBeDeliverable
 } from "./step-configs";
 import { sourceRefName } from "./step-input-section";
 import {
@@ -153,7 +153,7 @@ export function StepReadOnly({
     step.output_mode === "http_post" && hasHttpConfig(step.output_config)
       ? readHttpConfig(step.output_config, "output")
       : null;
-  const deliverable = stepDeliversArtifact(step) ? readDeliverable(step.output_config) : null;
+  const deliverable = stepCanBeDeliverable(step) ? readDeliverable(step.output_config) : null;
   const model = assistant?.completion_model_id
     ? space.completion_models.find((candidate) => candidate.id === assistant.completion_model_id)
     : null;

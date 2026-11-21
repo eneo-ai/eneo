@@ -1,11 +1,15 @@
 import { Button } from "@astryxdesign/core/Button";
+import { HStack } from "@astryxdesign/core/HStack";
+import { VStack } from "@astryxdesign/core/VStack";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
-import { useRef, useState } from "react";
+import { useId, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
+import { StatusLabel } from "@/components/composites/status-label";
+import { flowDeliverables } from "../flow-deliverables";
 import { formFieldsOf as formFieldDrafts } from "../flow-form-fields";
 import { ContractFromExampleDialog } from "./contract-from-example-dialog";
 import {
@@ -18,15 +22,18 @@ import {
 } from "./editor-fields";
 import type { FieldProblems } from "./field-problems";
 import {
+  oneLineStart,
   readCitationsOn,
   readDeliverable,
   readHttpConfig,
   readSpeakerMapping,
+  stepCanBeDeliverable,
   stepDeliversArtifact,
   supportsCitations,
   withCitations,
   withDeliverable,
   withSpeakerMapping,
+  withTidyDeliverable,
   type SpeakerMapping
 } from "./step-configs";
 import { HttpFields } from "./step-http-fields";
@@ -140,55 +147,56 @@ function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGrou
   });
 }
 
-/** The labels of the other steps marked as deliverables, in step order. */
-function deliverableLabels(flow: FlowPublic, stepId: string): string[] {
-  return [...flow.steps]
-    .sort((left, right) => left.step_order - right.step_order)
-    .flatMap((step) => {
-      const deliverable =
-        step.id !== stepId && stepDeliversArtifact(step)
-          ? readDeliverable(step.output_config)
-          : null;
-      return deliverable?.label.trim() ? [deliverable.label] : [];
-    });
-}
-
 /**
- * Whether the document is one of the run's results, under which label and
- * file name. The last document always is: it stays unmarked (the core names
- * it after the step) until the author customises it. Any other document is
- * one when its switch is on.
+ * Whether the step's text or document is one of the run's results, under
+ * which name and, for a document, which file name. The step the run delivers
+ * by its place (last, or right before the step that sends the run's result)
+ * is included unmarked and named after the step; "Behåll" marks it so it
+ * stays when the order changes. Any other step is included when its switch
+ * is on.
  */
 function DeliverableFields({
   formId,
   flow,
+  stepId,
   draft,
-  isLast,
   groups,
   onChange,
   problems
 }: {
   formId: string;
   flow: FlowPublic;
+  stepId: string;
   draft: StepConfig;
-  isLast: boolean;
   groups: VariableGroup[];
   onChange: (next: StepConfig) => void;
   problems: FieldProblems;
 }) {
   const t = useTranslations();
-  // The last document's fields opened without a change yet: nothing is marked.
+  // The fields of a step included by its place, opened without a change yet: nothing is marked.
   const [customising, setCustomising] = useState(false);
-  const customiseRef = useRef<HTMLDivElement>(null);
+  const keepId = useId();
+  const resetId = useId();
+  const run = flowDeliverables(
+    flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
+  );
+  const place = run.byPlace?.step.id === stepId ? run.byPlace.place : null;
   const deliverable = readDeliverable(draft.output_config);
-  const shown = deliverable ?? (isLast && customising ? { label: "" } : null);
-  const set = (next: StepDeliverable | null) => {
-    // The last document emptied is the default again; its fields stay open.
-    if (isLast && next && next.label === "" && !next.file_name) {
-      setCustomising(true);
-      next = null;
-    }
+  const isDocument = stepDeliversArtifact(draft);
+  // What the step is named in the result until the author names it.
+  const stepName = oneLineStart(draft.user_description ?? "");
+  const shown = deliverable ?? (place && customising ? { label: stepName } : null);
+  const set = (next: StepDeliverable | null) =>
     onChange({ ...draft, output_config: withDeliverable(draft.output_config, next) });
+  /** Names typed with stray spaces are made one line when the field is left. */
+  const tidy = () => {
+    const output_config = withTidyDeliverable(draft.output_config) as StepConfig["output_config"];
+    if (output_config !== draft.output_config) onChange({ ...draft, output_config });
+  };
+  /** Marks the step under its name; focus goes to the button that takes the mark away. */
+  const keep = () => {
+    flushSync(() => set({ label: stepName }));
+    document.getElementById(resetId)?.focus();
   };
 
   const fields = shown && (
@@ -199,92 +207,119 @@ function DeliverableFields({
           description={t("flow_step_editor_deliverable_label_description")}
           value={shown.label}
           onChange={(label) => set({ ...shown, label })}
+          onBlur={tidy}
           isRequired
           autoComplete="off"
+          width="100%"
           status={problemStatus(problems["output_config.deliverable.label"])}
         />
       </Anchor>
-      <Anchor
-        formId={formId}
-        anchor="output_config.deliverable.file_name"
-        className="flex flex-col gap-2"
-      >
-        <TextInput
-          label={t("flow_step_editor_deliverable_file_name")}
-          description={t("flow_step_editor_deliverable_file_name_description")}
-          value={shown.file_name ?? ""}
-          onChange={(file_name) => set({ ...shown, file_name })}
-          autoComplete="off"
-          status={problemStatus(problems["output_config.deliverable.file_name"])}
-        />
-        <div>
-          <VariablePicker
-            groups={fileNameGroups(flow, groups)}
-            label={t("flow_step_editor_deliverable_insert_field")}
-            onInsert={(token) =>
-              set({ ...shown, file_name: insertToken(shown.file_name ?? "", token, null).text })
-            }
-          />
-        </div>
-      </Anchor>
+      {isDocument && (
+        <Anchor formId={formId} anchor="output_config.deliverable.file_name">
+          <VStack gap={2} align="start">
+            <TextInput
+              label={t("flow_step_editor_deliverable_file_name")}
+              description={t("flow_step_editor_deliverable_file_name_description")}
+              value={shown.file_name ?? ""}
+              onChange={(file_name) => set({ ...shown, file_name })}
+              onBlur={tidy}
+              isOptional
+              autoComplete="off"
+              width="100%"
+              status={problemStatus(problems["output_config.deliverable.file_name"])}
+            />
+            <VariablePicker
+              groups={fileNameGroups(flow, groups)}
+              label={t("flow_step_editor_deliverable_insert_field")}
+              onInsert={(token) =>
+                set({ ...shown, file_name: insertToken(shown.file_name ?? "", token, null).text })
+              }
+            />
+          </VStack>
+        </Anchor>
+      )}
     </>
   );
 
-  if (!isLast) {
+  if (!place) {
     return (
-      <div className="flex flex-col gap-4">
+      <VStack gap={4}>
         <Switch
           label={t("flow_step_editor_deliverable_switch")}
           description={t("flow_step_editor_deliverable_switch_description")}
           value={deliverable !== null}
-          onChange={(on) => set(on ? { label: "" } : null)}
+          onChange={(on) => set(on ? { label: stepName } : null)}
         />
         {fields}
-      </div>
+      </VStack>
     );
   }
 
+  // A marked step whose own names differ from the step's: taking the mark away resets them.
+  const named = deliverable !== null && (deliverable.label !== stepName || !!deliverable.file_name);
   return (
-    <div className="flex flex-col gap-4">
-      <div ref={customiseRef} className="flex flex-col gap-1">
-        <Text as="p" display="block" className="m-0 font-medium">
-          {t("flow_step_editor_deliverable_always")}
-        </Text>
+    <VStack gap={4}>
+      <VStack gap={1}>
+        <StatusLabel status="success" label={t("flow_step_editor_deliverable_included")} />
         <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
-          {t("flow_step_editor_deliverable_always_description")}
+          {deliverable
+            ? t("flow_step_editor_deliverable_kept")
+            : t(`flow_step_editor_deliverable_place_${place}`)}
         </Text>
-        {!shown && (
-          <div className="pt-2">
+      </VStack>
+      {!deliverable && (
+        <HStack gap={2} wrap="wrap">
+          <Button
+            id={keepId}
+            label={t("flow_step_editor_deliverable_keep")}
+            size="sm"
+            variant="secondary"
+            onClick={keep}
+          />
+          {!customising && (
             <Button
-              label={t("flow_step_editor_deliverable_customise")}
+              label={t(
+                isDocument
+                  ? "flow_step_editor_deliverable_customise"
+                  : "flow_step_editor_deliverable_customise_text"
+              )}
               size="sm"
+              variant="ghost"
               onClick={() => {
                 // The button goes; focus moves to the field it opened.
                 flushSync(() => setCustomising(true));
                 focusAnchor(formId, "output_config.deliverable.label");
               }}
             />
-          </div>
-        )}
-      </div>
+          )}
+        </HStack>
+      )}
       {fields}
-      {shown && (
-        <div>
+      {deliverable && (
+        <VStack gap={2} align="start">
+          <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+            {named
+              ? t(
+                  `flow_step_editor_deliverable_reset_named_${isDocument ? "document" : "text"}_${place}`
+                )
+              : t(`flow_step_editor_deliverable_reset_${place}`)}
+          </Text>
           <Button
+            id={resetId}
             label={t("flow_step_editor_deliverable_reset")}
             size="sm"
             variant="ghost"
             onClick={() => {
               flushSync(() => {
                 setCustomising(false);
-                if (deliverable) set(null);
+                set(null);
               });
-              customiseRef.current?.querySelector("button")?.focus();
+              document.getElementById(keepId)?.focus();
             }}
           />
-        </div>
+        </VStack>
       )}
-    </div>
+    </VStack>
   );
 }
 
@@ -405,7 +440,6 @@ export function StepOutputSection({
                 inputConfig: draft.input_config
               })}
               problems={problems}
-              deliverableLabels={deliverableLabels(flow, stepId)}
             />
           </TemplateScope>
         </Anchor>
@@ -441,12 +475,12 @@ export function StepOutputSection({
         </Anchor>
       )}
 
-      {stepDeliversArtifact(draft) && (
+      {stepCanBeDeliverable(draft) && (
         <DeliverableFields
           formId={formId}
           flow={flow}
+          stepId={stepId}
           draft={draft}
-          isLast={isLast}
           groups={groups}
           onChange={onChange}
           problems={problems}
