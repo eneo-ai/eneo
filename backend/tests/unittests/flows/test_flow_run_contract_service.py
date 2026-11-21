@@ -1499,6 +1499,47 @@ def test_a_marked_text_is_delivered_and_a_step_that_sends_never_is() -> None:
     assert _deliverables(steps) == [(1, "Text")]
 
 
+_RUN_RESULT = {
+    "url": "https://receiver.example.org/results",
+    "auth": {"mode": "none"},
+    "body": {"mode": "run_result"},
+}
+
+
+def test_the_step_before_the_result_is_sent_and_the_sender_stays_final() -> None:
+    steps = [
+        _output_step(1, "compose_text", "text", name="Markdown"),
+        _output_step(
+            2,
+            "render_verbatim",
+            "docx",
+            name="Word 1",
+            deliverable=FlowStepDeliverable(label="Protokoll"),
+        ),
+        _output_step(3, "render_verbatim", "docx", name="Word 2"),
+        replace(
+            _output_step(4, "http_post", "text", name="Skicka"),
+            output_config=_RUN_RESULT,
+        ),
+    ]
+
+    outputs = build_run_output_contract(steps)
+
+    assert _deliverables(steps) == [(2, "Protokoll"), (3, "Word 2")]
+    assert outputs is not None
+    assert outputs.final_output.step_order == 4
+    assert outputs.final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP
+
+
+def test_a_document_before_a_plain_request_is_not_delivered() -> None:
+    steps = [
+        _output_step(1, "render_verbatim", "docx", name="Word"),
+        _output_step(2, "http_post", "text", name="Anropa"),
+    ]
+
+    assert _deliverables(steps) == []
+
+
 @pytest.mark.parametrize(
     ("output_config", "participants_field"),
     [

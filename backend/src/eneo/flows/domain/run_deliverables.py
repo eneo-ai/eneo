@@ -21,13 +21,18 @@ class StepDeliverableFacts:
     output_mode: FlowOutputMode | str
     # The author marked the step as a deliverable.
     marked: bool
+    # The step sends the run's finished result once the run has completed.
+    sends_run_result: bool = False
 
 
 def deliverable_positions(steps: Sequence[StepDeliverableFacts]) -> list[int]:
     """The positions in ``steps``, which are in step order, of the steps a
     run delivers: each marked step and the last step, when its text or
-    document can be delivered."""
+    document can be delivered. A last step that sends the run's result holds
+    nothing of its own, so the step before it stands in its place."""
     last = len(steps) - 1
+    if last >= 0 and steps[last].sends_run_result:
+        last -= 1
     return [
         position
         for position, step in enumerate(steps)

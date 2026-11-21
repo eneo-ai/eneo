@@ -65,6 +65,7 @@ from eneo.flows.flow_run_step_inputs import (
     aggregate_runtime_file_limit,
 )
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.http_transport.step_configs import sends_run_result
 from eneo.flows.published_definition import (
     PublishedFlowDefinition,
 )
@@ -296,6 +297,7 @@ def build_run_output_contract(
                 output_type=step.output_type,
                 output_mode=step.output_mode,
                 marked=step.deliverable is not None,
+                sends_run_result=sends_run_result(step.output_mode, step.output_config),
             )
             for step in steps
         ]

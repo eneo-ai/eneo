@@ -22285,7 +22285,7 @@ export interface components {
       aggregate_max_files?: number | null;
       /**
        * Deliverables
-       * @description Texts and documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is text or a document. Branch on `kind`: an `artifact` is a file, a `text` has no `files`. Use it to show everything a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers nothing.
+       * @description Texts and documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is text or a document (the step before it when the last step sends the run's result). Branch on `kind`: an `artifact` is a file, a `text` has no `files`. Use it to show everything a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers nothing.
        */
       deliverables?: (
         | components["schemas"]["FlowDeliverableContractPublic"]
@@ -22938,7 +22938,7 @@ export interface components {
       kind: "artifact";
       /**
        * Label
-       * @description What a client calls the document, as in the run contract's `deliverables`. Null when the last step has no name.
+       * @description What a client calls the document, as in the run contract's `deliverables`. Null when an unmarked step has no name.
        */
       label?: string | null;
       /** @description `docx` or `pdf`. */
@@ -27354,7 +27354,7 @@ export interface components {
       kind: "text";
       /**
        * Label
-       * @description What a client calls the text, as in the run contract's `deliverables`. Null when the last step has no name.
+       * @description What a client calls the text, as in the run contract's `deliverables`. Null when an unmarked step has no name.
        */
       label?: string | null;
       /** @description `text`. */

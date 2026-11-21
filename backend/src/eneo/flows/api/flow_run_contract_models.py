@@ -419,7 +419,7 @@ class FlowRunDeliverablePublic(BaseModel):
         default=None,
         description=(
             "What a client calls the document, as in the run contract's "
-            "`deliverables`. Null when the last step has no name."
+            "`deliverables`. Null when an unmarked step has no name."
         ),
     )
     output_type: FlowOutputType = Field(description="`docx` or `pdf`.")
@@ -449,7 +449,7 @@ class FlowRunTextDeliverablePublic(BaseModel):
         default=None,
         description=(
             "What a client calls the text, as in the run contract's "
-            "`deliverables`. Null when the last step has no name."
+            "`deliverables`. Null when an unmarked step has no name."
         ),
     )
     output_type: FlowOutputType = Field(description="`text`.")
@@ -826,7 +826,8 @@ class FlowRunContractPublic(BaseModel):
         description=(
             "Texts and documents a successful run delivers, in step order: each "
             "step the author marked as a deliverable, and the last step when its "
-            "output is text or a document. Branch on `kind`: an `artifact` is a "
+            "output is text or a document (the step before it when the last step "
+            "sends the run's result). Branch on `kind`: an `artifact` is a "
             "file, a `text` has no `files`. Use it to show everything a run "
             "returns, each with its label; read `final_output` and "
             "`FlowRunPublic.result` for the terminal output alone. Empty when the "
