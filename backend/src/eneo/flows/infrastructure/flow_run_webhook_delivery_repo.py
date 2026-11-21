@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, cast
@@ -237,31 +236,6 @@ class FlowRunWebhookDeliveryRepository:
         rows = (await self.session.execute(stmt)).all()
         now = datetime.now(timezone.utc)
         return [_to_read(row, now=now) for row in rows]
-
-    async def latest_delivery_statuses(
-        self, *, run_ids: Sequence[UUID], tenant_id: UUID
-    ) -> dict[tuple[UUID, UUID], FlowOutboxDeliveryStatus]:
-        """The status of each run step's latest delivery, by run and step."""
-        if not run_ids:
-            return {}
-        rows = (
-            await self.session.execute(
-                sa.select(
-                    FlowRunWebhookDeliveries.flow_run_id,
-                    FlowRunWebhookDeliveries.step_id,
-                    FlowRunWebhookDeliveries.delivery_status,
-                )
-                .where(FlowRunWebhookDeliveries.flow_run_id.in_(run_ids))
-                .where(FlowRunWebhookDeliveries.tenant_id == tenant_id)
-                .order_by(FlowRunWebhookDeliveries.attempt_no.asc())
-            )
-        ).all()
-        return {
-            (row.flow_run_id, row.step_id): FlowOutboxDeliveryStatus(
-                row.delivery_status
-            )
-            for row in rows
-        }
 
     async def get_run_delivery(
         self,

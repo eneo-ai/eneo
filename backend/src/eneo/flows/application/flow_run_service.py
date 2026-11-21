@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timezone
 from functools import partial
@@ -14,7 +14,10 @@ from eneo.authentication.api_key_resolver import resolve_effective_resource_perm
 from eneo.authentication.auth_models import ApiKeyPermission
 from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_repo import FileRepository
-from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunOutputContract,
+    final_step_delivery_status,
+)
 from eneo.flows.application.flow_run_access_policy import (
     FlowRunAccessKind,
     FlowRunAccessPolicy,
@@ -52,7 +55,6 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 from eneo.flows.domain.step_output import inline_transcript
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
-    FlowOutputDelivery,
     FlowRunLifecycleSource,
     FlowRunPurpose,
     is_terminal_flow_run_status,
@@ -251,7 +253,15 @@ class FlowRunWithResultFilesAndUsage:
 
 
 @dataclass(frozen=True, slots=True)
-class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
+class FlowRunDetailView:
+    """A run's detail. Its result's delivery status is decided from
+    ``webhook_deliveries`` where the detail is projected."""
+
+    run: FlowRun
+    result_files: Sequence[FlowRunStepResultFile]
+    token_usage: FlowRunTokenUsage | None
+    transcription_usage: FlowRunTranscriptionUsage | None = None
+    outputs: FlowRunOutputContract | None = None
     webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
 
 
@@ -1131,21 +1141,6 @@ class FlowRunService:
             speaker_labels=speaker_labels,
         )
 
-    async def get_run_with_result_files_and_usage(
-        self,
-        *,
-        flow_id: UUID,
-        run_id: UUID,
-        history: bool = False,
-    ) -> FlowRunWithResultFilesAndUsage:
-        run = await self.get_run(
-            run_id=run_id,
-            flow_id=flow_id,
-            access_kind="content",
-            history=history,
-        )
-        return await self.enrich_run_with_result_files_and_usage(run=run)
-
     async def get_run_detail_with_result_files_and_usage(
         self,
         *,
@@ -1159,20 +1154,12 @@ class FlowRunService:
             access_kind="content",
             history=history,
         )
+        [run_view] = await self._runs_with_result_files_and_usage(runs=(run,))
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
                 run_id=run.id,
                 tenant_id=self.user.tenant_id,
             )
-        )
-        # The rows come in step and attempt order, so each step keeps its
-        # latest attempt's status: the detail reads its deliveries once.
-        [run_view] = await self._runs_with_result_files_and_usage(
-            runs=(run,),
-            delivery_statuses={
-                (run.id, delivery.step_id): delivery.delivery_status
-                for delivery in webhook_deliveries
-            },
         )
         return FlowRunDetailView(
             run=run_view.run,
@@ -1180,7 +1167,6 @@ class FlowRunService:
             token_usage=run_view.token_usage,
             transcription_usage=run_view.transcription_usage,
             outputs=run_view.outputs,
-            final_delivery_status=run_view.final_delivery_status,
             webhook_deliveries=tuple(webhook_deliveries),
         )
 
@@ -1189,15 +1175,26 @@ class FlowRunService:
         *,
         run: FlowRun,
     ) -> FlowRunWithResultFilesAndUsage:
-        views = await self._runs_with_result_files_and_usage(runs=(run,))
-        return views[0]
+        [view] = await self._runs_with_result_files_and_usage(runs=(run,))
+        # Only a completed run has a result whose delivery is reported.
+        if view.outputs is None:
+            return view
+        deliveries = await self.webhook_delivery_repo.list_run_delivery_statuses(
+            run_id=run.id, tenant_id=self.user.tenant_id
+        )
+        return replace(
+            view,
+            final_delivery_status=final_step_delivery_status(
+                view.outputs,
+                [
+                    (delivery.step_id, delivery.attempt_no, delivery.delivery_status)
+                    for delivery in deliveries
+                ],
+            ),
+        )
 
     async def _runs_with_result_files_and_usage(
-        self,
-        *,
-        runs: Sequence[FlowRun],
-        delivery_statuses: Mapping[tuple[UUID, UUID], FlowOutboxDeliveryStatus]
-        | None = None,
+        self, *, runs: Sequence[FlowRun]
     ) -> tuple[FlowRunWithResultFilesAndUsage, ...]:
         if not runs:
             return ()
@@ -1222,12 +1219,6 @@ class FlowRunService:
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
         outputs_by_version_ref = await self._outputs_for_runs(runs=runs)
-        if delivery_statuses is None:
-            delivery_statuses = (
-                await self.webhook_delivery_repo.latest_delivery_statuses(
-                    run_ids=run_ids, tenant_id=self.user.tenant_id
-                )
-            )
         return tuple(
             FlowRunWithResultFilesAndUsage(
                 run=run,
@@ -1238,11 +1229,6 @@ class FlowRunService:
                     recording_seconds_by_run_id.get(run.id),
                 ),
                 outputs=outputs_by_version_ref.get((run.flow_id, run.flow_version)),
-                final_delivery_status=_final_delivery_status(
-                    run,
-                    outputs_by_version_ref.get((run.flow_id, run.flow_version)),
-                    delivery_statuses,
-                ),
             )
             for run in runs
         )
@@ -1364,16 +1350,3 @@ class FlowRunService:
         except FlowRunNotFoundError as exc:
             raise NotFoundException("Flow run not found.") from exc
         return result.run
-
-
-def _final_delivery_status(
-    run: FlowRun,
-    outputs: FlowRunOutputContract | None,
-    statuses: Mapping[tuple[UUID, UUID], FlowOutboxDeliveryStatus],
-) -> FlowOutboxDeliveryStatus | None:
-    final_output = outputs.final_output if outputs is not None else None
-    if final_output is None or final_output.delivery is not (
-        FlowOutputDelivery.OUTBOUND_HTTP
-    ):
-        return None
-    return statuses.get((run.id, final_output.step_id))

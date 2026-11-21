@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal, TypeAlias, cast
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.flows.api.flow_live_transcription_models import (
     FlowLiveTranscriptionAvailabilityPublic,
 )
@@ -475,6 +477,32 @@ class FlowRunOutputContract:
 
     final_output: FlowFinalOutputContractPublic
     deliverables: tuple[FlowRunContractDeliverable, ...]
+
+
+def final_step_delivery_status(
+    outputs: FlowRunOutputContract | None,
+    deliveries: Iterable[tuple[UUID, int, FlowOutboxDeliveryStatus]],
+) -> FlowOutboxDeliveryStatus | None:
+    """Where a run's sent result stands: the status of the final step's
+    highest-numbered delivery attempt, from the run's ``(step_id,
+    attempt_no, status)`` deliveries in any order. None when the final step
+    sends nothing or has no delivery yet. Every read of a run decides it
+    here: its detail, its evidence and the runs other endpoints answer with."""
+    final_output = outputs.final_output if outputs is not None else None
+    if final_output is None or final_output.delivery is not (
+        FlowOutputDelivery.OUTBOUND_HTTP
+    ):
+        return None
+    latest = max(
+        (
+            (attempt_no, status)
+            for step_id, attempt_no, status in deliveries
+            if step_id == final_output.step_id
+        ),
+        key=lambda attempt: attempt[0],
+        default=None,
+    )
+    return latest[1] if latest is not None else None
 
 
 class FlowRunInlineTextResultPublic(BaseModel):

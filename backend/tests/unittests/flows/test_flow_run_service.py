@@ -19,13 +19,23 @@ from eneo.authentication.auth_models import (
 )
 from eneo.authentication.principal_types import PrincipalType
 from eneo.authentication.service_key_user import build_service_key_user
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
 from eneo.files.file_models import FileType
-from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_run_contract_models import (
+    FlowFinalOutputContractPublic,
+    FlowRunOutboundHttpResultPublic,
+    FlowRunOutputContract,
+)
+from eneo.flows.api.flow_run_response import read_run_public
+from eneo.flows.application.flow_run_access_policy import (
+    FlowRunAccessPolicy,
+    FlowRunEvidenceAccess,
+)
 from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
 from eneo.flows.application.flow_run_service import (
     FlowRunService,
     FlowRunVersionedView,
-    FlowRunWithResultFilesAndUsage,
 )
 from eneo.flows.domain.flow import (
     Flow,
@@ -57,6 +67,9 @@ from eneo.flows.domain.runtime_invariant_exceptions import (
 )
 from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
 from eneo.flows.enums import (
+    FlowOutputDelivery,
+    FlowOutputMode,
+    FlowOutputType,
     FlowRunLifecycleSource,
     FlowStepAttemptStatus,
     FlowStepResultStatus,
@@ -103,6 +116,7 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 )
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryEvidenceMeasurement,
+    FlowRunWebhookDeliveryRead,
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.flows.infrastructure.flow_version_repo import FlowVersionEvidenceMeasurement
@@ -2519,7 +2533,7 @@ async def test_list_usage_batches_only_supplied_runs_without_reading_content(use
 
 
 @pytest.mark.asyncio
-async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
+async def test_run_detail_enriches_the_run_with_files_and_usage(user):
     flow_run_repo = flow_run_repo_mock()
     provider_call_repo = _provider_call_repo()
     flow_id = uuid4()
@@ -2552,14 +2566,14 @@ async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
         provider_call_repo=provider_call_repo,
         flow_version_repo=AsyncMock(),
         runtime_upload_repo=_runtime_upload_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
     )
 
-    view = await service.get_run_with_result_files_and_usage(
+    view = await service.get_run_detail_with_result_files_and_usage(
         flow_id=flow_id,
         run_id=run.id,
     )
 
-    assert isinstance(view, FlowRunWithResultFilesAndUsage)
     assert view.run == run
     assert view.result_files == (result_file,)
     assert view.token_usage == usage
@@ -2578,6 +2592,86 @@ async def test_get_run_with_result_files_and_usage_enriches_single_run(user):
         run_ids=[run.id],
         tenant_id=user.tenant_id,
     )
+
+
+def _delivery(step_id, attempt_no, status) -> FlowRunWebhookDeliveryRead:
+    now = datetime.now(timezone.utc)
+    return FlowRunWebhookDeliveryRead(
+        id=uuid4(),
+        step_id=step_id,
+        step_order=1,
+        attempt_no=attempt_no,
+        delivery_status=status,
+        delivery_attempts=1,
+        next_delivery_at=None,
+        delivered_at=None,
+        dead_lettered_at=None,
+        created_at=now,
+        updated_at=now,
+        state=status.value,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_run_read_and_its_detail_report_the_same_latest_delivery(user):
+    # Kills: taking a delivery's status from the order its attempts are read
+    # in, and the detail and the other run reads deciding it apart.
+    flow_run_repo = flow_run_repo_mock()
+    flow_id = uuid4()
+    run = _run(user=user, flow_id=flow_id).model_copy(
+        update={"status": FlowRunStatus.COMPLETED}
+    )
+    final_step = uuid4()
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_result_files_for_runs.return_value = []
+    flow_run_repo.recording_seconds_by_run_ids.return_value = {}
+    webhook_delivery_repo = _webhook_delivery_repo()
+    # Read out of order: the second attempt delivered after the first failed.
+    webhook_delivery_repo.list_run_delivery_statuses.return_value = [
+        _delivery(final_step, 2, FlowOutboxDeliveryStatus.DELIVERED),
+        _delivery(final_step, 1, FlowOutboxDeliveryStatus.DEAD_LETTERED),
+    ]
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        webhook_delivery_repo=webhook_delivery_repo,
+    )
+    outputs = FlowRunOutputContract(
+        final_output=FlowFinalOutputContractPublic(
+            step_id=final_step,
+            step_order=1,
+            output_type=FlowOutputType.TEXT,
+            output_mode=FlowOutputMode.HTTP_POST,
+            delivery=FlowOutputDelivery.OUTBOUND_HTTP,
+        ),
+        deliverables=(),
+    )
+    service._outputs_for_runs = AsyncMock(  # type: ignore[method-assign]
+        return_value={(flow_id, run.flow_version): outputs}
+    )
+
+    view = await service.enrich_run_with_result_files_and_usage(run=run)
+    detail = await service.get_run_detail_with_result_files_and_usage(
+        flow_id=flow_id, run_id=run.id
+    )
+    detail_public = FlowAssembler().to_run_detail_public(
+        detail.run,
+        outputs=detail.outputs,
+        webhook_deliveries=detail.webhook_deliveries,
+        evidence_access=FlowRunEvidenceAccess(
+            view_refusal=None, redacted_export_refusal=None, raw_export_refusal=None
+        ),
+    )
+
+    run_result = read_run_public(view, started_by=None).result
+    assert isinstance(run_result, FlowRunOutboundHttpResultPublic)
+    assert isinstance(detail_public.result, FlowRunOutboundHttpResultPublic)
+    assert run_result.delivery_status == "delivered"
+    assert detail_public.result.delivery_status == "delivered"
 
 
 @pytest.mark.asyncio

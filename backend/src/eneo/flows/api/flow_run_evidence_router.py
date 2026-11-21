@@ -21,16 +21,14 @@ from eneo.flows.api.flow_api_common import (
     RETIRED_FLOW_HISTORY_READ_CLAUSE,
     error_response,
 )
-from eneo.flows.api.flow_assembler import (
-    FlowAssembler,
-    final_step_delivery_status,
-)
+from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_models import (
     FlowEvidenceExportTooLargeError,
     FlowRunEvidenceExportResponse,
     FlowRunEvidenceResponse,
     FlowRunPublic,
 )
+from eneo.flows.api.flow_run_contract_models import final_step_delivery_status
 from eneo.flows.api.flow_run_started_by import started_by_for_run
 from eneo.flows.api.flow_runtime_paths import (
     FLOW_RUN_EVIDENCE_EXPORT_PATH,
@@ -234,6 +232,7 @@ async def get_flow_run_evidence(
                         [
                             (
                                 UUID(item["step_id"]),
+                                item["attempt_no"],
                                 FlowOutboxDeliveryStatus(item["delivery_status"]),
                             )
                             for item in evidence.webhook_deliveries
