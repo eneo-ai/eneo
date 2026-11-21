@@ -1,6 +1,7 @@
 <script lang="ts">
   import { tableLocationLabel } from "$lib/features/file-preview/tableReference";
   import { AUTO_ACCEPT_TOOLS_STORAGE_KEY } from "../../toolApprovalPreference";
+  import { clipboardHasFormattedText } from "@eneo/rich-paste";
   import { onMount, untrack } from "svelte";
   import { browser } from "$app/environment";
   import AttachmentUploadIconButton from "$lib/features/attachments/components/AttachmentUploadIconButton.svelte";
@@ -185,6 +186,8 @@
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
     if (!event.clipboardData?.files || event.clipboardData.files.length === 0) return;
+    // A word processor adds a picture of the copied text; the text is the paste.
+    if (clipboardHasFormattedText(event.clipboardData)) return;
     // A message in flight owns the attachment list; files pasted now would be
     // dropped with the sent batch.
     if (chat.askQuestion.isLoading || sendPending) return;
