@@ -542,8 +542,8 @@ async def test_a_run_delivers_each_marked_document_under_its_own_name(
     flow_broker_worker_seam: FlowBrokerWorkerSeam,
 ) -> None:
     # Two Word steps are marked as deliverables and a text step comes last:
-    # the run lists both documents, named from the form, while its result
-    # stays the last step's text.
+    # the run lists both documents, named from the form, and the last text,
+    # while its result stays that text.
     headers = flow_process_auth_headers
     suffix = uuid4().hex[:8]
     space = await client.post(
@@ -624,7 +624,8 @@ async def test_a_run_delivers_each_marked_document_under_its_own_name(
     assert contract.status_code == 200, contract.text
     assert [
         (item["step_order"], item["label"]) for item in contract.json()["deliverables"]
-    ] == [(1, "Protokoll"), (2, "Sammanfattning")]
+    ] == [(1, "Protokoll"), (2, "Sammanfattning"), (3, "Svar")]
+    assert contract.json()["deliverables"][2]["kind"] == "text"
     assert contract.json()["final_output"]["output_type"] == "text"
 
     await flow_broker_worker_seam.start_worker()
@@ -652,13 +653,22 @@ async def test_a_run_delivers_each_marked_document_under_its_own_name(
         .date()
         .isoformat()
     )
+    *documents, text = completed["deliverables"]
+    assert text == {
+        "kind": "text",
+        "step_id": text["step_id"],
+        "step_order": 3,
+        "label": "Svar",
+        "output_type": "text",
+        "delivery": "payload",
+    }
     assert [
         (
             item["step_order"],
             item["label"],
             [(file["name"], file["source"]) for file in item["files"]],
         )
-        for item in completed["deliverables"]
+        for item in documents
     ] == [
         (1, "Protokoll", [(f"Protokoll Eneo {run_day}.docx", "declared_artifact")]),
         (

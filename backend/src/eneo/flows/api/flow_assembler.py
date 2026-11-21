@@ -32,7 +32,7 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowRunArtifactResultPublic,
-    FlowRunDeliverablePublic,
+    FlowRunDeliverable,
     FlowRunFileBackedTextResultPublic,
     FlowRunInlineTextResultPublic,
     FlowRunOutboundHttpResultPublic,
@@ -152,7 +152,7 @@ class FlowAssembler:
         outputs: FlowRunOutputContract | None,
         result_files: Sequence[FlowRunStepResultFile] = (),
         final_delivery_status: FlowOutboxDeliveryStatus | None = None,
-    ) -> tuple[FlowRunResultPublic | None, list[FlowRunDeliverablePublic]]:
+    ) -> tuple[FlowRunResultPublic | None, list[FlowRunDeliverable]]:
         """``run``'s ``result`` and ``deliverables`` from one output
         contract; ``result_files`` hold each step's current attempt."""
         return (

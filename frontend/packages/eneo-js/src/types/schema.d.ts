@@ -18404,6 +18404,11 @@ export interface components {
     EvidenceDeliverableSummary: {
       /** Files */
       files: components["schemas"]["EvidenceDeliverableFileSummary"][];
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "artifact";
       /** Label */
       label: string | null;
       /** Step Order */
@@ -18501,9 +18506,12 @@ export interface components {
       completed_steps: number;
       /**
        * Deliverables
-       * @description Documents the run delivered, in step order, with each step's current document files. Empty until the run has completed. Kept out of the hashed bundle.
+       * @description Texts and documents the run delivered, in step order, each document with its step's current document files. Empty until the run has completed. Kept out of the hashed bundle.
        */
-      deliverables?: components["schemas"]["EvidenceDeliverableSummary"][];
+      deliverables?: (
+        | components["schemas"]["EvidenceDeliverableSummary"]
+        | components["schemas"]["EvidenceTextDeliverableSummary"]
+      )[];
       /** Duration Ms */
       duration_ms?: number | null;
       /** Failed Steps */
@@ -18779,6 +18787,22 @@ export interface components {
       /** Events */
       events: components["schemas"]["EvidenceStepReviewEvent"][];
       last_event?: components["schemas"]["EvidenceStepReviewEvent"] | null;
+    };
+    /**
+     * EvidenceTextDeliverableSummary
+     * @description A text the run delivered, by its step and label; the text itself is
+     *     the step's output in the bundle.
+     */
+    EvidenceTextDeliverableSummary: {
+      /**
+       * @description discriminator enum property added by openapi-typescript
+       * @enum {string}
+       */
+      kind: "text";
+      /** Label */
+      label: string | null;
+      /** Step Order */
+      step_order: number;
     };
     /**
      * ExpiringKeySummaryItem
@@ -19824,8 +19848,13 @@ export interface components {
      * @description A document every successful run of this version delivers.
      */
     FlowDeliverableContractPublic: {
-      /** @description How a client receives the document. Always `artifact` today: a file downloaded from the run. Other values may be added later; a client should skip one it does not know. */
+      /** @description How a client receives the document. Always `artifact`: a file downloaded from the run. */
       delivery: components["schemas"]["FlowOutputDelivery"];
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "artifact";
       /**
        * Label
        * @description What a client calls the document: the label the author gave it, or for the last step without one, the step's name. Null when the last step has no name.
@@ -22152,6 +22181,7 @@ export interface components {
      *       "deliverables": [
      *         {
      *           "delivery": "artifact",
+     *           "kind": "artifact",
      *           "label": "Summary",
      *           "output_mode": "render_verbatim",
      *           "output_type": "pdf",
@@ -22160,6 +22190,7 @@ export interface components {
      *         },
      *         {
      *           "delivery": "artifact",
+     *           "kind": "artifact",
      *           "label": "Report",
      *           "output_mode": "pass_through",
      *           "output_type": "docx",
@@ -22254,9 +22285,12 @@ export interface components {
       aggregate_max_files?: number | null;
       /**
        * Deliverables
-       * @description Documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is a document. Use it to show every document a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers no document.
+       * @description Texts and documents a successful run delivers, in step order: each step the author marked as a deliverable, and the last step when its output is text or a document. Branch on `kind`: an `artifact` is a file, a `text` has no `files`. Use it to show everything a run returns, each with its label; read `final_output` and `FlowRunPublic.result` for the terminal output alone. Empty when the flow delivers nothing.
        */
-      deliverables?: components["schemas"]["FlowDeliverableContractPublic"][];
+      deliverables?: (
+        | components["schemas"]["FlowDeliverableContractPublic"]
+        | components["schemas"]["FlowTextDeliverableContractPublic"]
+      )[];
       /** @description Published terminal output contract for this flow version. API consumers should use this before starting a run to decide whether their app will display output or offer a generated file download. After success, branch on `FlowRunPublic.result.kind`, including exact `inline_text` and `file_backed_text` for terminal text. */
       final_output?: components["schemas"]["FlowFinalOutputContractPublic"] | null;
       /**
@@ -22898,9 +22932,8 @@ export interface components {
        */
       files: components["schemas"]["FlowRunStepResultFile"][];
       /**
-       * Kind
-       * @description Discriminator: `artifact` is a document to download. Other kinds may be added later; a client should skip one it does not know.
-       * @constant
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
        */
       kind: "artifact";
       /**
@@ -23106,9 +23139,12 @@ export interface components {
       created_at: string;
       /**
        * Deliverables
-       * @description Every document the run delivered, in step order, each with its label and files: the run contract's `deliverables` for this run. Read it to offer every document a flow makes; read `result` for the terminal output alone. Each entry lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       * @description Every text and document the run delivered, in step order, each with its label: the run contract's `deliverables` for this run. Branch on `kind`: an `artifact` lists its files, a `text` has no `files` and its text is the step's output. Read `result` for the terminal output alone. An `artifact` lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
        */
-      deliverables?: components["schemas"]["FlowRunDeliverablePublic"][];
+      deliverables?: (
+        | components["schemas"]["FlowRunDeliverablePublic"]
+        | components["schemas"]["FlowRunTextDeliverablePublic"]
+      )[];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -25269,9 +25305,12 @@ export interface components {
       created_at: string;
       /**
        * Deliverables
-       * @description Every document the run delivered, in step order, each with its label and files: the run contract's `deliverables` for this run. Read it to offer every document a flow makes; read `result` for the terminal output alone. Each entry lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
+       * @description Every text and document the run delivered, in step order, each with its label: the run contract's `deliverables` for this run. Branch on `kind`: an `artifact` lists its files, a `text` has no `files` and its text is the step's output. Read `result` for the terminal output alone. An `artifact` lists only the step's document files, while `result.files` lists every current file of the last step. Download a file with its `file_id` through `POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, and only when its `availability` is `available`. Empty until the run has completed.
        */
-      deliverables?: components["schemas"]["FlowRunDeliverablePublic"][];
+      deliverables?: (
+        | components["schemas"]["FlowRunDeliverablePublic"]
+        | components["schemas"]["FlowRunTextDeliverablePublic"]
+      )[];
       /**
        * Dispatch Attempt Count
        * @description Broker dispatch attempts claimed in the most recent queue-entry dispatch epoch.
@@ -27295,6 +27334,42 @@ export interface components {
        * @description The step the field reads from, when the binding names one.
        */
       source_step?: number | null;
+    };
+    /**
+     * FlowRunTextDeliverablePublic
+     * @description A text the run delivered. Only what names it: the text is the step's
+     *     output.
+     */
+    FlowRunTextDeliverablePublic: {
+      /**
+       * Delivery
+       * @description `payload`: the text is the step's output, read with the step's result. A run result sent to a receiver carries it whole.
+       * @constant
+       */
+      delivery: "payload";
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "text";
+      /**
+       * Label
+       * @description What a client calls the text, as in the run contract's `deliverables`. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description `text`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that wrote the text. Unique in the list.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
     };
     /** FlowRunTokenUsagePublic */
     FlowRunTokenUsagePublic: {
@@ -30252,6 +30327,43 @@ export interface components {
       template_file_id?: string | null;
       /** Template Name */
       template_name?: string | null;
+    };
+    /**
+     * FlowTextDeliverableContractPublic
+     * @description A text every successful run of this version delivers.
+     */
+    FlowTextDeliverableContractPublic: {
+      /**
+       * Delivery
+       * @description `payload`: the text is the step's output, not a file. A run result sent to a receiver carries it whole.
+       * @constant
+       */
+      delivery: "payload";
+      /**
+       * @description Discriminator: `artifact` is a document to download, `text` is text the step wrote. Other kinds may be added later; a client should skip one it does not know. (enum property replaced by openapi-typescript)
+       * @enum {string}
+       */
+      kind: "text";
+      /**
+       * Label
+       * @description What a client calls the text: the label the author gave it, or for the last step without one, the step's name. Null when the last step has no name.
+       */
+      label?: string | null;
+      /** @description Output mode of the step, as for `final_output`. */
+      output_mode: components["schemas"]["FlowOutputMode"];
+      /** @description `text`. */
+      output_type: components["schemas"]["FlowOutputType"];
+      /**
+       * Step Id
+       * Format: uuid
+       * @description Published step that writes the text. Unique in the list; it matches `FlowRunPublic.deliverables[].step_id`.
+       */
+      step_id: string;
+      /**
+       * Step Order
+       * @description Published order of the step, from 1.
+       */
+      step_order: number;
     };
     /** FlowTextProcessingStepPublic */
     FlowTextProcessingStepPublic: {

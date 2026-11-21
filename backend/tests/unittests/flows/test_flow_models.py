@@ -41,6 +41,7 @@ from eneo.flows.api.flow_models import (
 from eneo.flows.api.flow_run_contract_models import (
     FlowDeliverableContractPublic,
     FlowRunOutputContract,
+    FlowTextDeliverableContractPublic,
 )
 from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
 from eneo.flows.domain.flow import (
@@ -1506,6 +1507,7 @@ def _document_file(run, *, step_id, availability: str = "available"):
 def _two_document_outputs(first_id, last_id) -> FlowRunOutputContract:
     def deliverable(step_id, step_order: int) -> FlowDeliverableContractPublic:
         return FlowDeliverableContractPublic(
+            kind="artifact",
             step_id=step_id,
             step_order=step_order,
             label=f"Document {step_order}",
@@ -1538,6 +1540,42 @@ def test_an_earlier_deliverable_without_a_file_is_listed_empty() -> None:
         (2, [purged]),
     ]
     assert public.deliverables[1].files[0].availability == "content_purged"
+
+
+def test_a_text_deliverable_is_listed_by_its_step_without_files() -> None:
+    text_id, last_id = uuid4(), uuid4()
+    run = _completed_run(output_payload_json={"text": "rendered"})
+    document = _document_file(run, step_id=last_id, availability="available")
+    outputs = _two_document_outputs(uuid4(), last_id)
+    outputs = FlowRunOutputContract(
+        final_output=outputs.final_output,
+        deliverables=(
+            FlowTextDeliverableContractPublic(
+                kind="text",
+                step_id=text_id,
+                step_order=1,
+                label="Sammanfattning",
+                output_type=FlowOutputType.TEXT,
+                output_mode=FlowOutputMode.COMPOSE_TEXT,
+                delivery="payload",
+            ),
+            outputs.deliverables[1],
+        ),
+    )
+
+    public = FlowAssembler().to_run_public(
+        run, result_files=(document,), outputs=outputs
+    )
+
+    assert [item.model_dump(mode="json") for item in public.deliverables][0] == {
+        "kind": "text",
+        "step_id": str(text_id),
+        "step_order": 1,
+        "label": "Sammanfattning",
+        "output_type": "text",
+        "delivery": "payload",
+    }
+    assert public.deliverables[1].kind == "artifact"
 
 
 def test_a_run_that_has_not_completed_lists_no_deliverables() -> None:

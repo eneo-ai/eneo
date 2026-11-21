@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from eneo.flows.enums import FlowOutputMode, FlowOutputType, step_delivers_artifact
+from eneo.flows.enums import FlowOutputMode, FlowOutputType, step_can_be_deliverable
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,14 +25,14 @@ class StepDeliverableFacts:
 
 def deliverable_positions(steps: Sequence[StepDeliverableFacts]) -> list[int]:
     """The positions in ``steps``, which are in step order, of the steps a
-    run delivers: each marked step and the last step, when it delivers a
-    document."""
+    run delivers: each marked step and the last step, when its text or
+    document can be delivered."""
     last = len(steps) - 1
     return [
         position
         for position, step in enumerate(steps)
         if (step.marked or position == last)
-        and step_delivers_artifact(
+        and step_can_be_deliverable(
             output_type=step.output_type, output_mode=step.output_mode
         )
     ]

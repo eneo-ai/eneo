@@ -692,6 +692,7 @@ async def test_get_flow_run_evidence_lists_deliverables_of_the_current_attempt(
             ),
             deliverables=(
                 FlowDeliverableContractPublic(
+                    kind="artifact",
                     step_id=final_step_id,
                     step_order=1,
                     label="Plan",

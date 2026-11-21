@@ -572,14 +572,18 @@ class FlowRunWebhookDeliveryService:
         )
         if not run_result:
             return payload, None
-        # Every deliverable of the completed run, as its detail lists them.
-        deliverables = project_run_deliverables(
-            status=run.status,
-            outputs=build_run_output_contract(steps),
-            result_files=await self.flow_run_repo.list_result_files_for_runs(
-                run_ids=[run.id], tenant_id=row.tenant_id
-            ),
-        )
+        # Every document of the completed run, as its detail lists them.
+        deliverables = [
+            deliverable
+            for deliverable in project_run_deliverables(
+                status=run.status,
+                outputs=build_run_output_contract(steps),
+                result_files=await self.flow_run_repo.list_result_files_for_runs(
+                    run_ids=[run.id], tenant_id=row.tenant_id
+                ),
+            )
+            if isinstance(deliverable, FlowRunDeliverablePublic)
+        ]
         check_run_result_files(deliverables)
         return payload, _RunResultSource(
             deliverables=deliverables,

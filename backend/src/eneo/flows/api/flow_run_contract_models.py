@@ -69,6 +69,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
     },
     "deliverables": [
         {
+            "kind": "artifact",
             "step_id": "00000000-0000-0000-0000-000000000102",
             "step_order": 2,
             "label": "Summary",
@@ -77,6 +78,7 @@ FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
             "delivery": "artifact",
         },
         {
+            "kind": "artifact",
             "step_id": "00000000-0000-0000-0000-000000000104",
             "step_order": 4,
             "label": "Report",
@@ -320,11 +322,19 @@ class FlowFinalOutputContractPublic(BaseModel):
     )
 
 
+_DELIVERABLE_KIND_DESCRIPTION = (
+    "Discriminator: `artifact` is a document to download, `text` is text the "
+    "step wrote. Other kinds may be added later; a client should skip one it "
+    "does not know."
+)
+
+
 class FlowDeliverableContractPublic(BaseModel):
     """A document every successful run of this version delivers."""
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["artifact"] = Field(description=_DELIVERABLE_KIND_DESCRIPTION)
     step_id: UUID = Field(
         description=(
             "Published step that produces the document. Unique in the list; it "
@@ -347,11 +357,49 @@ class FlowDeliverableContractPublic(BaseModel):
     )
     delivery: FlowOutputDelivery = Field(
         description=(
-            "How a client receives the document. Always `artifact` today: a file "
-            "downloaded from the run. Other values may be added later; a client "
-            "should skip one it does not know."
+            "How a client receives the document. Always `artifact`: a file "
+            "downloaded from the run."
         ),
     )
+
+
+class FlowTextDeliverableContractPublic(BaseModel):
+    """A text every successful run of this version delivers."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text"] = Field(description=_DELIVERABLE_KIND_DESCRIPTION)
+    step_id: UUID = Field(
+        description=(
+            "Published step that writes the text. Unique in the list; it "
+            "matches `FlowRunPublic.deliverables[].step_id`."
+        ),
+    )
+    step_order: int = Field(description="Published order of the step, from 1.")
+    label: str | None = Field(
+        default=None,
+        description=(
+            "What a client calls the text: the label the author gave it, or for "
+            "the last step without one, the step's name. Null when the last "
+            "step has no name."
+        ),
+    )
+    output_type: FlowOutputType = Field(description="`text`.")
+    output_mode: FlowOutputMode = Field(
+        description="Output mode of the step, as for `final_output`."
+    )
+    delivery: Literal["payload"] = Field(
+        description=(
+            "`payload`: the text is the step's output, not a file. A run result "
+            "sent to a receiver carries it whole."
+        ),
+    )
+
+
+FlowRunContractDeliverable: TypeAlias = Annotated[
+    FlowDeliverableContractPublic | FlowTextDeliverableContractPublic,
+    Field(discriminator="kind"),
+]
 
 
 class FlowRunDeliverablePublic(BaseModel):
@@ -359,12 +407,7 @@ class FlowRunDeliverablePublic(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    kind: Literal["artifact"] = Field(
-        description=(
-            "Discriminator: `artifact` is a document to download. Other kinds may "
-            "be added later; a client should skip one it does not know."
-        )
-    )
+    kind: Literal["artifact"] = Field(description=_DELIVERABLE_KIND_DESCRIPTION)
     step_id: UUID = Field(
         description=(
             "Published step that produced the document. Unique in the list: "
@@ -391,6 +434,39 @@ class FlowRunDeliverablePublic(BaseModel):
     )
 
 
+class FlowRunTextDeliverablePublic(BaseModel):
+    """A text the run delivered. Only what names it: the text is the step's
+    output."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text"] = Field(description=_DELIVERABLE_KIND_DESCRIPTION)
+    step_id: UUID = Field(
+        description="Published step that wrote the text. Unique in the list."
+    )
+    step_order: int = Field(description="Published order of the step, from 1.")
+    label: str | None = Field(
+        default=None,
+        description=(
+            "What a client calls the text, as in the run contract's "
+            "`deliverables`. Null when the last step has no name."
+        ),
+    )
+    output_type: FlowOutputType = Field(description="`text`.")
+    delivery: Literal["payload"] = Field(
+        description=(
+            "`payload`: the text is the step's output, read with the step's "
+            "result. A run result sent to a receiver carries it whole."
+        ),
+    )
+
+
+FlowRunDeliverable: TypeAlias = Annotated[
+    FlowRunDeliverablePublic | FlowRunTextDeliverablePublic,
+    Field(discriminator="kind"),
+]
+
+
 @dataclass(frozen=True, slots=True)
 class FlowRunOutputContract:
     """What a published version's runs return: the final output, and the
@@ -398,7 +474,7 @@ class FlowRunOutputContract:
     one without the other."""
 
     final_output: FlowFinalOutputContractPublic
-    deliverables: tuple[FlowDeliverableContractPublic, ...]
+    deliverables: tuple[FlowRunContractDeliverable, ...]
 
 
 class FlowRunInlineTextResultPublic(BaseModel):
@@ -745,14 +821,16 @@ class FlowRunContractPublic(BaseModel):
             "and `file_backed_text` for terminal text."
         ),
     )
-    deliverables: list[FlowDeliverableContractPublic] = Field(
-        default_factory=lambda: cast(list[FlowDeliverableContractPublic], []),
+    deliverables: list[FlowRunContractDeliverable] = Field(
+        default_factory=lambda: cast(list[FlowRunContractDeliverable], []),
         description=(
-            "Documents a successful run delivers, in step order: each step the "
-            "author marked as a deliverable, and the last step when its output is "
-            "a document. Use it to show every document a run returns, each with "
-            "its label; read `final_output` and `FlowRunPublic.result` for the "
-            "terminal output alone. Empty when the flow delivers no document."
+            "Texts and documents a successful run delivers, in step order: each "
+            "step the author marked as a deliverable, and the last step when its "
+            "output is text or a document. Branch on `kind`: an `artifact` is a "
+            "file, a `text` has no `files`. Use it to show everything a run "
+            "returns, each with its label; read `final_output` and "
+            "`FlowRunPublic.result` for the terminal output alone. Empty when the "
+            "flow delivers nothing."
         ),
     )
     form_fields: list[FormFieldPublic] = Field(

@@ -5,7 +5,12 @@ import json
 from datetime import datetime, timezone
 from typing import Any, cast
 
-from eneo.flows.api.flow_run_contract_models import FlowRunOutputContract
+from pydantic import TypeAdapter
+
+from eneo.flows.api.flow_run_contract_models import (
+    FlowRunOutputContract,
+    FlowRunTextDeliverablePublic,
+)
 from eneo.flows.application.flow_run_evidence_bundle import (
     EvidenceBundle,
     RedactedEvidenceBundle,
@@ -21,6 +26,7 @@ from eneo.flows.application.flow_run_evidence_export_manifest import (
     EvidenceReviewCheckpointSummary,
 )
 from eneo.flows.application.flow_run_evidence_export_summary import (
+    EvidenceDeliverable,
     EvidenceDeliverableFileSummary,
     EvidenceDeliverableSummary,
     EvidenceExportSummary,
@@ -29,6 +35,7 @@ from eneo.flows.application.flow_run_evidence_export_summary import (
     EvidenceStepInputLineageSummary,
     EvidenceStepKnowledgeRetrievalSummary,
     EvidenceStepOverview,
+    EvidenceTextDeliverableSummary,
     build_evidence_step_review_impacts_by_step_order,
     empty_evidence_step_review_impact,
 )
@@ -81,6 +88,8 @@ from eneo.flows.template_reference_analyzer import (
     consumes_runtime_input,
 )
 from eneo.main.config import get_settings
+
+_EVIDENCE_DELIVERABLE = TypeAdapter[EvidenceDeliverable](EvidenceDeliverable)
 
 _RETENTION_NOT_TRACKED_NOTE = (
     "Deletion provenance is not tracked; purged rows remain indistinguishable "
@@ -161,7 +170,7 @@ def render_evidence_json_export(
         review_checkpoint_summary=review_checkpoint_summary,
         deliverables=(
             [
-                EvidenceDeliverableSummary.model_validate(item)
+                _EVIDENCE_DELIVERABLE.validate_python(item)
                 for item in redact_payload(
                     [item.model_dump(mode="json") for item in deliverables]
                 )
@@ -321,7 +330,7 @@ def _build_summary_payload(
     *,
     provenance_parse_results: tuple[FlowAttemptProvenanceParseResult, ...],
     review_checkpoint_summary: EvidenceReviewCheckpointSummary,
-    deliverables: list[EvidenceDeliverableSummary],
+    deliverables: list[EvidenceDeliverable],
 ) -> EvidenceExportSummary:
     run = _as_json_object_or_empty(bundle_payload.get("run"))
     result_files = _result_file_records(bundle_payload)
@@ -383,7 +392,7 @@ def _build_summary_payload(
 
 def _deliverable_summaries(
     bundle_payload: dict[str, Any], *, outputs: FlowRunOutputContract | None
-) -> list[EvidenceDeliverableSummary]:
+) -> list[EvidenceDeliverable]:
     try:
         status = FlowRunStatus(
             _as_json_object_or_empty(bundle_payload.get("run")).get("status")
@@ -402,7 +411,11 @@ def _deliverable_summaries(
         ],
     )
     return [
-        EvidenceDeliverableSummary(
+        EvidenceTextDeliverableSummary(
+            step_order=deliverable.step_order, label=deliverable.label
+        )
+        if isinstance(deliverable, FlowRunTextDeliverablePublic)
+        else EvidenceDeliverableSummary(
             step_order=deliverable.step_order,
             label=deliverable.label,
             files=[

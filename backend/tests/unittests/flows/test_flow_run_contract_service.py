@@ -1399,14 +1399,31 @@ def _deliverables(steps: list[RuntimeStep]) -> list[tuple[int, str | None]]:
     outputs = build_run_output_contract(steps)
     assert outputs is not None
     for deliverable in outputs.deliverables:
-        assert deliverable.delivery is FlowOutputDelivery.ARTIFACT
+        assert deliverable.delivery == (
+            FlowOutputDelivery.PAYLOAD
+            if deliverable.kind == "text"
+            else FlowOutputDelivery.ARTIFACT
+        )
     return [(item.step_order, item.label) for item in outputs.deliverables]
 
 
-def test_a_text_flow_delivers_no_document() -> None:
+def test_a_text_flow_delivers_its_text() -> None:
     steps = [_output_step(1, "compose_text", "text", name="Skriv")]
 
-    assert _deliverables(steps) == []
+    outputs = build_run_output_contract(steps)
+
+    assert outputs is not None
+    assert [item.model_dump(mode="json") for item in outputs.deliverables] == [
+        {
+            "kind": "text",
+            "step_id": str(UUID(int=1)),
+            "step_order": 1,
+            "label": "Skriv",
+            "output_type": "text",
+            "output_mode": "compose_text",
+            "delivery": "payload",
+        }
+    ]
 
 
 def test_a_flow_whose_last_step_is_a_document_delivers_it() -> None:
@@ -1420,6 +1437,7 @@ def test_a_flow_whose_last_step_is_a_document_delivers_it() -> None:
     assert outputs is not None
     assert [item.model_dump(mode="json") for item in outputs.deliverables] == [
         {
+            "kind": "artifact",
             "step_id": str(UUID(int=2)),
             "step_order": 2,
             "label": "Skapa PDF",
@@ -1462,13 +1480,13 @@ def test_an_earlier_document_is_delivered_when_the_last_step_is_text() -> None:
 
     outputs = build_run_output_contract(steps)
 
-    assert _deliverables(steps) == [(1, "Plan")]
+    assert _deliverables(steps) == [(1, "Plan"), (3, "Sammanfattning")]
     assert outputs is not None
     assert outputs.final_output.step_order == 3
     assert outputs.final_output.delivery is FlowOutputDelivery.PAYLOAD
 
 
-def test_a_marked_step_without_a_document_is_never_delivered() -> None:
+def test_a_marked_text_is_delivered_and_a_step_that_sends_never_is() -> None:
     steps = [
         _output_step(
             1, "compose_text", "text", deliverable=FlowStepDeliverable(label="Text")
@@ -1478,7 +1496,7 @@ def test_a_marked_step_without_a_document_is_never_delivered() -> None:
         ),
     ]
 
-    assert _deliverables(steps) == []
+    assert _deliverables(steps) == [(1, "Text")]
 
 
 @pytest.mark.parametrize(

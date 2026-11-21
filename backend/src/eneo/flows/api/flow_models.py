@@ -55,6 +55,9 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunContractPublic as FlowRunContractPublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
+    FlowRunDeliverable as FlowRunDeliverable,
+)
+from eneo.flows.api.flow_run_contract_models import (
     FlowRunDeliverablePublic as FlowRunDeliverablePublic,
 )
 from eneo.flows.api.flow_run_contract_models import (
@@ -1860,15 +1863,16 @@ class FlowRunPublic(FlowRunSummaryPublic):
             "using its `file_id`, and only when its `availability` is `available`."
         ),
     )
-    deliverables: list[FlowRunDeliverablePublic] = Field(
-        default_factory=lambda: cast(list[FlowRunDeliverablePublic], []),
+    deliverables: list[FlowRunDeliverable] = Field(
+        default_factory=lambda: cast(list[FlowRunDeliverable], []),
         description=(
-            "Every document the run delivered, in step order, each with its "
-            "label and files: the run contract's `deliverables` for this run. "
-            "Read it to offer every document a flow makes; read `result` for the "
-            "terminal output alone. Each entry lists only the step's document "
-            "files, while `result.files` lists every current file of the last "
-            "step. Download a file with its `file_id` through "
+            "Every text and document the run delivered, in step order, each "
+            "with its label: the run contract's `deliverables` for this run. "
+            "Branch on `kind`: an `artifact` lists its files, a `text` has no "
+            "`files` and its text is the step's output. Read `result` for the "
+            "terminal output alone. An `artifact` lists only the step's "
+            "document files, while `result.files` lists every current file of "
+            "the last step. Download a file with its `file_id` through "
             "`POST {api_prefix}/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/`, "
             "and only when its `availability` is `available`. Empty until the "
             "run has completed."

@@ -14,13 +14,17 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowFinalOutputContractPublic,
     FlowMaxSpeakersOptionPublic,
     FlowReviewStepContractPublic,
+    FlowRunContractDeliverable,
     FlowRunContractPublic,
+    FlowRunDeliverable,
     FlowRunDeliverablePublic,
     FlowRunOutputContract,
+    FlowRunTextDeliverablePublic,
     FlowRuntimeInputContractPublic,
     FlowSecurityClassificationPublic,
     FlowSpeakerLabelsOptionPublic,
     FlowTemplateReadinessPublic,
+    FlowTextDeliverableContractPublic,
     FlowTextProcessingStepPublic,
     FlowTranscriptionContractPublic,
     FormFieldPublic,
@@ -49,6 +53,7 @@ from eneo.flows.enums import (
     FlowTemplateAssetStatus,
     final_output_delivery,
     final_step_output_type,
+    step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowValidationException
@@ -296,21 +301,38 @@ def build_run_output_contract(
         ]
     )
     deliverables = tuple(
-        FlowDeliverableContractPublic(
+        _deliverable_contract(steps[position]) for position in positions
+    )
+    return FlowRunOutputContract(final_output=final_output, deliverables=deliverables)
+
+
+def _deliverable_contract(step: RuntimeStep) -> FlowRunContractDeliverable:
+    label = (
+        step.deliverable.label
+        if step.deliverable is not None
+        else step.user_description
+    )
+    if step_delivers_artifact(
+        output_type=step.output_type, output_mode=step.output_mode
+    ):
+        return FlowDeliverableContractPublic(
+            kind="artifact",
             step_id=step.step_id,
             step_order=step.step_order,
-            label=(
-                step.deliverable.label
-                if step.deliverable is not None
-                else step.user_description
-            ),
+            label=label,
             output_type=FlowOutputType(step.output_type),
             output_mode=FlowOutputMode(step.output_mode),
             delivery=FlowOutputDelivery.ARTIFACT,
         )
-        for step in (steps[position] for position in positions)
+    return FlowTextDeliverableContractPublic(
+        kind="text",
+        step_id=step.step_id,
+        step_order=step.step_order,
+        label=label,
+        output_type=FlowOutputType(step.output_type),
+        output_mode=FlowOutputMode(step.output_mode),
+        delivery="payload",
     )
-    return FlowRunOutputContract(final_output=final_output, deliverables=deliverables)
 
 
 def project_run_deliverables(
@@ -318,16 +340,26 @@ def project_run_deliverables(
     status: FlowRunStatus,
     outputs: FlowRunOutputContract | None,
     result_files: Sequence[FlowRunStepResultFile],
-) -> list[FlowRunDeliverablePublic]:
-    """The documents a run delivered, each with the document files of its
-    step in ``result_files``, which hold each step's current attempt. Only a
-    completed run delivers: any other gives none, whatever its version's
-    contract says. A deliverable before the last step may have no file; the
-    last step's missing file is ``result``'s error to report."""
+) -> list[FlowRunDeliverable]:
+    """The texts and documents a run delivered, each document with the
+    document files of its step in ``result_files``, which hold each step's
+    current attempt. Only a completed run delivers: any other gives none,
+    whatever its version's contract says. A deliverable before the last step
+    may have no file; the last step's missing file is ``result``'s error to
+    report."""
     if status is not FlowRunStatus.COMPLETED or outputs is None:
         return []
     return [
-        FlowRunDeliverablePublic(
+        FlowRunTextDeliverablePublic(
+            kind="text",
+            step_id=deliverable.step_id,
+            step_order=deliverable.step_order,
+            label=deliverable.label,
+            output_type=deliverable.output_type,
+            delivery="payload",
+        )
+        if deliverable.kind == "text"
+        else FlowRunDeliverablePublic(
             kind="artifact",
             step_id=deliverable.step_id,
             step_order=deliverable.step_order,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -111,9 +111,27 @@ class EvidenceDeliverableSummary(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    kind: Literal["artifact"] = "artifact"
     step_order: int
     label: str | None
     files: list[EvidenceDeliverableFileSummary]
+
+
+class EvidenceTextDeliverableSummary(BaseModel):
+    """A text the run delivered, by its step and label; the text itself is
+    the step's output in the bundle."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["text"] = "text"
+    step_order: int
+    label: str | None
+
+
+EvidenceDeliverable: TypeAlias = Annotated[
+    EvidenceDeliverableSummary | EvidenceTextDeliverableSummary,
+    Field(discriminator="kind"),
+]
 
 
 class EvidenceStepReviewEvent(BaseModel):
@@ -214,12 +232,12 @@ class EvidenceExportSummary(BaseModel):
     citations: JsonObject
     review_checkpoints: EvidenceReviewCheckpointSummary
     final_output: EvidenceFinalOutputSummary
-    deliverables: list[EvidenceDeliverableSummary] = Field(
-        default_factory=lambda: list[EvidenceDeliverableSummary](),
+    deliverables: list[EvidenceDeliverable] = Field(
+        default_factory=lambda: list[EvidenceDeliverable](),
         description=(
-            "Documents the run delivered, in step order, with each step's "
-            "current document files. Empty until the run has completed. Kept "
-            "out of the hashed bundle."
+            "Texts and documents the run delivered, in step order, each "
+            "document with its step's current document files. Empty until the "
+            "run has completed. Kept out of the hashed bundle."
         ),
     )
     step_overview: list[EvidenceStepOverview]

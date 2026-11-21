@@ -919,6 +919,29 @@ def test_a_deliverable_lists_only_its_steps_current_document_files() -> None:
     assert run["deliverables"][1]["files"][0]["availability"] == "available"
 
 
+def test_a_marked_text_is_listed_without_files_in_the_run_and_the_export() -> None:
+    _, version, steps = _definition({16: {"label": "Brukartext"}})
+    step_results, step_attempts, files = _retried_history(steps)
+    history = (step_results, step_attempts, files)
+
+    run = _run_public(steps, result_files=_current_attempt_files(step_results, files))
+    raw = _evidence_export(version, steps, redacted=False, history=history)
+    redacted = _evidence_export(version, steps, redacted=True, history=history)
+
+    text = {"kind": "text", "step_order": 16, "label": "Brukartext"}
+    assert [item["kind"] for item in run["deliverables"]] == ["text", "artifact"]
+    assert run["deliverables"][0] == {
+        **text,
+        "step_id": str(steps[15].step_id),
+        "output_type": "text",
+        "delivery": "payload",
+    }
+    for summary in (raw["summary"], redacted["summary"]):
+        assert summary["deliverables"][0] == text
+        assert summary["deliverables"][1]["kind"] == "artifact"
+        assert summary["deliverables"][1]["step_order"] == 17
+
+
 def test_deliverables_stay_out_of_the_hashed_evidence_bundle() -> None:
     _, version, steps = _definition()
     history = _retried_history(steps)
