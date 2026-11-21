@@ -1,33 +1,80 @@
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
-import { ClientTime } from "@/components/composites/client-time";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
 
-type Delivery = Schema<"FlowRunWebhookDeliveryPublic">;
+export type Delivery = Schema<"FlowRunWebhookDeliveryStatePublic">;
 
-/** A pending delivery that has failed once is retrying, not on its way for the first time. */
-function deliveryView(delivery: Delivery): { tone: StatusTone; labelKey: string } {
-  switch (delivery.delivery_status) {
-    case "delivered":
-      return { tone: "success", labelKey: "flow_run_extras_webhook_delivered" };
-    case "dead_lettered":
-      return { tone: "error", labelKey: "flow_run_extras_webhook_dead_lettered" };
-    case "pending":
-      return delivery.delivery_attempts > 0
-        ? { tone: "warning", labelKey: "flow_run_extras_webhook_retrying" }
-        : { tone: "neutral", labelKey: "flow_run_extras_webhook_pending" };
-  }
+/**
+ * Whether the delivery is still under way: being sent, or a new attempt is
+ * planned. The core's `state` says which; the count of attempts does not, as
+ * it counts an attempt while it is being sent.
+ */
+export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | undefined): boolean {
+  return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
+}
+
+/**
+ * The deliveries as they stand: the detail's list, with the run's latest
+ * delivery as its status last said it (`latest`), which is newer than the
+ * detail once the run has completed.
+ */
+export function currentDeliveries(
+  deliveries: readonly Delivery[],
+  latest: Delivery | null | undefined
+): Delivery[] {
+  if (!latest) return [...deliveries];
+  const listed = deliveries.some((delivery) => delivery.id === latest.id);
+  return listed
+    ? deliveries.map((delivery) => (delivery.id === latest.id ? latest : delivery))
+    : [...deliveries, latest];
+}
+
+const TONES: Record<Delivery["state"], StatusTone> = {
+  sending: "neutral",
+  retry_scheduled: "warning",
+  delivered: "success",
+  dead_lettered: "error"
+};
+
+/** A plain POST's words: the run waits for it, and fails when it cannot be delivered. */
+const POST_LABELS: Record<Delivery["state"], string> = {
+  sending: "flow_run_extras_webhook_pending",
+  retry_scheduled: "flow_run_extras_webhook_retrying",
+  delivered: "flow_run_extras_webhook_delivered",
+  dead_lettered: "flow_run_extras_webhook_dead_lettered"
+};
+
+/** The words for the run's result, sent once the run has completed: never about the run failing. */
+const SENT_LABELS: Record<Exclude<Delivery["state"], "retry_scheduled">, string> = {
+  sending: "flow_run_extras_send_sending",
+  delivered: "flow_run_extras_send_delivered",
+  dead_lettered: "flow_run_extras_send_dead_lettered"
+};
+
+function DeliveryState({ delivery, afterRun }: { delivery: Delivery; afterRun: boolean }) {
+  const t = useTranslations();
+  const retryAt = useClientTimeText(delivery.next_delivery_at, "time");
+  const label = !afterRun
+    ? t(POST_LABELS[delivery.state])
+    : delivery.state === "retry_scheduled"
+      ? t("flow_run_extras_send_retry_at", { time: retryAt ?? "" })
+      : t(SENT_LABELS[delivery.state]);
+  return <StatusLabel status={TONES[delivery.state]} label={label} />;
 }
 
 /** How many tries so far, and when it landed, was given up or will be tried next. */
-function DeliveryDetail({ delivery }: { delivery: Delivery }) {
+function DeliveryDetail({ delivery, afterRun }: { delivery: Delivery; afterRun: boolean }) {
   const t = useTranslations();
   const settled = delivery.delivered_at ?? delivery.dead_lettered_at;
-  const retryAt = delivery.delivery_attempts > 0 ? delivery.next_delivery_at : null;
+  // The run's result says its next attempt in its state already.
+  const retryAt =
+    !afterRun && delivery.state === "retry_scheduled" ? delivery.next_delivery_at : null;
+  // An attempt being sent is counted already; it is said once it has an outcome.
   const attempts =
-    delivery.delivery_attempts > 0
+    delivery.delivery_attempts > 0 && delivery.state !== "sending"
       ? t("flow_run_extras_webhook_attempts_count", { count: delivery.delivery_attempts })
       : null;
   if (!attempts && !settled && !retryAt) return null;
@@ -49,39 +96,48 @@ function DeliveryDetail({ delivery }: { delivery: Delivery }) {
 /**
  * Where the run's result went: per step that sends it on, whether the
  * receiver got it, is being retried or was given up, after how many tries,
- * and when. Part of the run detail already read.
+ * and when, in the state the core gives. A step that sends the run's result
+ * once the run has completed (`sentAfterRun`) has words of its own: its
+ * delivery never makes the run fail.
  */
 export function RunWebhookDeliveries({
   deliveries,
-  stepName
+  stepName,
+  sentAfterRun
 }: {
   deliveries: readonly Delivery[];
   /** The step's title in this run, by its order. */
   stepName: (order: number) => string;
+  /** Whether the step at `order` sends the run's result once the run has completed. */
+  sentAfterRun: (order: number) => boolean;
 }) {
   const t = useTranslations();
-  const unsettled = deliveries.some((delivery) => delivery.delivery_status !== "delivered");
+  const unsettled = deliveries.filter((delivery) => delivery.state !== "delivered");
   return (
     <div className="flex flex-col gap-2">
       <List hasDividers density="compact" edge="flush">
         {[...deliveries]
           .sort((a, b) => a.step_order - b.step_order)
           .map((delivery) => {
-            const view = deliveryView(delivery);
+            const afterRun = sentAfterRun(delivery.step_order);
             return (
               <ListItem
                 key={delivery.id}
                 // A long step name wraps; a phone would cut it off.
                 label={<span className="text-pretty">{stepName(delivery.step_order)}</span>}
-                description={<DeliveryDetail delivery={delivery} />}
-                endContent={<StatusLabel status={view.tone} label={t(view.labelKey)} />}
+                description={<DeliveryDetail delivery={delivery} afterRun={afterRun} />}
+                endContent={<DeliveryState delivery={delivery} afterRun={afterRun} />}
               />
             );
           })}
       </List>
-      {unsettled && (
+      {unsettled.length > 0 && (
         <Text type="supporting" size="sm" as="p" display="block" className="m-0 text-pretty">
-          {t("flow_run_extras_webhook_retry_note")}
+          {t(
+            unsettled.every((delivery) => sentAfterRun(delivery.step_order))
+              ? "flow_run_extras_send_retry_note"
+              : "flow_run_extras_webhook_retry_note"
+          )}
         </Text>
       )}
     </div>

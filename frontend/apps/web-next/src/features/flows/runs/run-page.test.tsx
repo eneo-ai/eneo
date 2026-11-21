@@ -449,7 +449,8 @@ describe("FlowRunPage", () => {
   });
 
   it("shows a step's prompt and model settings when asked, and the run's webhook deliveries", async () => {
-    const summary = makeRunSummary();
+    // A plain POST that was given up fails its run.
+    const summary = makeRunSummary({ status: "failed" });
     answerRun(
       summary,
       makeRunDetail({
@@ -582,15 +583,18 @@ describe("FlowRunPage", () => {
       updated_at: "2026-10-21T08:01:00Z",
       state: attempts > 0 ? ("retry_scheduled" as const) : ("sending" as const)
     });
+    // An attempt being sent is counted, and it is still being sent, not tried again.
+    const sending = { ...delivery(1), next_delivery_at: null, state: "sending" as const };
     answerRun(
-      running,
-      makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(0)] })
+      { ...running, result_delivery: sending },
+      makeRunDetail({ ...running, result: null, webhook_deliveries: [sending] })
     );
     renderRun();
 
     expect(
       await screen.findByText(`· ${messages.flow_run_progress_delivery_summary}`)
     ).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_webhook_pending)).toBeTruthy();
     expect(screen.queryByText(`· ${messages.flow_run_progress_pending_summary}`)).toBeNull();
     // The delivery fold is open: it is what the run waits on.
     const deliveries = screen.getByRole("region", {
@@ -604,13 +608,16 @@ describe("FlowRunPage", () => {
 
     cleanup();
     answerRun(
-      running,
+      { ...running, result_delivery: delivery(2) },
       makeRunDetail({ ...running, result: null, webhook_deliveries: [delivery(2)] })
     );
     renderRun();
     expect(
       await screen.findByText(`· ${messages.flow_run_progress_delivery_retrying_summary}`)
     ).toBeTruthy();
+    // A plain POST keeps its own words.
+    expect(screen.getByText(messages.flow_run_extras_webhook_retrying)).toBeTruthy();
+    expect(screen.getByText(messages.flow_run_extras_webhook_retry_note)).toBeTruthy();
   });
 
   it("cancels a running run after asking, and says what the core answered", async () => {
@@ -824,23 +831,140 @@ describe("FlowRunPage", () => {
     );
   });
 
-  it("reads a completed run again while its result is on its way, and stops once it arrived", async () => {
+  /** The delivery of the step that sends the run's result, as the core says it stands. */
+  function resultDelivery(overrides: Partial<NonNullable<RunSummary["result_delivery"]>> = {}) {
+    return {
+      id: "delivery-1",
+      step_id: "step-2",
+      step_order: 2,
+      attempt_no: 1,
+      delivery_status: "pending" as const,
+      delivery_attempts: 0,
+      next_delivery_at: null,
+      delivered_at: null,
+      dead_lettered_at: null,
+      created_at: "2026-10-21T08:01:07Z",
+      updated_at: "2026-10-21T08:01:07Z",
+      state: "sending" as const,
+      ...overrides
+    };
+  }
+
+  /** A completed run whose last step sends its result afterwards (the core's step diagnostic). */
+  function answerSentAfterRun(delivery: ReturnType<typeof resultDelivery>) {
+    const completed = makeRunSummary({ result_delivery: delivery });
+    answerRun(
+      completed,
+      makeRunDetail({
+        ...completed,
+        result: { kind: "outbound_http", delivery_status: delivery.delivery_status },
+        webhook_deliveries: [delivery]
+      })
+    );
+    state.routes[STEPS] = () => ({
+      body: [
+        makeRunStep(1),
+        makeRunStep(2, {
+          output_payload_json: { text: "" },
+          diagnostics: [
+            { code: "run_result_sent_after_run", message: "Sent after the run.", severity: "info" }
+          ]
+        })
+      ]
+    });
+  }
+
+  it("follows the result sent after the run through its status alone, in the state the core gives", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const completed = makeRunSummary();
-    const sent = (delivery_status: "pending" | "delivered") =>
-      makeRunDetail({ ...completed, result: { kind: "outbound_http", delivery_status } });
-    answerRun(completed, sent("pending"));
-    renderRun();
-    expect(await screen.findByText(messages.flow_runs_result_sending)).toBeTruthy();
-    const read = calls(DETAIL).length;
+    // An attempt being sent is counted: still "Skickas", never a retry.
+    answerSentAfterRun(resultDelivery({ delivery_attempts: 1 }));
+    const { container } = renderRun();
+    const sending = await screen.findByRole("region", {
+      name: messages.flow_run_extras_send_heading
+    });
+    expect(within(sending).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
+    expect(screen.getByText(messages.flow_run_extras_send_retry_note)).toBeTruthy();
+    await expectNoAxeViolations(container);
+    const [details, graphs, steps] = [
+      calls(DETAIL).length,
+      calls(GRAPH).length,
+      calls(STEPS).length
+    ];
 
-    answerRun(completed, sent("delivered"));
-    await act(() => vi.advanceTimersByTimeAsync(30_100));
-    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
-    expect(calls(DETAIL)).toHaveLength(read + 1);
+    // The core plans a new attempt: both rows say when, from the same state.
+    const retry = resultDelivery({
+      delivery_attempts: 1,
+      next_delivery_at: "2026-10-21T08:05:00Z",
+      state: "retry_scheduled"
+    });
+    state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: retry }) });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const retryLabel = await within(sending).findByText(/^Nytt försök kl\. \d{1,2}[:.]\d{2}$/);
+    const time = retryLabel.textContent!.replace("Nytt försök kl. ", "");
+    expect(
+      screen.getByText(messages.flow_runs_result_retry_at.replace("{time}", time))
+    ).toBeTruthy();
 
+    // Delivered: the status says so, and nothing is read again after it.
+    const delivered = resultDelivery({
+      delivery_status: "delivered",
+      delivery_attempts: 2,
+      delivered_at: "2026-10-21T08:05:01Z",
+      state: "delivered"
+    });
+    state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: delivered }) });
+    await act(() => vi.advanceTimersByTimeAsync(5_100));
+    expect(await within(sending).findByText(messages.flow_run_extras_send_delivered)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    const statuses = calls(STATUS).length;
     await act(() => vi.advanceTimersByTimeAsync(60_000));
-    expect(calls(DETAIL)).toHaveLength(read + 1);
+    expect(calls(STATUS)).toHaveLength(statuses);
+    expect([calls(DETAIL).length, calls(GRAPH).length, calls(STEPS).length]).toEqual([
+      details,
+      graphs,
+      steps
+    ]);
+  });
+
+  it("uses the words for the result sent after the run as soon as the run completes, before its steps are read again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+
+    // The run completes and its result is on its way; the steps are not read yet.
+    answerSentAfterRun(resultDelivery());
+    const release = holdAnswers(STEPS);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
+    release();
+  });
+
+  it("keeps a run complete when the result sent after it could not be sent", async () => {
+    answerSentAfterRun(
+      resultDelivery({
+        delivery_status: "dead_lettered",
+        delivery_attempts: 5,
+        dead_lettered_at: "2026-10-21T08:30:00Z",
+        state: "dead_lettered"
+      })
+    );
+    renderRun();
+    const region = await screen.findByRole("region", {
+      name: messages.flow_run_extras_send_heading
+    });
+    expect(within(region).getByText(messages.flow_run_extras_send_dead_lettered)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_not_delivered)).toBeTruthy();
+    expect(screen.getAllByText(messages.flow_runs_status_completed).length).toBeGreaterThan(0);
+    expect(screen.queryByText(messages.flow_runs_status_failed)).toBeNull();
+    expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
   });
 
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {

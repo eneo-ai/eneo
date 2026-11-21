@@ -4,16 +4,25 @@ import { Timestamp } from "@astryxdesign/core/Timestamp";
 export type ClientTimeFormat = "date" | "date_long" | "date_time" | "relative" | "auto";
 
 type AbsoluteFormat = Exclude<ClientTimeFormat, "relative" | "auto">;
+/** `time`: the time of day alone, for a sentence that is about today ("Nytt försök kl. 14:05"). */
+type TextFormat = AbsoluteFormat | "time";
 
 /**
  * Timestamp's options for the absolute formats. Astryx exports no formatter,
  * so these mirror its formatInstant.ts; client-time.test.tsx checks that
  * useClientTimeText writes what ClientTime shows.
  */
-const TEXT_OPTIONS: Record<AbsoluteFormat, Intl.DateTimeFormatOptions> = {
+const TEXT_OPTIONS: Record<TextFormat, Intl.DateTimeFormatOptions> = {
   date: { year: "numeric", month: "short", day: "numeric" },
   date_long: { year: "numeric", month: "long", day: "numeric" },
-  date_time: { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }
+  date_time: {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  },
+  time: { hour: "numeric", minute: "2-digit" }
 };
 
 /**
@@ -49,7 +58,7 @@ export function ClientTime({ value, format }: { value: string; format: ClientTim
  */
 export function useClientTimeText(
   value: string | null | undefined,
-  format: AbsoluteFormat
+  format: TextFormat
 ): string | null {
   const locale = useLocale();
   const date = value ? new Date(value) : null;
