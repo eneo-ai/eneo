@@ -535,13 +535,12 @@ export function applyOutputModeChange(step: StepConfig, mode: OutputMode): StepC
 }
 
 /**
- * The outbound call changed. Choosing the body that sends the run's result
- * settles the step, as it then calls no model; another edit of the call
- * leaves the step's other settings as they are.
+ * The outbound call changed: the step's other settings stay as they are. No
+ * edit of the call makes a step send the run's result; that is a kind of
+ * step of its own.
  */
 export function applyHttpOutputChange(step: StepConfig, http: HttpConfig): StepConfig {
-  const next = { ...step, output_config: withHttpConfig(step.output_config, http) };
-  return sendsRunResult(next) && !sendsRunResult(step) ? settle(next) : next;
+  return { ...step, output_config: withHttpConfig(step.output_config, http) };
 }
 
 export function applyOutputTypeChange(step: StepConfig, type: OutputType): StepConfig {

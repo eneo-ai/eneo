@@ -318,11 +318,13 @@ describe("FlowStepEditor", () => {
         ]
       })
     );
-    const body = await screen.findByRole("combobox", {
-      name: new RegExp(`^${messages.flow_step_editor_http_body}`)
-    });
-    expect(body.textContent).toContain(messages.flow_step_editor_http_body_run_result);
-    expect(screen.getByText(messages.flow_step_editor_run_result_description)).toBeTruthy();
+    expect(await screen.findByText(messages.flow_step_editor_run_result_description)).toBeTruthy();
+    // What it sends is the step's kind, not a choice of body.
+    expect(
+      screen.queryByRole("combobox", {
+        name: new RegExp(`^${messages.flow_step_editor_http_body}`)
+      })
+    ).toBeNull();
     expect(
       screen.getByRole("textbox", {
         name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
@@ -2750,63 +2752,28 @@ describe("FlowStepEditor deliverables", () => {
   const bodyChoice = () =>
     screen.findByRole("combobox", { name: new RegExp(`^${messages.flow_step_editor_http_body}`) });
 
-  async function chooseBody(label: string) {
+  it("offers a plain POST no body that sends the run's result, and the step that sends it keeps its body", async () => {
+    let view = renderEditor(resultFlow({ body: { mode: "auto" } }), { stepId: "step-2" });
     fireEvent.click(await bodyChoice());
-    fireEvent.click(
-      within(
-        await screen.findByRole("listbox", {
-          name: new RegExp(`^${messages.flow_step_editor_http_body}`)
-        })
-      ).getByRole("option", { name: label })
-    );
-  }
-
-  const outputConfigOf = (index: number) =>
-    (
-      patchBodies()[index] as {
-        step_edits: { changes: { output_config: Record<string, unknown> } }[];
-      }
-    ).step_edits[0]!.changes.output_config;
-
-  it("sends the run's result when chosen, keeps it when reopened, and goes back to the step's own result", async () => {
-    const current = storeEdits(
-      resultFlow({ body: { mode: "json_template", template: '{"text": "{{text}}"}' } })
-    );
-    let view = renderEditor(current(), { stepId: "step-2" });
-    expect(
-      await screen.findByRole("textbox", {
-        name: new RegExp(`^${messages.flow_step_editor_http_body_template}`)
+    const options = within(
+      await screen.findByRole("listbox", {
+        name: new RegExp(`^${messages.flow_step_editor_http_body}`)
       })
-    ).toBeTruthy();
-    await chooseBody(messages.flow_step_editor_http_body_run_result);
-    // The template does not apply: Eneo builds the body.
-    await waitFor(() =>
-      expect(
-        screen.queryByRole("textbox", {
-          name: new RegExp(`^${messages.flow_step_editor_http_body_template}`)
-        })
-      ).toBeNull()
-    );
-    const sends = screen.getByRole("region", {
-      name: messages.flow_step_editor_run_result_sends_title
-    });
-    expect(within(sends).getByText("Till Startsidan")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: messages.http_test_button })).toBeNull();
-    await expectNoAxeViolations(view.container);
-    await saveStep();
-    expect(outputConfigOf(0).body).toEqual({ mode: "run_result" });
-    view.unmount();
-
-    view = renderEditor(current(), { stepId: "step-2" });
-    expect((await bodyChoice()).textContent).toContain(
+    ).getAllByRole("option");
+    expect(options.map((option) => option.textContent)).not.toContain(
       messages.flow_step_editor_http_body_run_result
     );
-    await chooseBody(messages.flow_step_editor_http_body_auto);
-    expect(
-      screen.queryByRole("heading", { name: messages.flow_step_editor_run_result_sends_title })
-    ).toBeNull();
+    view.unmount();
+
+    const current = storeEdits(resultFlow({ body: { mode: "run_result" } }));
+    view = renderEditor(current(), { stepId: "step-2" });
+    fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
     await saveStep();
-    expect(outputConfigOf(1).body).toEqual({ mode: "auto" });
+    // Only the name changes: nothing in the editor turns the step into a plain POST.
+    const changes = (patchBodies()[0] as { step_edits: { changes: Record<string, unknown> }[] })
+      .step_edits[0]!.changes;
+    expect(changes).toMatchObject({ user_description: "Skicka till intranätet" });
+    expect(changes).not.toHaveProperty("output_config");
   }, 30_000);
 
   it("lists the step before the send by its name when nothing is marked", async () => {
@@ -2899,40 +2866,6 @@ describe("FlowStepEditor deliverables", () => {
     fireEvent.click(screen.getByRole("button", { name: "Öppna steg 0 – Anteckningar" }));
     expect(onGo).toHaveBeenCalledWith("step-0");
   }, 20_000);
-
-  it("calls no model when it sends the run's result: the AI's task goes and the result is text", async () => {
-    const start = resultFlow({ citation_mode: "inline_inref_sidecar" });
-    const current = storeEdits({
-      ...start,
-      steps: start.steps.map((step) =>
-        step.id === "step-2"
-          ? { ...step, output_type: "json", input_config: { long_material: { mode: "digest" } } }
-          : step
-      )
-    });
-    renderEditor(current(), { stepId: "step-2" });
-    // An ordinary outbound step: an AI answers, with an instruction and a model.
-    const aiHeading = () =>
-      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_ai_title });
-    await waitFor(() => expect(aiHeading()).toBeTruthy());
-    expect(
-      screen.getByRole("switch", { name: new RegExp(`^${messages.flow_step_citation_mode}`) })
-    ).toBeTruthy();
-    await chooseBody(messages.flow_step_editor_http_body_run_result);
-    await waitFor(() => expect(aiHeading()).toBeNull());
-    expect(
-      screen.queryByRole("switch", { name: new RegExp(`^${messages.flow_step_citation_mode}`) })
-    ).toBeNull();
-    // Nothing hidden holds the save back.
-    await saveStep();
-    const body = patchBodies()[0] as {
-      step_edits: { changes: { output_type: string; input_config: unknown } }[];
-    };
-    expect(body.step_edits[0]!.changes.output_type).toBe("text");
-    expect(body.step_edits[0]!.changes.input_config).toBeNull();
-    expect(outputConfigOf(0)).not.toHaveProperty("citation_mode");
-    expect(body).not.toHaveProperty("assistants");
-  }, 30_000);
 
   it("holds the run's result to a fixed https address and its own Content-Type before saving", async () => {
     let view = renderEditor(

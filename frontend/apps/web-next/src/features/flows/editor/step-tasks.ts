@@ -5,6 +5,7 @@ import {
   Download,
   FileInput,
   FileText,
+  Globe,
   PencilLine,
   Plus,
   Send,
@@ -38,6 +39,8 @@ export type StepTask = {
   aliases: string;
   /** Offered only where its kind reads JSON: after a step that answers in a fixed format. */
   readsJson?: true;
+  /** No "in → out" on the row: the step reads no one input and gives no output of its own. */
+  hidesFlow?: true;
 };
 
 export const STEP_TASKS: readonly StepTask[] = [
@@ -126,10 +129,17 @@ export const STEP_TASKS: readonly StepTask[] = [
     aliases: "mcp verktyg anropa"
   },
   {
+    id: "send_run_result",
+    kind: "send_run_result",
+    icon: Send,
+    aliases: "skicka resultat leverans utskick webbadress https webhook mottagare startsida",
+    hidesFlow: true
+  },
+  {
     id: "send_http",
     kind: "send_http",
-    icon: Send,
-    aliases: "api http post webhook skicka ärendesystem"
+    icon: Globe,
+    aliases: "api http post webhook skicka ärendesystem webbtjänst integration"
   },
   {
     id: "blank",
@@ -169,12 +179,16 @@ export function taskFits(task: StepTask, option: StepKindOption | null): boolean
   return !task.readsJson || option.configuration.input_type === "json";
 }
 
+function queryWords(query: string): string[] {
+  return query.toLocaleLowerCase("sv").split(/\s+/).filter(Boolean);
+}
+
 /**
  * Whether `query` finds the task: every word of it in the name, the
  * description or the aliases, ignoring case.
  */
 export function taskMatches(task: StepTask, query: string, text: (key: string) => string) {
-  const words = query.toLocaleLowerCase("sv").split(/\s+/).filter(Boolean);
+  const words = queryWords(query);
   if (words.length === 0) return true;
   const haystack = [
     text(`flow_add_step_${task.id}`),
@@ -184,6 +198,13 @@ export function taskMatches(task: StepTask, query: string, text: (key: string) =
     .join(" ")
     .toLocaleLowerCase("sv");
   return words.every((word) => haystack.includes(word));
+}
+
+/** Whether every word of `query` is in the task's name: such a match ranks before the others. */
+export function taskNameMatches(task: StepTask, query: string, text: (key: string) => string) {
+  const words = queryWords(query);
+  const name = text(`flow_add_step_${task.id}`).toLocaleLowerCase("sv");
+  return words.length > 0 && words.every((word) => name.includes(word));
 }
 
 /** The document format a search asks for: PDF when it names it, else Word. */

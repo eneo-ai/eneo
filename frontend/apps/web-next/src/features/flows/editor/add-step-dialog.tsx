@@ -24,7 +24,7 @@ import {
 } from "./editor-api";
 import { problemStatus } from "./editor-fields";
 import { describeSaveError, isStaleRevision } from "./field-problems";
-import { httpUrlProblem } from "./step-configs";
+import { httpUrlProblem, runResultUrlFixed } from "./step-configs";
 import {
   kindOption,
   kindRefusalText,
@@ -42,6 +42,7 @@ import {
   taskFits,
   taskFlow,
   taskMatches,
+  taskNameMatches,
   taskStepName,
   type StepTask
 } from "./step-tasks";
@@ -50,6 +51,11 @@ import type { FlowPublic, ToolOption } from "./step-types";
 type Field = "url" | "tool";
 type Problems = Partial<Record<Field, string>>;
 type Row = { task: StepTask; option: StepKindOption };
+
+/** The kinds the author gives an address before adding. */
+function asksForUrl(kind: StepKindOption["kind"]): boolean {
+  return kind === "fetch_http" || kind === "send_http" || kind === "send_run_result";
+}
 
 function toolKey(tool: Pick<ToolOption, "mcp_server_id" | "tool_id">): string {
   return `${tool.mcp_server_id}:${tool.tool_id}`;
@@ -193,10 +199,19 @@ function AddStepPicker({
       { task, option: personal && option.kind === "tool" ? { ...option, allowed: false } : option }
     ];
   });
-  const found = rows.filter((row) => taskMatches(row.task, query, text));
+  const searched = query.trim();
+  const matches = rows.filter((row) => taskMatches(row.task, query, text));
+  // A search is one ranked list: rows whose name has the words first ("skicka" finds
+  // "Skicka körningens resultat" before a row that only mentions sending).
+  const found = searched
+    ? [
+        ...matches.filter((row) => taskNameMatches(row.task, query, text)),
+        ...matches.filter((row) => !taskNameMatches(row.task, query, text))
+      ]
+    : matches;
   const allowed = found.filter((row) => row.option.allowed);
   const refused = found.filter((row) => !row.option.allowed);
-  const recommendedIds = recommendedTaskIds(before ? before.output_type : null);
+  const recommendedIds = searched ? [] : recommendedTaskIds(before ? before.output_type : null);
   const recommended = allowed.filter((row) => recommendedIds.includes(row.task.id));
   const more = allowed.filter((row) => !recommendedIds.includes(row.task.id));
   const selected =
@@ -209,7 +224,6 @@ function AddStepPicker({
   // What the search leaves and what Enter in it adds, or that nothing can be
   // added here, said once the place's kinds are in (WCAG 4.1.3); clearing the
   // search drops what was said.
-  const searched = query.trim();
   const firstMatch = recommended[0] ?? more[0];
   const nothingFound = searched
     ? t("flow_add_step_no_results", { query: searched })
@@ -331,10 +345,14 @@ function AddStepPicker({
   function confirm(row: Row | null) {
     if (!row || add.isPending) return;
     const found: Problems = {};
-    if (row.option.kind === "fetch_http" || row.option.kind === "send_http") {
+    if (asksForUrl(row.option.kind)) {
       const urlProblem = httpUrlProblem(url);
       if (urlProblem === "missing") found.url = t("flow_step_editor_http_url_missing");
       else if (urlProblem === "invalid") found.url = t("flow_step_editor_http_url_invalid");
+      // The step's own rule: run data may not choose where the run's result goes.
+      else if (row.option.kind === "send_run_result" && !runResultUrlFixed(url)) {
+        found.url = t("flow_step_editor_http_run_result_url_fixed");
+      }
     }
     if (row.option.kind === "tool" && !tool) found.tool = t("flow_step_editor_tool_required");
     const first = (["url", "tool"] as const).find((field) => found[field]);
@@ -382,7 +400,8 @@ function AddStepPicker({
       >
         {members.map(({ task, option }) => {
           const Icon = task.icon;
-          const flowLabel = task.id === "blank" ? null : taskFlow(option, format, text);
+          const flowLabel =
+            task.id === "blank" || task.hidesFlow ? null : taskFlow(option, format, text);
           const io = flowLabel ? `${flowLabel.from} → ${flowLabel.to}` : null;
           return (
             <RadioListItem
@@ -592,15 +611,21 @@ function AddStepPicker({
                   <RadioListItem value="pdf" label={t("flow_output_type_pdf")} />
                 </RadioList>
               )}
-              {(kind === "fetch_http" || kind === "send_http") && (
+              {kind && asksForUrl(kind) && (
                 <TextInput
                   ref={urlRef}
                   label={
                     kind === "fetch_http"
                       ? t("flow_step_editor_http_url_get")
-                      : t("flow_step_editor_http_url_post")
+                      : kind === "send_run_result"
+                        ? t("flow_step_editor_http_url_run_result")
+                        : t("flow_step_editor_http_url_post")
                   }
-                  description={t("flow_step_editor_http_url_description")}
+                  description={
+                    kind === "send_run_result"
+                      ? t("flow_step_editor_http_url_run_result_description")
+                      : t("flow_step_editor_http_url_description")
+                  }
                   value={url}
                   onChange={(value) => {
                     setUrl(value);

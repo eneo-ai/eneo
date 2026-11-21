@@ -223,13 +223,11 @@ type TestOutcome = {
   preview: string | null;
 };
 
-const BODY_MODES: readonly HttpBodyMode[] = [
-  "auto",
-  "json_template",
-  "text_template",
-  "none",
-  "run_result"
-];
+/**
+ * The bodies a plain POST chooses from. Sending the run's result is a kind of
+ * step of its own ("Skicka körningens resultat"), not a body to switch to.
+ */
+const BODY_MODES: readonly HttpBodyMode[] = ["auto", "json_template", "text_template", "none"];
 
 type TestConfig = Parameters<typeof testHttp>[1]["config"];
 
@@ -620,7 +618,7 @@ export function HttpFields({
             onChange({ ...config, response_format: value === "json" ? "json" : "text" })
           }
         />
-      ) : (
+      ) : sendsRunResult ? null : (
         <Anchor formId={formId} anchor="output_config.http.body" className="flex flex-col gap-4">
           <Selector
             label={t("flow_step_editor_http_body")}

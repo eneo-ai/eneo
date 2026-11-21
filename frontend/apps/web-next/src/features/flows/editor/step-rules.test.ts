@@ -183,36 +183,41 @@ describe("a step that sends the run's result", () => {
       input_config: { long_material: { mode: "digest" } },
       ...overrides
     });
-  const withBody = (step: StepConfig, mode: "auto" | "run_result", url?: string) => {
+  const withBody = (step: StepConfig, mode: "auto", url?: string) => {
     const http = readHttpConfig(step.output_config, "output");
     return applyHttpOutputChange(step, { ...http, url: url ?? http.url, body: { mode } });
   };
 
-  it("calls no model: it sends text and drops what only a model uses", () => {
-    const step = withBody(outbound({ mode: "auto" }), "run_result");
+  it("calls no model: it sends text and offers nothing only a model uses", () => {
+    const step = outbound({ mode: "run_result" }, { output_type: "text", output_contract: null });
     expect(stepUsesModel(step)).toBe(false);
-    expect(step).toMatchObject({ output_type: "text", output_contract: null });
-    expect(step.output_config).not.toHaveProperty("citation_mode");
-    expect(step.output_config).not.toHaveProperty("retrieval_policy");
-    expect(readLongMaterial(step.input_config)).toBe(false);
     expect(outputTypeOptions(step).map((option) => option.value)).toEqual(["text"]);
     expect(supportsCitations(step)).toBe(false);
     expect(longMaterialEligibility(step)).toBe("output");
   });
 
-  it("drops the contracts, which it no longer shows, even from a text step", () => {
-    const step = withBody(
-      outbound(
-        { mode: "auto" },
-        {
-          output_type: "text",
-          input_contract: { type: "object" },
-          output_contract: { type: "string" }
-        }
-      ),
-      "run_result"
+  it("drops the contracts and what only a model uses when it sends the run's result again", () => {
+    // A step that sent the run's result, set to another mode and back.
+    const left = outbound(
+      { mode: "run_result" },
+      {
+        output_mode: "pass_through",
+        output_type: "text",
+        input_contract: { type: "object" },
+        output_contract: { type: "string" }
+      }
     );
-    expect(step).toMatchObject({ input_contract: null, output_contract: null });
+    const step = applyOutputModeChange(
+      { ...left, output_config: { ...left.output_config, auth: { mode: "none" } } },
+      "http_post"
+    );
+    expect(step).toMatchObject({
+      output_type: "text",
+      input_contract: null,
+      output_contract: null
+    });
+    expect(step.output_config).not.toHaveProperty("citation_mode");
+    expect(step.output_config).not.toHaveProperty("retrieval_policy");
   });
 
   it("leaves an ordinary outbound step as it is when its call changes", () => {

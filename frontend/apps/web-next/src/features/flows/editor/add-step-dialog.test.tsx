@@ -155,7 +155,7 @@ describe("AddStepDialog", () => {
     expect(asked?.init.params).toEqual({ path: { id: "flow-1" }, query: { position: 2 } });
     expect(rowsOf(dialog, messages.flow_add_step_recommended)).toEqual([
       "Gör text av data",
-      "Skicka via HTTP"
+      "Anropa webbtjänst"
     ]);
     expect(within(dialog).getByText("Hamnar efter Steg 1: Sammanfatta")).toBeTruthy();
     // Word cannot stand before a step that reads JSON: one folded line, then the reasons.
@@ -236,14 +236,14 @@ describe("AddStepDialog", () => {
     api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
     const { dialog } = await openDialog(2, textFlow);
     const search = within(dialog).getByRole("textbox", { name: messages.flow_add_step_search });
-    fireEvent.change(search, { target: { value: "webhook" } });
+    fireEvent.change(search, { target: { value: "ärendesystem" } });
     expect(
       within(dialog)
         .getAllByRole("radio")
         .map((radio) => radio.getAttribute("value"))
     ).toEqual(["send_http"]);
     // What is left, and what Enter adds, is said while focus stays in the search.
-    await waitFor(() => expect(spoken()).toBe("1 stegtyp. Enter lägger till Skicka via HTTP."));
+    await waitFor(() => expect(spoken()).toBe("1 stegtyp. Enter lägger till Anropa webbtjänst."));
     fireEvent.change(search, { target: { value: "zzz" } });
     await waitFor(() => expect(spoken()).toBe("Ingen stegtyp matchar ”zzz”."));
 
@@ -299,11 +299,11 @@ describe("AddStepDialog", () => {
       const { dialog } = await openDialog(2, textFlow, { rows: false });
       fireEvent.change(
         within(dialog).getByRole("textbox", { name: messages.flow_add_step_search }),
-        { target: { value: "webhook" } }
+        { target: { value: "ärendesystem" } }
       );
-      expect(spoken()).not.toBe("Ingen stegtyp matchar ”webhook”.");
+      expect(spoken()).not.toBe("Ingen stegtyp matchar ”ärendesystem”.");
       release();
-      await waitFor(() => expect(spoken()).toBe("1 stegtyp. Enter lägger till Skicka via HTTP."));
+      await waitFor(() => expect(spoken()).toBe("1 stegtyp. Enter lägger till Anropa webbtjänst."));
     } finally {
       api.stub.client.GET = get;
     }
@@ -337,7 +337,7 @@ describe("AddStepDialog", () => {
     const refusal = makeKindRefusal({ message: "Nej." });
     const kinds = [
       ...(["ai", "structured", "compose", "document", "template", "transcribe"] as const),
-      ...(["speakers", "review", "fetch_http", "tool", "send_http"] as const)
+      ...(["speakers", "review", "fetch_http", "tool", "send_run_result", "send_http"] as const)
     ];
     api.routes[KINDS] = () => ({
       body: {
@@ -398,6 +398,90 @@ describe("AddStepDialog", () => {
     ).toBeTruthy();
     expect(document.activeElement).toBe(within(dialog).getByLabelText(/^Adress att hämta från/));
     expect(api.stub.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+  });
+
+  it.each([
+    ["a text step", textFlow, textKinds],
+    ["a JSON step, where a plain POST is recommended", flow, null]
+  ])(
+    "ranks the step that sends the run's result first for “skicka” after %s",
+    async (_, current, kinds) => {
+      if (kinds) api.routes[KINDS] = kinds;
+      const { dialog } = await openDialog(2, current);
+      fireEvent.change(
+        within(dialog).getByRole("textbox", { name: messages.flow_add_step_search }),
+        {
+          target: { value: "skicka" }
+        }
+      );
+      const values = within(dialog)
+        .getAllByRole("radio")
+        .map((radio) => radio.getAttribute("value"));
+      expect(values[0]).toBe("send_run_result");
+      expect(values).toContain("send_http");
+      const row = within(dialog).getByRole("radio", { name: "Skicka körningens resultat" });
+      expect((row as HTMLInputElement).checked).toBe(true);
+      expect(
+        within(dialog).getByText(messages.flow_add_step_send_run_result_description)
+      ).toBeTruthy();
+      expect(within(dialog).getByRole("radio", { name: "Anropa webbtjänst" })).toBeTruthy();
+    }
+  );
+
+  it("adds the step that sends the run's result with the receiver's fixed https address, in one save", async () => {
+    const http = {
+      url: "",
+      auth: { mode: "none" },
+      timeout_seconds: 30,
+      body: { mode: "run_result" }
+    };
+    api.routes[KINDS] = () => ({
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [
+          makeKindPlace(2, [
+            makeKindOption("send_run_result", {
+              configuration: { output_mode: "http_post", output_config: http }
+            })
+          ])
+        ],
+        steps: []
+      }
+    });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const { dialog } = await openDialog(2, textFlow);
+    fireEvent.click(within(dialog).getByRole("radio", { name: "Skicka körningens resultat" }));
+    const submit = () =>
+      within(dialog).getByRole("button", { name: "Lägg till Skicka körningens resultat" });
+    const address = () => within(dialog).getByLabelText(/^Mottagarens adress/) as HTMLInputElement;
+
+    fireEvent.click(submit());
+    expect(
+      await within(dialog).findByText(messages.flow_step_editor_http_url_missing)
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(address());
+    // The same rule as in the step: one fixed https address, which run data cannot choose.
+    for (const url of ["http://intranet.example/resultat", "https://intranet.example/{{x}}"]) {
+      fireEvent.change(address(), { target: { value: url } });
+      fireEvent.click(submit());
+      expect(
+        await within(dialog).findByText(messages.flow_step_editor_http_run_result_url_fixed)
+      ).toBeTruthy();
+      expect(address().getAttribute("aria-invalid")).toBe("true");
+    }
+    expect(api.stub.calls.filter((call) => call.method === "PATCH")).toEqual([]);
+
+    fireEvent.change(address(), { target: { value: "https://intranet.example/resultat" } });
+    fireEvent.click(submit());
+    await waitFor(() => expect(sent()).toBeDefined());
+    expect(sent()?.new_steps[0]).toMatchObject({
+      name: "Skicka körningens resultat",
+      configuration: {
+        output_mode: "http_post",
+        output_config: { url: "https://intranet.example/resultat", body: { mode: "run_result" } }
+      }
+    });
   });
 
   it("cannot add while the core has not answered for the place, and offers a retry", async () => {
