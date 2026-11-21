@@ -27,6 +27,10 @@ from eneo.flows.api.flow_run_contract_models import (
     default_runtime_upload_policy_public,
 )
 from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowTemplateAsset
+from eneo.flows.domain.run_deliverables import (
+    StepDeliverableFacts,
+    deliverable_positions,
+)
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.runtime_input import build_runtime_input_config
 from eneo.flows.domain.speaker_mapping_config import (
@@ -45,7 +49,6 @@ from eneo.flows.enums import (
     FlowTemplateAssetStatus,
     final_output_delivery,
     final_step_output_type,
-    step_delivers_artifact,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowValidationException
@@ -265,8 +268,7 @@ def build_run_output_contract(
     steps: Sequence[RuntimeStep],
 ) -> FlowRunOutputContract | None:
     """What a run of ``steps`` returns: the last step's output, and in step
-    order every step that delivers an artifact and is marked as a
-    deliverable or is the last step. None for no steps."""
+    order the steps ``deliverable_positions`` chooses. None for no steps."""
     output_type = final_step_output_type([step.output_type for step in steps])
     if output_type is None:
         return None
@@ -283,6 +285,16 @@ def build_run_output_contract(
         ),
         output_contract=final_step.output_contract,
     )
+    positions = deliverable_positions(
+        [
+            StepDeliverableFacts(
+                output_type=step.output_type,
+                output_mode=step.output_mode,
+                marked=step.deliverable is not None,
+            )
+            for step in steps
+        ]
+    )
     deliverables = tuple(
         FlowDeliverableContractPublic(
             step_id=step.step_id,
@@ -296,11 +308,7 @@ def build_run_output_contract(
             output_mode=FlowOutputMode(step.output_mode),
             delivery=FlowOutputDelivery.ARTIFACT,
         )
-        for step in steps
-        if (step.deliverable is not None or step is final_step)
-        and step_delivers_artifact(
-            output_type=step.output_type, output_mode=step.output_mode
-        )
+        for step in (steps[position] for position in positions)
     )
     return FlowRunOutputContract(final_output=final_output, deliverables=deliverables)
 
