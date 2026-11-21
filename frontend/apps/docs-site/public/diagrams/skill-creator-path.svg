@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Same visual system as the MFA and file-home diagrams (canvas 860 wide, Inter 15-17, one meaning per colour:
+     neutral = ordinary step, blue = the box the diagram turns on, green = allowed, red = refused, dashed grey = absent). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="332" viewBox="0 0 860 332" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">Creating a Skill with the Skill creator</title>
+  <desc id="d">The person turns on the Skill creator for one conversation in the personal chat. The chat proposes a Skill on a card that shows the whole Skill as plain source text with its links and warnings; it cannot save. The person reads the card and presses Save, which goes through the ordinary Skill endpoint with the same rules as the Skill form. The Skill becomes a new version in the personal space and is turned on with the existing Skills control.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path class="ah" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>
+    .bg{fill:#ffffff;stroke:#d0d7de;stroke-width:1}
+    .lane{fill:none;stroke:#d0d7de;stroke-width:1.5}
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .key{fill:#e3f2fd;stroke:#1565c0;stroke-width:2}
+    .ok{fill:#e8f5e9;stroke:#2e7d32;stroke-width:1.5}
+    .warn{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .no{fill:#ffebee;stroke:#c62828;stroke-width:1.5}
+    .gone{fill:none;stroke:#999;stroke-width:1.5;stroke-dasharray:6 4}
+    .h{fill:#222;font-size:17px;font-weight:600}
+    .t{fill:#222;font-size:16px}
+    .s{fill:#444;font-size:15px}
+    .m{fill:#6a6a6a;font-size:15px}
+    .r{fill:#c62828;font-size:15px}
+    .pill{fill:#ffffff}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .back{stroke:#555;stroke-width:1.5;fill:none;stroke-dasharray:6 4;marker-end:url(#a)}
+    .line{stroke:#555;stroke-width:1.5;fill:none}
+    .cut{stroke:#c62828;stroke-width:2;fill:none}
+    .mark{stroke:#b26a00;stroke-width:2;fill:none;stroke-dasharray:6 4}
+    .dot,.ah{fill:#555}
+    @media (prefers-color-scheme: dark){
+      .bg,.pill{fill:#0d1117}
+      .bg,.lane{stroke:#30363d}
+      .box{fill:#161b22;stroke:#8b949e}
+      .key{fill:#0d2a45;stroke:#58a6ff}
+      .ok{fill:#0f2a19;stroke:#3fb950}
+      .warn{fill:#2b1d07;stroke:#d29922}
+      .no{fill:#2d1214;stroke:#f85149}
+      .gone{stroke:#6e7681}
+      .h,.t{fill:#e6edf3}
+      .s{fill:#b8c0ca}
+      .m{fill:#8b949e}
+      .r{fill:#ff7b72}
+      .edge,.back,.line{stroke:#8b949e}
+      .cut{stroke:#ff7b72}
+      .mark{stroke:#d29922}
+      .dot,.ah{fill:#8b949e}
+    }
+  </style>
+  <rect class="bg" x="0.5" y="0.5" width="859" height="331" rx="12"/>
+  <rect class="box" x="24" y="24" width="184" height="108" rx="8"/><text class="h" x="116" y="52" text-anchor="middle">Personal chat</text><text class="s" x="116" y="76" text-anchor="middle">Skill creator on</text><text class="s" x="116" y="95" text-anchor="middle">for this conversation</text>
+  <rect class="key" x="232" y="24" width="184" height="108" rx="8"/><text class="h" x="324" y="52" text-anchor="middle">Proposal card</text><text class="s" x="324" y="76" text-anchor="middle">the whole Skill as</text><text class="s" x="324" y="95" text-anchor="middle">plain source text,</text><text class="s" x="324" y="114" text-anchor="middle">links and warnings</text>
+  <rect class="ok" x="440" y="24" width="184" height="108" rx="8"/><text class="h" x="532" y="52" text-anchor="middle">Save</text><text class="s" x="532" y="76" text-anchor="middle">the person's click,</text><text class="s" x="532" y="95" text-anchor="middle">the ordinary</text><text class="s" x="532" y="114" text-anchor="middle">Skill endpoint</text>
+  <rect class="box" x="648" y="24" width="184" height="108" rx="8"/><text class="h" x="740" y="52" text-anchor="middle">Personal space</text><text class="s" x="740" y="76" text-anchor="middle">a new Skill version;</text><text class="s" x="740" y="95" text-anchor="middle">turned on with the</text><text class="s" x="740" y="114" text-anchor="middle">Skills control</text>
+  <path class="edge" d="M132,132 V172 H308 V134"/>
+  <rect class="pill" x="150" y="150" width="140" height="44" rx="4"/><text class="s" x="220" y="168" text-anchor="middle">proposes;</text><text class="s" x="220" y="186" text-anchor="middle">cannot save</text>
+  <path class="edge" d="M340,132 V172 H516 V134"/>
+  <rect class="pill" x="360" y="150" width="136" height="44" rx="4"/><text class="s" x="428" y="168" text-anchor="middle">the person</text><text class="s" x="428" y="186" text-anchor="middle">reads it</text>
+  <path class="edge" d="M548,132 V172 H724 V134"/>
+  <rect class="pill" x="568" y="150" width="136" height="44" rx="4"/><text class="s" x="636" y="168" text-anchor="middle">same rules as</text><text class="s" x="636" y="186" text-anchor="middle">the Skill form</text>
+  <path class="lane" d="M24,232 H836"/>
+  <rect class="pill" x="350" y="221" width="160" height="22" rx="4"/><text class="s" x="430" y="237" text-anchor="middle">who does what</text>
+  <text class="h" x="158" y="266" text-anchor="middle">The chat</text><text class="s" x="158" y="287" text-anchor="middle">reads your Skills, drafts,</text><text class="s" x="158" y="306" text-anchor="middle">asks at most one question</text>
+  <text class="h" x="430" y="266" text-anchor="middle">The person</text><text class="s" x="430" y="287" text-anchor="middle">reads, saves,</text><text class="s" x="430" y="306" text-anchor="middle">turns the Skill on</text>
+  <text class="h" x="702" y="266" text-anchor="middle">Eneo</text><text class="s" x="702" y="287" text-anchor="middle">checks the person's rights</text><text class="s" x="702" y="306" text-anchor="middle">on every call and on save</text>
+</svg>
