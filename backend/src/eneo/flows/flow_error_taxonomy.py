@@ -861,6 +861,20 @@ FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
         consumer_action="Send fewer or shorter steps, then send the request again.",
         user_action="Shorten the longest prompts or split the work into several flows.",
     ),
+    FlowApiErrorCode.RUN_RESULT_NO_DELIVERABLES: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A flow whose last step sends the run's result was published with "
+            "no text or document for it to send."
+        ),
+        consumer_action=(
+            "Mark a text or document step as a deliverable, or put one right "
+            "before the step named by `step_order` in the error context, then "
+            "publish again."
+        ),
+        user_action="Choose a text or document step to send, or add one before it.",
+    ),
     FlowApiErrorCode.STEP_LIMIT_EXCEEDED: _entry(
         category="Published definition",
         surfaced_through="API error response",

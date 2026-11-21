@@ -28,6 +28,8 @@ from eneo.flows.flow_validators import (
     _is_plain_tree,
     _validate_step_mapped_execution,
     collect_step_graph_issues,
+    draft_step_refusals,
+    publish_step_refusals,
     template_bound_path_made_ok,
     template_bound_path_ok,
     validate_form_schema,
@@ -4627,3 +4629,64 @@ def test_a_deliverable_label_with_braces_is_refused_at_the_label(label: str) -> 
 
 def test_a_deliverable_label_of_plain_text_publishes() -> None:
     _publish(_document_step({"label": "Rapport: vecka 47 (utkast) – 50 %"}))
+
+
+_SEND_RUN_RESULT = {
+    "url": "https://receiver.example.org/results",
+    "auth": {"mode": "none"},
+    "body": {"mode": "run_result"},
+}
+
+
+@pytest.mark.parametrize(
+    "steps",
+    [
+        # A step that sends the run's result and nothing before it.
+        [
+            _step(
+                1,
+                output_mode="http_post",
+                output_type="text",
+                output_config=_SEND_RUN_RESULT,
+            )
+        ],
+        # The step before it holds JSON, which is never delivered.
+        [
+            _step(1, output_mode="compose_text", output_type="text"),
+            _step(2),
+            _step(
+                3,
+                output_mode="http_post",
+                output_type="text",
+                output_config=_SEND_RUN_RESULT,
+            ),
+        ],
+    ],
+)
+def test_a_result_with_nothing_to_send_is_saved_and_refused_at_publish(
+    steps: list[FlowStep],
+) -> None:
+    sender = steps[-1].step_order
+
+    assert draft_step_refusals(steps, metadata_json=None) == []
+    [refusal] = publish_step_refusals(
+        steps, metadata_json=None, prompt_templates={}
+    )
+
+    assert refusal.code == "flow_run_result_no_deliverables"
+    assert refusal.context is not None
+    assert refusal.context["step_order"] == sender
+
+
+def test_a_result_with_something_to_send_publishes() -> None:
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []

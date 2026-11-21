@@ -913,6 +913,7 @@ async def test_publish_flow_requires_provider_binding(user, binding):
     version_repo = AsyncMock()
     service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
     step = _step()
+    before: list[FlowStep] = []
     if binding == "no_model_no_ai_mode":
         step = step.model_copy(
             update={"output_mode": "render_verbatim", "output_type": "pdf"}
@@ -932,6 +933,24 @@ async def test_publish_flow_requires_provider_binding(user, binding):
                 },
             }
         )
+    if binding == "no_model_run_result":
+        # The result has a text to send: the step before the one that sends.
+        before = [
+            _step().model_copy(
+                update={
+                    "assistant_id": step.assistant_id,
+                    "output_mode": "compose_text",
+                    "output_type": "text",
+                }
+            )
+        ]
+        step = step.model_copy(
+            update={
+                "step_order": 2,
+                "input_source": "previous_step",
+                "user_description": "Step 2",
+            }
+        )
     flow = Flow(
         id=uuid4(),
         tenant_id=user.tenant_id,
@@ -945,7 +964,7 @@ async def test_publish_flow_requires_provider_binding(user, binding):
         data_retention_days=None,
         created_at=datetime.now(timezone.utc),
         updated_at=datetime.now(timezone.utc),
-        steps=[step],
+        steps=[*before, step],
     )
     flow_repo.get.return_value = flow
     flow_repo.allocate_next_version.return_value = 1
@@ -4786,3 +4805,48 @@ async def test_update_flow_keeps_a_deliverable_only_where_it_can_be_one(
         if kept is not None
         else {"extension": "kept"}
     )
+
+
+@pytest.mark.asyncio
+async def test_publish_refuses_a_run_result_with_nothing_to_send(user):
+    flow_repo = AsyncMock()
+    version_repo = AsyncMock()
+    service = _service(user=user, flow_repo=flow_repo, version_repo=version_repo)
+    sender = _step().model_copy(
+        update={
+            "output_mode": "http_post",
+            "output_type": "text",
+            "output_config": {
+                "url": "https://receiver.example.org/results",
+                "auth": {"mode": "none"},
+                "body": {"mode": "run_result"},
+            },
+        }
+    )
+    flow = Flow(
+        id=uuid4(),
+        tenant_id=user.tenant_id,
+        space_id=uuid4(),
+        name="Publishable flow",
+        description=None,
+        created_by_user_id=user.id,
+        owner_user_id=user.id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=None,
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+        steps=[sender],
+    )
+    flow_repo.get.return_value = flow
+
+    with pytest.raises(FlowStepValidationError) as caught:
+        await service.publish_flow(flow_id=flow.id)
+
+    assert caught.value.code == "flow_run_result_no_deliverables"
+    assert caught.value.step_order == 1
+    assert caught.value.context == {
+        "issue_code": "flow_run_result_no_deliverables",
+        "step_order": 1,
+    }
+    version_repo.create.assert_not_awaited()

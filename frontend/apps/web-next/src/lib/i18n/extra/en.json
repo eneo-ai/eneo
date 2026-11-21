@@ -3682,6 +3682,7 @@
   "flow_error_flow_dispatch_failed": "The run could not start. Try again, or contact an administrator if it keeps failing.",
   "flow_error_flow_input_contract_inapplicable": "A step has material settings that do not fit together. Ask a flow editor to fix the step and publish the flow again.",
   "flow_error_flow_step_security_classification_mismatch": "The step's model is not cleared for the security class of the data the step uses. Choose a model with a higher security class, or change what the step reads.",
+  "flow_error_flow_run_result_no_deliverables": "Nothing is chosen to send. Choose or add a step that creates text or a document before the step that sends.",
   "flow_error_flow_step_limit_exceeded": "The flow has more steps than a flow can have. Remove steps or split the work into several flows, then save again.",
   "flow_error_flow_request_body_too_large": "The flow is too large to save. Shorten the longest instructions or split the work into several flows.",
   "flow_error_flow_step_output_classification_write_down": "The step's result cannot get a lower security class than the data it is built from. Choose the same or a higher class, or let it inherit.",

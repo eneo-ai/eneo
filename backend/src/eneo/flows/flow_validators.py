@@ -35,6 +35,10 @@ from eneo.flows.domain.speaker_mapping_config import (
     speaker_mapping_without_transcript,
     validate_speaker_mapping_output_config,
 )
+from eneo.flows.domain.run_deliverables import (
+    StepDeliverableFacts,
+    deliverable_positions,
+)
 from eneo.flows.domain.step_deliverable import (
     FLOW_STEP_DELIVERABLE_KEY,
     FlowStepDeliverableError,
@@ -321,6 +325,9 @@ def publish_step_refusals(
             require_complete_template_fill_config=True,
         )
     ]
+    empty_result = _run_result_without_deliverables(steps)
+    if empty_result is not None:
+        refusals.append(empty_result)
     if not steps:
         code = FlowGraphIssueCode.FLOW_HAS_NO_STEPS.value
         refusals.append(
@@ -335,6 +342,41 @@ def publish_step_refusals(
     except BadRequestException as exc:
         refusals.append(exc)
     return refusals
+
+
+def _run_result_without_deliverables(
+    steps: Sequence[FlowStep],
+) -> FlowStepValidationError | None:
+    """The refusal of a flow whose last step sends the run's result while
+    the run delivers nothing for it to send. Only publish refuses it: a
+    draft may be saved before its steps are chosen."""
+    ordered = sorted(steps, key=lambda step: step.step_order)
+    if not ordered:
+        return None
+    sender = ordered[-1]
+    if not sends_run_result(sender.output_mode, sender.output_config):
+        return None
+    facts = [
+        StepDeliverableFacts(
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+            marked=isinstance(step.output_config, Mapping)
+            and FLOW_STEP_DELIVERABLE_KEY in step.output_config,
+            sends_run_result=step is sender,
+        )
+        for step in ordered
+    ]
+    if deliverable_positions(facts):
+        return None
+    code = FlowApiErrorCode.RUN_RESULT_NO_DELIVERABLES.value
+    return FlowStepValidationError(
+        f"Step {sender.step_order} sends the run's result, but nothing is "
+        "chosen to send. Choose a text or document step, or add one, before "
+        "this step.",
+        step_order=sender.step_order,
+        code=code,
+        context={"issue_code": code, "step_order": sender.step_order},
+    )
 
 
 def collect_step_graph_issues(

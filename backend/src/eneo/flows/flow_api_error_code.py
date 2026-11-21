@@ -45,6 +45,7 @@ class FlowApiErrorCode(StrEnum):
     RUN_REDISPATCH_CONFLICT = "flow_run_redispatch_conflict"
     RUN_REDISPATCH_AUDIT_UNAVAILABLE = "flow_run_redispatch_audit_unavailable"
     RUN_WEBHOOK_REDELIVERY_CONFLICT = "flow_run_webhook_redelivery_conflict"
+    RUN_RESULT_NO_DELIVERABLES = "flow_run_result_no_deliverables"
     RUN_WEBHOOK_REDELIVERY_AUDIT_UNAVAILABLE = (
         "flow_run_webhook_redelivery_audit_unavailable"
     )
