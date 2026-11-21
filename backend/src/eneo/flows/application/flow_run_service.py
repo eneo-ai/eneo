@@ -1153,16 +1153,26 @@ class FlowRunService:
         run_id: UUID,
         history: bool = False,
     ) -> FlowRunDetailView:
-        run_view = await self.get_run_with_result_files_and_usage(
-            flow_id=flow_id,
+        run = await self.get_run(
             run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
             history=history,
         )
         webhook_deliveries = (
             await self.webhook_delivery_repo.list_run_delivery_statuses(
-                run_id=run_view.run.id,
+                run_id=run.id,
                 tenant_id=self.user.tenant_id,
             )
+        )
+        # The rows come in step and attempt order, so each step keeps its
+        # latest attempt's status: the detail reads its deliveries once.
+        [run_view] = await self._runs_with_result_files_and_usage(
+            runs=(run,),
+            delivery_statuses={
+                (run.id, delivery.step_id): delivery.delivery_status
+                for delivery in webhook_deliveries
+            },
         )
         return FlowRunDetailView(
             run=run_view.run,
@@ -1183,7 +1193,11 @@ class FlowRunService:
         return views[0]
 
     async def _runs_with_result_files_and_usage(
-        self, *, runs: Sequence[FlowRun]
+        self,
+        *,
+        runs: Sequence[FlowRun],
+        delivery_statuses: Mapping[tuple[UUID, UUID], FlowOutboxDeliveryStatus]
+        | None = None,
     ) -> tuple[FlowRunWithResultFilesAndUsage, ...]:
         if not runs:
             return ()
@@ -1208,9 +1222,12 @@ class FlowRunService:
         )
         result_files_by_run_id = _result_files_by_run_id(result_files)
         outputs_by_version_ref = await self._outputs_for_runs(runs=runs)
-        delivery_statuses = await self.webhook_delivery_repo.latest_delivery_statuses(
-            run_ids=run_ids, tenant_id=self.user.tenant_id
-        )
+        if delivery_statuses is None:
+            delivery_statuses = (
+                await self.webhook_delivery_repo.latest_delivery_statuses(
+                    run_ids=run_ids, tenant_id=self.user.tenant_id
+                )
+            )
         return tuple(
             FlowRunWithResultFilesAndUsage(
                 run=run,
