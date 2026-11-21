@@ -213,9 +213,7 @@ def test_resolve_handler_mode_rejects_unsupported_output_mode() -> None:
 async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
     run = _run()
     step = _step(output_mode="http_post")
-    handler = HttpPostStepHandler(
-        completion_handler=_OutputOnlyHandler(), run_result_handler=_RefusingHandler()
-    )
+    handler = HttpPostStepHandler(completion_handler=_OutputOnlyHandler())
 
     result = await handler.execute(
         step=step,
@@ -237,7 +235,10 @@ async def test_http_post_handler_emits_exactly_one_webhook_intent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_run_result_step_keeps_what_it_reads_without_its_model() -> None:
+async def test_a_run_result_step_holds_no_content_and_asks_nothing() -> None:
+    """The step that sends the run's result reads nothing and asks no model:
+    the body is built from the run's deliverables once the run has
+    completed."""
     step = replace(
         _step(output_mode="http_post"),
         output_config={
@@ -246,15 +247,17 @@ async def test_a_run_result_step_keeps_what_it_reads_without_its_model() -> None
             "body": {"mode": "run_result"},
         },
     )
-    handler = HttpPostStepHandler(
-        completion_handler=_RefusingHandler(), run_result_handler=_OutputOnlyHandler()
-    )
+    handler = HttpPostStepHandler(completion_handler=_RefusingHandler())
 
     result = await handler.execute(
         step=step, run=_run(), state=_state(), version_metadata=None, attempt_no=1
     )
 
-    assert result.output.full_text == "done"
+    output = result.output
+    assert (output.input_text, output.full_text, output.persisted_text) == ("", "", "")
+    assert output.generated_file_ids == []
+    assert output.effective_prompt == ""
+    assert [item.code for item in output.diagnostics] == ["run_result_sent_after_run"]
     assert len(result.delivery_intents) == 1
 
 
@@ -571,74 +574,3 @@ async def test_transcribe_only_handler_skips_llm_and_rag() -> None:
         "embedding_model": None,
         "embedding_model_status": "not_reported",
     }
-
-
-def _run_result_handler(prepared_step: PreparedAssistantStep) -> ComposeTextStepHandler:
-    async def _prepare(**_kwargs) -> PreparedAssistantStep:
-        return prepared_step
-
-    return ComposeTextStepHandler(
-        prepare_assistant_step=_prepare, output_mode=FlowOutputMode.HTTP_POST
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_run_result_step_says_it_sends_its_text_without_a_model() -> None:
-    process_typed_output = AsyncMock(
-        return_value=TypedOutputProcessingResult(
-            structured_output=None, artifacts=None, diagnostics=[]
-        )
-    )
-    handler = _run_result_handler(
-        _prepared_assistant_step(process_typed_output=process_typed_output)
-    )
-
-    result = await handler.execute(
-        step=_step(output_mode="http_post"),
-        run=_run(),
-        state=_state(),
-        version_metadata=None,
-        attempt_no=1,
-    )
-
-    [diagnostic] = [
-        item
-        for item in result.output.diagnostics
-        if item.code == "run_result_text_sent_without_model"
-    ]
-    assert "without calling the assistant" in diagnostic.message
-    assert "compose_text" not in diagnostic.message
-    assert not any(
-        item.code == "compose_text_used" for item in result.output.diagnostics
-    )
-
-
-@pytest.mark.asyncio
-async def test_a_run_result_step_refuses_text_it_cannot_send_whole() -> None:
-    """Text over the inline limit would be kept in a file, which a delivery
-    cannot send; the step refuses it while the run can still fail."""
-    process_typed_output = AsyncMock(
-        return_value=TypedOutputProcessingResult(
-            structured_output=None, artifacts=None, diagnostics=[]
-        )
-    )
-    apply_output_cap = AsyncMock(return_value=("Tran", [uuid4()]))
-    prepared_step = _prepared_assistant_step(
-        process_typed_output=process_typed_output, apply_output_cap=apply_output_cap
-    )
-    prepared_step = replace(
-        prepared_step, deps=replace(prepared_step.deps, max_inline_text_bytes=4)
-    )
-    handler = _run_result_handler(prepared_step)
-
-    with pytest.raises(TypedIOValidationException) as refused:
-        await handler.execute(
-            step=_step(output_mode="http_post"),
-            run=_run(),
-            state=_state(),
-            version_metadata=None,
-            attempt_no=1,
-        )
-
-    assert refused.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
-    apply_output_cap.assert_not_awaited()

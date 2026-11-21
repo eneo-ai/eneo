@@ -573,8 +573,8 @@ def collect_step_graph_issues(
                     step_order=step.step_order,
                 )
             )
-        # A step that sends the run's result sends the text it reads; another
-        # output type would parse or render that text instead.
+        # A step that sends the run's result holds no content of its own;
+        # another output type would ask it to parse or render one.
         if step.output_type != "text" and sends_run_result(
             step.output_mode, step.output_config
         ):

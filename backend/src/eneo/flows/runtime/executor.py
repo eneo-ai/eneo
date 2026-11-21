@@ -1701,10 +1701,6 @@ class FlowRunExecutor:
                         mapped_execution_policy=self.mapped_execution_policy,
                         rag_evidence_policy=self.rag_evidence_policy,
                     ),
-                    run_result_handler=ComposeTextStepHandler(
-                        prepare_assistant_step=self._prepare_assistant_step,
-                        output_mode=FlowOutputMode.HTTP_POST,
-                    ),
                 )
             case FlowOutputMode.TRANSCRIBE_ONLY:
                 return TranscribeOnlyStepHandler(

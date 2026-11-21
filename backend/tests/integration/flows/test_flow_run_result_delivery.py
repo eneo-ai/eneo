@@ -16,6 +16,7 @@ import pytest
 import sqlalchemy as sa
 from dependency_injector import providers
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure.completion_service import (
@@ -29,6 +30,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunStepResultFiles,
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
+    FlowStepResults,
 )
 from eneo.flows.api.flow_assembler import FlowAssembler
 from eneo.flows.api.flow_run_contract_models import FlowRunOutboundHttpResultPublic
@@ -83,6 +85,15 @@ RUN_RESULT_CONFIG: dict[str, object] = {
 }
 
 
+# The step before the POST step marks its text as one of the run's
+# deliverables, so the run has a result to send.
+MARKED_TEXT: tuple[str, str, dict[str, object] | None] = (
+    "pass_through",
+    "text",
+    {"deliverable": {"label": "Svar"}},
+)
+
+
 async def _run_state(run_id: UUID) -> tuple[str, list[str]]:
     run_status = await _read_scalar(
         sa.select(FlowRuns.status).where(FlowRuns.id == run_id)
@@ -115,7 +126,7 @@ async def _execute(run) -> dict[str, str]:
 def queued_run_result_run(
     admin_user, completion_model_factory, space_factory, assistant_factory
 ):
-    async def create():
+    async def create(*, include_prior_step: bool = True):
         async with sessionmanager.session() as session:
             enable_autobegin_for_flow_task_session(session)
             _, run, _ = await _create_queued_webhook_run(
@@ -125,6 +136,8 @@ def queued_run_result_run(
                 space_factory=space_factory,
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
+                include_prior_step=include_prior_step,
+                prior_step_output=MARKED_TEXT,
             )
             await session.commit()
         return run
@@ -149,6 +162,8 @@ def completed_run_result_run(
                 space_factory=space_factory,
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
+                prior_output_payload={"text": "Svar"},
+                prior_step_output=MARKED_TEXT,
             )
             assert flow.id is not None and step.id is not None
             delivery_id = await FlowRunWebhookDeliveryRepository(
@@ -241,16 +256,50 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
     assert len(headers["Idempotency-Key"]) == 64
     body_bytes = request["body_bytes"]
     assert isinstance(body_bytes, bytes)
+    body_step_id = json.loads(body_bytes)["deliverables"][0]["step_id"]
     assert json.loads(body_bytes) == {
         "schema": "eneo.flow_run_result.v1",
         "flow_id": str(run.flow_id),
         "run_id": str(run.id),
         "run_created_at": finished.created_at.isoformat(),
         "run_completed_at": finished.finished_at.isoformat(),
-        # The only step reads the run's form, so that is its text.
-        "text": "What happened?",
-        "deliverables": [],
+        "deliverables": [
+            {
+                "kind": "text",
+                "step_id": body_step_id,
+                "step_order": 1,
+                "label": "Svar",
+                "output_type": "text",
+                "text": "# Möte\n\nKlart.",
+            }
+        ],
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_result_with_nothing_to_send_is_never_sent(
+    setup_database,
+    object_content_runtime_ready,
+    queued_run_result_run,
+    monkeypatch,
+):
+    """A version published before an empty result was refused can still end
+    in a step that sends the run's result with no deliverable: it is dead
+    lettered unsent, and the run stays completed."""
+    run = await queued_run_result_run(include_prior_step=False)
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
+    outcome = await _run_outbox()
+
+    assert outcome["dead_lettered"] == 1
+    send.assert_not_awaited()
+    assert await _run_state(run.id) == (
+        FlowRunStatus.COMPLETED.value,
+        [FlowOutboxDeliveryStatus.DEAD_LETTERED.value],
+    )
 
 
 @pytest.mark.asyncio
@@ -379,6 +428,68 @@ async def test_a_receiver_down_through_every_attempt_leaves_the_run_completed(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
+async def test_a_marked_text_the_run_no_longer_holds_is_never_sent(
+    setup_database,
+    completed_run_result_run,
+    monkeypatch,
+):
+    """The marked text is gone from its step's result when the delivery is
+    due: the result is refused before anything is audited or sent, and the
+    run stays completed."""
+    run, _ = await completed_run_result_run()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(
+                FlowStepResults.flow_run_id == run.id,
+                FlowStepResults.step_order == 1,
+            )
+            .values(output_payload_json=None)
+        )
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    outcome = await _run_outbox()
+
+    assert outcome["dead_lettered"] == 1
+    send.assert_not_awaited()
+    assert await _run_state(run.id) == (
+        FlowRunStatus.COMPLETED.value,
+        [FlowOutboxDeliveryStatus.DEAD_LETTERED.value],
+    )
+    assert not await _read(
+        sa.select(AuditLog.id).where(
+            AuditLog.action == ActionType.FLOW_RUN_RESULT_SENDING.value,
+            AuditLog.entity_id == run.id,
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_text_result_without_its_audit_row_is_not_sent_and_waits(
+    setup_database,
+    completed_run_result_run,
+    monkeypatch,
+):
+    run, delivery_id = await completed_run_result_run()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    monkeypatch.setattr(
+        AuditService, "log", AsyncMock(side_effect=RuntimeError("audit down"))
+    )
+
+    await _run_outbox()
+
+    send.assert_not_awaited()
+    assert await _run_state(run.id) == (
+        FlowRunStatus.COMPLETED.value,
+        [FlowOutboxDeliveryStatus.PENDING.value],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_run_result_refused_by_the_receiver_is_dead_lettered_once(
     setup_database,
     completed_run_result_run,
@@ -456,7 +567,11 @@ def queued_markdown_documents_then_post_run(
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
                 include_prior_step=True,
-                prior_step_output=("compose_text", "text", None),
+                prior_step_output=(
+                    "compose_text",
+                    "text",
+                    {"deliverable": {"label": "Markdown"}},
+                ),
                 later_prior_steps=(
                     (
                         "render_verbatim",
@@ -490,8 +605,8 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     queued_markdown_documents_then_post_run,
     monkeypatch,
 ):
-    """The body's text is the run's text result: the markdown the POST step
-    reads and keeps as its own text, without calling its model."""
+    """The body carries the marked markdown whole and both documents, each
+    under its own label, in step order; no step asks a model."""
     run = await queued_markdown_documents_then_post_run()
 
     model = AsyncMock(side_effect=AssertionError("no step here calls a model"))
@@ -517,9 +632,15 @@ async def test_the_result_text_is_the_markdown_and_both_documents_are_sent(
     )
     assert delivery.delivery_status == "delivered", delivery.delivery_last_error
     [body] = [json.loads(item) for item in sent]
-    assert body["text"] == MARKDOWN
-    assert [item["label"] for item in body["deliverables"]] == ["Protokoll", "Kopia"]
-    for deliverable in body["deliverables"]:
+    assert "text" not in body
+    markdown, *documents = body["deliverables"]
+    assert (markdown["kind"], markdown["label"], markdown["text"]) == (
+        "text",
+        "Markdown",
+        MARKDOWN,
+    )
+    assert [item["label"] for item in documents] == ["Protokoll", "Kopia"]
+    for deliverable in documents:
         [file] = deliverable["files"]
         assert file["content_base64"]
 
@@ -582,6 +703,7 @@ def queued_long_markdown_then_post_run(
                 assistant_factory=assistant_factory,
                 output_config=RUN_RESULT_CONFIG,
                 include_prior_step=True,
+                prior_step_output=MARKED_TEXT,
                 webhook_question=None,
             )
             await session.commit()
@@ -592,41 +714,51 @@ def queued_long_markdown_then_post_run(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_markdown_beyond_the_inline_limit_fails_the_run_and_is_never_cut(
+async def test_markdown_beyond_the_inline_limit_is_sent_whole_from_its_file(
     setup_database,
     object_content_runtime_ready,
     queued_long_markdown_then_post_run,
     monkeypatch,
 ):
-    """Text beyond what a step result keeps inline is never sent in part: the
-    POST step cannot read it whole, so the run fails with a typed error and no
-    delivery is made."""
+    """Text beyond what a step result keeps inline is kept whole in the
+    step's file. The POST step reads nothing, so the run completes, and the
+    receiver gets the whole text once, read from that file."""
     monkeypatch.setattr(get_settings(), "flow_max_inline_text_bytes", 64)
     run = await queued_long_markdown_then_post_run()
-    send = AsyncMock(return_value=_response(200))
-    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    sent: list[bytes] = []
+
+    async def _receive(_self, **kwargs):
+        sent.append(kwargs["body_bytes"])
+        return _response(200)
+
+    markdown = "# Lång\n\n" + "x" * 200
 
     async def _long_answer(_self, **_kwargs):
-        return SimpleNamespace(completion="# Lång\n\n" + "x" * 200, total_token_count=1)
+        return SimpleNamespace(completion=markdown, total_token_count=1)
 
     monkeypatch.setattr(CompletionService, "get_response", _long_answer)
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", _receive)
 
-    await _execute(run)
+    assert await _execute(run) == {"status": FlowRunStatus.COMPLETED.value}
     await _run_outbox()
 
-    send.assert_not_awaited()
-    state = await _read_one(
-        sa.select(FlowRuns.status, FlowRuns.error_json).where(FlowRuns.id == run.id)
+    [body] = [json.loads(item) for item in sent]
+    [text] = body["deliverables"]
+    assert text["text"] == markdown
+    assert await _run_state(run.id) == (
+        FlowRunStatus.COMPLETED.value,
+        [FlowOutboxDeliveryStatus.DELIVERED.value],
     )
-    assert state.status == FlowRunStatus.FAILED.value
-    assert state.error_json["code"] == "typed_io_input_too_large"
-    # The long text was written: it is the POST step that could not read it.
-    assert state.error_json["step_order"] == 2
-    assert not await _read(
-        sa.select(FlowRunWebhookDeliveries.id).where(
-            FlowRunWebhookDeliveries.flow_run_id == run.id
+    [audit] = await _read(
+        sa.select(AuditLog.log_metadata).where(
+            AuditLog.action == ActionType.FLOW_RUN_RESULT_SENDING.value,
+            AuditLog.entity_id == run.id,
         )
     )
+    # The row names the step and the file the text was read from, nothing more.
+    assert audit.log_metadata["extra"]["step_ids"] == [text["step_id"]]
+    assert len(audit.log_metadata["extra"]["file_ids"]) == 1
+    assert markdown not in json.dumps(audit.log_metadata)
 
 
 @pytest.mark.asyncio
@@ -638,8 +770,8 @@ async def test_markdown_near_the_inline_limit_is_sent_whole_beside_a_prompt(
     monkeypatch,
 ):
     """The POST step's assistant keeps an instruction, but the step asks its
-    model nothing: the instruction is not filled in, does not count against
-    the inline limit, and its attempt names no model."""
+    model nothing: its attempt names no model, and the marked text is sent
+    whole from the step that wrote it."""
     markdown = "# Lång\n\n" + "x" * 200
     monkeypatch.setattr(
         get_settings(), "flow_max_inline_text_bytes", len(markdown.encode()) + 5
@@ -661,7 +793,7 @@ async def test_markdown_near_the_inline_limit_is_sent_whole_beside_a_prompt(
     await _run_outbox()
 
     [body] = [json.loads(item) for item in sent]
-    assert body["text"] == markdown
+    assert body["deliverables"][0]["text"] == markdown
     attempt = await _read_one(
         sa.select(FlowStepAttempts.requested_model, FlowStepAttempts.provider).where(
             FlowStepAttempts.flow_run_id == run.id, FlowStepAttempts.step_order == 2

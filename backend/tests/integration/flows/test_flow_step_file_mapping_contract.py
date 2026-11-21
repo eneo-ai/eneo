@@ -60,7 +60,6 @@ from eneo.flows.runtime.step_input_resolution import resolve_step_input
 from eneo.flows.runtime.step_result_builder import build_completed_step_result
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.container.container import Container
-from eneo.main.exceptions import TypedIOValidationException
 from eneo.object_content.content import ContentFailureCode, ContentState
 from tests.flow_snapshot_fixtures import assistant_snapshot
 from tests.unittests.flows.test_flow_transcription import (
@@ -1692,12 +1691,13 @@ async def test_committed_transcript_survives_failure_and_output_replacement(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_a_step_that_sends_the_run_result_refuses_a_transcript_kept_in_a_file(
+async def test_a_step_that_sends_the_run_result_reads_no_transcript_kept_in_a_file(
     transcript_spill_runtime,
 ):
     """A transcript over the inline limit is read from a file. A step that
-    sends the run's result would keep it in a file too, which its delivery
-    cannot send, so the step refuses it while the run can still fail."""
+    sends the run's result reads nothing: its body is built from the run's
+    deliverables once the run has completed, each text whole from its file,
+    so the transcript never stops the step."""
     case = transcript_spill_runtime
     if case.transformed:
         pytest.skip("The run result step reads the transcript as it is.")
@@ -1712,13 +1712,13 @@ async def test_a_step_that_sends_the_run_result_refuses_a_transcript_kept_in_a_f
         },
     )
 
-    with pytest.raises(TypedIOValidationException) as refused:
-        await case.executor._execute_step(
-            step=step,
-            run=case.run,
-            state=_state(),
-            attempt_no=1,
-            version_metadata=case.metadata,
-        )
+    result = await case.executor._execute_step(
+        step=step,
+        run=case.run,
+        state=_state(),
+        attempt_no=1,
+        version_metadata=case.metadata,
+    )
 
-    assert refused.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert result.output.full_text == ""
+    assert len(result.delivery_intents) == 1

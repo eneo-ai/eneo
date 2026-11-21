@@ -216,8 +216,8 @@ def step_reads_by_channel(
         ("input_config", input_config),
     )
     if sends_run_result(mode, output_config):
-        # A run result sends the run's text and every deliverable, and any
-        # earlier step may be one, so the body reads each of them.
+        # A run result sends every deliverable, and any earlier step may be
+        # one, so the body reads each of them.
         reads.extend(
             StepRead("config", order, (), "output_config.body")
             for order in range(1, max_prior_step_order + 1)

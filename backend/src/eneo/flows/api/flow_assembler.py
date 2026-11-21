@@ -71,7 +71,10 @@ from eneo.flows.flow_run_input_envelope import (
     read_speaker_labels_choice,
 )
 from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
-from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.flow_run_step_result_file import (
+    FlowRunStepResultFile,
+    text_overflow_files,
+)
 from eneo.flows.http_transport import redact_persisted_config
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
@@ -477,16 +480,14 @@ def _project_run_result(
                 "Completed text run has malformed persisted text metadata."
             ) from exc
         if isinstance(text, FileBackedStepText):
-            matching_files = [
-                result_file
-                for result_file in result_files
-                if result_file.flow_run_id == run.id
-                and result_file.flow_id == run.flow_id
-                and result_file.tenant_id == run.tenant_id
-                and result_file.step_id == final_output.step_id
-                and result_file.file_id == text.file_id
-                and result_file.source == "generated_output"
-            ]
+            matching_files = text_overflow_files(
+                result_files,
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_id=final_output.step_id,
+                file_id=text.file_id,
+            )
             if len(matching_files) != 1:
                 raise FlowRunResultProjectionError(
                     "Completed file-backed text run must have exactly one current "

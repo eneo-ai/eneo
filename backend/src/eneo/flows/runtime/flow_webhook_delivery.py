@@ -16,7 +16,7 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileContentVariant
 from eneo.files.file_repo import FileRepository
-from eneo.flows.api.flow_run_contract_models import FlowRunDeliverablePublic
+from eneo.flows.api.flow_run_contract_models import FlowRunTextDeliverablePublic
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.application.flow_webhook_delivery_policy import (
     FLOW_WEBHOOK_MAX_ATTEMPTS,
@@ -72,9 +72,12 @@ from eneo.flows.runtime.http_orchestration import (
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.run_result_body import (
-    check_run_result_files,
+    RunResultPart,
+    RunResultText,
+    check_run_result,
     run_result_body,
     run_result_file_ids,
+    run_result_text,
 )
 from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.json_types import JsonValue
@@ -158,9 +161,11 @@ class WebhookDeliveryPayload:
     context: dict[str, Any]
     audit_actor: FlowRunActor | None
     # The document a run_result body sends; None for a template body, which
-    # is sent while its run is running. It holds file content: never in a repr.
+    # is sent while its run is running. It holds content: never in a repr.
     run_result_body: JsonValue | None = field(default=None, repr=False)
-    # The files that body sends, for the audit row written before each send.
+    # The steps and files that body sends, for the audit row written before
+    # each send.
+    run_result_step_ids: tuple[UUID, ...] = ()
     run_result_file_ids: tuple[UUID, ...] = ()
 
 
@@ -169,7 +174,7 @@ class _RunResultSource:
     """What a run result body is built from once the delivery's transaction
     has ended: its deliverables and a read grant for each file found."""
 
-    deliverables: list[FlowRunDeliverablePublic]
+    parts: list[RunResultPart]
     grants: dict[UUID, ContentReadGrant]
 
 
@@ -572,23 +577,36 @@ class FlowRunWebhookDeliveryService:
         )
         if not run_result:
             return payload, None
-        # Every document of the completed run, as its detail lists them.
-        deliverables = [
-            deliverable
+        # Every deliverable of the completed run, as its detail lists them,
+        # each text read from its step's current result.
+        result_files = await self.flow_run_repo.list_result_files_for_runs(
+            run_ids=[run.id], tenant_id=row.tenant_id
+        )
+        results_by_step = {item.step_id: item for item in results}
+        parts: list[RunResultPart] = [
+            run_result_text(
+                deliverable,
+                step_result=results_by_step.get(deliverable.step_id),
+                result_files=result_files,
+            )
+            if isinstance(deliverable, FlowRunTextDeliverablePublic)
+            else deliverable
             for deliverable in project_run_deliverables(
                 status=run.status,
                 outputs=build_run_output_contract(steps),
-                result_files=await self.flow_run_repo.list_result_files_for_runs(
-                    run_ids=[run.id], tenant_id=row.tenant_id
-                ),
+                result_files=result_files,
             )
-            if isinstance(deliverable, FlowRunDeliverablePublic)
         ]
-        check_run_result_files(deliverables)
+        if not parts:
+            raise ValueError(
+                "Run result delivery has nothing to send: the run delivers no "
+                "text or document."
+            )
+        check_run_result(parts)
         return payload, _RunResultSource(
-            deliverables=deliverables,
+            parts=parts,
             grants=await self._content_grants(
-                run_result_file_ids(deliverables), tenant_id=row.tenant_id
+                run_result_file_ids(parts), tenant_id=row.tenant_id
             ),
         )
 
@@ -614,13 +632,15 @@ class FlowRunWebhookDeliveryService:
         return replace(
             payload,
             run_result_body=run_result_body(
-                run=payload.run,
-                # The step kept the text it read as its own: the run's text.
-                text=payload.text_payload,
-                deliverables=source.deliverables,
-                contents=contents,
+                run=payload.run, parts=source.parts, contents=contents
             ),
-            run_result_file_ids=tuple(run_result_file_ids(source.deliverables)),
+            run_result_step_ids=tuple(
+                part.deliverable.step_id
+                if isinstance(part, RunResultText)
+                else part.step_id
+                for part in source.parts
+            ),
+            run_result_file_ids=tuple(run_result_file_ids(source.parts)),
         )
 
     async def _content_grants(
@@ -663,8 +683,8 @@ class FlowRunWebhookDeliveryService:
     ) -> None:
         """Record, and commit, that the run's result and files are about to
         leave Eneo: after its request is compiled, before it is sent. The row
-        names the files by id and the receiver by the host of the compiled
-        address; it holds no file name or content."""
+        names the steps and files by id and the receiver by the host of the
+        compiled address; it holds no label, file name or content."""
         url_host = parse_effective_http_url(url).host
         actor = payload.audit_actor
         try:
@@ -691,6 +711,9 @@ class FlowRunWebhookDeliveryService:
                             "delivery_id": str(row.id),
                             "delivery_attempt": row.delivery_attempts,
                             "url_host": url_host,
+                            "step_ids": [
+                                str(step_id) for step_id in payload.run_result_step_ids
+                            ],
                             "file_ids": [
                                 str(file_id) for file_id in payload.run_result_file_ids
                             ],
