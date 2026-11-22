@@ -392,9 +392,7 @@ class QuestionRepository:
             update_values["completion_model_id"] = completion_model_id
         if tool_calls is not None:
             # JSON mode: the column is JSONB and the records carry UUIDs.
-            update_values["tool_calls"] = [
-                tc.model_dump(mode="json") for tc in tool_calls
-            ]
+            update_values["tool_calls"] = [tc.storage_record() for tc in tool_calls]
         if reasoning is not None:
             update_values["reasoning"] = reasoning
         update_values.update(
@@ -513,9 +511,9 @@ class QuestionRepository:
             question_values["skill_provenance"] = None
         if question.tool_calls is not None:
             # JSONB column; the records carry UUIDs.
-            question_values["tool_calls"] = question.model_dump(
-                mode="json", include={"tool_calls"}
-            )["tool_calls"]
+            question_values["tool_calls"] = [
+                tc.storage_record() for tc in question.tool_calls
+            ]
         question_values["skill_activation_data"] = (
             question.skill_activation.model_dump(mode="json")
             if question.skill_activation is not None

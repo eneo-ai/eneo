@@ -400,10 +400,21 @@ class SessionService:
         tool_call_id: str,
     ) -> ToolCallInfo | None:
         """The stored record of one visible tool call, with its result."""
+        root_matches: list[ToolCallInfo] = []
         for question in session.questions or []:
-            for tc in question.tool_calls or []:
-                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
-                    return tc
+            root_matches.extend(
+                step
+                for step in question.tool_calls or []
+                if step.tool_call_id == tool_call_id
+            )
+        # Repeated provider IDs can identify the same activation. Distinct
+        # records have no unambiguous root result.
+        if root_matches:
+            first, *remaining = root_matches
+            if not remaining or (
+                first.result is not None and all(step == first for step in remaining)
+            ):
+                return first
         return None
 
     async def get_sessions_by_assistant(

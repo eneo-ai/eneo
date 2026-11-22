@@ -18,14 +18,8 @@ async def attach_question_files(
     still are attached.
     """
     if not include_user_uploads:
-        generated_file_ids = {
-            question_file.file.id
-            for question in questions
-            for question_file in question.questions_files
-            if not question_file.is_user_upload
-        }
         for question in questions:
-            question.leave_out_user_uploads(generated_file_ids)
+            question.leave_out_user_uploads()
     if loader is None:
         if any(question.questions_files for question in questions):
             raise RuntimeError("Question files require FileContentLoader")

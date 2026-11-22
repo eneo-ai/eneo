@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
 from typing import (
     TYPE_CHECKING,
@@ -144,6 +145,14 @@ def _mint_ref_id(existing_prefixes: set[str]) -> uuid.UUID:
         attempt += 1
     existing_prefixes.add(str(ref_id)[:8])
     return ref_id
+
+
+def _upload_free_reference_ids(
+    proxy: "MCPProxySession | None", references: Sequence[McpToolReference] = ()
+) -> tuple[uuid.UUID, ...] | None:
+    if proxy is not None and proxy.tool_context_without_uploads:
+        return tuple(reference.id for reference in references)
+    return None
 
 
 def _build_tool_result_with_references(
@@ -833,7 +842,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             metadata.append(
                 ToolCallMetadata(
                     server_name="skills",
-                    tool_name=outcome.activation_key or "unknown",
+                    tool_name=(outcome.activation_key or "unknown")
+                    if not rejected
+                    else SKILL_ACTIVATION_TOOL_NAME,
+                    upload_free_reference_ids=None if rejected else (),
                     title=outcome.display_name,
                     arguments=arguments,
                     tool_call_id=outcome.call_id,
@@ -865,6 +877,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             ToolCallMetadata(
                 server_name="skills",
                 tool_name=key,
+                upload_free_reference_ids=(),
                 title=display_name,
                 arguments={"skill_key": key, "mode": "always"},
                 tool_call_id=f"skill-always-{key}",
@@ -1712,6 +1725,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 result_status=result_status,
                                 result=display_text,
                                 mcp_tool_name=call.name,
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy, refs_for_call
+                                ),
                                 purpose=mcp_proxy.get_tool_purpose(call.name),
                                 is_internal=mcp_proxy.is_internal_tool(call.name),
                                 is_bundled=mcp_proxy.is_bundled_tool(call.name),
@@ -2340,6 +2356,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                         title=title,
                                         tool_call_id=call.call_id,
                                         result_status="deferred",
+                                        upload_free_reference_ids=_upload_free_reference_ids(
+                                            mcp_proxy
+                                        ),
                                         purpose=_tool_purpose(call.name),
                                         is_internal=_tool_is_internal(call.name),
                                         is_bundled=_tool_is_bundled(call.name),
@@ -2626,6 +2645,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     result_status=result_status,
                                     result=display_text,
                                     meta=result_data.get("meta") or None,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy, refs_for_call
+                                    ),
                                     structured_content=(
                                         result_data.get("structured_content")
                                         if has_app_view
@@ -2667,6 +2689,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     "timeout_denied" if timed_out else "denied"
                                 ),
                                 result=json.dumps(denial_payload),
+                                upload_free_reference_ids=_upload_free_reference_ids(
+                                    mcp_proxy
+                                ),
                             )
                         )
 
@@ -2765,6 +2790,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     tool_call_id=tool_call["id"],
                                     result_status="failed",
                                     result=refusal_payload,
+                                    upload_free_reference_ids=_upload_free_reference_ids(
+                                        mcp_proxy
+                                    ),
                                     mcp_tool_name=name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),

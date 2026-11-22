@@ -1,5 +1,4 @@
-from collections.abc import Collection
-from typing import Any, Literal, Optional
+from typing import Any, Literal, Optional, Self
 from uuid import UUID
 
 from pydantic import (
@@ -17,7 +16,6 @@ from pydantic import (
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.authentication.signed_urls import redact_reference_tokens
 from eneo.files.file_models import File, FileMetadata, FilePublic
-from eneo.files.model_file_references import referenced_file_ids
 from eneo.info_blobs.info_blob import InfoBlobInDB, InfoBlobPublicNoText
 from eneo.libs.json_text import escape_null_characters
 from eneo.logging.logging import (
@@ -183,6 +181,49 @@ class ToolCallInfo(BaseModel):
     # `{"view_id", "mcp_server_id", "ui"}`. Clients show that stored view for
     # the call; a tool the view calls runs on that server.
     app_view: Optional[dict[str, Any]] = None
+    # Internal evidence from the executing step. A missing value never
+    # authorizes raw data, regardless of when the question was written.
+    upload_free_reference_ids: tuple[UUID, ...] | None = Field(
+        default=None, exclude=True
+    )
+
+    def storage_record(self) -> dict[str, object]:
+        record = self.model_dump(mode="json")
+        if self.upload_free_reference_ids is not None:
+            record["upload_free_reference_ids"] = [
+                str(id_) for id_ in self.upload_free_reference_ids
+            ]
+        return record
+
+    def status_only(self) -> Self:
+        # A restricted reader may see the step's identity and status. New
+        # provider fields stay private until explicitly included here.
+        return type(self).model_validate(
+            self.model_dump(
+                include={
+                    "server_name",
+                    "tool_name",
+                    "tool_call_id",
+                    "mcp_tool_name",
+                    "approved",
+                    "result_status",
+                    "purpose",
+                    "is_internal",
+                    "is_bundled",
+                    "generated_file_ids",
+                }
+            )
+        )
+
+
+def _project_upload_free_steps(steps: list[ToolCallInfo]) -> set[UUID]:
+    visible_sources: set[UUID] = set()
+    for index, step in enumerate(steps):
+        if step.upload_free_reference_ids is None:
+            steps[index] = step.status_only()
+        else:
+            visible_sources.update(step.upload_free_reference_ids)
+    return visible_sources
 
 
 class QuestionAdd(QuestionBase):
@@ -228,43 +269,18 @@ class Question(QuestionAdd, InDB):
     tool_calls: Optional[list[ToolCallInfo]] = None
     feedback: Optional[MessageFeedback] = None
 
-    def leave_out_user_uploads(self, generated_file_ids: Collection[UUID]) -> None:
-        """Drop what a principal without the ``files`` read grant may not see.
-
-        The upload relationships go, so no later projection sees even a name.
-        So does what a tool read out of a file: a call that was handed a file
-        keeps its place in the turn but loses its arguments and result, and
-        the resources it captured go with it. Only ``generated_file_ids`` are
-        known not to be uploads; a reference to any other file counts as one.
-        """
+    def leave_out_user_uploads(self) -> None:
+        """Expose raw tool data and sources only when their own step cleared them."""
         self.questions_files = [
             question_file
             for question_file in self.questions_files
             if not question_file.is_user_upload
         ]
-        if self.tool_calls is None:
-            return
-        masked_call_ids: set[str | None] = set()
-        tool_calls: list[ToolCallInfo] = []
-        for call in self.tool_calls:
-            if referenced_file_ids(call.arguments) <= set(generated_file_ids):
-                tool_calls.append(call)
-                continue
-            masked_call_ids.add(call.tool_call_id)
-            tool_calls.append(
-                call.model_copy(
-                    update={
-                        "arguments": None,
-                        "result": None,
-                        "structured_content": None,
-                    }
-                )
-            )
-        self.tool_calls = tool_calls
+        visible_reference_ids = _project_upload_free_steps(self.tool_calls or [])
         self.mcp_tool_references = [
             reference
             for reference in self.mcp_tool_references
-            if reference.tool_call_id not in masked_call_ids
+            if reference.id in visible_reference_ids
         ]
 
     def attach_hydrated_files(self, files_by_id: dict[UUID, File]) -> None:

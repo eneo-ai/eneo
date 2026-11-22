@@ -926,7 +926,10 @@ async def test_non_streaming_handle_response_persists_no_tool_calls_when_none():
 
 
 @pytest.mark.asyncio
-async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
+@pytest.mark.parametrize("second_call_id", ["call_2", "call_1"])
+async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri(
+    second_call_id,
+):
     first_ref = McpToolReference(
         id=uuid4(),
         tool_call_id="call_1",
@@ -939,7 +942,7 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
     )
     second_ref = McpToolReference(
         id=uuid4(),
-        tool_call_id="call_2",
+        tool_call_id=second_call_id,
         mcp_tool_name="server__tool",
         uri="https://example.test/shared",
         mime_type="text/plain",
@@ -950,11 +953,22 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
 
     async def fake_completion_stream():
         for ref in (first_ref, second_ref):
-            yield Completion(
+            step = ToolCallMetadata(
+                server_name="source",
+                tool_name="lookup",
+                tool_call_id=ref.tool_call_id,
+                result=ref.content,
+                result_status="succeeded",
+                upload_free_reference_ids=(ref.id,),
+            )
+            final = Completion(
                 reasoning_token_count=0,
                 response_type=ResponseType.TOOL_CALL,
                 mcp_tool_references=[ref],
+                tool_calls_metadata=[step],
             )
+            yield final
+            yield final
         yield Completion(
             reasoning_token_count=0,
             response_type=ResponseType.TEXT,
@@ -991,6 +1005,13 @@ async def test_streaming_handle_response_keeps_distinct_refs_with_same_uri():
 
     update_kwargs = session_service_mock.complete_question_with_answer.call_args.kwargs
     assert update_kwargs["mcp_tool_references"] == [first_ref, second_ref]
+    assert [
+        (step.result, step.upload_free_reference_ids)
+        for step in update_kwargs["tool_calls"]
+    ] == [
+        ("first", (first_ref.id,)),
+        ("second", (second_ref.id,)),
+    ]
 
 
 @pytest.mark.asyncio

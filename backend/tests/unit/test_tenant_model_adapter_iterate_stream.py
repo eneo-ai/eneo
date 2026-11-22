@@ -139,6 +139,8 @@ def _response_tool_call(tool_call_id: str, arguments: str, name: str = "server__
 
 
 class _FakeMCPProxy:
+    tool_context_without_uploads = True
+
     def model_result_text(self, text):
         return text
 
@@ -689,9 +691,11 @@ async def test_prepare_streaming_returns_explicit_context_wrapper():
 
 
 @pytest.mark.asyncio
-async def test_non_streaming_supports_multiple_tool_rounds():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_non_streaming_supports_multiple_tool_rounds(upload_free):
     adapter = _make_completion_adapter()
     mcp_proxy = _ResourceMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     responses = [
         _response(
             tool_calls=[_response_tool_call("call_1", '{"q":"first"}')],
@@ -727,6 +731,10 @@ async def test_non_streaming_supports_multiple_tool_rounds():
         "call_1",
         "call_2",
     }
+    for step, source in zip(
+        completion.tool_calls_metadata, completion.mcp_tool_references, strict=True
+    ):
+        assert step.upload_free_reference_ids == ((source.id,) if upload_free else None)
     assert {ref.uri for ref in completion.mcp_tool_references} == {
         "https://example.test/shared"
     }
@@ -1711,9 +1719,13 @@ async def test_iterate_stream_timeout_yields_timeout_event_and_auto_denies():
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
+@pytest.mark.parametrize("upload_free", [False, True])
+async def test_iterate_stream_denied_tools_produce_structured_denial_payload(
+    upload_free,
+):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
+    mcp_proxy.tool_context_without_uploads = upload_free
     approval_manager = AsyncMock()
     messages = []
 
@@ -1744,7 +1756,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
         "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
         mocked_acompletion,
     ):
-        await _collect(
+        chunks = await _collect(
             adapter,
             stream,
             require_tool_approval=True,
@@ -1758,6 +1770,14 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
             pending_approval_ids=set(),
         )
 
+    completed = [
+        step
+        for chunk in chunks
+        for step in chunk.tool_calls_metadata or ()
+        if step.result is not None
+    ]
+    assert len(completed) == 1
+    assert completed[0].upload_free_reference_ids == (() if upload_free else None)
     denied_tool_messages = [m for m in messages if m.get("role") == "tool"]
     assert denied_tool_messages
     denied_payload = json.loads(denied_tool_messages[0]["content"])

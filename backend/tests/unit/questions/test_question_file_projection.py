@@ -135,6 +135,7 @@ def _reference(tool_call_id: str, content: str) -> McpToolReferencePublic:
 
 def _with_tool_calls(question: Question, upload: File, generated: File) -> Question:
     """The turn read its upload with a tool, edited its own output and searched."""
+    search_source = _reference("search", "A public page.")
     question.tool_calls = [
         ToolCallInfo(
             server_name="files",
@@ -146,6 +147,7 @@ def _with_tool_calls(question: Question, upload: File, generated: File) -> Quest
             },
             result=f"File: {upload.name} (text/plain)\n\n{upload.text}",
             structured_content={"text": upload.text},
+            meta={"preview": upload.text},
         ),
         ToolCallInfo(
             server_name="images",
@@ -153,6 +155,7 @@ def _with_tool_calls(question: Question, upload: File, generated: File) -> Quest
             tool_call_id="edit-generated",
             arguments={"image": file_handle(generated.id), "prompt": "Crop it"},
             result="[Image 1]",
+            upload_free_reference_ids=(),
         ),
         ToolCallInfo(
             server_name="web",
@@ -160,11 +163,12 @@ def _with_tool_calls(question: Question, upload: File, generated: File) -> Quest
             tool_call_id="search",
             arguments={"query": "payroll law"},
             result="Three results.",
+            upload_free_reference_ids=(search_source.id,),
         ),
     ]
     question.mcp_tool_references = [
         _reference("read-upload", upload.text or ""),
-        _reference("search", "A public page."),
+        search_source,
     ]
     return question
 
@@ -182,7 +186,9 @@ async def test_without_the_grant_what_a_tool_read_out_of_an_upload_is_left_out()
 
     assert question.tool_calls is not None
     read, edit, search = question.tool_calls
-    assert (read.arguments, read.result, read.structured_content) == (None, None, None)
+    assert (read.arguments, read.result, read.structured_content, read.meta) == (
+        None,
+    ) * 4
     assert read.tool_call_id == "read-upload"
     assert edit.result == "[Image 1]"
     assert search.result == "Three results."
@@ -208,15 +214,24 @@ async def test_with_the_grant_tool_calls_are_untouched():
     assert question.model_dump(include={"tool_calls", "mcp_tool_references"}) == before
 
 
-async def test_a_file_from_another_turn_counts_as_an_upload():
-    """Only the turns in hand say what was generated, so a reference to any
-    other file is masked rather than trusted."""
+async def test_unmarked_history_keeps_only_the_status_even_when_another_turn_holds_the_file():
     upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
     generated = _file("summary.txt", "GENERATED-SUMMARY")
     question = _with_tool_calls(_question(upload, generated), upload, generated)
     question.questions_files = []
+    assert question.tool_calls is not None
+    # A stored record from before the evidence existed. Its URL and the
+    # presence of that same UUID as an output elsewhere grant no visibility.
+    question.tool_calls[1] = ToolCallInfo.model_validate(
+        question.tool_calls[1].model_dump()
+    )
+    other = _question(upload, generated)
 
-    await attach_question_files([question], loader=None, include_user_uploads=False)
+    await attach_question_files(
+        [question, other],
+        loader=_Loader([upload, generated]),
+        include_user_uploads=False,
+    )
 
     assert question.tool_calls is not None
     assert [call.result for call in question.tool_calls] == [

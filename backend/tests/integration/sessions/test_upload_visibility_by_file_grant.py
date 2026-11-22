@@ -98,8 +98,7 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         assert [file.id for file in read.questions[0].files] == []
         assert [file.id for file in read.questions[0].generated_files] == [generated.id]
         assert "payroll-scan" not in str(read.model_dump())
-        # What a tool read out of the upload is left out with it; the call on
-        # the generated file is not an upload read and stays.
+        # Mixed tool context hides raw details; its generated file stays available.
         assert "PAYROLL-TEXT" not in str(read.model_dump())
         masked = await sessions.get_tool_call_result(
             session=read, tool_call_id="read-upload"
@@ -109,7 +108,7 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         kept = await sessions.get_tool_call_result(
             session=read, tool_call_id="describe-generated"
         )
-        assert kept is not None and kept.result == "A bar chart."
+        assert kept is not None and kept.result is None
 
         renamed = await sessions.update_session(
             SessionUpdate(id=session.id, name="Renamed")
@@ -127,10 +126,7 @@ async def test_uploads_follow_the_files_grant_through_every_history_read(
         assert stored is not None
         assert stored.files == []
         assert [file.id for file in stored.generated_files] == [generated.id]
-        assert [call.result for call in stored.tool_calls or []] == [
-            None,
-            "A bar chart.",
-        ]
+        assert [call.result for call in stored.tool_calls or []] == [None, None]
 
         # Tenant-wide reads (exports) hydrate through the same path.
         exported_sessions = await container.session_repo().get_by_tenant(

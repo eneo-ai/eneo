@@ -166,6 +166,8 @@ class MCPProxySession:
         mcp_server_tool_repo: "MCPServerToolRepository | None" = None,
         app_view_repo: "McpAppViewRepo | None" = None,
         for_view: bool = False,
+        *,
+        tool_context_without_uploads: bool = False,
     ):
         """
         Initialize proxy session.
@@ -187,6 +189,7 @@ class MCPProxySession:
         # Who calls through this session: the model, or one of a server's
         # views. Each is offered only the tools its server makes visible to it.
         self._for_view = for_view
+        self.tool_context_without_uploads = tool_context_without_uploads
         # Stored MCP App views. A proxy built without the repo (the
         # prepare-only path) resolves no views.
         self._app_view_repo = app_view_repo
