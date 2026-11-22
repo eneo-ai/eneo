@@ -5,7 +5,7 @@ import type { PageLoad } from "./$types";
 export const load: PageLoad = ({ params }) => {
   redirect(
     308,
-    resolve("/spaces/[spaceId]/assistants/[assistantId]/edit", {
+    resolve("/(app)/spaces/[spaceId]/assistants/[assistantId]/edit", {
       spaceId: params.spaceId,
       assistantId: params.groupChatId
     })
