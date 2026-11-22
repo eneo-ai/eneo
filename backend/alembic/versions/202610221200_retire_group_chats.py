@@ -11,6 +11,11 @@ The migrated assistant gets the space's first enabled model that can call
 tools, or no model when the space has none; editors then choose one. It gets
 no instructions: the orchestration prompt is the editor's to write.
 
+For a database already upgraded with an earlier draft, review the model on
+assistants marked migrated_from_group_chat in their metadata. An editor can
+select an eligible model in the assistant's AI settings. Do not rerun the
+migration over later edits.
+
 This revision first followed 202610201100 on a chain that left the main one
 at 202610161000. A database migrated on that chain reports itself at head,
 so `alembic upgrade head` would skip the revisions now before it, and two of
@@ -57,14 +62,21 @@ def upgrade() -> None:
             false, false,
             (
                 SELECT cm.id
-                FROM spaces_completion_models scm
-                JOIN completion_models cm ON cm.id = scm.completion_model_id
-                WHERE scm.space_id = g.space_id
+                FROM completion_models cm
+                LEFT JOIN security_classifications model_class
+                    ON model_class.id = cm.security_classification_id
+                WHERE (cm.tenant_id IS NULL OR cm.tenant_id = s.tenant_id)
+                  AND (s.user_id IS NOT NULL OR EXISTS (
+                      SELECT 1 FROM spaces_completion_models scm
+                      WHERE scm.space_id = s.id AND scm.completion_model_id = cm.id
+                  ))
+                  AND (NOT t.security_enabled OR space_class.id IS NULL
+                       OR model_class.security_level >= space_class.security_level)
                   AND cm.is_enabled
                   AND cm.deleted_at IS NULL
                   AND cm.supports_tool_calling
                   AND NOT cm.is_deprecated
-                ORDER BY cm.created_at
+                ORDER BY cm.created_at, cm.id
                 LIMIT 1
             ),
             g.user_id, g.space_id, false, g.published, 'assistant',
@@ -75,6 +87,9 @@ def upgrade() -> None:
             END || '{"migrated_from_group_chat": true}'::jsonb,
             g.icon_id
         FROM group_chats g
+        JOIN spaces s ON s.id = g.space_id
+        JOIN tenants t ON t.id = s.tenant_id
+        LEFT JOIN security_classifications space_class ON space_class.id = s.security_classification_id
         WHERE NOT EXISTS (SELECT 1 FROM assistants a WHERE a.id = g.id)
         """
     )

@@ -140,6 +140,23 @@ describe("MCP chat controls", () => {
     });
   });
 
+  it("applies approval preferences when only a specialist can use tools", () => {
+    const options = {
+      servers: [],
+      capabilities: [],
+      disabledServerIds: new Set<string>(),
+      autoAcceptTools: false
+    };
+    expect(mcpConversationOptions(options).require_tool_approval).toBeUndefined();
+    expect(mcpConversationOptions({ ...options, hasSpecialists: true }).require_tool_approval).toBe(
+      true
+    );
+    expect(
+      mcpConversationOptions({ ...options, hasSpecialists: true, autoAcceptTools: true })
+        .require_tool_approval
+    ).toBeUndefined();
+  });
+
   it("asks before a capability runs, as before a server, when tools do not run automatically", () => {
     // Web search and image generation are external tools: the backend asks for them too.
     const options = (autoAcceptTools: boolean) =>

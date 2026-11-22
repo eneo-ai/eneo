@@ -77,8 +77,10 @@ export function mcpConversationOptions({
   servers,
   capabilities,
   disabledServerIds,
+  hasSpecialists = false,
   autoAcceptTools
 }: {
+  hasSpecialists?: boolean;
   servers: McpServerSummary[];
   /** Web search, image generation, …: external tools the backend asks approval for too. */
   capabilities: ChatCapability[];
@@ -90,7 +92,9 @@ export function mcpConversationOptions({
   );
   return {
     require_tool_approval:
-      servers.length + capabilities.length > 0 && !autoAcceptTools ? true : undefined,
+      (servers.length + capabilities.length > 0 || hasSpecialists) && !autoAcceptTools
+        ? true
+        : undefined,
     disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
   };
 }
@@ -121,6 +125,7 @@ function ToolGroup({ title, children }: { title: string; children: React.ReactNo
 }
 
 export type ChatToolsProps = {
+  hasSpecialists?: boolean;
   capabilities?: ChatCapability[];
   disabledCapabilities?: Set<Capability>;
   servers?: McpServerSummary[];
@@ -164,6 +169,7 @@ export function ToolsPanel({
   disabledServerIds = new Set(),
   autoAcceptTools,
   modelSupportsTools = true,
+  hasSpecialists,
   onDisabledCapabilitiesChange,
   onDisabledServerIdsChange,
   onAutoAcceptToolsChange,
@@ -241,7 +247,7 @@ export function ToolsPanel({
           </div>
         )}
         <div className="text-ax-text-secondary flex items-center justify-between gap-2 text-xs">
-          <span>{t("mcp_servers_active_count", { active, total })}</span>
+          <span>{total > 0 && t("mcp_servers_active_count", { active, total })}</span>
           {total > 1 && modelSupportsTools && (
             // Never disabled: a button that disables itself when pressed
             // would drop keyboard focus. Pressing it again changes nothing.
@@ -341,6 +347,9 @@ export function ToolsPanel({
         )}
       </div>
 
+      {hasSpecialists && (
+        <p className="text-ax-text-secondary text-sm">{t("assistant_delegated_tools")}</p>
+      )}
       {modelSupportsTools && (
         <div className="border-ax-border flex shrink-0 items-start gap-2.5 border-t pt-2">
           <ShieldCheck
@@ -374,14 +383,16 @@ export function ChatTools(props: ChatToolsProps) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const { total, active } = toolCounts(props);
-  if (total === 0) return null;
+  if (total === 0 && !props.hasSpecialists) return null;
 
   return (
     <ComposerPanel
       icon={Plug}
       text={t("chat_tools")}
       name={t("chat_tools_named", {
-        status: t("mcp_servers_active_count", { active, total })
+        status: total
+          ? t("mcp_servers_active_count", { active, total })
+          : t("assistant_delegated_tools")
       })}
       count={active}
       label={t("chat_tools")}

@@ -3,6 +3,7 @@ import { isHttpError, isRedirect } from "@sveltejs/kit";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { toAppError } from "$lib/core/errors/toAppError";
 import { load as loadSpace } from "./spaces/[spaceId]/chat/+page";
+import { load as loadFormerGroupEditor } from "./spaces/[spaceId]/group-chats/[groupChatId]/edit/+page";
 import { load as loadDashboard } from "./dashboard/[assistantId]/[[sessionId]]/+page";
 
 function deferred<T>() {
@@ -233,6 +234,16 @@ describe("Space chat access", () => {
     });
     expect(data.getSession).not.toHaveBeenCalled();
     expect(data.listSessions).not.toHaveBeenCalled();
+  });
+
+  test("opens a former group editor bookmark in the same assistant's settings", () => {
+    expect(() =>
+      loadFormerGroupEditor({
+        params: { spaceId: "space-1", groupChatId: "group-1" }
+      } as Parameters<typeof loadFormerGroupEditor>[0])
+    ).toThrow(
+      expect.objectContaining({ status: 308, location: "/spaces/space-1/assistants/group-1/edit" })
+    );
   });
 
   test("opens a saved group-chat link as the assistant with that id", async () => {

@@ -38,6 +38,7 @@
         },
         {
           "id": "assistant-specialists",
+          "permissions": { "allOf": ["assistants"] },
           "type": "new",
           "area": "assistants",
           "title": {
@@ -58,8 +59,8 @@
             "sv": "Gruppchattar är nu assistenter"
           },
           "body": {
-            "en": "Each group chat became an assistant with the same name and its members as specialists, so conversations and insights carried over. Open the former group in the assistant list, give it instructions for the combined answer, and check its model and specialists. Mentions and response labels are gone; the steps under each answer show who said what.",
-            "sv": "Varje gruppchatt blev en assistent med samma namn och medlemmarna som specialister, så konversationer och insikter följde med. Öppna den tidigare gruppen i assistentlistan, ge den instruktioner för det samlade svaret och kontrollera modell och specialister. Omnämnanden och svarsetiketter är borta; stegen under varje svar visar vem som sa vad."
+            "en": "To find your group conversations, open the same space, choose Assistants, open the assistant with the group's former name and select History. Its members are now specialists. If you cannot see the assistant, ask your administrator to review your assistant access.",
+            "sv": "Du hittar dina tidigare gruppkonversationer under Assistenter i samma yta. Öppna assistenten med gruppens tidigare namn och välj Historik. Medlemmarna är nu specialister. Om assistenten saknas kan din administratör se över din behörighet till assistenter."
           }
         },
         {

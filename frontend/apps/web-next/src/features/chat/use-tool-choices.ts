@@ -164,6 +164,7 @@ export function useToolChoices(partner: ChatPartner) {
   return {
     /** False when the partner's model cannot call tools: every tool is unavailable. */
     modelSupportsTools,
+    hasSpecialists: modelSupportsTools && !!partner.hasSpecialists,
     /** Capabilities offered in the composer. */
     capabilities,
     disabledCapabilities,

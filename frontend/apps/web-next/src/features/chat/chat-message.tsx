@@ -65,6 +65,7 @@ import {
   mcpReferencesFromParts,
   ToolApprovalCard
 } from "./message-parts";
+import { approvalForPart } from "./tool-approvals";
 import { MessageFiles, PendingMessageFiles, type PendingUpload } from "./message-files";
 
 /** Who answers: the chat partner's name and tile. */
@@ -710,8 +711,9 @@ function AssistantMessage({
               </CitationSourcesProvider>
             );
           }
-          if (part.type === "data-tool-approval") {
-            return <ToolApprovalCard key={part.id ?? index} data={part.data} />;
+          const approval = approvalForPart(part);
+          if (approval) {
+            return <ToolApprovalCard key={approval.approval_id} data={approval} />;
           }
           return null;
         })}

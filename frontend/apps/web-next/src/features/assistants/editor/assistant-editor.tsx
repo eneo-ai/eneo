@@ -12,6 +12,7 @@ import {
   Send,
   ShieldCheck,
   SlidersHorizontal,
+  Users,
   Sparkles
 } from "lucide-react";
 import Link from "@/lib/link";
@@ -46,6 +47,7 @@ import { InstructionsSection } from "./instructions-section";
 import { KnowledgeSection } from "./knowledge-section";
 import { McpSection } from "./mcp-section";
 import { PublishingSection } from "./publishing-section";
+import { SpecialistsSection } from "./specialists-section";
 import { SecuritySection } from "./security-section";
 import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use-assistant";
 
@@ -121,6 +123,20 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
         <KnowledgeSection
           assistant={assistant}
           modelSupportsTools={ai.toolModel?.supports_tool_calling === true}
+        />
+      )
+    },
+    {
+      id: "specialists",
+      label: t("specialists"),
+      icon: Users,
+      group: content,
+      summary: summary.chosen(assistant.specialists?.length ?? 0),
+      node: (
+        <SpecialistsSection
+          key={assistant.id}
+          assistant={assistant}
+          supportsTools={ai.toolModel?.supports_tool_calling === true}
         />
       )
     },

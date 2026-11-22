@@ -619,8 +619,9 @@ async def create_space_assistant(
 
 @router.post(
     "/{id}/applications/group-chats/",
-    response_model=None,
-    responses={410: {"description": "Group chats are retired."}},
+    status_code=410,
+    response_model=GeneralError,
+    response_description="Group chats are retired.",
     description=(
         "Retired: group chats became assistants with specialists. Always 410. "
         "Create an assistant and add its specialists instead."

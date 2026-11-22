@@ -27,6 +27,7 @@ export type ChatPartner = {
   } | null;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */
   mcpServers?: Schema<"MCPServerPublicDict">[];
+  hasSpecialists?: boolean;
   enabledCapabilities?: Schema<"AssistantPublic">["enabled_capabilities"];
   availableCapabilities?: Schema<"AssistantPublic">["available_capabilities"];
   /** Personal-assistant governance hints, including enforced MCP defaults. */
@@ -151,6 +152,7 @@ export type EneoDataParts = {
   "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
   "tool-approval": ToolApprovalData;
+  consultation: Schema<"ConsultationInfo">;
   error: { code?: number | null; reason?: string | null };
 };
 

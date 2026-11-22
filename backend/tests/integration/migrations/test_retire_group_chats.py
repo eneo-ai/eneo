@@ -58,7 +58,19 @@ def migration_database() -> Generator[tuple[Connection, Config], None, None]:
 
 
 @pytest.mark.parametrize(
-    "unavailable", ["disabled", "deleted", "deprecated", "no_tools", "no_alternative"]
+    "unavailable",
+    [
+        "disabled",
+        "deleted",
+        "deprecated",
+        "no_tools",
+        "no_alternative",
+        "personal_unmapped",
+        "below_class",
+        "no_class",
+        "enforcement_off",
+        "not_mapped",
+    ],
 )
 def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
     migration_database: tuple[Connection, Config], unavailable: str
@@ -74,6 +86,11 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
             "new_model",
             "group",
             "session",
+            "low",
+            "high",
+            "question",
+            "foreign_tenant",
+            "foreign_provider",
         )
     }
     with connection.begin() as transaction:
@@ -95,6 +112,51 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
             ),
             ids,
         )
+        classified = unavailable in {"below_class", "no_class", "enforcement_off"}
+        if classified:
+            connection.execute(
+                sa.text("""
+                INSERT INTO security_classifications (id, tenant_id, name, security_level)
+                VALUES (:low, :tenant, 'Low', 1), (:high, :tenant, 'High', 2)
+            """),
+                ids,
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE spaces SET security_classification_id=:high WHERE id=:space"
+                ),
+                ids,
+            )
+            connection.execute(
+                sa.text(
+                    "UPDATE tenants SET security_enabled=:enabled WHERE id=:tenant"
+                ),
+                {**ids, "enabled": unavailable != "enforcement_off"},
+            )
+        if unavailable == "personal_unmapped":
+            connection.execute(
+                sa.text("UPDATE spaces SET user_id=:user WHERE id=:space"), ids
+            )
+            # Isolate this personal catalog from global model seeds in older revisions.
+            connection.execute(
+                sa.text(
+                    "UPDATE completion_models SET is_enabled=false WHERE tenant_id IS NULL"
+                )
+            )
+            connection.execute(
+                sa.text("""
+                INSERT INTO tenants (id, name, quota_limit, state)
+                VALUES (:foreign_tenant, 'Other tenant', 1000000, 'active')
+            """),
+                ids,
+            )
+            connection.execute(
+                sa.text("""
+                INSERT INTO model_providers (id, tenant_id, name, provider_type, credentials)
+                VALUES (:foreign_provider, :foreign_tenant, 'Tenant provider', 'openai', '{}')
+            """),
+                ids,
+            )
         for key, enabled, deleted, deprecated, tools, created in (
             (
                 "old_model",
@@ -130,6 +192,29 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
                     "created": created,
                 },
             )
+            if classified:
+                level = (
+                    None
+                    if unavailable == "no_class" and key == "old_model"
+                    else (ids["high"] if key == "new_model" else ids["low"])
+                )
+                connection.execute(
+                    sa.text(
+                        "UPDATE completion_models SET security_classification_id=:level WHERE id=:model"
+                    ),
+                    {"level": level, "model": ids[key]},
+                )
+            if unavailable == "personal_unmapped":
+                if key == "old_model":
+                    connection.execute(
+                        sa.text("""
+                        UPDATE completion_models SET tenant_id=:foreign_tenant, provider_id=:foreign_provider WHERE id=:old_model
+                    """),
+                        ids,
+                    )
+                continue
+            if key == "old_model" and unavailable == "not_mapped":
+                continue
             connection.execute(
                 sa.text(
                     "INSERT INTO spaces_completion_models (space_id, completion_model_id) VALUES (:space, :model)"
@@ -151,6 +236,13 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
         """),
             ids,
         )
+        connection.execute(
+            sa.text("""
+            INSERT INTO questions (id, tenant_id, session_id, question, answer, num_tokens_question, num_tokens_answer)
+            VALUES (:question, :tenant, :session, 'Original question', 'Original answer', 2, 2)
+        """),
+            ids,
+        )
         revision = ScriptDirectory.from_config(config).get_revision("202610221200")
         assert revision is not None
         with Operations.context(MigrationContext.configure(connection)):
@@ -162,7 +254,11 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
             ids,
         ).one()
         assert assistant.completion_model_id == (
-            None if unavailable == "no_alternative" else ids["new_model"]
+            None
+            if unavailable == "no_alternative"
+            else ids["old_model"]
+            if unavailable == "enforcement_off"
+            else ids["new_model"]
         )
         assert assistant.metadata_json["migrated_from_group_chat"] is True
         session = connection.execute(
@@ -171,4 +267,10 @@ def test_retirement_selects_an_available_tool_model_and_keeps_old_sessions(
         ).one()
         assert session.assistant_id == ids["group"]
         assert session.created_at.year == 2025
+        assert connection.execute(
+            sa.text("""
+            SELECT question, answer, session_id FROM questions WHERE id=:question
+        """),
+            ids,
+        ).one() == ("Original question", "Original answer", ids["session"])
         transaction.rollback()

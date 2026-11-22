@@ -66,6 +66,7 @@ import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } fro
 import { Composer } from "./composer";
 import { ComposerDock, ConversationLayout } from "./conversation-layout";
 import {
+  approvalForPart,
   pendingTools,
   ToolApprovalsContext,
   ToolDecisionBar,
@@ -412,12 +413,9 @@ function ConversationView({
           streamErrorRef.current = part.data;
           setStreamError(part.data);
         }
-        if (
-          part.type === "data-tool-approval" &&
-          part.data.status === "pending" &&
-          mounted.current
-        ) {
-          const names = part.data.tools.map((tool) => tool.title || tool.tool_name).join(", ");
+        const approval = approvalForPart(part);
+        if (approval?.status === "pending" && mounted.current) {
+          const names = approval.tools.map((tool) => tool.title || tool.tool_name).join(", ");
           announce(t("chat_announce_tool_approval", { tools: names }));
         }
         if (part.type === "data-token-usage") {
@@ -671,18 +669,18 @@ function ConversationView({
   const lastMessage = messages.at(-1);
   const waitingApproval =
     lastMessage?.role === "assistant"
-      ? lastMessage.parts.findLast(
-          (part) => part.type === "data-tool-approval" && part.data.status === "pending"
-        )
+      ? lastMessage.parts
+          .map(approvalForPart)
+          .findLast((approval) => approval?.status === "pending")
       : undefined;
   const decisionBar =
     phone === true &&
     // A pending call only waits while its stream is open: a broken stream
     // gives the composer back (and its retry).
     busy &&
-    waitingApproval?.type === "data-tool-approval" &&
-    pendingTools(waitingApproval.data, approvals.decisions).length > 0
-      ? waitingApproval.data
+    waitingApproval &&
+    pendingTools(waitingApproval, approvals.decisions).length > 0
+      ? waitingApproval
       : null;
   // The decision is made: the composer is back where the bar was, and the
   // focus goes with it if it had none left.
@@ -727,6 +725,7 @@ function ConversationView({
   function requestOptions(): SendRequest {
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
+      hasSpecialists: toolChoices.hasSpecialists,
       capabilities: toolChoices.capabilities,
       disabledServerIds: toolChoices.disabledMcpServerIds,
       autoAcceptTools: toolChoices.autoAcceptTools
@@ -1024,6 +1023,7 @@ function ConversationView({
     disabledServerIds: toolChoices.disabledMcpServerIds,
     autoAcceptTools: toolChoices.autoAcceptTools,
     modelSupportsTools: toolChoices.modelSupportsTools,
+    hasSpecialists: toolChoices.hasSpecialists,
     onDisabledCapabilitiesChange: toolChoices.setDisabledCapabilities,
     onDisabledServerIdsChange: toolChoices.setDisabledMcpServerIds,
     onAutoAcceptToolsChange: toolChoices.setAutoAcceptTools

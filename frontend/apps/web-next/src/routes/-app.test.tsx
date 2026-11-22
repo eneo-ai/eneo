@@ -185,6 +185,12 @@ it("opens the knowledge hub and passes the operator's runtime integration form U
   expect(document.title).toBe(`${messages.knowledge} · Upphandling · Eneo`);
 });
 
+it("redirects a former group editor bookmark to the same assistant editor", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  const { router } = await renderRoute("/spaces/space-1/group-chats/former/edit");
+  expect(router.state.location.pathname).toBe("/spaces/space-1/assistants/former/edit");
+});
+
 it("redirects the integration index to the knowledge tab", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   const { router } = await renderRoute("/spaces/space-1/knowledge/integrations");

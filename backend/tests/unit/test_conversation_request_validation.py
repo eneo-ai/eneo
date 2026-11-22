@@ -11,6 +11,23 @@ from eneo.conversations.conversation_models import ConversationRequest
 from eneo.conversations.conversations_router import chat
 
 
+def test_retired_group_endpoints_document_the_actual_error():
+    from eneo.server.main import app
+
+    paths = app.openapi()["paths"]
+    for path in (
+        "/api/v1/group-chats/",
+        "/api/v1/group-chats/{path}",
+        "/api/v1/spaces/{id}/applications/group-chats/",
+    ):
+        for operation in paths[path].values():
+            responses = operation["responses"]
+            assert "200" not in responses
+            assert responses["410"]["content"]["application/json"]["schema"] == {
+                "$ref": "#/components/schemas/GeneralError"
+            }
+
+
 def test_conversation_request_requires_exactly_one_target_id():
     assistant_id = uuid4()
     session_id = uuid4()

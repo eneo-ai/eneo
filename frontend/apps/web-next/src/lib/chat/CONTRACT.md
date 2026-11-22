@@ -279,6 +279,13 @@ MCP resource citations produced by a tool call; emitted with the snapshot
 that carries them, before that snapshot's tool parts. Not transient (one
 part per batch, no id).
 
+### `data-consultation` (eneo)
+
+The part carries a public `ConsultationInfo` snapshot. Its ID is the consultation
+ID. Updates replace the same part as the specialist works. A specialist's
+pending approval carries the approval ID and the tool call IDs awaiting a decision.
+The parent's final answer continues on the ordinary text stream.
+
 ### `data-tool-approval` (eneo) — see [Tool approval](#tool-approval)
 
 ```json

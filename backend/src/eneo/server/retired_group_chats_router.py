@@ -5,7 +5,7 @@ became an assistant with the same id, so a client holding a group chat id can
 use it as an assistant id against the assistant endpoints.
 """
 
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -15,6 +15,7 @@ from eneo.authentication.endpoint_access import (
     endpoint_access,
 )
 from eneo.main.container.container import Container
+from eneo.main.models import GeneralError
 from eneo.server.dependencies.container import get_container
 
 router = APIRouter()
@@ -37,9 +38,6 @@ def _gone() -> None:
     raise HTTPException(status_code=410, detail=RETIRED_DETAIL)
 
 
-_RESPONSES: dict[int | str, dict[str, Any]] = {
-    410: {"description": "Group chats are retired."}
-}
 _DESCRIPTION = "Retired: group chats became assistants with specialists. Always 410."
 
 
@@ -73,7 +71,9 @@ for _method in ("GET", "POST"):
         retired_group_chats_collection,
         methods=[_method],
         operation_id=f"retired_group_chats_collection_{_method.lower()}",
-        responses=_RESPONSES,
+        status_code=410,
+        response_model=GeneralError,
+        response_description="Group chats are retired.",
         description=_DESCRIPTION,
         deprecated=True,
     )
@@ -83,7 +83,9 @@ for _method in ("GET", "POST", "PATCH", "PUT", "DELETE"):
         retired_group_chats_item,
         methods=[_method],
         operation_id=f"retired_group_chats_item_{_method.lower()}",
-        responses=_RESPONSES,
+        status_code=410,
+        response_model=GeneralError,
+        response_description="Group chats are retired.",
         description=_DESCRIPTION,
         deprecated=True,
     )
