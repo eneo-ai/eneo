@@ -186,6 +186,26 @@ class AssistantDelegation:
     def references_for(self, call_id: str) -> list[McpToolReference]:
         return self._result_references.get(call_id, [])
 
+    def _deny(
+        self, consultation: AssistantConsultation, call_id: str
+    ) -> AssistantConsultation:
+        # Streaming, cancellation recovery and persistence all read the same record.
+        denied = AssistantConsultation(
+            id=consultation.id,
+            ordinal=consultation.ordinal,
+            assistant_id=consultation.assistant_id,
+            assistant_name=consultation.assistant_name,
+            question="",
+            status="denied",
+            usage=consultation.usage,
+            completion_model_id=consultation.completion_model_id,
+            input_tokens=consultation.input_tokens,
+            output_tokens=consultation.output_tokens,
+        )
+        self.consultations[consultation.ordinal - 1] = denied
+        self._results[call_id] = json.dumps({"outcome": "denied"})
+        return denied
+
     @staticmethod
     def _event(consultation: AssistantConsultation) -> Completion:
         return Completion(
@@ -361,9 +381,7 @@ class AssistantDelegation:
                                 else "incomplete"
                             )
             except _ACCESS_DENIED:
-                consultation.status = "denied"
-                # Withhold evidence from a now-ineligible parent.
-                self._results[call_id] = json.dumps({"outcome": "denied"})
+                consultation = self._deny(consultation, call_id)
             except ExecutionLimitReached:
                 consultation.status = "incomplete"
             except TimeoutError:
@@ -393,8 +411,7 @@ class AssistantDelegation:
                 # evidence, and only a still-eligible parent may receive it.
                 await self.authorize(self.parent_assistant_id)
             except _ACCESS_DENIED:
-                consultation.status = "denied"
-                self._results[call_id] = json.dumps({"outcome": "denied"})
+                consultation = self._deny(consultation, call_id)
             if call_id not in self._results:
                 self._results[call_id] = json.dumps(
                     {

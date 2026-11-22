@@ -38,6 +38,20 @@ describe("awaitingToolCalls", () => {
     expect(isAwaitingApproval(consultation, { tool_call_id: "internal" })).toBe(false);
   });
 
+  it("offers only the pending occurrence when a provider reuses an id", () => {
+    const previous = step("same", { step_id: "previous", result_status: "succeeded" });
+    const pending = step("same", { step_id: "current", arguments: { q: "new" } });
+    const consultation = {
+      status: "awaiting_approval",
+      approval_id: "approval",
+      awaiting_tool_call_ids: ["same"],
+      tool_calls: [previous, pending]
+    };
+    expect(awaitingToolCalls(consultation).map((call) => call.arguments)).toEqual([{ q: "new" }]);
+    expect(isAwaitingApproval(consultation, previous)).toBe(false);
+    expect(isAwaitingApproval(consultation, pending)).toBe(true);
+  });
+
   it("falls back to external pending steps for history without the list", () => {
     const consultation = {
       status: "awaiting_approval",

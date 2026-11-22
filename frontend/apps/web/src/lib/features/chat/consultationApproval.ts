@@ -12,6 +12,7 @@ export type ConsultationApprovalLike = {
   approval_id?: string | null;
   awaiting_tool_call_ids?: string[] | null;
   tool_calls?: Array<{
+    step_id?: string | null;
     server_name: string;
     tool_name: string;
     tool_call_id?: string | null;
@@ -29,19 +30,30 @@ export type AwaitingToolCall = {
   tool_call_id?: string;
 };
 
-export function awaitingToolCalls(consultation: ConsultationApprovalLike): AwaitingToolCall[] {
+type ApprovalStep = NonNullable<ConsultationApprovalLike["tool_calls"]>[number];
+
+export function awaitingConsultationSteps<T extends ApprovalStep>(
+  consultation: Omit<ConsultationApprovalLike, "tool_calls"> & { tool_calls?: T[] | null }
+): T[] {
   if (consultation.status !== "awaiting_approval" || !consultation.approval_id) return [];
-  const steps = consultation.tool_calls ?? [];
-  const listed = consultation.awaiting_tool_call_ids ?? [];
-  const awaiting = listed.length
-    ? steps.filter((step) => !!step.tool_call_id && listed.includes(step.tool_call_id))
-    : steps.filter(
-        (step) =>
-          !step.is_internal &&
-          step.approved == null &&
-          (step.result_status === "pending" || step.result_status === "awaiting_approval")
-      );
-  return awaiting.map((step) => ({
+  const listed = new Set(consultation.awaiting_tool_call_ids);
+  const current = new Map<string, T>();
+  for (const step of consultation.tool_calls ?? []) {
+    const id = step.tool_call_id;
+    if (!id || step.is_internal || step.approved != null) continue;
+    if (listed.size && !listed.has(id)) continue;
+    if (
+      step.result_status == null ||
+      ["pending", "awaiting_approval"].includes(step.result_status)
+    ) {
+      current.set(id, step);
+    }
+  }
+  return [...current.values()];
+}
+
+export function awaitingToolCalls(consultation: ConsultationApprovalLike): AwaitingToolCall[] {
+  return awaitingConsultationSteps(consultation).map((step) => ({
     server_name: step.server_name,
     tool_name: step.tool_name,
     arguments: step.arguments ?? undefined,
@@ -52,8 +64,10 @@ export function awaitingToolCalls(consultation: ConsultationApprovalLike): Await
 /** Whether `step` is one of the calls the consultation's pending approval decides. */
 export function isAwaitingApproval(
   consultation: ConsultationApprovalLike,
-  step: { tool_call_id?: string | null }
+  step: { tool_call_id?: string | null; step_id?: string | null }
 ): boolean {
   if (!step.tool_call_id) return false;
-  return awaitingToolCalls(consultation).some((call) => call.tool_call_id === step.tool_call_id);
+  return awaitingConsultationSteps(consultation).some((call) =>
+    step.step_id ? call.step_id === step.step_id : call.tool_call_id === step.tool_call_id
+  );
 }

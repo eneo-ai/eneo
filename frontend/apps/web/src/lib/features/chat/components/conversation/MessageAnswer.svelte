@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { awaitingConsultationSteps } from "../../consultationApproval";
   import { analysisStep } from "../../analysisStep";
   import { analysisStepLabels } from "../../analysisStepLabels";
   import { toolFileInputs, type ToolInputFile } from "../../toolFileInputs";
@@ -138,10 +139,11 @@
   const pendingToolCalls = $derived([
     ...(pendingConsultations.length ? [] : (mcpToolCalls ?? []).filter(isPending)).map((step) => ({
       ...step,
-      consultationName: ""
+      consultationName: "",
+      step_id: undefined
     })),
     ...pendingConsultations.flatMap((consultation) =>
-      (consultation.tool_calls ?? [])
+      awaitingConsultationSteps(consultation)
         .filter((step) => step.tool_call_id && pendingToolIds.includes(step.tool_call_id))
         .map((step) => ({
           ...step,
@@ -588,7 +590,7 @@
 
   {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
+      {#each pendingToolCalls as toolCall, idx (toolCall.step_id ?? toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =
           toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}

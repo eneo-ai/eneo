@@ -26,7 +26,7 @@ from eneo.completion_models.domain.skill_activation import SkillActivationRuntim
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
-    replayable_tool_call_id,
+    history_may_contain_uploads,
 )
 from eneo.files.file_models import File
 from eneo.files.file_reference import (
@@ -452,6 +452,7 @@ class CompletionService:
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
         document_template: "DocumentTemplateReference | None" = None,
+        question_may_contain_uploads: bool = False,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -544,21 +545,14 @@ class CompletionService:
             # Build the acting user/tenant identity headers once; each client
             # forwards them only to its server when forward_identity is set.
             identity_headers = build_identity_headers(self.user, self.tenant)
-            # The model can quote a prior tool result in a new call without a file handle.
-            unverified_history = any(
-                step.upload_free_reference_ids is None
-                and replayable_tool_call_id(step) is not None
-                for turn in history
-                for step in turn.tool_calls or ()
-            )
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 identity_headers=identity_headers,
                 tool_context_without_uploads=not (
                     files
                     or transcription_inputs
-                    or any(turn.files for turn in history)
-                    or unverified_history
+                    or question_may_contain_uploads
+                    or history_may_contain_uploads(history)
                 ),
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
                 app_view_repo=(
