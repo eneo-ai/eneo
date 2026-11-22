@@ -824,7 +824,8 @@ async def test_a_conversation_takes_one_follow_up_at_a_time(
     assert resp.status_code == 200, resp.text
     token = await _mint(client, public_id)
 
-    # The first follow-up's answer streams only once the test lets it.
+    # Overlap the requests only after the first follow-up holds the conversation.
+    answer_started = asyncio.Event()
     gate = asyncio.Event()
     canned = AssistantService.ask
 
@@ -834,6 +835,7 @@ async def test_a_conversation_takes_one_follow_up_at_a_time(
             inner = response.answer
 
             async def answer():
+                answer_started.set()
                 await gate.wait()
                 async for chunk in inner:
                     yield chunk
@@ -858,16 +860,18 @@ async def test_a_conversation_takes_one_follow_up_at_a_time(
             headers=_auth(token),
         )
     )
-    await asyncio.sleep(0.3)
-    second = await client.post(
-        f"/api/v1/widgets/{public_id}/ask/",
-        json={"question": "Också", "session_id": session_id},
-        headers=_auth(token),
-    )
-    assert second.status_code == 429, second.text
-    assert second.json()["detail"]["code"] == "rate_limited_session"
-    gate.set()
-    resp = await first
+    try:
+        await asyncio.wait_for(answer_started.wait(), timeout=10)
+        second = await client.post(
+            f"/api/v1/widgets/{public_id}/ask/",
+            json={"question": "Också", "session_id": session_id},
+            headers=_auth(token),
+        )
+        assert second.status_code == 429, second.text
+        assert second.json()["detail"]["code"] == "rate_limited_session"
+    finally:
+        gate.set()
+        resp = await first
     assert resp.status_code == 200, resp.text
 
     # The hold is gone with the answer; the cap now closes the conversation.
