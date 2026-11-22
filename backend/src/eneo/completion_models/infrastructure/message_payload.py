@@ -50,18 +50,21 @@ class TurnToolCallIds:
 
     def __init__(self, namespace: UUID | None = None) -> None:
         self._namespace = namespace or uuid4()
-        self._used: set[str] = set()
+        self._provider_ids: dict[str, str] = {}
+
+    def provider_id_for(self, call_id: str) -> str:
+        return self._provider_ids[call_id]
 
     def claim(self, provider_id: str) -> str:
         if not provider_id:
             return provider_id
         call_id = provider_id
-        ordinal = len(self._used)
-        while call_id in self._used:
+        ordinal = len(self._provider_ids)
+        while call_id in self._provider_ids:
             # Nine alphanumerics also fit providers with strict tool-id formats.
             call_id = uuid5(self._namespace, f"{provider_id}:{ordinal}").hex[:9]
             ordinal += 1
-        self._used.add(call_id)
+        self._provider_ids[call_id] = provider_id
         return call_id
 
 

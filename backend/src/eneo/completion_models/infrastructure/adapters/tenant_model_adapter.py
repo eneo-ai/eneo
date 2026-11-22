@@ -1662,6 +1662,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     provider_calls = tuple(
                         ProviderToolCall(
                             call_id=call_ids.claim(tc.id),
+                            provider_id=tc.id,
                             name=tc.function.name,
                             arguments=tc.function.arguments,
                         )
@@ -2427,6 +2428,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     provider_calls = tuple(
                         ProviderToolCall(
                             call_id=cast(str, tool_call["id"]),
+                            provider_id=call_ids.provider_id_for(
+                                cast(str, tool_call["id"])
+                            ),
                             name=tool_call["function"]["name"],
                             arguments=tool_call["function"]["arguments"],
                         )
