@@ -268,6 +268,8 @@ async def test_a_run_result_run_completes_before_its_result_is_sent(
         "run_id": str(run.id),
         "run_created_at": finished.created_at.isoformat(),
         "run_completed_at": finished.finished_at.isoformat(),
+        "run_label": None,
+        "run_date": finished.created_at.astimezone(timezone.utc).date().isoformat(),
         "deliverables": [
             {
                 "kind": "text",

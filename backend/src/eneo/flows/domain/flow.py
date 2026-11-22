@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated, Any, Literal, Optional, Self, TypeAlias, cast
 from uuid import UUID
 
@@ -285,6 +285,17 @@ class FlowRunStatusSnapshot(BaseModel):
         cls, value: object
     ) -> FlowRunDispatchError | None:
         return parse_flow_run_dispatch_error(value)
+
+
+def flow_run_day(*, run_date: date | None, created_at: datetime) -> date:
+    """The day a run is filed under: its own day, from the form field with
+    that role, else the day it was created. Its documents' names and its sent
+    result both carry it."""
+    if created_at.tzinfo is None:
+        created_at = created_at.replace(tzinfo=timezone.utc)
+    # Eneo has no user or tenant time zone: a run without a day of its own is
+    # dated by its UTC day.
+    return run_date or created_at.astimezone(timezone.utc).date()
 
 
 class FlowRun(FlowRunStatusSnapshot):
