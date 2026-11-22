@@ -63,6 +63,9 @@ describe("login diagnostics", () => {
     expect(loginDiagnosticMessageKey({ detailCode: "oidc_transaction_invalid" })).toBe(
       "oidc_error_attempt_rejected"
     );
+    expect(loginDiagnosticMessageKey({ detailCode: "identity_conflict" })).toBe(
+      "oidc_error_identity_conflict"
+    );
   });
 
   it("builds bounded diagnostic redirect URLs", () => {

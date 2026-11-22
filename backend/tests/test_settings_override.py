@@ -310,9 +310,10 @@ def test_stored_mode_does_not_warn_about_settings_that_still_apply(
     assert _ignored_sign_in_warnings(caplog) == []
 
 
-def test_allowed_domains_are_not_called_ignored_while_api_tokens_use_them(
+def test_allowed_domains_are_called_ignored_with_access_tokens_too(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ):
+    """Access tokens read the stored provider's domains, as browser sign-in does."""
     _set_minimal_settings_env(monkeypatch)
     monkeypatch.setenv("FEDERATION_ENABLED", "true")
     monkeypatch.delenv("FEDERATION_PER_TENANT_ENABLED", raising=False)
@@ -325,7 +326,7 @@ def test_allowed_domains_are_not_called_ignored_while_api_tokens_use_them(
 
     [warning] = _ignored_sign_in_warnings(caplog)
     assert "OIDC_CLIENT_SECRET" in warning
-    assert "OIDC_ALLOWED_DOMAINS" not in warning
+    assert "OIDC_ALLOWED_DOMAINS" in warning
 
 
 @pytest.fixture(autouse=True)

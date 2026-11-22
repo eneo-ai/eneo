@@ -347,7 +347,7 @@ class ConversationRetentionRepository:
             source=PolicyLevel(source),
         )
 
-    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
+    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int | None:
         return await self.unit.cascade_cost(identifier, ceiling)
 
     async def delete_unit(

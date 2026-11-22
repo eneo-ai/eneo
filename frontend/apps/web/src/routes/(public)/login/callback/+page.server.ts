@@ -195,6 +195,9 @@ export const load = (async (event) => {
       params.set("detailCode", "login_unavailable");
     } else if (loginError.code === "ATTEMPT_EXPIRED") {
       params.set("message", "oidc_attempt_rejected");
+    } else if (loginError.code === "IDENTITY_CONFLICT") {
+      params.set("message", "oidc_callback_failed");
+      params.set("detailCode", "identity_conflict");
     } else {
       params.set("message", "oidc_callback_failed");
     }

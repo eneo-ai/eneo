@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Callable
 from typing import Any
 from unittest.mock import AsyncMock
@@ -6,9 +7,12 @@ from uuid import uuid4
 
 import pytest
 from arq.worker import Function, create_worker
+from sqlalchemy.exc import IntegrityError
 
 from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, DEFAULT_QUEUE_NAME
+from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.main.config import get_settings
+from eneo.main.exceptions import TenantQuotaExceededException
 from eneo.websites.application.crawl_dispatch import CrawlReconciliationResult
 from eneo.worker import arq as worker_arq
 from eneo.worker import routes as worker_routes
@@ -52,9 +56,17 @@ def test_arq_constructs_crawler_with_shared_runtime_settings() -> None:
     assert crawler.functions["crawl"].keep_result_s == 0
 
 
-async def test_crawler_startup_cleans_orphans_before_runtime_start(
+def test_arq_does_not_rerun_app_jobs_after_a_worker_crash() -> None:
+    general = create_worker(WorkerSettings)
+
+    assert general.functions[Task.RUN_APP.value].max_tries == 1
+
+
+async def test_crawler_startup_removes_earlier_workspaces_before_runtime_start(
     monkeypatch,
 ) -> None:
+    """An earlier version left crawl workspaces in the default temporary
+    directory, outside any process's scratch directory."""
     events: list[str] = []
 
     def cleanup() -> int:
@@ -243,13 +255,20 @@ class _AsyncContext:
     def __init__(self, value: Any = None, exit_error: Exception | None = None):
         self.value = value
         self.exit_error = exit_error
+        self.committed = False
+        self.rolled_back = False
 
     async def __aenter__(self) -> Any:
         return self.value
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
-        if exc_type is None and self.exit_error is not None:
+        if exc_type is not None:
+            self.rolled_back = True
+            return
+        if self.exit_error is not None:
+            self.rolled_back = True
             raise self.exit_error
+        self.committed = True
 
 
 async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
@@ -283,6 +302,7 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
     )
     task_container = MagicMock()
     task_container.task_manager.return_value = task_manager
+    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
     recovery_container = MagicMock()
     recovery_container.job_service.return_value = AsyncMock()
     containers = [task_container, recovery_container]
@@ -304,19 +324,96 @@ async def test_commit_failure_records_the_job_failure_in_a_fresh_session(
 
     # The task body succeeded inside the transaction that was then lost...
     task_job_service.complete_job.assert_awaited_once_with(job_id, "done")
-    # ...so the failure is written where it survives.
+    # ...so the failure is written where it survives, as its code.
     recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
-        job_id, "storage quota exceeded"
+        job_id, failure_code=JobFailureCode.PROCESSING_FAILED, only_if_queued=False
     )
 
 
-async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> None:
-    """The recorded text is served to users as the failure message of an
-    integration task, so a database error must not carry its SQL."""
+async def test_cancelled_task_records_cancelled_in_fresh_session_after_rollback(
+    monkeypatch,
+) -> None:
+    """Cancelling a @worker.task rolls back its transaction (including the inner
+    fail_job write), so the CANCELLED status must be committed in a fresh
+    session before CancelledError is re-raised to ARQ."""
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
-    from sqlalchemy.exc import IntegrityError
+    from eneo.main.models import ChannelType
+    from eneo.worker import task_manager as task_manager_module
+    from eneo.worker import worker as worker_module
+    from eneo.worker.task_manager import TaskManager
+
+    job_id = uuid4()
+    run_id = uuid4()
+    user_id = uuid4()
+    tx_contexts = [_AsyncContext(), _AsyncContext()]
+    pending = list(tx_contexts)
+
+    def session() -> _AsyncContext:
+        db = MagicMock()
+        db.begin.return_value = pending.pop(0)
+        return _AsyncContext(db)
+
+    monkeypatch.setattr(
+        worker_module, "sessionmanager", SimpleNamespace(session=session)
+    )
+    published_when_recovery_committed: list[bool] = []
+
+    async def fake_publish(_channel: str, _payload: str) -> None:
+        published_when_recovery_committed.append(tx_contexts[1].committed)
+
+    monkeypatch.setattr(task_manager_module, "r", SimpleNamespace(publish=fake_publish))
+
+    task_job_service = AsyncMock()
+    task_manager = TaskManager(
+        user=MagicMock(id=user_id),
+        job_id=job_id,
+        job_service=task_job_service,
+        channel_type=ChannelType.APP_RUN_UPDATES,
+        resource_id=run_id,
+    )
+    task_container = MagicMock()
+    task_container.task_manager.return_value = task_manager
+    task_container.job_repo.return_value.mark_job_started = AsyncMock(return_value=True)
+    recovery_container = MagicMock()
+    recovery_container.job_service.return_value = AsyncMock()
+    containers = [task_container, recovery_container]
+
+    async def create_container(session, user_id=None):
+        return containers.pop(0)
+
+    worker = worker_module.Worker()
+    monkeypatch.setattr(worker, "_create_container", create_container)
+
+    started = asyncio.Event()
+
+    async def body(params, container):
+        started.set()
+        await asyncio.Event().wait()
+
+    wrapper = worker.task(channel_type=ChannelType.APP_RUN_UPDATES)(body)
+    params = SimpleNamespace(user_id=user_id, id=run_id)
+
+    running = asyncio.create_task(wrapper({"job_id": str(job_id)}, params))
+    await started.wait()
+    running.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await running
+
+    assert tx_contexts[0].rolled_back is True
+    assert tx_contexts[0].committed is False
+    assert tx_contexts[1].committed is True
+    recovery_container.job_service.return_value.fail_job.assert_awaited_once_with(
+        job_id, failure_code=JobFailureCode.CANCELLED, only_if_queued=False
+    )
+    assert published_when_recovery_committed[-1] is True
+
+
+def _recovery_worker(monkeypatch, job_service: AsyncMock):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
 
     from eneo.worker import worker as worker_module
 
@@ -328,21 +425,77 @@ async def test_commit_failure_is_recorded_without_the_statement(monkeypatch) -> 
         SimpleNamespace(session=lambda: _AsyncContext(db)),
     )
     container = MagicMock()
-    container.job_service.return_value = AsyncMock()
+    container.job_service.return_value = job_service
     worker = worker_module.Worker()
 
     async def create_container(session, user_id=None):
         return container
 
     monkeypatch.setattr(worker, "_create_container", create_container)
-    error = IntegrityError(
-        "INSERT INTO info_blobs (title) VALUES (%(title)s)",
-        {"title": "Lönelista 2026"},
-        Exception("duplicate key"),
+    return worker
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        pytest.param(
+            IntegrityError(
+                "INSERT INTO info_blobs (title) VALUES (%(title)s)",
+                {"title": "Lönelista 2026"},
+                Exception("duplicate key"),
+            ),
+            JobFailureCode.PROCESSING_FAILED,
+            id="database",
+        ),
+        pytest.param(
+            TenantQuotaExceededException("Lönelista 2026 does not fit"),
+            JobFailureCode.TENANT_QUOTA_EXCEEDED,
+            id="quota",
+        ),
+    ],
+)
+async def test_a_commit_failure_is_recorded_as_its_code_without_text(
+    monkeypatch, error: Exception, code: JobFailureCode
+) -> None:
+    """A commit error can carry SQL with bound values; the job record keeps
+    only the failure code, which both apps explain."""
+    job_service = AsyncMock()
+    worker = _recovery_worker(monkeypatch, job_service)
+    job_id = uuid4()
+
+    await worker._record_job_failure(job_id, None, error)
+
+    job_service.fail_job.assert_awaited_once_with(
+        job_id, failure_code=code, only_if_queued=False
     )
 
-    await worker._fail_job_after_commit_error(uuid4(), None, error)
 
-    container.job_service.return_value.fail_job.assert_awaited_once()
-    message = container.job_service.return_value.fail_job.await_args.args[1]
-    assert message == "Database error"
+async def test_a_failure_that_cannot_be_recorded_is_logged_without_its_text(
+    monkeypatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from eneo.worker import worker as worker_module
+
+    async def refused(*_, **__):
+        try:
+            raise ValueError("inner Lönelista 2026")
+        except ValueError as inner:
+            raise RuntimeError("outer Lönelista 2026") from inner
+
+    worker = _recovery_worker(monkeypatch, AsyncMock(fail_job=refused))
+    worker_module.logger.addHandler(caplog.handler)
+    try:
+        with caplog.at_level(logging.DEBUG):
+            await worker._record_job_failure(
+                uuid4(), None, RuntimeError("commit refused: Lönelista 2026")
+            )
+    finally:
+        worker_module.logger.removeHandler(caplog.handler)
+
+    assert caplog.records
+    for record in caplog.records:
+        assert not record.exc_info and not record.stack_info, record.getMessage()
+        assert "Lönelista" not in repr(record.__dict__), record.getMessage()
+    assert any(
+        getattr(record, "error_type", None) == "RuntimeError <- ValueError"
+        for record in caplog.records
+    )

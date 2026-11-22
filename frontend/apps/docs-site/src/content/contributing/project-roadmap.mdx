@@ -265,7 +265,7 @@ Project intake and manual roadmap exports run the script after they validate `AD
 | A field exists but you cannot see it in the current view. | Open `View` -> `Fields` and tick the field. The export can read hidden fields. |
 | The export workflow says `Missing ADD_TO_PROJECT_PAT`. | Add a repository secret named `ADD_TO_PROJECT_PAT`. |
 | A task gets `needs:epic`. | Write the epic as `#123` in `Parent epic`. If it was already there, check that the epic has the `kind:epic` label. |
-| A PR gets `needs:task-link`. | Write `Fixes #123` in the PR body, or link the task under **Development**. After a sidebar link, remove the label to refresh it. |
+| A PR gets `needs:task-link`. | Write `Fixes #123` in the PR body, or link the task under **Development**. After a sidebar link, edit the PR description, or ask a maintainer to remove the label, so intake checks it again. |
 | A card is missing from the SVG. | Check that `Kind` is `Epic` or the issue has the `kind:epic` label. |
 
 `Add item` creates a new project item. The `+` in a table header adds or shows fields in that view.

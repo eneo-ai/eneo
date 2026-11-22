@@ -1,5 +1,5 @@
 import type { PageMapItem } from "nextra";
-import { type DocsLanguage, languagePath } from "./languages";
+import { type DocsLanguage, languagePath, localizeDocsHref } from "./languages";
 
 const swedishTitles: Readonly<Record<string, string>> = {
   "/": "Start",
@@ -24,6 +24,7 @@ const swedishTitles: Readonly<Record<string, string>> = {
   "/guides/oidc-federation/multi-tenant": "Federation för flera organisationer",
   "/guides/scim-provisioning": "Provisionering med SCIM",
   "/guides/audit-logging": "Granskningsloggning",
+  "/guides/data-retention": "Gallring",
   "/guides/skills": "Färdigheter",
   "/guides/ai-providers": "Konfigurera AI-leverantörer",
   "/guides/mcp-servers": "MCP-servrar",
@@ -34,10 +35,12 @@ const swedishTitles: Readonly<Record<string, string>> = {
   "/guides/object-content-storage": "Välj innehållslagring",
   "/guides/document-processing": "Dokumentbearbetning",
   "/guides/sharepoint-integration": "SharePoint-integration",
+  "/guides/upgrade-notes": "Uppgraderingsanteckningar",
   "/guides/upgrade-2-2-0": "Uppgradera till 2.2.0",
   "/guides/upgrade-1-7-0": "Uppgradera till 1.7.0",
   "/contributing/project-roadmap": "Projektets planering",
   "/contributing/security": "Säkerhet",
+  "/security": "Säkerhet",
   "/about/release-notes": "Versionsnyheter",
 };
 
@@ -60,13 +63,21 @@ export function languagePageMap(
                 name === "index" ? parent || "/" : `${parent}/${name}`;
               const title =
                 name === "index" && parent ? "Översikt" : swedishTitles[route];
+              // A navbar entry that links to a page keeps the reader's language.
+              const entry =
+                typeof meta === "object" &&
+                meta !== null &&
+                "href" in meta &&
+                typeof meta.href === "string"
+                  ? { ...meta, href: localizeDocsHref(meta.href, language) }
+                  : meta;
               return [
                 name,
                 language === "sv" && title
-                  ? typeof meta === "string"
+                  ? typeof entry === "string"
                     ? title
-                    : { ...meta, title }
-                  : meta,
+                    : { ...entry, title }
+                  : entry,
               ];
             }),
         );

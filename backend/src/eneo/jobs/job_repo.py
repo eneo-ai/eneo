@@ -17,10 +17,17 @@ from eneo.jobs.job_models import (
     JobUpdate,
 )
 from eneo.jobs.task_models import DispatchEnvelope
+from eneo.main.models import Status
 
 KNOWLEDGE_REAPER_PAGE_SIZE = 50
 KNOWLEDGE_JOB_STALE_AFTER = timedelta(minutes=5)
 _IN_PROGRESS_SQL = sa.literal_column("'in progress'", type_=sa.String())
+ACTIVE_JOB_STATUSES = (Status.QUEUED, Status.IN_PROGRESS)
+# Keep the fixed partial-index predicate visible in prepared plans.
+_ACTIVE_JOB_STATUSES_SQL = tuple(
+    sa.literal_column(f"'{status.value}'", type_=sa.String())
+    for status in ACTIVE_JOB_STATUSES
+)
 _KNOWLEDGE_TASK_VALUES = tuple(task.value for task in KNOWLEDGE_TASKS)
 _KNOWLEDGE_TASKS_SQL = tuple(
     sa.literal_column(f"'{task}'", type_=sa.String()) for task in _KNOWLEDGE_TASK_VALUES
@@ -79,13 +86,21 @@ class JobRepository:
             dispatch_envelope=dispatch_envelope.model_dump(mode="json"),
         )
 
-    async def update_job(self, id: UUID, job: JobUpdate):
+    async def update_job(
+        self,
+        id: UUID,
+        job: JobUpdate,
+        *,
+        from_statuses: tuple[Status, ...] = (),
+    ):
         stmt = (
             sa.update(Jobs)
             .values(job.model_dump(exclude_unset=True))
             .where(Jobs.id == id)
             .returning(Jobs)
         )
+        if from_statuses:
+            stmt = stmt.where(Jobs.status.in_(from_statuses))
 
         updated = await self.delegate.get_model_from_query(stmt)
         if updated is not None:
@@ -111,7 +126,8 @@ class JobRepository:
         """Update an in-progress job's timestamp to signal 'still alive'.
 
         Upload processing uses this as a heartbeat and stops if the job has
-        already become terminal.
+        already become terminal. The update holds the row lock until commit,
+        so app runs can keep maintenance from reaping a live worker.
 
         Args:
             id: Job UUID to touch
@@ -143,22 +159,12 @@ class JobRepository:
             True if job was successfully transitioned to IN_PROGRESS
             False if job status had already changed
         """
-        from eneo.main.models import Status
-
-        stmt = (
-            sa.update(Jobs)
-            .where(Jobs.id == id)
-            .where(Jobs.status == Status.QUEUED)  # KEY: Only if still QUEUED
-            .values(
-                status=Status.IN_PROGRESS,
-                updated_at=sa.func.now(),
-            )
+        started = await self.update_job(
+            id,
+            JobUpdate(status=Status.IN_PROGRESS),
+            from_statuses=(Status.QUEUED,),
         )
-        result = await self.delegate.session.execute(stmt)
-        started = affected_row_count(result) > 0
-        if started:
-            await self.announce(id)
-        return started
+        return started is not None
 
     async def mark_job_completed(self, id: UUID, result_location: str) -> bool:
         from eneo.main.models import Status
@@ -211,6 +217,9 @@ class JobRepository:
         self,
         tasks: list[str],
         stale_before: datetime,
+        *,
+        limit: int | None = None,
+        failure_code: JobFailureCode | None = None,
     ) -> list[UUID]:
         """Mark long-stuck QUEUED/IN_PROGRESS jobs as FAILED.
 
@@ -230,32 +239,36 @@ class JobRepository:
 
         Returns the ids of the jobs that were failed.
         """
-        from eneo.main.models import Status
-
-        active = (Status.IN_PROGRESS.value, Status.QUEUED.value)
         candidates = (
             sa.select(Jobs.id)
             .where(Jobs.task.in_(tasks))
-            .where(Jobs.status.in_(active))
+            .where(Jobs.status.in_(_ACTIVE_JOB_STATUSES_SQL))
             .where(Jobs.updated_at < stale_before)
+            .order_by(Jobs.updated_at, Jobs.id)
+            .limit(limit)
             .with_for_update(skip_locked=True)
             .cte("stale_jobs")
         )
         stmt = (
             sa.update(Jobs)
             .where(Jobs.id.in_(sa.select(candidates.c.id)))
-            .where(Jobs.status.in_(active))
+            .where(Jobs.status.in_(_ACTIVE_JOB_STATUSES_SQL))
             .values(
                 status=Status.FAILED.value,
                 finished_at=sa.func.now(),
                 updated_at=sa.func.now(),
             )
-            .returning(Jobs.id)
+            .returning(Jobs)
         )
+        if failure_code is not None:
+            stmt = stmt.values(failure_code=failure_code.value, result_location=None)
         result = await self.delegate.session.execute(stmt)
-        failed_ids = [row[0] for row in result.all()]
-        await self.announce(*failed_ids)
-        return failed_ids
+        failed_jobs = result.scalars().all()
+        for job in failed_jobs:
+            publish_job_update_after_commit(
+                self.delegate.session, JobInDb.model_validate(job)
+            )
+        return [job.id for job in failed_jobs]
 
     async def mark_stale_in_progress_jobs_failed(
         self,

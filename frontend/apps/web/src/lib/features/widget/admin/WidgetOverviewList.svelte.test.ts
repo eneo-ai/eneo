@@ -76,6 +76,13 @@ describe("WidgetOverviewList", () => {
     await expect.element(page.getByText(/widget_admin_overview_origins\(2\)/)).toBeVisible();
   });
 
+  test("names the MCP servers outside Eneo a widget reaches", async () => {
+    renderList([item({ external_tools: ["Ärendesystemet", "Bokningen"] })]);
+    await expect
+      .element(page.getByText("widget_admin_overview_external_tools(Ärendesystemet, Bokningen)"))
+      .toBeVisible();
+  });
+
   test("a healthy active widget has no warning, and each card is a heading", async () => {
     renderList([item({}), item({ id: "w2", name: "Bygglov", status: "paused" })]);
     expect(document.body.textContent).not.toContain("widget_admin_overview_active_issues");

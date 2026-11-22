@@ -5,8 +5,10 @@ from fastapi import FastAPI
 from eneo.database.database import sessionmanager
 from eneo.internal_mcp import internal_mcp_lifespan
 from eneo.jobs.job_manager import job_manager
+from eneo.main import process_scratch
 from eneo.main.aiohttp_client import aiohttp_client
 from eneo.main.config import get_settings
+from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import FINALIZATION_BUDGET_SECONDS
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     drain_connection_hosts,
@@ -24,6 +26,8 @@ from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.sessions.session_service import drain_background_saves
 from eneo.settings.encryption_service import EncryptionService
+
+logger = get_logger(__name__)
 
 
 @asynccontextmanager
@@ -51,6 +55,7 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
+    process_scratch.start()
     sessionmanager.init(settings.database_url)
     # PostgreSQL owns the optional administrator-managed connection, so it must
     # be available before object-content imports or loads that configuration.
@@ -67,7 +72,9 @@ async def startup():
         # any other transient storage dependency failure and retry through
         # readiness and reconciliation after startup.
         pass
-    except (ObjectContentConfigurationError, ObjectStoreConnectionError):
+    except (ObjectContentConfigurationError, ObjectStoreConnectionError) as error:
+        # The API server only reports that its worker failed to boot.
+        logger.error("Startup refused: %s", error)
         await object_content_runtime.stop()
         await sessionmanager.close()
         await aiohttp_client.stop()
@@ -105,3 +112,4 @@ async def shutdown():
     await aiohttp_client.stop()
     await job_manager.close()
     await websocket_manager.shutdown()
+    process_scratch.stop()

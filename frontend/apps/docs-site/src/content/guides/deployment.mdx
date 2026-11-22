@@ -396,11 +396,11 @@ value and a comment.
     template seed that policy once and are otherwise ignored.
 
     <Callout type="info">
-      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` (template:
-      `10485760`) as a PostgreSQL, WAL, backup, and process safety ceiling. For
-      an inline session upload, the effective limit is the smaller value; the
-      admin page shows the configured value, effective value, and constraining
-      source.
+      Files stored in PostgreSQL also have a
+      [storage limit](https://github.com/eneo-ai/eneo/blob/develop/docs/deployment/OBJECT_CONTENT.md#storage-limit-for-files-stored-in-postgresql): the most PostgreSQL holds per file. The template no
+      longer sets `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the variable is
+      deprecated, and a value that is still set lowers that limit. The admin
+      page shows the configured value, effective value, and constraining source.
     </Callout>
 
     **Crawler Settings:**
@@ -589,7 +589,7 @@ not match.
 | Owner                                 | Responsibility                                                                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`                 |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, and backups                                                         |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -929,7 +929,7 @@ key or a tenant ID. The container side is covered in
 | Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                                                        |
 | Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                                                                    |
 | Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                                                                  |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower    | Review configured, effective, and source values in Admin > File storage                                                               |
+| Large file uploads fail              | Admin policy or the storage limit is lower              | Review configured, effective, and source values in Admin > File storage                                                               |
 | "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                                                               |
 | Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                                                              |
 | OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)                                          |
@@ -1174,6 +1174,19 @@ For the upgrade to 2.3, also stop every backend and worker replica before
 its migrations and the old Scrapy worker cannot run side by side. Returning to
 2.2 requires restoring the backup taken in the next step.
 
+For the release that empties stored question logs, stop every backend and
+worker of the earlier version before `db-init` as well. Only the new version
+checks for a removal before it stores a log, so a log that an earlier backend or
+worker stores while the migration runs keeps its content. Stop them, then check
+that the second command lists no container:
+
+```bash
+docker compose --env-file .env --env-file release.env stop backend worker
+docker compose --env-file .env --env-file release.env ps --status running backend worker
+```
+
+Stop replicas that run on other hosts the same way.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database
@@ -1346,10 +1359,30 @@ per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
 workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
 backend and every worker.
 
+### Temporary files
+
+Each backend and worker process keeps the files it works on (a file uploaded
+to a conversation before it is stored, audio being converted or transcribed,
+crawled pages and SharePoint files being read) in a directory of its own,
+`eneo-scratch/proc-<id>` under `UPLOAD_TMP_DIR` (default `/tmp`), and removes
+it when it stops. A process that crashes leaves its directory; the next process
+to start on the same volume removes it once the crashed process is gone. At
+start, the crawler worker also removes the `eneo-crawl-*` directories that
+earlier versions left in the system temporary directory; nothing else is
+removed at start. The owner check uses a file lock, so `UPLOAD_TMP_DIR` must be
+a local filesystem; a volume shared between hosts over a network filesystem is
+not supported.
+
+Knowledge and transcription uploads that wait for their job are kept in
+`job-staging/` under `UPLOAD_TMP_DIR` instead. A file there is removed once its
+job has finished, or after an hour when no job holds it.
+
 ---
 
 ## Related Documentation
 
+- [Security at Eneo](/docs/security) - Who is responsible for what, the protections in a deployment and how to check a release
+- [Tool Runtime Security](/docs/tool-runtime-security) - Isolation of model-written code and what the operator provides
 - [AI Provider Configuration](/guides/ai-providers) - Configure AI models and providers
 - [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) - Enterprise SSO setup
 - [Single-Tenant OIDC](/guides/oidc-federation/single-tenant) - Simple SSO setup
@@ -1359,7 +1392,7 @@ backend and every worker.
 - [Authentication Architecture](/docs/authentication-architecture) - Technical authentication details
 - [System Architecture](/docs/architecture) - Complete architecture overview
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
-- [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
+- [Release SBOMs and Attestations](/docs/release-sboms) - Verify shipped image digests and provenance
 
 ## Main host and UI rollback
 

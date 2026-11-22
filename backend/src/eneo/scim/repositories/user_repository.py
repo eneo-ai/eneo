@@ -2,10 +2,12 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import Select, asc, desc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users, users_roles_table
+from eneo.main.exceptions import UniqueException
 from eneo.main.logging import get_logger
 from eneo.scim.domain.errors import ScimInvalidFilterError
 from eneo.scim.schemas.common import ScimFilter, ScimSort
@@ -13,6 +15,9 @@ from eneo.scim.schemas.common import ScimFilter, ScimSort
 logger = get_logger(__name__)
 
 UserModel = Users
+
+# The users table's unique index on the address of live accounts.
+_ACTIVE_EMAIL_INDEX = "idx_unique_active_user_email"
 
 # Keys are SCIM attribute paths lowercased (RFC 7644 paths are case-insensitive).
 # `emails.value` is Azure Entra ID's primary filter form for de-dup lookups;
@@ -68,8 +73,16 @@ class ScimUserRepository:
         self._session = session
 
     async def create(self, model: UserModel) -> UserModel:
-        self._session.add(model)
-        await self._session.flush()
+        """Insert the user; ``UniqueException`` when a live account already
+        has the address. The savepoint keeps the request's session usable."""
+        try:
+            async with self._session.begin_nested():
+                self._session.add(model)
+                await self._session.flush()
+        except IntegrityError as exc:
+            if _ACTIVE_EMAIL_INDEX not in str(exc.orig):
+                raise
+            raise UniqueException("User already exists.") from exc
         await self._assign_default_role(model.id, model.tenant_id)
         return model
 

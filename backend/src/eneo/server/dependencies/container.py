@@ -21,7 +21,6 @@ from eneo.database.database import (
 from eneo.main.container.container import Container
 from eneo.main.container.container_overrides import override_user
 from eneo.main.container.request_container import request_container
-from eneo.main.exceptions import AuthenticationException
 from eneo.object_content.deployment_policy import (
     UploadAdmissionSnapshot,
     load_upload_admission_snapshot,
@@ -199,10 +198,6 @@ async def get_user_from_websocket(
 
         try:
             user = await container.user_service().authenticate(token=token)
-            # A socket keeps its user after sign-out, so a browser session's
-            # token cannot open one; web-next opens none.
-            if user.browser_session is not None:
-                raise AuthenticationException("A browser session cannot open a socket")
             authorize_user(websocket, user)
         except Exception as e:
             raise WebSocketException(

@@ -52,7 +52,8 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
                 owner, created = await container.user_service().resolve_federated_user(
                     identity=FederatedIdentity(
                         issuer="https://idp.example.org",
-                        subject=f"subject-{tenant_id}",
+                        audience="eneo-client",
+                        subject=f"subject-{email}",
                         email=email,
                         email_verified=True,
                     ),
@@ -76,9 +77,12 @@ async def test_colliding_usernames_keep_identity_and_private_resources_isolated(
                         state=UserState.ACTIVE,
                     )
                 )
-                token = (
-                    await container.user_service().login(email=email, password=password)
-                ).access_token
+                admitted = await container.user_service().login(
+                    email=email, password=password
+                )
+                token = container.auth_service().create_access_token_for_user(
+                    admitted, auth_method="password"
+                )
             owners.append(owner)
             tokens.append(token)
             private_space = Spaces(

@@ -3,13 +3,25 @@
 # Licensed under the MIT License.
 
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from eneo.widgets.domain.widget import Widget
+
+if TYPE_CHECKING:
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+
+
+def external_tools_for_widget(server: "MCPServer") -> list["MCPServerTool"]:
+    """Enabled assistant tools on an external server, for display and visitor turns."""
+    if server.is_internal or not server.is_enabled or not server.tools_loaded:
+        return []
+    return [tool for tool in server.tools if tool.is_enabled]
 
 
 class WidgetVisitorContext(BaseModel):
@@ -31,6 +43,17 @@ class WidgetVisitorContext(BaseModel):
     # Retention 0: conversation content must never be committed, so the
     # session service keeps placeholders inside the request transaction.
     never_persist: bool = False
+    # Request-scoped policy supplied by build_visitor_user, also for previews.
+    allow_external_tools: bool = Field(default=False, exclude=True)
+
+    def reachable_servers(self, servers: Sequence["MCPServer"]) -> list["MCPServer"]:
+        """Apply the organisation's widget policy to the assistant's current servers."""
+        return [
+            server
+            for server in servers
+            if server.is_internal
+            or (self.allow_external_tools and external_tools_for_widget(server))
+        ]
 
 
 @dataclass(frozen=True)
@@ -42,7 +65,7 @@ class VisitorClaims:
     issued_at: datetime
     expires_at: datetime
     jti: str
-    # Minted for an editor's live preview: admits draft and paused widgets.
+    # Minted for an editor's live preview: also admits a draft widget.
     preview: bool = False
 
 

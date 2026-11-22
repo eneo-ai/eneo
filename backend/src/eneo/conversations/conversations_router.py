@@ -19,6 +19,7 @@ from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.outcome import Outcome
+from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS
 from eneo.authentication.auth_dependencies import (
     require_resource_permission_for_method,
     require_user_for_creation,
@@ -949,9 +950,7 @@ async def call_tool_from_app_view(
             action=ActionType.FILE_SIGNED_URL_MINTED,
             entity_type=EntityType.FILE,
             entity_id=file.id,
-            description=(
-                f"Minted signed URL for file '{file.name}' for a tool view's call"
-            ),
+            description=FILE_DESCRIPTIONS[ActionType.FILE_SIGNED_URL_MINTED],
             metadata=AuditMetadata.standard(
                 actor=current_user,
                 target=file,

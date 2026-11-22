@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { m } from "$lib/paraglide/messages";
 import { actions, load } from "./+page.server";
 
 const SECRET = "s3cret-value-never-echoed";
@@ -167,6 +168,46 @@ describe("saving the sign-in settings", () => {
       expect(JSON.stringify(result)).not.toContain(SECRET);
     }
   );
+
+  test.each([
+    ["token endpoint", "tokens.idp.example"],
+    ["JWKS URI", "2001:db8::5"]
+  ])("a %s on a host the operator has not listed names that host", async (name, host) => {
+    const refused = `The ${name} is on ${host}, which is neither the discovery host nor in allowed_endpoint_hosts`;
+
+    const result = await save(
+      backend(() => json(400, { message: refused, detail: refused })),
+      saveForm([
+        ["revision", "rev-1"],
+        ["client_secret", SECRET]
+      ])
+    );
+
+    expect(result).toMatchObject({
+      status: 400,
+      data: { failure: { code: "endpoint_host", host } }
+    });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
+
+  test.each(["en", "sv"] as const)("the %s message names the refused host", (locale) => {
+    expect(
+      m.federation_admin_endpoint_host_refused({ host: "tokens.idp.example" }, { locale })
+    ).toContain("tokens.idp.example");
+  });
+
+  test("any other text in a 400 is never shown", async () => {
+    const result = await save(
+      backend(() => json(400, { message: `Rejected ${SECRET}`, detail: `Rejected ${SECRET}` })),
+      saveForm([
+        ["revision", "rev-1"],
+        ["client_secret", SECRET]
+      ])
+    );
+
+    expect(result).toMatchObject({ status: 400, data: { failure: { code: "request_failed" } } });
+    expect(JSON.stringify(result)).not.toContain(SECRET);
+  });
 
   test("an unreachable backend is a failed save, not a thrown error", async () => {
     const result = await save(

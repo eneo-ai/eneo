@@ -4,7 +4,12 @@ ARG APP_REVISION=unknown
 # Svelte E2E) passes no-web-app and skips that build.
 ARG WEB_APP_STAGE=web-build
 
-FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
+FROM python:3.11-slim-bookworm AS builder
+
+# uv is copied in at a pinned version, on the same base as the final stage. The
+# uv images that bundle Debian bookworm stopped at 0.9.30, so their floating tag
+# no longer follows uv releases.
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /bin/
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
@@ -39,7 +44,7 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 # The Vite app served by FastAPI when WEB_APP_ENABLED is enabled.
 # Build from the repository root with the required named frontend context:
 # docker buildx build --build-context web=./frontend backend
-FROM node:22.23.4-bookworm-slim AS web-build
+FROM node:22.23.5-bookworm-slim AS web-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY --from=oven/bun:1.4.4 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /repo

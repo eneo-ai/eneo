@@ -88,7 +88,7 @@ cd backend && uv run worker              # Terminal 3: Worker
 If you prefer manual setup or need more control:
 
 **Requirements:**
-- Python 3.11 (the backend is pinned to `>=3.11,<3.12`) and [uv](https://docs.astral.sh/uv/)
+- Python 3.11.5 or a later 3.11 release (the backend is pinned to `>=3.11.5,<3.12`) and [uv](https://docs.astral.sh/uv/)
 - Bun 1.3
 - PostgreSQL with the pgvector extension and Redis (for example in Docker)
 - `libmagic` and `ffmpeg` system packages
@@ -124,6 +124,32 @@ cd backend && uv run worker
 - **Platform**: http://localhost:3000
 - **API Documentation**: http://localhost:8123/docs
 - **Default Login**: `user@example.com` / `ChangeMePassword1!`
+
+#### Performance Improvements for Local Development
+
+The DevContainer can use 5–6 GB of RAM, and most of it is editor tooling rather than Eneo. To trade some editor features for memory, put personal settings in `.vscode/settings.json`. Git ignores that file, so the settings only affect you:
+
+```jsonc
+{
+  // Turns off Pylance (about 1 GB). Ruff still lints and formats;
+  // type check with `uv run pyright` in backend/.
+  "python.languageServer": "None",
+  // Tailwind IntelliSense for the Svelte app only (about 300 MB less);
+  // no Tailwind completions in web-next or the docs site.
+  "tailwindCSS.experimental.configFile": {
+    "frontend/apps/web/src/app.css": [
+      "frontend/apps/web/src/**",
+      "frontend/packages/ui/src/**"
+    ]
+  }
+}
+```
+
+Also:
+- Run **Svelte: Restart Language Server** from the command palette when the editor slows down; the server can grow past 1 GB.
+- Restart `bun run dev` after a long session; Vite grows as it compiles the pages you open.
+- Start the backend with `start` instead of `uv run start` (`.venv/bin` is on the PATH) to skip the `uv` parent process. Run `uv sync` yourself after dependency changes.
+- To see what uses memory, run `ps -eo rss,args --sort=-rss | head` inside the container, or `docker stats` on the host.
 
 #### Next Steps for Developers
 

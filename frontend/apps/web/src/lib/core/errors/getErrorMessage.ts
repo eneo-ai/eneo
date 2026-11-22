@@ -81,6 +81,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9077: () => m.eneo_error_9077(), // OIDC_LOGIN_UNAVAILABLE
   9078: () => m.eneo_error_9078(), // OIDC_TRANSACTION_INVALID
   9079: () => m.eneo_error_9079(), // OIDC_RESPONSE_NOT_VERIFIED
+  9082: () => m.eneo_error_9082(), // IDENTITY_CONFLICT
 
   // --- Governance ---
   9069: () => m.eneo_error_9069(), // PROMPT_IN_USE_BY_GOVERNANCE
@@ -92,6 +93,9 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
 
   // --- Removed content ---
   9085: () => m.eneo_error_9085(), // DERIVED_SOURCE_REMOVED
+
+  // --- Retention periods ---
+  9086: () => m.eneo_error_9086(), // RETENTION_EXCEEDS_SPACE
 
   // --- Skill lifecycle ---
   9081: () => m.eneo_error_9081(), // SKILL_REFERENCED_BY_REVISION

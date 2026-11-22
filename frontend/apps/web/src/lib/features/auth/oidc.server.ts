@@ -87,6 +87,13 @@ export async function loginWithOidc(
           rawDetail
         });
       }
+      if (refusal === "identity_conflict") {
+        throw new LoginError("oidc", "IDENTITY_CONFLICT", "", {
+          traceId,
+          statusCode: response.status,
+          rawDetail
+        });
+      }
 
       // Map status codes to specific error codes and throw LoginError
       if (response.status === 400) {

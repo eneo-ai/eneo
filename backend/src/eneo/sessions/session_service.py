@@ -427,8 +427,16 @@ class SessionService:
             name_filter=name_filter,
         )
 
-    async def update_session(self, session_update: SessionUpdate) -> SessionInDB:
-        session = await self.session_repo.update(session_update)
+    async def update_session(
+        self, session_update: SessionUpdate, *, title_from_turns_at: int | None = None
+    ) -> SessionInDB:
+        session = await self.session_repo.update(
+            session_update, title_from_turns_at=title_from_turns_at
+        )
+        if session is None and title_from_turns_at is not None:
+            # A turn the title was made from was removed meanwhile: the title
+            # is dropped and the conversation keeps the name it has.
+            return await self.get_session_by_uuid(session_update.id)
         return self._check_exists_and_belongs_to_user(session)
 
     async def delete(
@@ -614,13 +622,19 @@ class SessionService:
         info_blob_chunks: list[InfoBlobChunkInDBWithScore],
         generated_files: Sequence[File] | None = None,
         logging_details: LoggingDetails | None = None,
+        history_revision: int | None = None,
         tool_calls: list[ToolCallInfo] | None = None,
         mcp_tool_references: list["McpToolReference"] | None = None,
         reasoning: str | None = None,
         skill_provenance: Sequence[SkillExecutionReference] | None = None,
         skill_activation: SkillActivationEvidence | None = None,
     ) -> None:
-        """Update a placeholder Question row with the final assistant answer."""
+        """Update a placeholder Question row with the final assistant answer.
+
+        A log needs `history_revision`, the conversation's revision when the
+        answer's history was read. A question removed meanwhile stays removed:
+        nothing is stored for it.
+        """
         completion_model_id = completion_model.id if completion_model else None
         async with self._write_transaction():
             await self.question_repo.update_with_answer(
@@ -638,6 +652,7 @@ class SessionService:
                 info_blob_chunks=info_blob_chunks,
                 generated_files=list(generated_files) if generated_files else None,
                 logging_details=logging_details,
+                history_revision=history_revision,
                 mcp_tool_references=mcp_tool_references,
                 skill_provenance=skill_provenance,
                 skill_activation=skill_activation,

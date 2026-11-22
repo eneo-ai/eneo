@@ -11,9 +11,11 @@ from arq.worker import Function, create_worker
 from eneo.analysis.analysis import AnalysisJobStatus
 from eneo.analysis.analysis_job_manager import AnalysisJobManager
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask, ResourceTaskParams
+from eneo.worker import analysis_tasks
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.arq import WorkerSettings
 from eneo.worker.worker import Worker
+from tests.log_capture import chained_error, emitted, logged_errors
 
 
 async def _noop_task(params: ResourceTaskParams, container: object) -> None:
@@ -158,3 +160,29 @@ async def test_insights_task_fails_closed_when_the_record_has_no_question():
     container.analysis_service.return_value.generate_unified_analysis_answer.assert_not_called()
     job = await manager.get_job(tenant_id=tenant_id, job_id=job_id)
     assert job is not None and job.status == AnalysisJobStatus.FAILED
+
+
+async def test_a_failed_insights_job_logs_the_kind_of_error_not_its_text():
+    """A provider's error can echo the questions it was given. Mutant: the
+    job's failure is logged with its message or traceback."""
+    redis = _FakeRedis()
+    tenant_id = uuid4()
+    job_id = uuid4()
+    manager = AnalysisJobManager(redis)  # pyright: ignore[reportArgumentType]
+    await manager.create_job(
+        job_id=job_id,
+        tenant_id=tenant_id,
+        question="stored question",
+        assistant_id=None,
+        group_chat_id=None,
+    )
+    container = _insights_container(redis, tenant_id)
+    service = container.analysis_service.return_value
+    service.generate_unified_analysis_answer.side_effect = chained_error()
+
+    with emitted(analysis_tasks.logger) as records, pytest.raises(RuntimeError):
+        await analyze_conversation_insights_task(
+            job_id=job_id, params=_payload(), container=container
+        )
+
+    assert logged_errors(records), [record.getMessage() for record in records]

@@ -27,12 +27,21 @@ the worker process.
 `eneo.policy_levels` is a pure module (standard library only, no I/O):
 
 - `PolicyLevel`: `installation`, `organization`, `space`, `assistant_or_app`,
-  `flow`. The strings are released API and audit values.
+  `flow`, `flow_step`. The strings are released API and audit values
+  (`flow_step` once a rule uses it).
+  `flow_step` is declared for retention in flows, which will resolve
+  organisation, space, flow and step with the space and the flow as caps; no
+  rule uses it yet. A write longer than its cap is to answer 400 with
+  `retention_exceeds_space` (9086) and the cap in days with the level that
+  chose it (`cap_days`, `cap_origin`).
 - `resolve(chain, *, stricter, bounding)` takes the levels from the outermost
-  to the innermost. The nearest chosen value is inherited. A value chosen on a
-  bounding level is a bound that no inner value loosens, so the result is the
-  stricter of the nearest value and the bound. The result carries the value,
-  the level it came from, the bound and the outermost level that set it.
+  to the innermost. The nearest chosen value is inherited. The value that
+  applies on a bounding level, chosen there or inherited from outside it, is a
+  bound that no inner value loosens, so the result is the stricter of the
+  nearest value and the bound. A space that inherits its organisation's 30
+  days caps an assistant's 90 at 30, from the organisation. The result
+  carries the value, the level it came from, the bound and the outermost
+  level that chose it.
 - `None` means nothing is chosen at that level. Any other value, `False`
   included, is a choice. On a tie the nearest level is the origin. An empty
   chain, or one without a choice, resolves to nothing chosen.
@@ -60,9 +69,12 @@ removal. Every `RetentionRule` has exactly one disposition:
 | `widget_conversations` | exemption: each widget's own nightly job removes its conversations, held to the organisation's widget policy |
 
 The SQL that selects due conversations is built from the rule's levels
-(`nearest_period`): a `COALESCE` and a level `CASE` in the rule's order, from
-the innermost level out. It refuses a rule with a bound, which needs its bound
-in SQL first. A parity test runs every combination of the three levels and
+(`rule_period`): a `COALESCE` and a level `CASE` in the rule's order, from
+the innermost level out. For a rule with a bound, each bounding level caps
+with the period that applies there, chosen or inherited, and the result is the
+`LEAST` of the nearest period and those caps; a separate parity test runs
+bounded rules through the database and through `resolve`. It refuses a rule
+without a column for each of its levels. A parity test runs every combination of the three levels and
 the organisation switch through the database and through `resolve_period`,
 and both must match the rule written out. The level a removal came from stays
 the audit count key: `by_assistant_or_app_rule`, `by_space_rule`,
@@ -89,6 +101,13 @@ switch that turns it off.
 
 The check covers registered tasks and declared rules. It cannot see a removal
 written outside the engine, in arbitrary SQL, a log or another store.
+
+Records the engine keeps out of its removals are declared in
+`OUTSIDE_THE_ENGINE`, each with how it ends today, until the owner decides:
+audit exports, insights in Redis, browser sessions, audit logs and service
+runs. A test pins the list and checks that each cron a reason names still runs.
+Request logs are not among them: removing a question clears every later log of
+its conversation.
 
 ### The database clock
 

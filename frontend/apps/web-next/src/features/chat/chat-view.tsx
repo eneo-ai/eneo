@@ -73,6 +73,7 @@ import {
   useToolApprovalState
 } from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
+import { ChatSkills } from "./chat-skills";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
 import { partnerCannotAnswer } from "./partner-model";
@@ -221,8 +222,8 @@ type ChatViewProps = {
   onStartedChange?: (started: boolean) => void;
   /** Interactive model picker shown in the composer (default-assistant only). */
   modelSelector?: ReactNode;
-  /** The personal chat's Skills control, beside Verktyg in the composer. */
-  skills?: ReactNode;
+  /** The personal chat: its Skills share the composer's Verktyg control. */
+  withSkills?: boolean;
   /** Start state for the personal assistant: the assistant selector inside the composer. */
   partnerToken?: ReactNode;
   activity: ActivityState | null;
@@ -259,7 +260,7 @@ function ConversationView({
   onTitle,
   onStartedChange,
   modelSelector,
-  skills,
+  withSkills = false,
   partnerToken,
   activity,
   onActivityChange,
@@ -644,7 +645,7 @@ function ConversationView({
     [panel, setInput]
   );
 
-  const preflight = usePreflight({
+  const { estimate: preflight, pending: preflightPending } = usePreflight({
     question: input,
     revision: partner.preflightRevision ?? partner.completionModel?.id,
     fileIds: attachments.fileIds,
@@ -1047,19 +1048,18 @@ function ConversationView({
       />
     ) : null;
 
-  const tools = (
-    <ChatTools
-      capabilities={toolChoices.capabilities}
-      disabledCapabilities={toolChoices.disabledCapabilities}
-      servers={toolChoices.mcpServers}
-      disabledServerIds={toolChoices.disabledMcpServerIds}
-      autoAcceptTools={toolChoices.autoAcceptTools}
-      modelSupportsTools={toolChoices.modelSupportsTools}
-      onDisabledCapabilitiesChange={toolChoices.setDisabledCapabilities}
-      onDisabledServerIdsChange={toolChoices.setDisabledMcpServerIds}
-      onAutoAcceptToolsChange={toolChoices.setAutoAcceptTools}
-    />
-  );
+  const toolsProps = {
+    capabilities: toolChoices.capabilities,
+    disabledCapabilities: toolChoices.disabledCapabilities,
+    servers: toolChoices.mcpServers,
+    disabledServerIds: toolChoices.disabledMcpServerIds,
+    autoAcceptTools: toolChoices.autoAcceptTools,
+    modelSupportsTools: toolChoices.modelSupportsTools,
+    onDisabledCapabilitiesChange: toolChoices.setDisabledCapabilities,
+    onDisabledServerIdsChange: toolChoices.setDisabledMcpServerIds,
+    onAutoAcceptToolsChange: toolChoices.setAutoAcceptTools
+  };
+  const tools = withSkills ? <ChatSkills tools={toolsProps} /> : <ChatTools {...toolsProps} />;
 
   const composerLabel = t("chat_composer_label", { name: partnerName });
   const composerProps = {
@@ -1078,13 +1078,13 @@ function ConversationView({
     knowledge: partner.knowledge,
     knowledgeMode: partner.knowledgeMode,
     tools,
-    skills,
     mention,
     modelSelector,
     quote: composerQuote,
     contextBar: (
       <ContextUsageBar
         usage={usage}
+        pending={preflightPending}
         modelName={partner.completionModel?.name}
         cumulativeTokens={cumulative.tokens}
         turnCount={cumulative.turns}

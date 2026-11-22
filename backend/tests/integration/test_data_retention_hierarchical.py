@@ -1073,14 +1073,15 @@ async def test_an_oversized_question_is_proved_within_one_limit_and_passed(
     await retention_session.flush()
     big_id, small_id = big.id, small.id
 
-    # Two links and three tool references: a ceiling of 2 stops at 3 rows.
+    # Its session, two links and three tool references: a ceiling of 2 stops
+    # at 3 rows.
     repository = ConversationRetentionRepository(
         retention_session,
         kind=ConversationRootKind.QUESTION,
         now=datetime.now(timezone.utc),
     )
     assert await repository.cascade_cost(big_id, 2) == 3
-    assert await repository.cascade_cost(big_id, 10) == 5
+    assert await repository.cascade_cost(big_id, 10) == 6
 
     settings = get_settings().model_copy(
         update={"retention_conversations_max_unit_rows": 4, "retention_chunk_rows": 30}
@@ -1143,11 +1144,12 @@ async def test_a_unit_its_remainder_cannot_fund_writes_nothing(
     connection = (await retention_session.connection()).sync_connection
     event.listen(connection, "before_cursor_execute", record)
     try:
-        # A session release needs up to 3 rows after the root DELETE.
+        # A session release needs up to 2 rows after the root DELETE; the
+        # proof charged the session's lock.
         unit = await repository.delete_unit(
             question.id,
             child_rows=1,
-            max_rows=3 if short == "session" else 10,
+            max_rows=2 if short == "session" else 10,
             max_files=0 if short == "files" else 10,
             max_family_rows=5,
         )
@@ -1372,14 +1374,28 @@ async def test_owners_without_due_history_are_charged_and_passed(
         }
     )
 
+    real_now = datetime.now(timezone.utc)
+    # A date on which questions go first among the task's three steps: on the
+    # others a step before them charges its rows from the same 8, and questions
+    # stop after two owners with the cursor past the second.
+    now = next(
+        real_now + timedelta(days=offset)
+        for offset in range(3)
+        if (real_now + timedelta(days=offset)).date().toordinal() % 3 == 0
+    )
+
     # The first run probes owners 1-3, policy or not, and spends the rest of its
     # budget there.
-    first = await run_registered_retention(retention_session, settings=settings)
+    first = await run_registered_retention(
+        retention_session, settings=settings, now=now
+    )
     assert first.counts["questions.owners_examined"] == 3
     assert "questions.questions_deleted" not in first.counts
     assert await retention_session.get(Questions, due_id) is not None
 
-    second = await run_registered_retention(retention_session, settings=settings)
+    second = await run_registered_retention(
+        retention_session, settings=settings, now=now
+    )
     assert second.counts["questions.questions_deleted"] == 1
     assert await retention_session.get(Questions, due_id) is None
 

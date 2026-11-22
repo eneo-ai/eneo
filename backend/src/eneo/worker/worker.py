@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
+import logging
 import os
 from functools import wraps
 from typing import Any, Callable, cast
@@ -14,17 +16,19 @@ from dependency_injector import providers
 from opentelemetry import trace
 
 from eneo.database.database import AsyncSession, sessionmanager
+from eneo.jobs.job_models import failure_code_for_exception
+from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_serialization import deserialize_job, serialize_job
 from eneo.jobs.task_models import ResourceTaskParams
 from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType
-from eneo.observability.error_text import user_visible_error
+from eneo.main.models import Channel, ChannelType, RedisMessage, Status
+from eneo.observability.error_log import log_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
-from eneo.worker.task_manager import TaskManager, WorkerConfig
+from eneo.worker.task_manager import TaskManager, WorkerConfig, publish_task_status
 
 logger = get_logger(__name__)
 
@@ -264,8 +268,11 @@ class Worker:
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
+                # A job's parameters can carry text that retention removes,
+                # such as a file's name in an audit event: name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 async with sessionmanager.session() as session, session.begin():
@@ -401,23 +408,45 @@ class Worker:
         channel_type: ChannelType | None = None,
         *,
         keep_result: int | None = None,
+        max_tries: int | None = None,
+        commit_start_before_run: bool = False,
     ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: ResourceTaskParams) -> Any:
+                # A job's parameters can carry text that retention removes:
+                # name the job only.
                 logger.debug(
-                    f"Executing {func.__name__} with context {ctx} and params {params}"
+                    f"Executing {func.__name__}",
+                    extra={"job_id": str(ctx.get("job_id"))},
                 )
 
                 job_id = _job_id_from_ctx(ctx)
                 assert job_id is not None
                 user_id = params.user_id if with_user else None
 
+                task_manager: TaskManager | None = None
+                claim_pending = commit_start_before_run
                 try:
+                    if commit_start_before_run:
+                        async with sessionmanager.session() as start, start.begin():
+                            if not await JobRepository(start).mark_job_started(job_id):
+                                return False
+                        # Only a confirmed commit lets this delivery fail a running job.
+                        claim_pending = False
+
                     async with sessionmanager.session() as session, session.begin():
                         container = await self._create_container(
                             session, user_id=user_id
                         )
+                        # Hold the row through completion so recovery skips live work.
+                        repo = container.job_repo()
+                        if commit_start_before_run:
+                            started = await repo.touch_job(job_id)
+                        else:
+                            started = await repo.mark_job_started(job_id)
+                        if not started:
+                            return False
                         task_manager = container.task_manager(
                             job_id=job_id,
                             resource_id=params.id,
@@ -427,49 +456,75 @@ class Worker:
                             func, task_manager=task_manager
                         )
 
-                        async with task_manager.set_status_on_exception():
+                        async with task_manager.set_status_on_exception(
+                            status_already_set=True, transactional=True
+                        ):
+                            await task_manager.publish_status(Status.IN_PROGRESS)
                             task_manager.result_location = await func(
                                 params, container=container, **optional_kwargs
                             )
 
                         success = task_manager.successful()
-                except Exception as exc:
-                    # Task errors are already turned into a FAILED job inside the
-                    # transaction; what reaches here is the commit itself failing
-                    # (e.g. a before_commit guard such as the storage quota), which
-                    # rolled that status back together with the work.
-                    await self._fail_job_after_commit_error(job_id, user_id, exc)
+                except (Exception, asyncio.CancelledError) as exc:
+                    if await self._record_job_failure(
+                        job_id, user_id, exc, only_if_queued=claim_pending
+                    ):
+                        if task_manager is not None:
+                            await task_manager.publish_status(Status.FAILED)
+                        elif channel_type is not None and user_id is not None:
+                            await publish_task_status(
+                                Channel(type=channel_type, user_id=user_id),
+                                RedisMessage(id=params.id, status=Status.FAILED),
+                            )
                     raise
 
+                assert success is not None
+                await task_manager.publish_status(
+                    Status.COMPLETE if success else Status.FAILED
+                )
                 return success
 
             traced = _traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, keep_result=keep_result, max_tries=max_tries)
+                if keep_result is not None or max_tries is not None
                 else traced
             )
             return wrapper
 
         return decorator
 
-    async def _fail_job_after_commit_error(
-        self, job_id: UUID, user_id: UUID | None, exc: BaseException
-    ) -> None:
+    async def _record_job_failure(
+        self,
+        job_id: UUID,
+        user_id: UUID | None,
+        exc: BaseException,
+        *,
+        only_if_queued: bool = False,
+    ) -> bool:
         """Record the failure in a fresh session so the job is not left pending
-        until the reaper finds it."""
-        # JobPublic serves the result of a failed integration task as its
-        # failure message; a commit error carries SQL with bound values.
-        message = user_visible_error(exc)
+        until the reaper finds it.
+
+        Like a task's own failure it is stored as its code: a commit error
+        carries SQL with bound values.
+        """
+        code = failure_code_for_exception(exc)
         try:
             async with sessionmanager.session() as session, session.begin():
                 container = await self._create_container(session, user_id=user_id)
-                await container.job_service().fail_job(job_id, message)
-        except Exception:
-            logger.exception(
-                "Could not record job failure after a commit error",
-                extra={"job_id": str(job_id)},
+                failed = await container.job_service().fail_job(
+                    job_id, failure_code=code, only_if_queued=only_if_queued
+                )
+            return failed is not None
+        except Exception as error:
+            log_error(
+                logger,
+                logging.ERROR,
+                "Could not record job failure after task rollback",
+                error=error,
+                extra={"job_id": str(job_id), "failure_code": code.value},
             )
+            return False
 
     def cron_job(self, *, manages_own_session: bool = False, **decorator_kwargs: Any):
         """Register a cron job.

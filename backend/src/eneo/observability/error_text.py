@@ -99,11 +99,24 @@ def _describe(error: BaseException) -> str:
         current = cause
 
 
-def _describe_one(error: BaseException) -> str:
+def http_response(error: BaseException) -> tuple[int, str] | None:
+    """The status and reason phrase of the HTTP response an HTTP client's error
+    reports, or None for any other error.
+
+    Only the two client errors are read: a ``status`` attribute on another
+    exception can mean something else.
+    """
     if isinstance(error, aiohttp.ClientResponseError) and error.status:
-        return _http_status(error.status, error.message)
+        return error.status, error.message
     if isinstance(error, httpx.HTTPStatusError):
-        return _http_status(error.response.status_code, error.response.reason_phrase)
+        return error.response.status_code, error.response.reason_phrase
+    return None
+
+
+def _describe_one(error: BaseException) -> str:
+    response = http_response(error)
+    if response is not None:
+        return _http_status(*response)
     if (
         isinstance(error, SQLAlchemyError)
         or type(error).__module__.partition(".")[0] in _DATABASE_DRIVERS

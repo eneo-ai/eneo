@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime
 from uuid import UUID
 
@@ -5,6 +6,7 @@ from eneo.analysis.analysis_job_manager import AnalysisJobManager
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask
 from eneo.main.container.container import Container
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 logger = get_logger(__name__)
 
@@ -36,8 +38,11 @@ async def analyze_conversation_insights_task(
             include_followup=params.include_followups,
         )
     except Exception as exc:
-        logger.exception(
+        log_error(
+            logger,
+            logging.ERROR,
             "Async conversation insights job failed",
+            error=exc,
             extra={"job_id": str(job_id), "tenant_id": str(user.tenant_id)},
         )
         await manager.mark_failed(

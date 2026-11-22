@@ -17,6 +17,7 @@ from eneo.authentication.oidc.errors import (
     OidcTransactionInvalidError,
 )
 from eneo.data_retention.derivations import DerivedSourceRemovedError
+from eneo.data_retention.domain.rules import RetentionExceedsSpaceError
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -77,6 +78,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeCleanupFailed,
     ObjectStoreProbeConnectionFailed,
     ObjectStoreProbeIntegrityFailed,
+    ObjectStoreProbeKeepsVersions,
     ObjectStoreProbeTlsFailed,
     ObjectStoreProbeUnavailable,
 )
@@ -95,6 +97,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.users.identity_binding_repo import IdentityConflictError
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -288,6 +291,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         None,
         ErrorCodes.OIDC_RESPONSE_NOT_VERIFIED,
     ),
+    IdentityConflictError: (403, None, ErrorCodes.IDENTITY_CONFLICT),
     # --- Integrations: the string ``code`` tells the cases apart ---
     SharePointCredentialsInvalidError: (400, None, ErrorCodes.BAD_REQUEST),
     OAuthCodeRejectedError: (400, None, ErrorCodes.BAD_REQUEST),
@@ -368,6 +372,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectStoreProbeTlsFailed: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeBindingMismatch: (409, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeIntegrityFailed: (400, None, ErrorCodes.BAD_REQUEST),
+    ObjectStoreProbeKeepsVersions: (400, None, ErrorCodes.BAD_REQUEST),
     ObjectStoreProbeCleanupFailed: (503, None, ErrorCodes.RESOURCE_NOT_READY),
     ObjectStoreProbeConnectionFailed: (
         503,
@@ -446,6 +451,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ),
     # --- Copies of removed content ---
     DerivedSourceRemovedError: (410, None, ErrorCodes.DERIVED_SOURCE_REMOVED),
+    # --- Retention periods ---
+    RetentionExceedsSpaceError: (400, None, ErrorCodes.RETENTION_EXCEEDS_SPACE),
 }
 
 

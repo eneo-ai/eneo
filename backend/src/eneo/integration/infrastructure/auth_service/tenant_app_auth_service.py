@@ -10,6 +10,7 @@ from eneo.integration.infrastructure.auth_service.org_token_provider import (
     loggable_token_reason,
     summarize_token_endpoint_error,
 )
+from eneo.observability.error_log import log_error
 from eneo.observability.error_text import user_visible_error
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,13 @@ class TenantAppAuthService:
                 )
                 raise
             except httpx.HTTPError as e:
-                logger.error(f"HTTP error acquiring token for app {app.id}: {e}")
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "HTTP error acquiring token for app %s",
+                    app.id,
+                    error=e,
+                )
                 raise
 
     async def test_credentials(
@@ -185,7 +192,13 @@ class TenantAppAuthService:
             )
             return (False, summarize_token_endpoint_error(e))
         except Exception as e:
-            logger.error(f"Credentials test failed for app {app.id}: {e}")
+            log_error(
+                logger,
+                logging.ERROR,
+                "Credentials test failed for app %s",
+                app.id,
+                error=e,
+            )
             return (False, user_visible_error(e))
 
     def clear_cache(self, app_id: str) -> None:

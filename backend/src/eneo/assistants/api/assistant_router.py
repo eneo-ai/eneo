@@ -458,13 +458,14 @@ def _build_assistant_update_changes(
 
         def extract_item_info(
             item: object, assistant_space_id: UUID | None
-        ) -> tuple[str, str, str | None]:
+        ) -> tuple[str, str | None, str | None]:
             """Extract ID, name, and scope from an item, handling attachments specially."""
             item_id = str(getattr(item, "id", item))
 
-            # Special handling for FileAttachment objects
+            # A file is recorded by its id alone: retention removes its name.
+            item_name: str | None
             if is_attachment:
-                item_name = str(getattr(item, "name", "unknown_file"))
+                item_name = None
             else:
                 # For other types, use the specified attribute or a safe fallback
                 if hasattr(item, name_attr):
@@ -494,10 +495,9 @@ def _build_assistant_update_changes(
         added: list[dict[str, str | None]] = []
         for k in new_items:
             if k not in old_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": new_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if new_items[k]["name"] is not None:
+                    item_data["name"] = new_items[k]["name"]
                 if new_items[k]["scope"]:
                     item_data["scope"] = new_items[k]["scope"]
                 added.append(item_data)
@@ -505,10 +505,9 @@ def _build_assistant_update_changes(
         removed: list[dict[str, str | None]] = []
         for k in old_items:
             if k not in new_items:
-                item_data: dict[str, str | None] = {
-                    "id": k,
-                    "name": old_items[k]["name"],
-                }
+                item_data: dict[str, str | None] = {"id": k}
+                if old_items[k]["name"] is not None:
+                    item_data["name"] = old_items[k]["name"]
                 if old_items[k]["scope"]:
                     item_data["scope"] = old_items[k]["scope"]
                 removed.append(item_data)
@@ -556,7 +555,6 @@ def _build_assistant_update_changes(
     attachment_modes_changed: list[dict[str, str | None]] = [
         {
             "id": str(file.id),
-            "name": file.name,
             "mode": (
                 "inline"
                 if updated_assistant.attachment_inline_text.get(file.id, True)
@@ -610,7 +608,8 @@ def _build_assistant_update_changes(
         new_tool_map = {str(t.tool_id): t.is_enabled for t in assistant.mcp_tools}
 
         tool_changes: list[dict[str, object]] = []
-        for tid, is_enabled in new_tool_map.items():
+        for tid in sorted(old_mcp_tool_overrides.keys() | new_tool_map.keys()):
+            is_enabled = new_tool_map.get(tid)
             old_enabled = old_mcp_tool_overrides.get(tid)
             if old_enabled != is_enabled:
                 tool_changes.append(
@@ -835,12 +834,17 @@ async def update_assistant(
             space = None
 
     # Build extra context
-    extra = {
+    extra: dict[str, object] = {
         "type": updated_assistant.type.value if updated_assistant.type else "standard",
         "summary": f"Modified {', '.join(change_summary)}"
         if change_summary
         else "No changes detected",
     }
+
+    if "mcp_servers" in changes or "mcp_tools" in changes:
+        extra["serves_active_widget"] = await container.widget_repo().serves_target(
+            current_user.tenant_id, id
+        )
 
     audit_service = container.audit_service()
     await audit_service.log_async(
@@ -1506,6 +1510,11 @@ async def add_mcp_to_assistant(
                     "added": [{"id": str(mcp_server.id), "name": mcp_server.name}]
                 }
             },
+            extra={
+                "serves_active_widget": await container.widget_repo().serves_target(
+                    user.tenant_id, id
+                )
+            },
         ),
     )
 
@@ -1558,6 +1567,11 @@ async def remove_mcp_from_assistant(
                 "mcp_servers": {
                     "removed": [{"id": str(mcp_server.id), "name": mcp_server.name}]
                 }
+            },
+            extra={
+                "serves_active_widget": await container.widget_repo().serves_target(
+                    user.tenant_id, id
+                )
             },
         ),
     )

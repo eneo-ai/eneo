@@ -267,7 +267,7 @@ class DerivedCopyRepository:
         deleted_id, tenant_id = row
         return ConversationDeletion(id=deleted_id, tenant_id=tenant_id, source=None)
 
-    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int:
+    async def cascade_cost(self, identifier: UUID, ceiling: int) -> int | None:
         return await self.unit.cascade_cost(identifier, ceiling)
 
     async def delete_unit(

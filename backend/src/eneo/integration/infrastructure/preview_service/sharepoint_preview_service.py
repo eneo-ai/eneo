@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, cast
 
 from typing_extensions import override
@@ -15,6 +16,7 @@ from eneo.integration.infrastructure.preview_service.base_preview_service import
     BasePreviewService,
 )
 from eneo.main.logging import get_logger
+from eneo.observability.error_log import log_error
 
 if TYPE_CHECKING:
     from eneo.integration.domain.entities.tenant_sharepoint_app import (
@@ -110,8 +112,11 @@ class SharePointPreviewService(BasePreviewService):
                     include_my_teams=tenant_app.is_service_account(),
                 )
             except Exception as e:
-                logger.error(
-                    f"Error fetching SharePoint preview data with app auth: {e}"
+                log_error(
+                    logger,
+                    logging.ERROR,
+                    "Error fetching SharePoint preview data with app auth",
+                    error=e,
                 )
                 raise
 
@@ -163,9 +168,11 @@ class SharePointPreviewService(BasePreviewService):
             async with asyncio.timeout(OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS):
                 return await load()
         except Exception as e:
-            logger.warning(
-                "Could not resolve team sites for my-teams categorization: %s",
-                e if str(e) else type(e).__name__,
+            log_error(
+                logger,
+                logging.WARNING,
+                "Could not resolve team sites for my-teams categorization",
+                error=e,
             )
             return {}
 
@@ -178,10 +185,7 @@ class SharePointPreviewService(BasePreviewService):
             async with asyncio.timeout(OPTIONAL_USER_CONTEXT_TIMEOUT_SECONDS):
                 drive_data = await content_client.get_my_drive()
         except Exception as e:
-            logger.warning(
-                "Could not fetch OneDrive: %s",
-                e if str(e) else type(e).__name__,
-            )
+            log_error(logger, logging.WARNING, "Could not fetch OneDrive", error=e)
             return None
 
         if not drive_data:

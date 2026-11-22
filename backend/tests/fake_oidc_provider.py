@@ -8,9 +8,11 @@ callback receives.
 
 Its settings reproduce providers that differ or misbehave: PKCE enforced or
 ignored, the ``iss`` parameter advertised or not, a key marked for another
-use, an outage, and ID tokens with a wrong ``iss``, ``aud``, ``azp`` or
+use, an outage, ``sub`` values that differ per client (with a stable ``oid``
+claim beside them), and ID tokens with a wrong ``iss``, ``aud``, ``azp`` or
 ``nonce``, an unsupported algorithm, a foreign signature, a key of the wrong
-type, an expiry in the past or an ``iat`` in the future.
+type, an expiry in the past or an ``iat`` in the future. ``access_token``
+signs the JWT access token a resource server receives.
 """
 
 import asyncio
@@ -19,6 +21,7 @@ import hashlib
 import json
 import secrets
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from functools import cache
 from typing import Any, Literal
@@ -90,10 +93,26 @@ class _Grant:
     claims: dict[str, Any]
 
 
+class _Body:
+    """The body as a stream, as Eneo reads a provider's answer."""
+
+    def __init__(self, body: bytes):
+        self._body = body
+
+    async def iter_chunked(self, size: int) -> AsyncIterator[bytes]:
+        for start in range(0, len(self._body), size):
+            yield self._body[start : start + size]
+
+
 class _Response:
     def __init__(self, payload: dict[str, Any], status: int = 200):
         self._payload = payload
         self.status = status
+        self.content_length: int | None = None
+
+    @property
+    def content(self) -> _Body:
+        return _Body(json.dumps(self._payload).encode())
 
     async def __aenter__(self) -> "_Response":
         return self
@@ -133,12 +152,17 @@ class FakeOidcProvider:
     # "ES256-under-rsa-kid" an EC key under the kid of the published RSA key.
     signing_override: str | None = None
     discovery_overrides: dict[str, Any] = field(default_factory=dict)
+    # Where the token endpoint and the JWKS are; None means the issuer.
+    endpoint_base: str | None = None
     # The JWK's ``use``; None leaves it out.
     key_use: str | None = "sig"
     # Discovery and JWKS answer 503, as during an outage.
     down: bool = False
     # When the person last signed in at the provider (its SSO session).
     session_auth_time: int = field(default_factory=lambda: int(time.time()) - 3600)
+    # Each client sees its own ``sub`` for the person (pairwise subjects);
+    # the ``oid`` claim stays the same for all of them.
+    pairwise_subjects: bool = False
     requests: list[tuple[str, str]] = field(default_factory=list)
     token_requests: list[dict[str, str]] = field(default_factory=list)
     # Every ID token issued, in order.
@@ -155,11 +179,11 @@ class FakeOidcProvider:
 
     @property
     def token_endpoint(self) -> str:
-        return f"{self.issuer}/token"
+        return f"{self.endpoint_base or self.issuer}/token"
 
     @property
     def jwks_uri(self) -> str:
-        return f"{self.issuer}/jwks"
+        return f"{self.endpoint_base or self.issuer}/jwks"
 
     @property
     def kid(self) -> str:
@@ -301,6 +325,37 @@ class FakeOidcProvider:
             }
         )
 
+    def subject_for(self, client_id: str, person: str = "person-0001") -> str:
+        """The ``sub`` this client sees for the person."""
+        if not self.pairwise_subjects:
+            return "subject-0001"
+        return (
+            "pairwise-"
+            + hashlib.sha256(f"{client_id}:{person}".encode()).hexdigest()[:16]
+        )
+
+    def access_token(self, *, audience: str, client_id: str, **claims: Any) -> str:
+        """A JWT access token for an API, as issued to one client."""
+        now = int(time.time())
+        payload: dict[str, Any] = {
+            "iss": self.issuer,
+            "aud": audience,
+            "azp": client_id,
+            "sub": self.subject_for(client_id),
+            "oid": "person-0001",
+            "iat": now,
+            "exp": now + 300,
+            "email": "user@example.com",
+            **claims,
+        }
+        payload = {key: value for key, value in payload.items() if value is not DROP}
+        return jwt.encode(
+            payload,
+            _private_key(_key_kind(self.algorithm)),
+            algorithm=self.algorithm,
+            headers={"kid": self.kid},
+        )
+
     def _id_token(self, grant: _Grant, access_token: str) -> str:
         if self.signing_override == "HS256":
             algorithm, key, kid = "HS256", self.client_secret.encode() * 4, self.kid
@@ -318,7 +373,8 @@ class FakeOidcProvider:
         claims: dict[str, Any] = {
             "iss": self.issuer,
             "aud": grant.client_id,
-            "sub": "subject-0001",
+            "sub": self.subject_for(grant.client_id),
+            "oid": "person-0001",
             "iat": now,
             "exp": now + 300,
             "auth_time": self.session_auth_time,
@@ -345,7 +401,8 @@ class _ProviderHttp:
 
     def _owner(self, url: str) -> FakeOidcProvider:
         for provider in self._providers:
-            if url.startswith(provider.issuer + "/"):
+            bases = (provider.issuer, provider.endpoint_base or provider.issuer)
+            if any(url.startswith(base + "/") for base in bases):
                 return provider
         raise AssertionError(f"No fake provider serves {url}")
 
@@ -386,3 +443,6 @@ def install(monkeypatch: pytest.MonkeyPatch, *providers: FakeOidcProvider) -> No
     monkeypatch.setattr(aiohttp_client, "session", http)
     monkeypatch.setattr(profile, "_discovery_cache", {})
     monkeypatch.setattr(oidc_resource_server, "_federation_jwks_caches", {})
+    monkeypatch.setattr(
+        oidc_resource_server, "_jwks_cache", oidc_resource_server.JWKSCache()
+    )

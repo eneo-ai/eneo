@@ -253,10 +253,8 @@ TRANSCRIPTION_MAX_FILE_SIZE=209715200
 # Durable Object Content (PostgreSQL-inline defaults)
 # ----------------------------------------------------------------------------
 # These settings are active whether or not an external object store is enabled.
-# The inline ceiling is a deployment safety/admission bound, not a user-facing
-# upload policy. Reads of existing inline content remain possible if it is
-# lowered. Product upload limits remain admin-configurable in Eneo.
-OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=10485760
+# Upload limits are set in Admin > File storage, up to the most PostgreSQL holds
+# per file. OBJECT_CONTENT_INLINE_MAXIMUM_BYTES is deprecated; leave it unset.
 OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES=262144
 
 # Bounded lifecycle and reference reconciliation. Increase only after measuring

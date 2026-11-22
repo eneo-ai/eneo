@@ -15,6 +15,7 @@
       "entry": [
         "scripts/audit-dependencies.mjs",
         "scripts/audit-dependencies.test.mjs",
+        "scripts/remote-functions-off.test.mjs",
         "scripts/security-patches.test.mjs"
       ]
     },
@@ -33,6 +34,10 @@
       "ignore": ["src/icons/Icon.svelte"]
     },
     "packages/eneo-js": {},
-    "packages/eslint-plugin": {}
+    "packages/eslint-plugin": {},
+    "packages/widget-loader": {
+      "ignoreFiles": ["scripts/minify-css.d.mts"],
+      "ignoreDependencies": ["@vitest/browser"]
+    }
   }
 }

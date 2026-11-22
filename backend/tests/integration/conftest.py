@@ -736,6 +736,16 @@ async def client(app) -> AsyncGenerator[AsyncClient, None]:
         yield client
 
 
+@pytest.fixture
+async def raw_client(app) -> AsyncGenerator[AsyncClient, None]:
+    """A client that receives the 500 instead of the server's exception."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test.local",
+    ) as client:
+        yield client
+
+
 # Database session fixtures
 
 
@@ -1032,6 +1042,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
         expires_in: float | None = None,
         extra_claims: dict[str, object] | None = None,
         auth_method=None,
+        derived_from=None,
     ) -> str:
         return original_create_token(
             self,
@@ -1043,6 +1054,7 @@ def patch_auth_service_jwt(monkeypatch, test_settings):
             else test_settings.jwt_expiry_time,
             extra_claims=extra_claims,
             auth_method=auth_method,
+            derived_from=derived_from,
         )
 
     def patched_get_jwt_payload(
@@ -1113,10 +1125,17 @@ def oidc_mock(monkeypatch):
         request_log: list[tuple[str, str]] = []
         token_clients: list[str | None] = []
 
+        from tests.fake_oidc_provider import _Body
+
         class _FakeResponse:
             def __init__(self, payload: dict, status: int = 200):
                 self._payload = payload
                 self.status = status
+                self.content_length = None
+
+            @property
+            def content(self) -> _Body:
+                return _Body(json.dumps(self._payload).encode())
 
             async def __aenter__(self):
                 return self

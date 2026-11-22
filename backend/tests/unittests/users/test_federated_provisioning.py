@@ -10,10 +10,11 @@ import pytest
 import sqlalchemy as sa
 from cryptography.fernet import Fernet
 
+from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import FederatedIdentity
+from eneo.authentication.oidc.sign_in_source import sign_in_config
 from eneo.main.config import Settings
 from eneo.main.exceptions import FederatedLoginDenied
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.federation_startup_migration import (
     FederationStartupMigrationService,
@@ -25,13 +26,14 @@ from eneo.users.user_repo import UsersRepository
 from eneo.users.user_service import UserService
 from tests.fake_oidc_provider import FakeOidcProvider, install
 from tests.fixtures import TEST_TENANT, TEST_USER
+from tests.identity_bindings_in_memory import IdentityBindingsInMemory
 
 ISSUER = "https://idp.example.org"
 
 
 def identity_of(claims: dict[str, object], **mapping: str) -> FederatedIdentity:
     return FederatedIdentity.from_claims(
-        claims, issuer=ISSUER, client_id="client", **mapping
+        claims, issuer=ISSUER, audience="client", **mapping
     )
 
 
@@ -50,6 +52,28 @@ class UsersInMemory:
             ),
             None,
         )
+
+    async def get_users_by_email(self, email: str, *, limit: int) -> list[UserInDB]:
+        return [
+            user
+            for user in self.users
+            if user.email.lower() == email.lower() and user.deleted_at is None
+        ][:limit]
+
+    async def get_user_by_id(
+        self, id: UUID, with_deleted: bool = False
+    ) -> UserInDB | None:
+        return next(
+            (
+                user
+                for user in self.users
+                if user.id == id and (with_deleted or user.deleted_at is None)
+            ),
+            None,
+        )
+
+    async def get_user_by_id_for_update(self, id: UUID) -> UserInDB | None:
+        return await self.get_user_by_id(id)
 
     async def has_removed_user_by_email(self, email: str, tenant_id: UUID) -> bool:
         return any(
@@ -107,6 +131,12 @@ class AuditLog:
     async def log(self, **event: object) -> None:
         self.events.append(event)
 
+    async def log_async(self, **event: object) -> None:
+        self.events.append(event)
+
+    def of(self, action: ActionType) -> list[dict[str, object]]:
+        return [event for event in self.events if event["action"] == action]
+
 
 @pytest.fixture
 def tenant() -> TenantInDB:
@@ -136,6 +166,7 @@ async def sign_in(
         api_key_v2_repo=None,
         settings_repo=None,
         info_blob_repo=None,
+        identity_binding_repo=IdentityBindingsInMemory(),
     )
     user, created = await service.resolve_federated_user(
         identity=identity_of(claims),
@@ -185,9 +216,11 @@ async def test_jit_creates_member_with_default_role_and_audit(
     assert user.email_verified is True
     assert len(users.created) == 1
     assert [role.id for role in users.created[0].roles] == [tenant.default_role_id]
-    assert len(audit.events) == 1
-    assert audit.events[0]["tenant_id"] == tenant.id
-    assert audit.events[0]["entity_id"] == user.id
+    [created_event] = audit.of(ActionType.USER_CREATED)
+    assert created_event["tenant_id"] == tenant.id
+    assert created_event["entity_id"] == user.id
+    [bound] = audit.of(ActionType.IDENTITY_BOUND)
+    assert (bound["entity_id"], bound["metadata"]["method"]) == (user.id, "jit")
 
 
 @pytest.mark.parametrize("domains", [[], ["outside.example"]])
@@ -361,7 +394,7 @@ async def test_existing_scim_member_can_sign_in_without_jit_requirements(
     assert user.id == member.id
     assert created is False
     assert users.created == []
-    assert audit.events == []
+    assert audit.of(ActionType.USER_CREATED) == []
 
 
 @pytest.mark.parametrize("state", [UserState.INACTIVE, UserState.DELETED])
@@ -456,10 +489,21 @@ def test_custom_directory_claim_is_not_rejected_by_unrelated_email_verification(
     assert identity.email_verified is False
 
 
-@pytest.mark.parametrize("email", [None, 123, "", "invalid", "user@", "@example.com"])
-def test_invalid_email_is_rejected_before_account_admission(email):
-    with pytest.raises(ValueError):
-        identity_of({"email": email, "email_verified": True})
+@pytest.mark.parametrize(
+    ("email", "error"),
+    [
+        (None, "Email claim not found"),
+        (123, "Email claim not found"),
+        ("", "Email claim not found"),
+        ("invalid", "Email claim from identity provider is invalid"),
+        ("user@", "Email claim from identity provider is invalid"),
+        ("@example.com", "Email claim from identity provider is invalid"),
+    ],
+)
+def test_invalid_email_is_rejected_before_account_admission(email, error):
+    # Every other claim is valid, so the email is what is refused.
+    with pytest.raises(ValueError, match=error):
+        identity_of({**CLAIMS, "email": email})
 
 
 @pytest.mark.parametrize("moved", [False, True], ids=["oidc-env", "moved-into-eneo"])
@@ -499,9 +543,7 @@ async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
         ]
         tenant = tenant.model_copy(update={"federation_config": stored})
     # Read as the federation callback reads them (federation_router.py).
-    config = CredentialResolver(
-        tenant=tenant, settings=settings, encryption_service=encryption
-    ).get_federation_config()
+    config = sign_in_config(settings, tenant, encryption)
     domains = cast(list[str], config.get("allowed_domains") or [])
 
     # A current member inside the domains still signs in...
@@ -524,7 +566,9 @@ async def test_moving_global_oidc_into_eneo_keeps_its_domain_policy(
     assert created is True
 
 
-def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch):
+def test_global_oidc_domain_configuration_is_resolved(
+    test_settings, monkeypatch, tenant
+):
     monkeypatch.setenv("OIDC_ALLOWED_DOMAINS", '["example.com"]')
     settings = Settings(
         _env_file=None,
@@ -534,7 +578,7 @@ def test_global_oidc_domain_configuration_is_resolved(test_settings, monkeypatch
     settings.oidc_client_id = "client"
     settings.oidc_client_secret = "secret"
     assert settings.oidc_allowed_domains == ["example.com"]
-    config = CredentialResolver(settings=settings).get_federation_config()
+    config = sign_in_config(settings, tenant, EncryptionService())
     assert config["allowed_domains"] == ["example.com"]
 
 

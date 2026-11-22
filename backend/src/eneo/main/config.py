@@ -753,7 +753,10 @@ class Settings(BaseSettings):
     # TTL, after which the visitor's stored key re-mints with a fresh proof.
     widget_visitor_token_ttl_seconds: int = Field(default=900, gt=0)
     widget_visitor_token_grace_seconds: int = Field(default=900, ge=0)
-    widget_preview_token_ttl_seconds: int = Field(default=3600, gt=0)
+    # The preview token is a bearer in the admin page's DOM and iframe URL;
+    # the preview re-mints it before it expires, so it lives no longer than
+    # a visitor token.
+    widget_preview_token_ttl_seconds: int = Field(default=900, gt=0)
     # ALTCHA v2 proof of work: each attempt derives a key with `cost` hash
     # iterations and must land on `key_prefix`, so the expected work is
     # 16**len(key_prefix) * cost iterations and the attempt count is
@@ -1084,11 +1087,8 @@ class Settings(BaseSettings):
             "OIDC_DISCOVERY_ENDPOINT": self.oidc_discovery_endpoint,
             "OIDC_CLIENT_ID": self.oidc_client_id,
             "OIDC_CLIENT_SECRET": self.oidc_client_secret,
-            # API tokens still fall back to these domains when the stored
-            # provider lists none, so they are not ignored while that is on.
-            "OIDC_ALLOWED_DOMAINS": (
-                None if self.oidc_resource_server_enabled else self.oidc_allowed_domains
-            ),
+            # Access tokens read the stored provider's domains too.
+            "OIDC_ALLOWED_DOMAINS": self.oidc_allowed_domains,
         }
         names = [name for name, value in ignored.items() if value]
         if names:

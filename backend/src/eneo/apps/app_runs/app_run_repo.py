@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import cast
 from uuid import UUID
 
@@ -10,7 +11,8 @@ from sqlalchemy.sql.base import ExecutableOption
 from eneo.apps.app_runs.app_run import AppRun
 from eneo.apps.app_runs.app_run_factory import AppRunFactory
 from eneo.database.database import AsyncSession
-from eneo.database.tables.app_table import AppRuns, AppRunsFiles
+from eneo.database.tables.app_table import AppRuns, AppRunsFiles, Apps
+from eneo.database.tables.spaces_table import Spaces
 from eneo.files.file_models import FileInfo
 from eneo.files.file_repo import FileRepository
 from eneo.files.unused_file_cleanup import delete_unused_root_files
@@ -133,6 +135,23 @@ class AppRunRepository:
         )
 
         return await self._to_domain_many(app_runs_in_db)
+
+    async def get_update_targets_for_jobs(
+        self, job_ids: list[UUID]
+    ) -> Sequence[tuple[UUID, UUID, UUID, UUID, bool]]:
+        stmt = (
+            sa.select(
+                AppRuns.id,
+                AppRuns.user_id,
+                AppRuns.app_id,
+                Spaces.id,
+                Spaces.user_id.is_not(None),
+            )
+            .join(Apps, Apps.id == AppRuns.app_id)
+            .join(Spaces, Spaces.id == Apps.space_id)
+            .where(AppRuns.job_id.in_(job_ids))
+        )
+        return (await self.session.execute(stmt)).tuples().all()
 
     async def add(self, app_run: AppRun) -> AppRun:
         stmt = (

@@ -2,15 +2,16 @@
 
 import asyncio
 import secrets
+from collections.abc import Mapping
 from datetime import datetime, timezone
-from typing import Annotated, Any, Optional, Protocol, cast
+from typing import Annotated, Any, NamedTuple, Optional, cast
 from uuid import UUID
 
 import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
-from typing_extensions import NotRequired, TypedDict
+from typing_extensions import TypedDict
 
 from eneo.authentication.endpoint_access import (
     Authentication,
@@ -23,6 +24,12 @@ from eneo.authentication.oidc.profile import (
     OidcProfile,
     OidcProviderError,
     load_profile,
+)
+from eneo.authentication.oidc.sign_in_source import (
+    redirect_uris,
+    selected_config,
+    sign_in_available,
+    sign_in_config,
 )
 from eneo.authentication.oidc.transaction import (
     STORE_TIMEOUT_SECONDS,
@@ -41,13 +48,15 @@ from eneo.main.config import (
 from eneo.main.container.container import Container
 from eneo.main.exceptions import FederatedLoginDenied
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.main.request_context import ensure_correlation_id, set_request_context
 from eneo.observability.debug_toggle import is_debug_enabled
 from eneo.observability.redaction import sanitize_payload
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-from eneo.settings.credential_resolver import CredentialResolver
 from eneo.tenants.tenant import TenantInDB, TenantState
+from eneo.users.identity_binding_repo import IdentityConflictError
+from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
 
@@ -55,25 +64,6 @@ router = APIRouter(
     prefix="/auth",
     tags=["authentication"],
 )
-
-
-class OIDCClaimsMapping(TypedDict):
-    email: str
-
-
-class FederationConfig(TypedDict):
-    client_id: str
-    client_secret: str
-    provider: NotRequired[str]
-    discovery_endpoint: NotRequired[str]
-    authorization_endpoint: NotRequired[str]
-    token_endpoint: NotRequired[str]
-    jwks_uri: NotRequired[str]
-    token_endpoint_auth_method: NotRequired[str]
-    token_endpoint_auth_methods_supported: NotRequired[list[str]]
-    scopes: NotRequired[list[str]]
-    claims_mapping: NotRequired[OIDCClaimsMapping]
-    allowed_domains: NotRequired[list[str]]
 
 
 class OIDCStatePayload(TypedDict):
@@ -92,8 +82,11 @@ class AccessTokenResponse(TypedDict):
     frontend_state: str
 
 
-class _FederationConfigResolver(Protocol):
-    def get_federation_config(self) -> FederationConfig: ...
+class FederatedSignIn(NamedTuple):
+    """A verified callback's admitted user, and the state its page sent."""
+
+    user: UserInDB
+    frontend_state: str
 
 
 async def _log_oidc_debug(
@@ -142,8 +135,13 @@ def _transaction_store(container: Container) -> Redis | None:
         return None
 
 
+UNUSABLE_PROVIDER_DETAIL = (
+    "Sign-in is not available for this organisation. Contact your administrator."
+)
+
+
 async def _load_profile(
-    federation_config: FederationConfig, settings: Settings, correlation_id: str
+    federation_config: Mapping[str, object], settings: Settings, correlation_id: str
 ) -> OidcProfile:
     try:
         # Discovery is cached as long as the provider's keys.
@@ -152,13 +150,15 @@ async def _load_profile(
             discovery_ttl_seconds=settings.oidc_jwks_cache_ttl_seconds,
         )
     except OidcProviderError as exc:
+        # The reason names hosts and settings: for the log and the operator,
+        # never for a visitor who is not signed in.
         logger.error(
             "OIDC provider configuration is unusable",
             extra={"reason": str(exc), "correlation_id": correlation_id},
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
+            detail=UNUSABLE_PROVIDER_DETAIL,
             headers={"X-Correlation-ID": correlation_id},
         ) from exc
 
@@ -203,7 +203,7 @@ def _changed_during_sign_in(
 def _require_registered_redirect_uri(
     transaction: OidcTransaction,
     tenant: TenantInDB,
-    credential_resolver: CredentialResolver,
+    federation_config: Mapping[str, object],
     settings: Settings,
     correlation_id: str,
 ) -> None:
@@ -219,7 +219,9 @@ def _require_registered_redirect_uri(
         "correlation_id": correlation_id,
     }
     try:
-        expected_redirect_uri = credential_resolver.get_redirect_uri()
+        expected_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
     except ValueError as e:
         logger.error(
             "Failed to resolve expected redirect_uri for validation",
@@ -230,7 +232,6 @@ def _require_registered_redirect_uri(
             detail="Failed to validate redirect_uri configuration",
             headers={"X-Correlation-ID": correlation_id},
         )
-    valid_redirect_uris = set(credential_resolver.get_valid_redirect_uris())
     try:
         redirect_uri = validate_redirect_uri(transaction.redirect_uri) or ""
     except ValueError:
@@ -401,10 +402,6 @@ class FederationStatusResponse(BaseModel):
     }
 
 
-def _has_federation_config(config: dict[str, Any]) -> bool:
-    return bool(config.get("client_id") and config.get("discovery_endpoint"))
-
-
 @router.get(
     "/federation-status",
     response_model=FederationStatusResponse,
@@ -462,20 +459,21 @@ async def get_federation_status(
 
     # Single-tenant federation detection (API-configured federation in database):
     # - Exactly 1 active tenant
-    # - Has API-configured federation (non-empty federation_config JSONB)
-    # - Federation config has required fields
+    # - Its stored config names a discovery URL, a client ID and a secret
     # - Only applies when federation_enabled=true
     has_single_federation = False
     if settings.federation_enabled and tenant_count == 1:
         tenant = tenants[0]
-        if _has_federation_config(tenant.federation_config):
+        if sign_in_available(settings, tenant):
             has_single_federation = True
             logger.info(
                 "Single-tenant API federation detected",
                 extra={
                     "tenant_id": str(tenant.id),
                     "tenant_name": tenant.name,
-                    "provider": tenant.federation_config.get("provider", "unknown"),
+                    "provider": selected_config(settings, tenant).get(
+                        "provider", "unknown"
+                    ),
                 },
             )
 
@@ -512,13 +510,13 @@ async def list_tenants(
     Returns only tenants that have:
     - Active status (not deleted)
     - Slug configured (required for federation routing)
-    - Client ID and discovery endpoint when federation is enabled
+    - A discovery URL, client ID and client secret when federation is enabled
 
     Returns:
         TenantListResponse with slug, name, display_name for each tenant
     """
     tenant_repo = container.tenant_repo()
-    federation_enabled = get_settings().federation_enabled
+    settings = get_settings()
 
     # Get all active tenants
     tenants = await tenant_repo.get_all_active()
@@ -532,7 +530,7 @@ async def list_tenants(
         )
         for tenant in tenants
         if tenant.slug
-        and (not federation_enabled or _has_federation_config(tenant.federation_config))
+        and (not settings.federation_enabled or sign_in_available(settings, tenant))
     ]
 
     logger.info(f"Listed {len(tenant_list)} tenants for selector")
@@ -727,19 +725,10 @@ async def initiate_federated_sign_in(
 
     set_request_context(tenant_slug=tenant_obj.slug or tenant_obj.name)
 
-    # Resolve federation config (tenant-specific or global)
-    # Create CredentialResolver with tenant, settings, and encryption_service
-    encryption_service = container.encryption_service()
-    credential_resolver = CredentialResolver(
-        tenant=tenant_obj,
-        settings=settings,
-        encryption_service=encryption_service,
-    )
-
     try:
-        federation_config = cast(
-            _FederationConfigResolver, credential_resolver
-        ).get_federation_config()
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
+        )
     except ValueError as e:
         logger.error(
             "No federation config for tenant",
@@ -761,7 +750,9 @@ async def initiate_federated_sign_in(
 
     # Resolve redirect_uri server-side
     try:
-        canonical_redirect_uri = credential_resolver.get_redirect_uri()
+        canonical_redirect_uri, valid_redirect_uris = redirect_uris(
+            federation_config, settings
+        )
     except ValueError as e:
         logger.error(
             "Failed to resolve redirect_uri for tenant",
@@ -777,8 +768,6 @@ async def initiate_federated_sign_in(
             f"No public origin configured for tenant '{tenant}'. "
             "Contact administrator to configure canonical_public_origin.",
         )
-
-    valid_redirect_uris = credential_resolver.get_valid_redirect_uris()
 
     if redirect_uri_param is not None:
         try:
@@ -887,12 +876,23 @@ async def initiate_federated_sign_in(
             "description": (
                 "Invalid or expired state, or a binding_verifier that does not "
                 "match the sign-in (oidc_transaction_invalid)"
-            )
+            ),
+            "model": GeneralError,
         },
-        401: {"description": "Token validation failed"},
-        403: {"description": "Domain not allowed, inactive tenant, or user missing"},
-        404: {"description": "Tenant or user not found"},
-        503: {"description": "Sign-in store unavailable (oidc_login_unavailable)"},
+        401: {"description": "Token validation failed", "model": GeneralError},
+        403: {
+            "description": (
+                "Domain not allowed, inactive tenant or user missing; or "
+                "`identity_conflict` (9082): the account is bound to another "
+                "sign-in identity"
+            ),
+            "model": GeneralError,
+        },
+        404: {"description": "Tenant or user not found", "model": GeneralError},
+        503: {
+            "description": "Sign-in store unavailable (oidc_login_unavailable)",
+            "model": GeneralError,
+        },
     },
 )
 @endpoint_access(
@@ -902,20 +902,32 @@ async def initiate_federated_sign_in(
 )
 async def auth_callback(
     callback: CallbackRequest,
-    container: Annotated[Container, Depends(get_container())],
+    # The session (and an account the sign-in created) commits before the
+    # token leaves, so its first request is admitted.
+    container: Annotated[
+        Container, Depends(get_container(transaction_scope="function"))
+    ],
 ) -> AccessTokenResponse:
     """Handle the OIDC callback after the user authenticated with the IdP."""
-    return await federated_sign_in(callback, container, channel="api")
+    signed_in = await federated_sign_in(callback, container, channel="api")
+    # The token names its session, so signing out (POST /users/logout/)
+    # ends every copy of it.
+    return AccessTokenResponse(
+        access_token=await container.browser_session_service().start(
+            signed_in.user, auth_method=None
+        ),
+        frontend_state=signed_in.frontend_state,
+    )
 
 
 async def federated_sign_in(
     callback: CallbackRequest, container: Container, *, channel: OidcChannel
-) -> AccessTokenResponse:
+) -> FederatedSignIn:
     """
     Verify a provider's callback and admit its user: the shared sign-in core.
 
-    Starts no session. Each route that hands the token out decides which
-    session it gets (``BrowserSessionService.start``).
+    Starts no session and mints no token. Each route starts the user's
+    session (``BrowserSessionService.start``) and hands its token out.
 
     This function:
     1. Validates signed state (JWT with tenant context)
@@ -925,7 +937,7 @@ async def federated_sign_in(
        (signature, issuer, audience, freshness, nonce)
     4. Validates email domain against tenant's allowed_domains
     5. Resolves an active tenant member or provisions under the shared JIT policy
-    6. Issues Eneo JWT token
+    6. Returns the admitted user and the page's frontend state
 
     Raises:
         HTTPException 400: Invalid state or code
@@ -933,6 +945,8 @@ async def federated_sign_in(
         HTTPException 401: The verified token carries no usable email
         OidcResponseNotVerifiedError (401): The provider's response failed a check
         HTTPException 403: Email domain not allowed for tenant or user not found
+        IdentityConflictError (403): The identity cannot be bound to the account
+            its email names
         OidcLoginUnavailableError (503): The transaction store is unavailable
     """
     settings = get_settings()
@@ -1057,16 +1071,11 @@ async def federated_sign_in(
                 headers={"X-Correlation-ID": correlation_id},
             )
 
-        credential_resolver = CredentialResolver(
-            tenant=tenant_obj,
-            settings=settings,
-            encryption_service=container.encryption_service(),
+        federation_config = sign_in_config(
+            settings, tenant_obj, container.encryption_service()
         )
-        federation_config = cast(
-            _FederationConfigResolver, credential_resolver
-        ).get_federation_config()
         _require_registered_redirect_uri(
-            transaction, tenant_obj, credential_resolver, settings, correlation_id
+            transaction, tenant_obj, federation_config, settings, correlation_id
         )
         profile = await _load_profile(federation_config, settings, correlation_id)
         verified = await verify_response(
@@ -1087,21 +1096,33 @@ async def federated_sign_in(
             ) from exc
 
         email = identity.email
-        set_request_context(user_email=email)
+        # Not the address itself: the sign-in may still be refused, and a
+        # refused one logs no email. callback.success carries it.
         await _log_oidc_debug(
             redis_client=redis_client,
             correlation_id=correlation_id,
             event="callback.email_extracted",
-            email=email,
             email_claim=profile.email_claim,
         )
         try:
             user, created = await container.user_service().resolve_federated_user(
                 identity=identity,
                 tenant_id=tenant_id,
-                allowed_domains=federation_config.get("allowed_domains") or [],
+                allowed_domains=cast(
+                    list[str], federation_config.get("allowed_domains") or []
+                ),
                 correlation_id=correlation_id,
             )
+        except IdentityConflictError as exc:
+            await _log_oidc_debug(
+                redis_client=redis_client,
+                correlation_id=correlation_id,
+                event="callback.identity_conflict",
+                tenant_slug=tenant_slug,
+                reason=exc.reason,
+            )
+            # Typed: 403 with its code, for the login pages to explain.
+            raise
         except FederatedLoginDenied as exc:
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1116,6 +1137,11 @@ async def federated_sign_in(
                 headers={"X-Correlation-ID": correlation_id},
             ) from exc
 
+        # Only an admitted sign-in puts its email in the request's log context,
+        # so a refused one (an identity conflict, a denied account) logs none,
+        # like the provider-response refusals before it.
+        set_request_context(user_email=email)
+
         if created:
             await _log_oidc_debug(
                 redis_client=redis_client,
@@ -1124,11 +1150,6 @@ async def federated_sign_in(
                 tenant_slug=tenant_slug,
                 email=email,
             )
-
-        # Create JWT token for existing user
-        access_token_response = container.auth_service().create_access_token_for_user(
-            user
-        )
 
         logger.info(
             f"Federated login successful for {email} on tenant {tenant_slug}",
@@ -1150,11 +1171,8 @@ async def federated_sign_in(
             user_id=str(user.id),
         )
 
-        return AccessTokenResponse(
-            access_token=access_token_response,
-            frontend_state=state_payload["frontend_state"],
-        )
-    except (HTTPException, OidcSignInError):
+        return FederatedSignIn(user, state_payload["frontend_state"])
+    except (HTTPException, OidcSignInError, IdentityConflictError):
         # Re-raise HTTP and typed sign-in refusals with correlation_id already set
         raise
     except Exception as e:

@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 import eneo.server.dependencies.lifespan as lifespan_module
+from eneo.object_content.content import ObjectContentConfigurationError
 from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionDatabaseUnavailable,
 )
@@ -46,6 +47,42 @@ async def test_connection_table_outage_does_not_stop_startup(
     lifespan_module.sessionmanager.close.assert_not_awaited()
     lifespan_module.aiohttp_client.stop.assert_not_awaited()
     lifespan_module.job_manager.init.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_refused_object_store_is_logged_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The API server reports only that its worker failed to boot, so the
+    reason must be in the application's own log before startup fails."""
+    settings = SimpleNamespace(
+        openapi_only_mode=False,
+        database_url="postgresql+asyncpg://unused",
+        testing=True,
+        encryption_key="unused",
+    )
+    reason = "Object content storage bucket 'eneo-content' has versioning enabled"
+    monkeypatch.setattr(lifespan_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(lifespan_module.sessionmanager, "init", MagicMock())
+    monkeypatch.setattr(lifespan_module.sessionmanager, "close", AsyncMock())
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "start", MagicMock())
+    monkeypatch.setattr(
+        lifespan_module.object_content_runtime,
+        "validate_configuration",
+        AsyncMock(side_effect=ObjectContentConfigurationError(reason)),
+    )
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "stop", AsyncMock())
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "start", MagicMock())
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "stop", AsyncMock())
+
+    logger = MagicMock()
+    monkeypatch.setattr(lifespan_module, "logger", logger)
+
+    with pytest.raises(ObjectContentConfigurationError):
+        await lifespan_module.startup()
+
+    [(message, error)] = [call.args for call in logger.error.call_args_list]
+    assert reason in message % error
 
 
 @pytest.mark.asyncio

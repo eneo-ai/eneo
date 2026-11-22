@@ -53,6 +53,8 @@ class SessionInDB(SessionBase, InDB):
     visitor_id: Optional[UUID] = None
     feedback_value: Optional[Literal[-1, 1]] = None
     feedback_text: Optional[str] = None
+    # Read with the row, before its turns: see Sessions.history_revision.
+    history_revision: int = 0
 
     questions: list[Question] = []
     assistant: Optional["AssistantSparse"] = None

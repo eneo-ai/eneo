@@ -7,6 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from eneo.authentication import auth_service as auth_service_module
+from eneo.authentication.auth_models import CredentialFacts, JWTPayload
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.internal_mcp.foundation import (
     assistant_id_from_token,
@@ -35,6 +36,10 @@ def auth_service(monkeypatch):
     monkeypatch.setattr(auth_service_module, "JWT_SECRET", JWT_SECRET)
     monkeypatch.setattr(get_settings(), "jwt_secret", JWT_SECRET)
     return AuthService()
+
+
+def _raw_claims(token: str) -> dict[str, object]:
+    return jwt.decode(token, options={"verify_signature": False})
 
 
 async def test_can_create_access_token_successfully(auth_service: AuthService):
@@ -291,6 +296,10 @@ async def test_same_username_sessions_keep_their_own_identity(
             owner.tenant_id,
             owner.email,
         )
+        # A scoped MCP token is derived from the credential that minted it.
+        assert actual.credential == CredentialFacts(
+            kind="derived" if scoped_mcp else "bearer"
+        )
 
 
 async def test_session_does_not_need_a_username(session_service):
@@ -405,6 +414,7 @@ async def test_legacy_session_is_rejected_even_when_its_username_is_unique(
 
 
 SID = "s" * 43
+REF = UUID("6a1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
 
 
 def test_ordinary_tokens_name_no_browser_session(auth_service: AuthService):
@@ -413,6 +423,23 @@ def test_ordinary_tokens_name_no_browser_session(auth_service: AuthService):
 
     bound = auth_service.add_session_id(token, SID)
     assert token_claims(bound) == token_claims(token) | {"sid": SID}
+    # A session started with a stable id carries it beside the sid.
+    referenced = auth_service.add_session_id(token, SID, REF)
+    assert token_claims(referenced) == token_claims(token) | {
+        "sid": SID,
+        "session_ref": str(REF),
+    }
+
+
+def test_a_token_dump_leaves_the_session_out(auth_service: AuthService):
+    claims = token_claims(
+        auth_service.add_session_id(
+            auth_service.create_access_token_for_user(TEST_USER), SID, REF
+        )
+    )
+    payload = JWTPayload.model_validate(claims)
+    assert (payload.sid, payload.session_ref) == (SID, REF)
+    assert {"sid", "session_ref"}.isdisjoint(payload.model_dump())
 
 
 async def test_a_browser_session_token_needs_its_session(session_service):
@@ -429,7 +456,7 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     user = await service.authenticate(token=token)
     [payload] = sessions.admit.await_args.args
     assert (payload.sid, payload.user_id) == (SID, TEST_USER.id)
-    assert user.browser_session == payload
+    assert user.credential == CredentialFacts(kind="browser_session", session=payload)
 
     sessions.admit.side_effect = AuthenticationException("ended")
     with pytest.raises(AuthenticationException):
@@ -438,7 +465,7 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     ordinary = await service.authenticate(
         token=auth.create_access_token_for_user(TEST_USER)
     )
-    assert ordinary.browser_session is None
+    assert ordinary.credential == CredentialFacts(kind="bearer")
     sessions.admit.assert_not_awaited()
 
 
@@ -455,8 +482,40 @@ async def test_a_present_sid_is_a_session_id(session_service, sid: object):
 
 
 @pytest.mark.parametrize(
+    "session_ref",
+    [None, "", 7, str(REF).upper(), REF.hex, f"{{{REF}}}", f"urn:uuid:{REF}"],
+    ids=repr,
+)
+async def test_a_present_session_ref_is_a_session_id(
+    session_service, session_ref: object
+):
+    # Signed with the real key: only the claim's form is wrong. Null or
+    # another spelling of the same id must not read as a token without one.
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    service.browser_session_service = AsyncMock()
+    claims = token_claims(
+        service.auth_service.add_session_id(
+            service.auth_service.create_access_token_for_user(TEST_USER), SID
+        )
+    )
+    claims["session_ref"] = session_ref
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=sign_claims(claims))
+    service.browser_session_service.admit.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
     "field",
-    ["user_id", "tenant_id", "credential_version", "token_version", "sub", "sid"],
+    [
+        "user_id",
+        "tenant_id",
+        "credential_version",
+        "token_version",
+        "sub",
+        "sid",
+        "session_ref",
+    ],
 )
 def test_extra_claims_cannot_override_session_identity(
     auth_service: AuthService, field: str
@@ -494,6 +553,45 @@ async def test_scoped_mcp_token_is_not_a_session(session_service):
     )
     with pytest.raises(AuthenticationException):
         await service.authenticate(token=token)
+
+
+async def test_an_mcp_token_minted_in_a_browser_session_carries_its_session_ref(
+    session_service,
+):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    ref = uuid4()
+    auth = service.auth_service
+
+    token = auth.create_scoped_mcp_token(
+        TEST_USER,
+        assistant_id=uuid4(),
+        derived_from=CredentialFacts(kind="browser_session", session_ref=ref),
+    )
+
+    assert _raw_claims(token)["session_ref"] == str(ref)
+    user = await service.authenticate_internal_mcp_token(token)
+    assert user.credential == CredentialFacts(kind="derived", session_ref=ref)
+    # One minted with an API key names no session: the claim is absent.
+    keyed = auth.create_scoped_mcp_token(
+        TEST_USER, assistant_id=uuid4(), derived_from=CredentialFacts(kind="api_key")
+    )
+    assert "session_ref" not in _raw_claims(keyed)
+
+
+async def test_an_mcp_token_without_a_session_has_no_session_ref(session_service):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    assistant_id = uuid4()
+
+    token = service.auth_service.create_scoped_mcp_token(
+        TEST_USER, assistant_id=assistant_id
+    )
+
+    assert "session_ref" not in _raw_claims(token)
+    assert assistant_id_from_token(token) == assistant_id
+    user = await service.authenticate_internal_mcp_token(token)
+    assert user.credential == CredentialFacts(kind="derived")
 
 
 async def test_session_token_is_not_a_scoped_mcp_token(session_service):

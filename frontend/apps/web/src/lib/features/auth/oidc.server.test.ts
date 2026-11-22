@@ -94,7 +94,8 @@ describe("loginWithOidc", () => {
   test.each([
     [503, "oidc_login_unavailable", "LOGIN_UNAVAILABLE"],
     [400, "oidc_transaction_invalid", "ATTEMPT_EXPIRED"],
-    [401, "oidc_response_not_verified", "UNAUTHORIZED"]
+    [401, "oidc_response_not_verified", "UNAUTHORIZED"],
+    [403, "identity_conflict", "IDENTITY_CONFLICT"]
   ])("a typed %i refusal (%s) becomes %s", async (status, code, loginErrorCode) => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const error = await loginWithOidc(
