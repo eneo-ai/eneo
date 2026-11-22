@@ -458,6 +458,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         : false
     ),
     refetchIntervalInBackground: false,
+    // A result given up can be sent again from elsewhere, and nothing on a closed page sees it:
+    // opened again, the page reads the run's status even when it read it a moment ago.
+    refetchOnMount: () =>
+      cachedResultDelivery(queryClient, flowId, runId)?.state === "dead_lettered" ? "always" : true,
     ...readsOnReturn
   });
 
