@@ -577,7 +577,10 @@ class FlowRunOutboundHttpResultPublic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     kind: Literal["outbound_http"] = Field(
-        description="Discriminator for a completed outbound HTTP delivery."
+        description=(
+            "A result sent to an outbound HTTP receiver; `delivery_status` says "
+            "where the delivery stands."
+        )
     )
     delivery_status: Literal["pending", "delivered", "dead_lettered"] = Field(
         description=(

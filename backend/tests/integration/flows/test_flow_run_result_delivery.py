@@ -372,8 +372,6 @@ async def test_a_run_result_run_that_does_not_complete_keeps_no_delivery_row(
     send_http_request.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-@pytest.mark.integration
 async def _result_delivery_status(run, *, admin_user, test_tenant) -> str:
     """The run's ``result.delivery_status`` as reading the run answers it."""
     async with sessionmanager.session() as session, session.begin():
@@ -406,6 +404,8 @@ async def _result_delivery_status(run, *, admin_user, test_tenant) -> str:
     return result.delivery_status
 
 
+@pytest.mark.asyncio
+@pytest.mark.integration
 async def test_a_receiver_down_through_every_attempt_leaves_the_run_completed(
     setup_database,
     completed_run_result_run,

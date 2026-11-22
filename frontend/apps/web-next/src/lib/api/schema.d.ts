@@ -25257,7 +25257,7 @@ export interface components {
        */
       delivery_status: "pending" | "delivered" | "dead_lettered";
       /**
-       * @description Discriminator for a completed outbound HTTP delivery. (enum property replaced by openapi-typescript)
+       * @description A result sent to an outbound HTTP receiver; `delivery_status` says where the delivery stands. (enum property replaced by openapi-typescript)
        * @enum {string}
        */
       kind: "outbound_http";

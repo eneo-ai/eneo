@@ -217,6 +217,9 @@ async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
     assert audit.log_metadata["extra"]["step_ids"] == [deliverable["step_id"]]
     assert audit.log_metadata["extra"]["url_host"] == "receiver.example.org"
     assert audit.log_metadata["extra"]["delivery_attempt"] == 1
+    # The audit trail names the deliverable by id, never by its label.
+    assert "Startsidan" not in json.dumps(audit.log_metadata, ensure_ascii=False)
+    assert "Startsidan" not in audit.description
 
 
 async def test_without_the_audit_row_nothing_is_sent_and_it_is_tried_again(
@@ -246,12 +249,14 @@ async def test_files_over_the_cap_dead_letter_before_any_send(
     run, delivery_id, file_id = await run_with_a_document()
     send = AsyncMock(return_value=_response(200))
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
-    monkeypatch.setattr(
-        "eneo.flows.runtime.run_result_body.RUN_RESULT_MAX_BYTES", 1
-    )
+    read = AsyncMock(return_value={})
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", read)
+    monkeypatch.setattr("eneo.flows.runtime.run_result_body.RUN_RESULT_MAX_BYTES", 1)
 
     await _run_outbox()
 
+    # Refused before any file's bytes are read.
+    read.assert_not_awaited()
     send.assert_not_awaited()
     delivery = await _read_one(
         sa.select(
