@@ -46,6 +46,7 @@ from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
 from eneo.flows.runtime import tasks as tasks_module
+from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
@@ -62,6 +63,7 @@ from tests.integration.flows.test_flow_run_result_delivery import RUN_RESULT_CON
 from tests.integration.flows.test_flow_run_result_redelivery import _make_editor
 from tests.integration.flows.test_flow_webhook_outbox_delivery import (
     _create_running_webhook_run,
+    _insert_due_webhook_rows,
     _intent,
     _read,
     _read_one,
@@ -320,6 +322,131 @@ async def test_a_read_that_stalls_past_the_send_deadline_spends_an_attempt(
     assert delivery.claim_token is None
     assert delivery.next_delivery_at > datetime.now(timezone.utc)
     assert await _sending_audits(run.id) == []
+
+
+def _spend_the_deadline_at_the_send(monkeypatch) -> None:
+    """The payload is prepared within the job's deadline, and the deadline has
+    passed by the time the request is compiled."""
+    deliver = FlowRunWebhookDeliveryService._deliver_payload
+
+    async def _late(self, *, row, payload, deadline):
+        budget = deadline.budget
+        spent = budget.deadline(
+            started_at=asyncio.get_running_loop().time() - budget.job_deadline_seconds
+        )
+        await deliver(self, row=row, payload=payload, deadline=spent)
+
+    monkeypatch.setattr(FlowRunWebhookDeliveryService, "_deliver_payload", _late)
+
+
+async def test_a_deadline_passed_after_the_files_are_read_spends_the_attempt(
+    setup_database, run_with_a_document, monkeypatch
+):
+    """Otherwise a job that reads the files just before the deadline hands the
+    claim back on every run, and the delivery never runs out of attempts."""
+    run, delivery_id, _ = await run_with_a_document()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    read = ObjectContentService.read_content_bytes
+    reads: list[object] = []
+
+    async def _read_files(self, grants):
+        reads.append(grants)
+        return await read(self, grants)
+
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", _read_files)
+    _spend_the_deadline_at_the_send(monkeypatch)
+    started = datetime.now(timezone.utc)
+
+    for attempt in range(1, webhook_policy.FLOW_WEBHOOK_MAX_ATTEMPTS + 1):
+        # Each job claims past the previous attempt's backoff.
+        outcome = await _run_outbox(now=started + timedelta(hours=attempt))
+
+        assert len(reads) == attempt
+        delivery = await _delivery(delivery_id)
+        assert delivery.delivery_attempts == attempt
+        assert delivery.claim_token is None
+        if attempt < webhook_policy.FLOW_WEBHOOK_MAX_ATTEMPTS:
+            assert outcome["retry_scheduled"] == 1, outcome
+            assert delivery.delivery_status == "pending"
+            assert delivery.next_delivery_at > datetime.now(timezone.utc)
+        else:
+            assert outcome["dead_lettered"] == 1, outcome
+            assert delivery.delivery_status == "dead_lettered"
+    send.assert_not_awaited()
+    assert await _sending_audits(run.id) == []
+
+
+async def test_a_deadline_passed_in_the_database_step_gives_the_claim_back(
+    setup_database, run_with_a_document, monkeypatch
+):
+    """Nothing of the run's result has been read: the attempt is not spent."""
+    run, delivery_id, _ = await run_with_a_document()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    read = AsyncMock(return_value={})
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", read)
+
+    async def _stalled_database_step(_self, **_kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(
+        FlowRunWebhookDeliveryService,
+        "_prepare_delivery_payload",
+        _stalled_database_step,
+    )
+    # The sends end 2 s after the start.
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.1,
+        preparation_margin_seconds=1.7,
+        persistence_margin_seconds=2.0,
+        finish_margin_seconds=2.0,
+        claim_window_seconds=0.2,
+    )
+
+    outcome = await asyncio.wait_for(
+        tasks_module._deliver_flow_webhook_outbox(budget=budget, limit=1),
+        timeout=budget.job_timeout_seconds,
+    )
+
+    assert outcome["released"] == 1, outcome
+    read.assert_not_awaited()
+    send.assert_not_awaited()
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "pending"
+    assert delivery.delivery_attempts == 0
+    assert delivery.claim_token is None
+    assert await _sending_audits(run.id) == []
+
+
+async def test_a_plain_webhook_whose_deadline_passes_at_the_send_gives_the_claim_back(
+    setup_database,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    """A webhook without a run result reads no content before its send."""
+    [delivery_id] = await _insert_due_webhook_rows(
+        row_count=1,
+        admin_user=admin_user,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+    )
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    _spend_the_deadline_at_the_send(monkeypatch)
+
+    outcome = await _run_outbox()
+
+    assert outcome["released"] == 1, outcome
+    send.assert_not_awaited()
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "pending"
+    assert delivery.delivery_attempts == 0
+    assert delivery.claim_token is None
 
 
 @pytest.mark.parametrize(

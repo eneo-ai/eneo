@@ -394,7 +394,8 @@ async def deliver_webhook(
     if before_send is not None:
         await before_send(url)
         # A deadline reached while before_send commits leaves its
-        # record without a send; the claim is released and tried again.
+        # record without a send; the caller decides whether that spends
+        # the attempt.
         timeout_seconds = within_deadline(timeout_seconds)
     start_time = time.monotonic()
     try:
