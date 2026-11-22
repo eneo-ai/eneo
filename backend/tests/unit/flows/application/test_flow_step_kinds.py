@@ -406,6 +406,25 @@ def test_a_step_added_first_takes_the_run_input_over() -> None:
     )
 
 
+def test_a_document_fits_before_a_result_sender_that_follows_structured_data() -> None:
+    # The sender sends the run's deliverables, not the step before it, so the
+    # type that step gives decides nothing about what may stand before it.
+    structured = _step(1, output_type="json")
+    sender = insertion_change(
+        _flow([structured]),
+        FlowStepKind.SEND_RUN_RESULT,
+        position=2,
+        values=StepKindValues(url=_URL),
+    ).configuration
+    flow = _flow([structured, _step(2, **sender)])
+
+    answer = step_kind_answer(flow, prompts={}, positions=[2], step_ids=[])
+
+    by_kind = {option.kind: option for option in answer.insertions[0].options}
+    for kind in (FlowStepKind.DOCUMENT, FlowStepKind.TEMPLATE):
+        assert by_kind[kind].refusals == (), kind
+
+
 def test_the_update_carries_the_revision_its_caller_read() -> None:
     # The caller read revision 1; the draft has moved on to 3 since. The
     # update is saved against what the caller read, so the save refuses it
