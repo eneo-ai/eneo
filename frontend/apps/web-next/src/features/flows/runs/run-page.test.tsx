@@ -1148,6 +1148,39 @@ describe("FlowRunPage", () => {
     }
   );
 
+  // Sent again and given up again while the page was closed: the core reuses the row and resets its
+  // attempts, so only the time it was given up says so.
+  it("shows a result given up again when the page opens again past half a minute, from its status alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const givenUpAt = (at: string) =>
+      resultDelivery({
+        delivery_status: "dead_lettered",
+        delivery_attempts: 5,
+        dead_lettered_at: at,
+        updated_at: at,
+        state: "dead_lettered"
+      });
+    answerSentAfterRun(givenUpAt("2026-10-21T15:00:00Z"));
+    const { rerender } = renderRun();
+    await screen.findByRole("region", { name: messages.flow_run_extras_send_heading });
+
+    const { region, reads } = await openAgain(
+      rerender,
+      () => {
+        state.routes[STATUS] = () => ({
+          body: makeRunSummary({ result_delivery: givenUpAt("2026-10-21T16:00:00Z") })
+        });
+        state.routes[GRAPH] = () => ({ status: 503, body: { message: "Busy" } });
+      },
+      31_000
+    );
+    expect(runReads(reads)[GRAPH] ?? 0).toBe(0);
+    expect(within(region).getByText(messages.flow_run_extras_send_dead_lettered)).toBeTruthy();
+    const times = [...region.querySelectorAll("time")].map((time) => time.dateTime);
+    expect(times).toContain("2026-10-21T16:00:00.000Z");
+    expect(times).not.toContain("2026-10-21T15:00:00.000Z");
+  });
+
   it("offers no refresh of the whole run when a given-up result's status cannot be read on a return", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerSentAfterRun(deadLettered());
@@ -1204,7 +1237,12 @@ describe("FlowRunPage", () => {
     answerSentAfterRun(resultDelivery());
     const sending = makeRunSummary({ result_delivery: resultDelivery() });
     answerStatus(() => sending);
+    const done = asked.length;
     await act(() => vi.advanceTimersByTimeAsync(40_000));
+    // The poll that sees it completed starts the clock over: the next comes 2 s after it.
+    const firstGap = asked[done + 1]! - asked[done]!;
+    expect(firstGap).toBeGreaterThanOrEqual(2_000);
+    expect(firstGap).toBeLessThan(3_000);
     expect(lastGap()).toBeGreaterThan(4_000);
 
     // The result moves on: the next poll comes 2 s after the one that saw it.
@@ -1284,9 +1322,11 @@ describe("FlowRunPage", () => {
         await act(() => vi.advanceTimersByTimeAsync(2_100));
         expect(screen.getAllByText(/Nytt försök kl\./).length).toBeGreaterThan(0);
 
-        // Away past the app's half minute; the page opens again.
+        // Away past the app's half minute; the page opens again, and a read of its graph would
+        // answer late.
         rerender(<div />);
         await act(() => vi.advanceTimersByTimeAsync(31_000));
+        const release = holdAnswers(GRAPH);
         rerender(
           <Suspense>
             <FlowRunPage flowId="flow-1" runId="run-1" />
@@ -1304,6 +1344,11 @@ describe("FlowRunPage", () => {
           })
         });
         await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
+
+        // Any late graph answers: the page stays where the newer status put it.
+        release();
+        await act(() => vi.advanceTimersByTimeAsync(100));
         expect(within(region).getByText(messages.flow_run_extras_send_sending)).toBeTruthy();
         expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
         expect(screen.queryAllByText(/Nytt försök kl\./)).toHaveLength(0);

@@ -20,10 +20,19 @@ export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | unde
   return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
 }
 
-/** What changes when a delivery moves on; equal signatures mean nothing new. */
+/**
+ * What changes when a delivery moves on; equal signatures mean nothing new. A redelivery reuses the
+ * row and starts its attempts over, so a second dead letter differs only in when it was given up.
+ */
 export function deliverySignature(delivery: Delivery | null | undefined): string {
   return delivery
-    ? `${delivery.id}:${delivery.state}:${delivery.delivery_attempts}:${delivery.next_delivery_at ?? ""}`
+    ? [
+        delivery.id,
+        delivery.state,
+        delivery.delivery_attempts,
+        delivery.next_delivery_at ?? "",
+        delivery.dead_lettered_at ?? ""
+      ].join(":")
     : "";
 }
 
