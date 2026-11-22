@@ -15,6 +15,7 @@ from eneo.flows.domain.flow_step_validation import (
     flow_step_validation_view_from_flow_step,
     flow_step_validation_views_from_flow_steps,
 )
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.enums import FlowOutputMode, FlowOutputType
 from eneo.flows.flow_metadata import normalize_flow_metadata_for_write
 from eneo.flows.flow_review_policy import (
@@ -4786,3 +4787,172 @@ def test_a_run_result_step_is_still_judged_on_its_headers() -> None:
     assert refusal.code == "flow_input_binding_unknown_step_order"
     assert refusal.context is not None
     assert refusal.context["field"] == "output_config.custom_headers.0.value"
+
+
+# A speaker step stores no output_contract: its contract is fixed, and the run
+# validates the step's output against it. Publishing judges a later step's
+# question binding and compose source_refs by the same contract; its other
+# reads are judged as before.
+def _publish_after_speakers(
+    reader: FlowStep, *, prompts: dict[int, str] | None = None
+) -> None:
+    validate_steps(
+        [_transcript(1), _speaker_mapping(2), reader],
+        metadata_json=_audio_metadata(),
+        require_complete_template_fill_config=True,
+        prompt_templates=prompts,
+    )
+
+
+def _speaker_compose(**updates) -> FlowStep:
+    return _step(3, output_mode="compose_text", output_type="text", **updates)
+
+
+def _speakers_ref(**updates) -> dict:
+    return {
+        "source_refs": [
+            {
+                "step_ref": "step_2",
+                "output": "structured",
+                "field_path": "speakers",
+                **updates,
+            }
+        ]
+    }
+
+
+@pytest.mark.parametrize(
+    "reference",
+    ["step_2.output.structured.speakers", "step_2.output.structured"],
+)
+def test_publish_accepts_a_text_step_reading_the_named_speakers(
+    reference: str,
+) -> None:
+    _publish_after_speakers(_speaker_compose(**_question("{{" + reference + "}}")))
+
+
+@pytest.mark.parametrize(
+    ("reference", "message"),
+    [
+        pytest.param(
+            "step_2.output.structured.names",
+            "references unknown field 'names'",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "step_2.output.structured.speakers.0.name",
+            "does not resolve through an object contract",
+            id="array-index",
+        ),
+    ],
+)
+def test_publish_refuses_a_text_step_reading_what_the_speaker_contract_lacks(
+    reference: str, message: str
+) -> None:
+    with pytest.raises(FlowStepValidationError, match=message) as refused:
+        _publish_after_speakers(_speaker_compose(**_question("{{" + reference + "}}")))
+
+    assert refused.value.code == FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refused.value.step_order == 3
+
+
+def test_publish_accepts_a_name_list_from_the_speakers_with_an_item_template() -> None:
+    _publish_after_speakers(
+        _speaker_compose(input_bindings=_speakers_ref(item_template="{name}"))
+    )
+
+
+def test_publish_refuses_the_speaker_array_as_underlag_without_an_item_template() -> (
+    None
+):
+    with pytest.raises(
+        FlowStepValidationError,
+        match="structured array source_refs require item_template",
+    ):
+        _publish_after_speakers(_speaker_compose(input_bindings=_speakers_ref()))
+
+
+@pytest.mark.parametrize(
+    "declared",
+    [
+        pytest.param(
+            SPEAKER_MAPPING_OUTPUT_CONTRACT["properties"]["speakers"], id="array"
+        ),
+        pytest.param({"type": "string"}, id="string"),
+    ],
+)
+def test_publish_judges_a_json_projection_of_the_speakers_as_before(
+    declared: dict,
+) -> None:
+    with pytest.raises(FlowStepValidationError) as refused:
+        _publish_after_speakers(
+            _step(
+                3,
+                input_type="json",
+                input_bindings=_speakers_ref(),
+                input_contract={
+                    "type": "object",
+                    "properties": {"speakers": declared},
+                    "required": ["speakers"],
+                    "additionalProperties": False,
+                },
+            )
+        )
+
+    assert refused.value.code == FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY
+    assert refused.value.context == {
+        "field": "input_bindings",
+        "key": "source_refs",
+        "issue_code": "flow_input_binding_unsupported_key",
+        "step_order": 3,
+    }
+
+
+@pytest.mark.parametrize(
+    "field",
+    [pytest.param("speakers", id="array"), pytest.param("names", id="missing-key")],
+)
+def test_publish_still_refuses_a_word_field_bound_to_a_speaker_value(
+    field: str,
+) -> None:
+    # The editor names the placeholder from this code and context.
+    with pytest.raises(FlowStepValidationError) as refused:
+        _publish_after_speakers(
+            _step(
+                3,
+                output_type="docx",
+                output_mode="template_fill",
+                output_config={
+                    "template_asset_id": str(uuid4()),
+                    "bindings": {
+                        "Deltagare": "{{step_2.output.structured." + field + "}}"
+                    },
+                },
+            )
+        )
+
+    assert refused.value.code == FlowGraphIssueCode.TEMPLATE_BINDING_NOT_SCALAR.value
+    assert refused.value.context is not None
+    assert refused.value.context["placeholder"] == "Deltagare"
+
+
+def test_publish_keeps_a_prompt_that_reads_a_speaker_by_index() -> None:
+    # The run resolves an array index in a prompt; the contract walk that
+    # judges bindings has no index, so the prompt stays judged as before.
+    _publish_after_speakers(
+        _step(3, output_type="text"),
+        prompts={3: "Ordförande: {{ step_2.output.structured.speakers.0.name }}"},
+    )
+
+
+@pytest.mark.parametrize("field_path", ["speakers", "speakers.0.name"])
+def test_publish_accepts_the_speakers_as_underlag_of_a_model_step(
+    field_path: str,
+) -> None:
+    # A text step's source_refs become its question, which the run resolves
+    # with an array index too, so they are judged as a prompt is.
+    _publish_after_speakers(
+        _step(
+            3, output_type="text", input_bindings=_speakers_ref(field_path=field_path)
+        )
+    )
