@@ -9308,7 +9308,7 @@
   "flow_runs_result_files": "Files the run created",
   "flow_runs_result_delivered": "The result was sent to its receiver.",
   "flow_runs_result_sending": "The run is done; its result is on its way to the receiver.",
-  "flow_runs_result_not_delivered": "The result could not be sent to its receiver. Every attempt failed.",
+  "flow_runs_result_not_delivered": "Eneo received no confirmation from the receiver. No more attempts are planned.",
   "flow_runs_result_retry_at": "The receiver has not confirmed that the result arrived. Next attempt at {time}.",
   "flow_runs_output_overflow": "The text is shortened here. The whole text is in the file.",
   "flow_runs_output_none": "The step produced no text to show.",

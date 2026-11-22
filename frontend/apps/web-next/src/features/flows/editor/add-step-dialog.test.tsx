@@ -451,7 +451,17 @@ describe("AddStepDialog", () => {
     });
     api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
     const { dialog } = await openDialog(2, textFlow);
+    const scrolled = vi.spyOn(Element.prototype, "scrollIntoView");
     fireEvent.click(within(dialog).getByRole("radio", { name: "Skicka körningens resultat" }));
+    // The address field the choice adds to the footer shrinks the list: the chosen row is
+    // brought back into view, not left under the footer (WCAG 2.4.11).
+    await waitFor(() =>
+      expect(
+        scrolled.mock.contexts.map((element) => (element as HTMLElement).dataset.task)
+      ).toContain("send_run_result")
+    );
+    expect(scrolled).toHaveBeenCalledWith({ block: "nearest" });
+    scrolled.mockRestore();
     const submit = () =>
       within(dialog).getByRole("button", { name: "Lägg till Skicka körningens resultat" });
     const address = () => within(dialog).getByLabelText(/^Mottagarens adress/) as HTMLInputElement;
@@ -462,12 +472,18 @@ describe("AddStepDialog", () => {
     ).toBeTruthy();
     expect(document.activeElement).toBe(address());
     // The same rule as in the step: one fixed https address, which run data cannot choose.
-    for (const url of ["http://intranet.example/resultat", "https://intranet.example/{{x}}"]) {
+    for (const url of [
+      "http://intranet.example/resultat",
+      "https://intranet.example/{{x}}",
+      "ftp://intranet.example/resultat",
+      "https://anna:hemligt@intranet.example/resultat"
+    ]) {
       fireEvent.change(address(), { target: { value: url } });
       fireEvent.click(submit());
       expect(
         await within(dialog).findByText(messages.flow_step_editor_http_run_result_url_fixed)
       ).toBeTruthy();
+      expect(within(dialog).queryByText(messages.flow_step_editor_http_url_invalid)).toBeNull();
       expect(address().getAttribute("aria-invalid")).toBe("true");
     }
     expect(api.stub.calls.filter((call) => call.method === "PATCH")).toEqual([]);

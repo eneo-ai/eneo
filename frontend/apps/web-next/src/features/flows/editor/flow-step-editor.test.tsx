@@ -2902,6 +2902,23 @@ describe("FlowStepEditor deliverables", () => {
     expect(patchBodies()).toHaveLength(0);
   }, 20_000);
 
+  it("names the sender's own address rule, not the general one, for an address that is not valid", async () => {
+    renderEditor(
+      resultFlow({
+        url: "https://anna:hemligt@receiver.example.org/eneo/results",
+        body: { mode: "run_result" }
+      }),
+      { stepId: "step-2" }
+    );
+    fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    expect(
+      await screen.findByText(messages.flow_step_editor_http_run_result_url_fixed)
+    ).toBeTruthy();
+    expect(screen.queryByText(messages.flow_step_editor_http_url_invalid)).toBeNull();
+    expect(patchBodies()).toHaveLength(0);
+  }, 20_000);
+
   it.each([
     {
       field: "output_config.url",

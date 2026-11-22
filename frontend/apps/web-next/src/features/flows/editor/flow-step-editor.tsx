@@ -44,12 +44,11 @@ import {
   contentTypeHeaderPart,
   DELIVERABLE_FILE_NAME_MAX,
   DELIVERABLE_LABEL_MAX,
-  httpUrlProblem,
+  httpUrlProblemKey,
   readDeliverable,
   readHttpConfig,
   readTextProcessingMode,
   readToolConfig,
-  runResultUrlFixed,
   sendsRunResult,
   stepCanBeDeliverable,
   withTidyDeliverable
@@ -762,28 +761,15 @@ function StepEditorSession({
       problems.user_description = t("flow_step_editor_name_taken");
     }
     if (current.input_source === "http_get") {
-      const problem = httpUrlProblem(readHttpConfig(current.input_config, "input").url);
-      if (problem) {
-        problems["input_config.http"] =
-          problem === "missing"
-            ? t("flow_step_editor_http_url_missing")
-            : t("flow_step_editor_http_url_invalid");
-      }
+      const problem = httpUrlProblemKey(readHttpConfig(current.input_config, "input").url, false);
+      if (problem) problems["input_config.http"] = t(problem);
     }
     if (current.output_mode === "http_post") {
       const http = readHttpConfig(current.output_config, "output");
-      const problem = httpUrlProblem(http.url);
-      if (problem) {
-        problems["output_config.http"] =
-          problem === "missing"
-            ? t("flow_step_editor_http_url_missing")
-            : t("flow_step_editor_http_url_invalid");
-      }
-      // The core's rules for a body that sends the run's result.
+      // A body that sends the run's result holds the core's own address rule.
+      const problem = httpUrlProblemKey(http.url, http.body.mode === "run_result");
+      if (problem) problems["output_config.http"] = t(problem);
       if (http.body.mode === "run_result") {
-        if (!problem && !runResultUrlFixed(http.url)) {
-          problems["output_config.http"] = t("flow_step_editor_http_run_result_url_fixed");
-        }
         const part = contentTypeHeaderPart(http);
         if (part) {
           problems[httpAnchor("output_config.http", part)] = t(

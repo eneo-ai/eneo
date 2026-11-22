@@ -327,9 +327,31 @@ export function runResultUrlFixed(url: string): boolean {
 }
 
 /**
+ * The message for what is wrong with a call's address, or null. A step that
+ * sends the run's result names its own rule for any address it cannot send
+ * to: the general one (http:// when the step does not sign in) does not hold
+ * for it.
+ */
+export function httpUrlProblemKey(
+  url: string,
+  sendsRunResult: boolean
+):
+  | "flow_step_editor_http_url_missing"
+  | "flow_step_editor_http_url_invalid"
+  | "flow_step_editor_http_run_result_url_fixed"
+  | null {
+  const problem = httpUrlProblem(url);
+  if (problem === "missing") return "flow_step_editor_http_url_missing";
+  if (sendsRunResult && (problem || !runResultUrlFixed(url))) {
+    return "flow_step_editor_http_run_result_url_fixed";
+  }
+  return problem ? "flow_step_editor_http_url_invalid" : null;
+}
+
+/**
  * Whether the step sends the run's result: an outbound call whose body Eneo
  * builds once the run is complete (the core's `sends_run_result`). It sends
- * the text the step reads.
+ * the run's deliverables once the run has completed.
  */
 export function sendsRunResult(step: {
   output_mode: OutputMode;

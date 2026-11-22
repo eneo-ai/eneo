@@ -25,7 +25,7 @@ import {
 } from "./editor-api";
 import { problemStatus } from "./editor-fields";
 import { describeSaveError, isStaleRevision } from "./field-problems";
-import { httpUrlProblem, runResultUrlFixed } from "./step-configs";
+import { httpUrlProblemKey } from "./step-configs";
 import {
   kindOption,
   kindRefusalText,
@@ -250,6 +250,16 @@ function AddStepPicker({
     }
   }, [announce, searchResult, searched]);
 
+  // A choice can add a field to the footer (the receiver's address), which shrinks the list: the
+  // chosen row is brought back into view once the footer has laid out, never left under it
+  // (WCAG 2.4.11).
+  useEffect(() => {
+    if (!chosenId) return;
+    listRef.current
+      ?.querySelector<HTMLElement>(`[data-task="${chosenId}"]`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [chosenId]);
+
   const add = useMutation({
     mutationFn: ({ task, option }: Row) =>
       updateFlowEditor(
@@ -347,13 +357,9 @@ function AddStepPicker({
     if (!row || add.isPending) return;
     const found: Problems = {};
     if (asksForUrl(row.option.kind)) {
-      const urlProblem = httpUrlProblem(url);
-      if (urlProblem === "missing") found.url = t("flow_step_editor_http_url_missing");
-      else if (urlProblem === "invalid") found.url = t("flow_step_editor_http_url_invalid");
       // The step's own rule: run data may not choose where the run's result goes.
-      else if (row.option.kind === "send_run_result" && !runResultUrlFixed(url)) {
-        found.url = t("flow_step_editor_http_run_result_url_fixed");
-      }
+      const urlProblem = httpUrlProblemKey(url, row.option.kind === "send_run_result");
+      if (urlProblem) found.url = t(urlProblem);
     }
     if (row.option.kind === "tool" && !tool) found.tool = t("flow_step_editor_tool_required");
     const first = (["url", "tool"] as const).find((field) => found[field]);

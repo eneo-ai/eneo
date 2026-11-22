@@ -21,9 +21,8 @@ import { describeSaveError, HTTP_ERROR_KEYS, type FieldProblems } from "./field-
 import {
   headerSent,
   httpsHostFixed,
-  httpUrlProblem,
+  httpUrlProblemKey,
   isSecretSentinel,
-  runResultUrlFixed,
   type HttpBodyMode,
   type HttpConfig,
   type HttpHeader,
@@ -458,7 +457,6 @@ export function HttpFields({
   const urlId = useId();
   const moreId = useId();
   const [showUrlProblem, setShowUrlProblem] = useState(false);
-  const urlProblem = httpUrlProblem(config.url);
   const auth = config.auth;
   // A run fills a templated name, so it is known only then.
   const apiKeyHeaderInvalid =
@@ -472,16 +470,9 @@ export function HttpFields({
       config.custom_headers.some((header) => header.secret && headerSent(header))) &&
     url !== "" &&
     !httpsHostFixed(url);
-  const localUrlProblem = !showUrlProblem
-    ? null
-    : urlProblem === "missing"
-      ? t("flow_step_editor_http_url_missing")
-      : urlProblem === "invalid"
-        ? t("flow_step_editor_http_url_invalid")
-        : // The save refuses it too; said here as soon as the field is left.
-          sendsRunResult && !runResultUrlFixed(url)
-          ? t("flow_step_editor_http_run_result_url_fixed")
-          : null;
+  // The save refuses it too; said here as soon as the field is left.
+  const urlProblem = httpUrlProblemKey(config.url, sendsRunResult);
+  const localUrlProblem = showUrlProblem && urlProblem ? t(urlProblem) : null;
   const urlError = problem ?? localUrlProblem;
 
   const inUse =

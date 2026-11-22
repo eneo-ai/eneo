@@ -907,9 +907,13 @@ describe("FlowRunPage", () => {
     state.routes[STATUS] = () => ({ body: makeRunSummary({ result_delivery: retry }) });
     await act(() => vi.advanceTimersByTimeAsync(2_100));
     const retryLabel = await within(sending).findByText(/^Nytt försök kl\. \d{1,2}[:.]\d{2}$/);
-    const time = retryLabel.textContent!.replace("Nytt försök kl. ", "");
+    // "kl." and the time stay on one line: a no-break space between them.
+    const time = retryLabel.textContent!.replace("Nytt försök kl.\u00a0", "");
+    // Text matching folds the no-break space into a space.
     expect(
-      screen.getByText(messages.flow_runs_result_retry_at.replace("{time}", time))
+      screen.getByText(
+        messages.flow_runs_result_retry_at.replace("{time}", time).replace(/\u00a0/g, " ")
+      )
     ).toBeTruthy();
     // Each move is said aloud as it happens, in the result's own words.
     expect(state.announce).toHaveBeenCalledWith(
@@ -936,6 +940,45 @@ describe("FlowRunPage", () => {
       graphs,
       steps
     ]);
+  });
+
+  it("offers a refresh while the result sent after the run is on its way, and says when its status read failed", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerSentAfterRun(resultDelivery());
+    renderRun();
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    // The run is finished, but what it sends is not.
+    expect(screen.getByRole("button", { name: messages.flow_run_more_refresh })).toBeTruthy();
+
+    state.routes[STATUS] = () => ({
+      status: 503,
+      body: { message: "Busy", code: "service_unavailable" }
+    });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.getByRole("button", { name: messages.flow_run_more_refresh })).toBeTruthy();
+    // Where the delivery last stood stays on the page.
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+
+    // Delivered: a finished run with nothing under way offers no refresh again.
+    state.routes[STATUS] = () => ({
+      body: makeRunSummary({
+        result_delivery: resultDelivery({
+          delivery_status: "delivered",
+          delivery_attempts: 1,
+          delivered_at: "2026-10-21T08:01:09Z",
+          state: "delivered"
+        })
+      })
+    });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
+    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull()
+    );
+    expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
   });
 
   it("uses the words for the result sent after the run as soon as the run completes, before its steps are read again", async () => {

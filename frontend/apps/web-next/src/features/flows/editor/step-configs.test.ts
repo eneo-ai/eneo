@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   argumentValue,
   contentTypeHeaderPart,
+  httpUrlProblemKey,
   longMaterialEligibility,
   newSourceRef,
   oneLineStart,
@@ -156,6 +157,22 @@ describe("HTTP", () => {
     expect(runResultUrlFixed("https://receiver.example.org/eneo/results")).toBe(true);
     expect(runResultUrlFixed("https://receiver.example.org/{{ flow_input.path }}")).toBe(false);
     expect(runResultUrlFixed("http://receiver.example.org/eneo/results")).toBe(false);
+    // A sender names its own rule for any address it cannot send to: the general advice
+    // (http:// when the step does not sign in) does not hold for it.
+    for (const url of [
+      "ftp://receiver.example.org/eneo",
+      "https://anna:hemligt@receiver.example.org/eneo",
+      "http://receiver.example.org/eneo",
+      "https://receiver.example.org/{{ flow_input.path }}"
+    ]) {
+      expect(httpUrlProblemKey(url, true)).toBe("flow_step_editor_http_run_result_url_fixed");
+    }
+    expect(httpUrlProblemKey("ftp://receiver.example.org/eneo", false)).toBe(
+      "flow_step_editor_http_url_invalid"
+    );
+    expect(httpUrlProblemKey("http://receiver.example.org/eneo", false)).toBeNull();
+    expect(httpUrlProblemKey(" ", true)).toBe("flow_step_editor_http_url_missing");
+    expect(httpUrlProblemKey("https://receiver.example.org/eneo", true)).toBeNull();
     const config = readHttpConfig(
       { url: "https://receiver.example.org", auth: { mode: "none" }, body: { mode: "run_result" } },
       "output"
