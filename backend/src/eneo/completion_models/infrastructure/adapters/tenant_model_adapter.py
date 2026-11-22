@@ -67,6 +67,7 @@ from eneo.completion_models.infrastructure.context_builder import (
     MIN_PERCENTAGE_KNOWLEDGE,
 )
 from eneo.completion_models.infrastructure.message_payload import (
+    TurnToolCallIds,
     build_content,
     build_turn_messages,
 )
@@ -1529,6 +1530,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                 choice = response.choices[0]
                 msg = choice.message
 
+                call_ids = TurnToolCallIds()
                 tool_round = 0
                 max_rounds = get_settings().max_tool_rounds
                 shared_budget = current_execution_budget()
@@ -1644,7 +1646,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             assistant_content=msg.content,
                             calls=[
                                 ProviderToolCall(
-                                    call_id=tc.id,
+                                    call_id=call_ids.claim(tc.id),
                                     name=tc.function.name,
                                     arguments=tc.function.arguments,
                                 )
@@ -1659,7 +1661,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     provider_calls = tuple(
                         ProviderToolCall(
-                            call_id=tc.id,
+                            call_id=call_ids.claim(tc.id),
                             name=tc.function.name,
                             arguments=tc.function.arguments,
                         )
@@ -2076,6 +2078,8 @@ class TenantModelAdapter(CompletionModelAdapter):
             def _tool_is_bundled(name: str) -> bool:
                 return mcp_proxy.is_bundled_tool(name) if mcp_proxy else False
 
+            call_ids = TurnToolCallIds()
+
             # Shared state for tool call accumulation and usage across stream draining
             class _StreamResult:
                 def __init__(self) -> None:
@@ -2207,12 +2211,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                             idx = tc_delta.index
                             if idx not in res.tool_calls_acc:
                                 res.tool_calls_acc[idx] = {
-                                    "id": tc_delta.id,
+                                    "id": None,
                                     "type": "function",
                                     "function": {"name": "", "arguments": ""},
                                 }
-                            if tc_delta.id:
-                                res.tool_calls_acc[idx]["id"] = tc_delta.id
+                            if tc_delta.id and not res.tool_calls_acc[idx]["id"]:
+                                res.tool_calls_acc[idx]["id"] = call_ids.claim(
+                                    tc_delta.id
+                                )
                             if tc_delta.function:
                                 fn = tc_delta.function
                                 if fn.name:
@@ -2954,7 +2960,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 )
                             except OpenAIException:
                                 args = None
-                            server_name, tool_name, title = _resolve_tool_names(name)
+                            registered = name in _allowed_tool_names() or (
+                                name == SKILL_ACTIVATION_TOOL_NAME
+                                and activation_available
+                            )
+                            display_name = name if registered else "unknown_tool"
+                            server_name, tool_name, title = (
+                                _resolve_tool_names(name)
+                                if registered
+                                else ("", display_name, None)
+                            )
                             refused_metadata.append(
                                 ToolCallMetadata(
                                     server_name=server_name,
@@ -2967,7 +2982,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     upload_free_reference_ids=_upload_free_reference_ids(
                                         mcp_proxy
                                     ),
-                                    mcp_tool_name=name,
+                                    mcp_tool_name=display_name,
                                     purpose=_tool_purpose(name),
                                     is_internal=_tool_is_internal(name),
                                     is_bundled=_tool_is_bundled(name),
