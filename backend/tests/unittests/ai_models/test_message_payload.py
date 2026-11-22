@@ -35,6 +35,23 @@ def _image_file(blob: bytes | None = _PNG_1PX) -> File:
     )
 
 
+def test_replay_pairs_distinct_results_when_stored_provider_ids_repeat():
+    calls = [
+        MessageToolCall(
+            tool_call_id="reused", tool_name="lookup", arguments={}, result=value
+        )
+        for value in ("first", "second")
+    ]
+    messages = build_turn_messages("question", "answer", [], calls)
+    call_ids = [call["id"] for call in messages[1]["tool_calls"]]
+    assert call_ids[0] == "reused"
+    assert len(set(call_ids)) == 2
+    assert [(m["tool_call_id"], m["content"]) for m in messages[2:4]] == list(
+        zip(call_ids, ("first", "second"), strict=True)
+    )
+    assert build_turn_messages("question", "answer", [], calls) == messages
+
+
 def test_build_image_block_encodes_blob_at_high_detail():
     block = build_image_block(_image_file())
 

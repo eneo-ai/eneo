@@ -8,6 +8,7 @@ shape cannot drift from the sent shape.
 import base64
 import json
 from typing import Any
+from uuid import NAMESPACE_OID, UUID, uuid4, uuid5
 
 from eneo.ai_models.completion_models.completion_model import MessageToolCall
 from eneo.files.file_models import File
@@ -44,6 +45,26 @@ def build_content(text: str, images: list[File]) -> str | list[dict[str, Any]]:
     return content
 
 
+class TurnToolCallIds:
+    """Give each invocation one id for its events, approvals and tool result."""
+
+    def __init__(self, namespace: UUID | None = None) -> None:
+        self._namespace = namespace or uuid4()
+        self._used: set[str] = set()
+
+    def claim(self, provider_id: str) -> str:
+        if not provider_id:
+            return provider_id
+        call_id = provider_id
+        ordinal = len(self._used)
+        while call_id in self._used:
+            # Nine alphanumerics also fit providers with strict tool-id formats.
+            call_id = uuid5(self._namespace, f"{provider_id}:{ordinal}").hex[:9]
+            ordinal += 1
+        self._used.add(call_id)
+        return call_id
+
+
 def build_turn_messages(
     question: str,
     answer: str | None,
@@ -61,13 +82,17 @@ def build_turn_messages(
         {"role": "user", "content": build_content(question, images)}
     ]
     if tool_calls:
+        # Previously stored turns can contain repeated provider ids. Reconstruct
+        # the same pairs when counting tokens and when sending the follow-up.
+        ids = TurnToolCallIds(NAMESPACE_OID)
+        calls = [(ids.claim(tc.tool_call_id), tc) for tc in tool_calls]
         messages.append(
             {
                 "role": "assistant",
                 "content": None,
                 "tool_calls": [
                     {
-                        "id": tc.tool_call_id,
+                        "id": call_id,
                         "type": "function",
                         "function": {
                             "name": tc.tool_name,
@@ -78,15 +103,15 @@ def build_turn_messages(
                             ),
                         },
                     }
-                    for tc in tool_calls
+                    for call_id, tc in calls
                 ],
             }
         )
-        for tc in tool_calls:
+        for call_id, tc in calls:
             messages.append(
                 {
                     "role": "tool",
-                    "tool_call_id": tc.tool_call_id,
+                    "tool_call_id": call_id,
                     "content": tc.result,
                 }
             )
