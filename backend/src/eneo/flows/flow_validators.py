@@ -1466,6 +1466,9 @@ def _validate_template_fill_config(
     # The syntax validator above establishes an object of exact expressions or
     # explicit empty values. Publishing additionally requires a known scalar.
     bindings = cast(dict[str, str], (step.output_config or {})["bindings"])
+    # The authored contract: a speaker step's fixed one has no scalar to fill a
+    # placeholder, and its walk would trade the placeholder's not-a-scalar
+    # refusal for an unknown-field one.
     output_contracts_by_order = {
         order: source.output_contract for order, source in steps_by_order.items()
     }
@@ -2307,7 +2310,12 @@ def _validate_binding_references(
             if referenced_order is not None
             else None
         )
-        if referenced_step is None or referenced_step.output_contract is None:
+        contract = (
+            referenced_step.effective_output_contract
+            if referenced_step is not None
+            else None
+        )
+        if contract is None:
             raise FlowStepValidationError(
                 f"Input binding path '{expression}' requires the referenced step to declare output_contract.",
                 code=FlowGraphIssueCode.FLOW_INPUT_BINDING_UNSUPPORTED_KEY.value,
@@ -2318,7 +2326,7 @@ def _validate_binding_references(
                 step_order=current_step_order,
             )
         _source_ref_schema(
-            contract=referenced_step.output_contract,
+            contract=contract,
             field_path=structured_path,
             current_step_order=current_step_order,
             path_label=f"input binding path '{expression}'",
@@ -2516,7 +2524,12 @@ def _validate_source_ref_contracts(
             steps_by_order=steps_by_order,
             step_ref_mapping=step_ref_mapping,
         )
-        if referenced_step is None or referenced_step.output_contract is None:
+        contract = (
+            referenced_step.effective_output_contract
+            if referenced_step is not None
+            else None
+        )
+        if contract is None:
             raise FlowStepValidationError(
                 f"Step {step.step_order}: compose_text structured source_refs require "
                 "the referenced step to declare output_contract.",
@@ -2525,7 +2538,7 @@ def _validate_source_ref_contracts(
                 step_order=step.step_order,
             )
         target_schema = _source_ref_schema(
-            contract=referenced_step.output_contract,
+            contract=contract,
             field_path=ref.field_path,
             current_step_order=step.step_order,
             path_label=f"source_ref field_path '{'.'.join(ref.field_path)}'",
@@ -2600,6 +2613,8 @@ def _validate_structured_source_ref(
             context=context,
             step_order=step.step_order,
         )
+    # The authored contract, as for a prompt: the run lowers these refs to the
+    # step's question, which resolves an array index (`speakers.0.name`).
     if producer.output_contract is not None and ref.field_path:
         _source_ref_schema(
             contract=producer.output_contract,
@@ -2990,6 +3005,9 @@ def _validate_template_read(
             context={"field": field, "key": reference.expression},
             step_order=step_order,
         )
+    # The authored contract, not the effective one: the run resolves an array
+    # index in a prompt or request (`speakers.0.name`), which the contract walk
+    # below refuses, so a speaker step's fixed contract is not applied here.
     if producer.output_contract is not None and reference.structured_path:
         _source_ref_schema(
             contract=producer.output_contract,

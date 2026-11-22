@@ -320,7 +320,9 @@ runtime input names, earlier steps, and their output contracts:
   accept the same prior numeric refs and exact labels.
 - Structured question paths such as
   `step_1.output.structured.report_title` publish only when the earlier step's
-  `output_contract` proves every path segment. Missing contracts, unknown
+  output contract proves every path segment: its `output_contract`, or for a
+  step that maps speakers to names the fixed contract the run applies, so
+  `step_2.output.structured.speakers` publishes. Missing contracts, unknown
   fields, and traversal through scalar values are rejected before runtime.
 - Authoring lowers `plan_step_ref` to `step_N` before persisting a `FlowStep`.
   `existing_step_ref` is edit identity only. Publish rejects either raw identity

@@ -31,9 +31,11 @@ OPENING_EXCERPT_CHARS = 6000
 # cuts exactly the cue the mapping model is told to rely on.
 OPENING_EXCERPT_LINE_CHARS = 600
 
-# Fixed JSON contract for a speaker-mapping step's structured output. Set on
-# the runtime step by the definition parser so typed-output processing, the
-# review checkpoint and review edits all validate against the same schema.
+# Fixed JSON contract for a speaker-mapping step's structured output.
+# ``effective_output_contract`` (flows.output_modes) gives it for such a step,
+# so typed-output processing, the review checkpoint, review edits and the
+# publish checks of a later step's question binding and compose source_refs
+# use one schema.
 SPEAKER_MAPPING_OUTPUT_CONTRACT: dict[str, Any] = {
     "type": "object",
     "required": ["speakers"],

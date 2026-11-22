@@ -14,6 +14,7 @@ from eneo.flows.enums import (
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+from eneo.flows.output_modes import effective_output_contract
 from eneo.main.exceptions import BadRequestException
 
 
@@ -143,6 +144,15 @@ class FlowStepValidationView:
     # The step assistant's prompt, a second input channel. Only publish
     # supplies it (a flow step holds its assistant by id).
     prompt_template: str | None = None
+
+    @property
+    def effective_output_contract(self) -> FlowPersistedJsonObject | None:
+        """The contract the step's output follows, by which publishing judges a
+        later step's question binding and compose ``source_refs``;
+        ``output_contract`` is what the author wrote."""
+        return effective_output_contract(
+            output_mode=self.output_mode, output_contract=self.output_contract
+        )
 
 
 def flow_step_validation_view_from_flow_step(
