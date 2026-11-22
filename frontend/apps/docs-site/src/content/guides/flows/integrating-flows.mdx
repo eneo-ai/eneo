@@ -2178,7 +2178,7 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
   before base64. Base64 makes a file about a third larger, so a body of files
   at the 20 MiB cap is about 28 MB. Texts grow when they are written as JSON:
   a quote, a backslash or a line break takes two bytes, and most other control
-  characters six. There is no fixed maximum for the body.
+  characters six. A result with long texts can therefore be larger than 28 MB.
 - A result is never sent in part. A result over 20 MiB, a document step that
   left no file, or content that is corrupt or was removed dead-letters the
   delivery without a request, and Eneo does not try again. A store that does
