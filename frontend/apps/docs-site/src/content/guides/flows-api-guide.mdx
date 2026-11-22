@@ -1315,9 +1315,9 @@ successfully. A completed run returns exactly one closed result shape:
   do not infer another Eneo envelope inside it.
 - `artifact` contains current-attempt file metadata. Request a signed URL with
   the authorized artifact endpoint before downloading a file.
-- `outbound_http` contains only `delivery_status: "delivered"`. It is a delivery
-  receipt and never exposes destination URLs, headers, credentials, or the sent
-  payload.
+- `outbound_http` contains only `delivery_status`: `pending`, `delivered` or
+  `dead_lettered`. It says where the delivery stands and never exposes
+  destination URLs, headers, credentials, or the sent payload.
 
 Every historical list item is projected from its own `flow_version`, so do not
 interpret old structured results with the currently published contract. The

@@ -31,7 +31,7 @@ type FlowRunResult =
         availability: FlowArtifactAvailability;
       }>;
     }
-  | { kind: "outbound_http"; delivery_status: "delivered" };
+  | { kind: "outbound_http"; delivery_status: "pending" | "delivered" | "dead_lettered" };
 
 function renderResult(result: FlowRunResult): string {
   switch (result.kind) {
@@ -46,7 +46,7 @@ function renderResult(result: FlowRunResult): string {
     case "artifact":
       return `${result.files.length} generated file(s)`;
     case "outbound_http":
-      return "Delivered";
+      return result.delivery_status;
     default: {
       const unreachable: never = result;
       return unreachable;

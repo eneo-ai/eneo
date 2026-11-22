@@ -1230,7 +1230,7 @@ Drive the UI from the typed final result, step details, artifact links, and stat
 2. Treat `structured.value` as authored data governed by that run's `flow_version` and `structured.output_contract`; do not infer another envelope inside it.
 3. For `artifact`, use the file id from `result.files`, then call `runtime_paths.artifact_signed_url_template` to get a short-lived download URL.
 4. Use `inline_text` as complete exact text. A `file_backed_text` preview is only a bounded prefix. Download `file` through `runtime_paths.artifact_signed_url_template` only when its availability is `available`; when it is `content_purged`, the complete text is unavailable and the artifact request returns `410`.
-5. Treat `outbound_http.delivery_status: delivered` as a receipt, not as a copy of destination configuration or payload data.
+5. Read `outbound_http.delivery_status` as where the delivery stands (`pending`, `delivered` or `dead_lettered`), not as a copy of destination configuration or payload data.
 6. Call `runtime_paths.list_steps_template` only when the UI needs intermediate results, diagnostics, or step progress.
 7. `output_payload_json.text` is complete only when `output_payload_json.text_overflow` is absent; when present, `text` is a bounded preview and its single `generated_file_ids` entry identifies the current-attempt `generated_output` item in `result_files`.
 8. Download that file only when `availability` is `available`; `content_purged` leaves the preview incomplete and the artifact endpoint returns `410`. Final-result consumers should prefer the run-level `result`.
@@ -1758,7 +1758,7 @@ export type RunResult =
   | { kind: "file_backed_text"; file: ResultFile; preview: string }
   | { kind: "structured"; value: unknown; output_contract: unknown | null }
   | { kind: "artifact"; files: ResultFile[] }
-  | { kind: "outbound_http"; delivery_status: "delivered" };
+  | { kind: "outbound_http"; delivery_status: "pending" | "delivered" | "dead_lettered" };
 
 export interface FlowRun {
   id: string;
@@ -2151,6 +2151,13 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
 - Headers may read run data; the address may not. Content-Type is set by the
   mode and cannot be authored.
 
+**Publishing.** The sending step needs something to send: a text or document
+step marked as a deliverable, or a text or document step right before it.
+Without one, publishing answers `400` with `flow_run_result_no_deliverables`,
+and `context.step_order` names the sending step. Mark a text or document step
+as a deliverable, or add one right before that step, then publish again. A
+draft without one can still be saved.
+
 **Receiver contract.** Answer `2xx` once the result is stored. Delivery is at
 least once: the same result can arrive again with the same `Idempotency-Key`,
 so store by that key. A `4xx` other than `408` and `429` refuses the result:
@@ -2226,13 +2233,13 @@ A finished run exposes its output in two places, and which one you use depends o
 
 `run.result` is the typed final result and is the value to render. It is a closed discriminated union on `kind`:
 
-| `result.kind`      | What it means                                                          | How to consume it                                                                                                                                                             |
-| ------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `inline_text`      | Plain text small enough to be returned in the response                 | Read `text` directly                                                                                                                                                          |
-| `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                          |
-| `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                          |
-| `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                   |
-| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status` is always `delivered`, because the result only exists once delivery succeeded; use `webhook_deliveries` on the run for attempt history |
+| `result.kind`      | What it means                                                          | How to consume it                                                                                                                                                                                                                                                                                             |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `inline_text`      | Plain text small enough to be returned in the response                 | Read `text` directly                                                                                                                                                                                                                                                                                          |
+| `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                                                                                                                                                          |
+| `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                                                                                                                                                          |
+| `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                                                                                                                                                   |
+| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status`: `delivered` means the receiver accepted the result, `pending` means sending is still going on (`result_delivery.state` on `/status/`), `dead_lettered` means it was not sent. The run is complete in all three. Attempt history is in `webhook_deliveries` on the run |
 
 `result.kind` is predictable before the run starts: the run contract's `final_output.output_type` (`text`, `json`, `pdf`, `docx`) and `final_output.delivery` tell you which branch to build the UI for.
 
