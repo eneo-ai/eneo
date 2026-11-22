@@ -52,7 +52,8 @@ class AnalysisJobManager:
             return None
         record: dict[str, object] = orjson.loads(raw)
         # Until pre-upgrade Redis jobs expire, a group ID can be the only
-        # target. Retirement preserved that UUID on the migrated assistant.
+        # target. Remove this translation once every supported upgrade path has
+        # spent one TTL without a writer of the old record. A new write uses assistant_id.
         group_chat_id = record.pop("group_chat_id", None)
         if (record.get("assistant_id") is None) == (group_chat_id is None):
             return None

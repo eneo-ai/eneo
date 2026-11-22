@@ -1088,10 +1088,14 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     ][0]
     assert saved.status == "complete"
     assert evidence in saved.answer
-    assert any(step.server_name == "skills" for step in saved.tool_calls)
-    assert any(step.server_name == "knowledge" for step in saved.tool_calls)
     assert len(saved.references) == 1
     assert saved.references[0].content == evidence
+    skill_step = next(step for step in saved.tool_calls if step.server_name == "skills")
+    assert skill_step.upload_free_reference_ids == ()
+    knowledge_step = next(
+        step for step in saved.tool_calls if step.server_name == "knowledge"
+    )
+    assert knowledge_step.upload_free_reference_ids == (saved.references[0].id,)
     if knowledge_mode == "inject":
         # Reference rows are keyed by their own id: reusing the blob id made
         # the second question citing the same blob violate the primary key.
@@ -1102,6 +1106,44 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         turn.service.references_service.get_references.assert_not_awaited()
     else:
         turn.service.references_service.get_references.assert_awaited_once()
+
+
+def test_tool_occurrences_keep_order_and_partial_approval_cannot_reuse_prior_evidence():
+    from dataclasses import replace
+
+    steps = []
+    base = ToolCallMetadata(
+        server_name="tools", tool_name="read", tool_call_id="reused"
+    )
+    first = replace(
+        base,
+        arguments={"key": "public"},
+        result="A",
+        result_status="succeeded",
+        upload_free_reference_ids=(),
+    )
+    first.record(steps, ResponseType.TOOL_CALL)
+    first.record(steps, ResponseType.TOOL_CALL)  # Redelivery of a terminal event.
+    replace(base, tool_call_id="other", result="B", result_status="succeeded").record(
+        steps, ResponseType.TOOL_CALL
+    )
+    replace(
+        base, arguments={"key": "pending"}, title="Read", result_status="pending"
+    ).record(steps, ResponseType.TOOL_CALL)
+    base.record(steps, ResponseType.TOOL_APPROVAL_REQUIRED)
+    base.record(steps, ResponseType.TOOL_APPROVAL_TIMEOUT)
+    replace(base, approved=False, result_status="timeout_denied").record(
+        steps, ResponseType.TOOL_CALL
+    )
+    assert [step.result for step in steps] == ["A", "B", None]
+    assert steps[-1].arguments == {"key": "pending"}
+    assert steps[-1].title == "Read"
+    assert steps[-1].result_status == "timeout_denied"
+    assert [step.upload_free_reference_ids for step in steps] == [(), None, None]
+    replace(base, result_status="timeout_denied", result='{"denied": true}').record(
+        steps, ResponseType.TOOL_CALL
+    )
+    assert [step.result for step in steps] == ["A", "B", '{"denied": true}']
 
 
 def _consultation_arguments(child: UUID) -> str:

@@ -223,6 +223,7 @@ exclude = ["*/completion_models/infrastructure/adapters/base_adapter.py"]
 ignore_names = [
     "exc_val",                     # __aexit__ context-manager protocol params
     "exc_tb",
+    "memo",                        # __deepcopy__ protocol param
     "priority",                    # accepted-but-not-yet-persisted API param (documented in code)
     "BaseDBModel",                 # imports below are used only in string/future annotations
     "DomainIntegrationKnowledge",
@@ -235,4 +236,5 @@ ignore_names = [
     "DomainUserTokenUsageSummary",
     "TranscriptionModelsDB",
     "Options",                     # jwt.types.Options; used only in a string cast: cast("Options", ...)
+    "CursorResult",                # sqlalchemy.engine.CursorResult; used only in a string cast
 ]

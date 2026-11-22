@@ -47,7 +47,6 @@ _ACCESS_DENIED = (
     NotFoundException,
     BadRequestException,
 )
-_UNFINISHED_STEP_STATUSES = {None, "pending", "approved", "awaiting_approval"}
 
 
 @dataclass(frozen=True)
@@ -202,32 +201,11 @@ class AssistantDelegation:
     ) -> bool:
         """Fold one child chunk into the consultation; True when steps changed."""
         if chunk.tool_calls_metadata:
-            indexed = {
-                step.tool_call_id: i
-                for i, step in enumerate(consultation.tool_calls)
-                if step.tool_call_id is not None
-            }
             for step in chunk.tool_calls_metadata:
                 if step.tool_call_id in files_by_call:
                     step.generated_file_ids = files_by_call.pop(step.tool_call_id)
-                index = (
-                    indexed.get(step.tool_call_id)
-                    if step.tool_call_id is not None
-                    else None
-                )
-                # Provider IDs are local to a model round. Only an unfinished
-                # step can receive a status update.
-                if index is not None and not (
-                    step.result_status == "pending"
-                    and consultation.tool_calls[index].result_status
-                    not in _UNFINISHED_STEP_STATUSES
-                ):
-                    consultation.tool_calls[index] = copy.deepcopy(step)
-                else:
-                    consultation.tool_calls.append(copy.deepcopy(step))
+                if step.record(consultation.tool_calls, chunk.response_type):
                     consultation.step_ids.append(uuid4())
-                    if step.tool_call_id is not None:
-                        indexed[step.tool_call_id] = len(consultation.tool_calls) - 1
         if chunk.mcp_tool_references:
             known = {reference.id for reference in consultation.references}
             consultation.references.extend(
@@ -407,7 +385,7 @@ class AssistantDelegation:
                 consultation.approval_id = None
                 consultation.awaiting_tool_call_ids = []
                 for step in consultation.tool_calls:
-                    if step.result_status in _UNFINISHED_STEP_STATUSES:
+                    if step.unfinished:
                         step.result_status = "failed"
             try:
                 # One check for every outcome: complete, timed out, exhausted

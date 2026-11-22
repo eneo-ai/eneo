@@ -15,7 +15,11 @@ from eneo.data_retention.infrastructure.retention_rule_sql import (
     RulePeriodSQL,
     rule_period,
 )
-from eneo.database.tables.assistant_table import Assistants, AssistantSpecialists
+from eneo.database.tables.assistant_table import (
+    MIGRATED_GROUP_CHAT_METADATA_KEY,
+    Assistants,
+    AssistantSpecialists,
+)
 from eneo.database.tables.audit_retention_policy_table import AuditRetentionPolicy
 from eneo.database.tables.spaces_table import Spaces
 from eneo.policy_levels import PolicyLevel
@@ -48,6 +52,9 @@ def conversation_text_retention_days() -> ColumnElement[int | None]:
     specialists and the migration marker survives also on already-migrated
     databases. Resolve inherited periods at read/removal time, just like turns;
     copying a period into the migrated assistant would freeze the space default.
+    The marker belongs to an assistant and also affects its new conversations.
+    Retire it only after the marked assistants have an equivalent retention
+    policy or their owner has deliberately adopted the ordinary policy.
     Ordinary consultations remain part of the orchestrator's conversation.
     The caller joins the conversation's assistant, space and organisation.
     """
@@ -65,7 +72,7 @@ def conversation_text_retention_days() -> ColumnElement[int | None]:
     )
     own_days = sa.case(
         (
-            Assistants.metadata_json.contains({"migrated_from_group_chat": True}),
+            Assistants.metadata_json.contains({MIGRATED_GROUP_CHAT_METADATA_KEY: True}),
             sa.func.least(Assistants.data_retention_days, shortest_member),
         ),
         else_=Assistants.data_retention_days,

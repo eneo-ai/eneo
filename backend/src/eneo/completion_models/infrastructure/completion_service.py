@@ -24,7 +24,10 @@ from eneo.authentication.signed_urls import build_signed_original_download_url
 from eneo.completion_models.domain.execution_budget import current_execution_budget
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
-from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextBuilder,
+    replayable_tool_call_id,
+)
 from eneo.files.file_models import File
 from eneo.files.file_reference import (
     file_reference_base_url,
@@ -494,9 +497,10 @@ class CompletionService:
         # URLs.
         # Generated images count as history files too: a follow-up edit needs
         # a reference URL for the image the assistant produced last turn.
+        history = session.questions if session else []
         history_files = [
             file
-            for question in (session.questions if session else [])
+            for question in history
             for file in [*question.files, *question.generated_files]
         ]
         # Persistent attachments marked "open with tool" are URL-only: their
@@ -540,9 +544,22 @@ class CompletionService:
             # Build the acting user/tenant identity headers once; each client
             # forwards them only to its server when forward_identity is set.
             identity_headers = build_identity_headers(self.user, self.tenant)
+            # The model can quote a prior tool result in a new call without a file handle.
+            unverified_history = any(
+                step.upload_free_reference_ids is None
+                and replayable_tool_call_id(step) is not None
+                for turn in history
+                for step in turn.tool_calls or ()
+            )
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 identity_headers=identity_headers,
+                tool_context_without_uploads=not (
+                    files
+                    or transcription_inputs
+                    or any(turn.files for turn in history)
+                    or unverified_history
+                ),
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
                 app_view_repo=(
                     McpAppViewRepo(self.session) if self.session is not None else None

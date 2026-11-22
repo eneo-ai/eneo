@@ -45,7 +45,7 @@ async def test_consultation_usage_keeps_each_model_and_does_not_repeat_parent_to
         status="denied",
     )
     now = datetime.now(timezone.utc)
-    repo = QuestionRepository(async_session)
+    repo = QuestionRepository(async_session, include_user_uploads=False)
     question = await repo.add(
         QuestionAdd(
             question="Parent",

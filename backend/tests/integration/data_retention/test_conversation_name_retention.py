@@ -420,6 +420,50 @@ async def test_former_group_text_keeps_the_shortest_effective_member_period(
     assert await _texts(retention_session, kept) == (name, 1, feedback)
 
 
+async def test_editing_assistant_metadata_preserves_its_migrated_retention_policy(
+    client, db_container, admin_user, patch_auth_service_jwt
+):
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    space = await client.post(
+        "/api/v1/spaces/", headers=headers, json={"name": f"Retention-{uuid4()}"}
+    )
+    assert space.status_code == 201, space.text
+    assistant = await client.post(
+        "/api/v1/assistants/",
+        headers=headers,
+        json={"name": "Policy", "space_id": space.json()["id"]},
+    )
+    assert assistant.status_code == 200, assistant.text
+    assistant_id = UUID(assistant.json()["id"])
+    url = f"/api/v1/assistants/{assistant_id}/"
+    marker = {"migrated_from_group_chat": True}
+
+    attempted = await client.post(
+        url, headers=headers, json={"metadata_json": {**marker, "label": "new"}}
+    )
+    assert attempted.status_code == 200, attempted.text
+    assert attempted.json()["metadata_json"] == {"label": "new"}
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Assistants)
+            .where(Assistants.id == assistant_id)
+            .values(metadata_json=marker)
+        )
+    for replacement, expected in [
+        ({"label": "changed"}, {**marker, "label": "changed"}),
+        (None, marker),
+        ({"migrated_from_group_chat": False}, marker),
+    ]:
+        updated = await client.post(
+            url, headers=headers, json={"metadata_json": replacement}
+        )
+        assert updated.status_code == 200, updated.text
+        assert updated.json()["metadata_json"] == expected
+
+
 async def test_former_group_inherits_current_settings_without_restarting_old_text(
     retention_session: AsyncSession, test_tenant, admin_user, completion_model_factory
 ):
@@ -489,7 +533,7 @@ async def test_writing_a_name_or_feedback_text_starts_its_time_again(
         named_days_ago=10,
         feedback_days_ago=40,
     )
-    repository = SessionRepository(retention_session)
+    repository = SessionRepository(retention_session, include_user_uploads=False)
     await repository.update(SessionUpdate(id=renamed, name="New name"))
     await repository.add_feedback(
         SessionFeedback(value=-1, text="New feedback"), renamed
@@ -552,7 +596,7 @@ async def test_a_title_made_late_from_the_turns_goes_with_their_oldest_question(
             )
         )
     await retention_session.flush()
-    repository = SessionRepository(retention_session)
+    repository = SessionRepository(retention_session, include_user_uploads=False)
     await repository.update(
         SessionUpdate(id=titled, name="Title made today"),
         title_from_turns_at=await _revision(retention_session, titled),
@@ -605,7 +649,9 @@ async def test_a_title_made_while_a_turn_it_read_is_removed_is_not_stored(
     read_at = await _revision(retention_session, titled)
 
     await run_registered_retention(retention_session)
-    stored = await SessionRepository(retention_session).update(
+    stored = await SessionRepository(
+        retention_session, include_user_uploads=False
+    ).update(
         SessionUpdate(id=titled, name="Title quoting the removed turn"),
         title_from_turns_at=read_at,
     )

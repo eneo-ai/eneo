@@ -21,6 +21,9 @@ from eneo.database.tables.users_table import Users
 from eneo.database.tables.websites_table import Websites
 from eneo.files.file_models import FileUsageKind
 
+# Written by the group retirement migration. Clients own the other metadata.
+MIGRATED_GROUP_CHAT_METADATA_KEY = "migrated_from_group_chat"
+
 
 class Assistants(BasePublic):
     capabilities: Mapped[list[AssistantCapabilities]] = relationship(

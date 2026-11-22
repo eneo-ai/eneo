@@ -211,6 +211,8 @@ under the assistant. Every `/api/v1/group-chats/...` call and
 `code: "group_chats_retired"`; the space applications payload no longer has a
 `group_chats` list; the `group_chats` role permission is gone.
 
+Conversation names and feedback on a migrated assistant retain the group's shortest effective retention period. The period follows changes to the relevant policies. Editing or clearing the assistant's custom metadata preserves this rule. Eneo sets the reserved `migrated_from_group_chat` marker during migration.
+
 ### Non-streaming response
 
 With `stream: false` the endpoint returns one JSON object once the answer is complete. Its fields are `consultations`, `id`, `session_id`, `question`, `answer`, `files`, `generated_files`, `references`, `tools`, `web_search_references`, `mcp_tool_references`, `completion_model`, `created_at`, and `updated_at`. The exact schema is `AskChatResponse` in the specification. `files` are the uploads attached to the question; `generated_files` are the files the answer's tools made (images, documents, spreadsheets), each a `FilePublic` whose `id` the file endpoints accept.
