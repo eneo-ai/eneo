@@ -2675,6 +2675,40 @@ async def test_a_run_read_and_its_detail_report_the_same_latest_delivery(user):
 
 
 @pytest.mark.asyncio
+async def test_latest_webhook_delivery_is_the_last_steps_latest_attempt(user):
+    # Kills: taking the latest delivery from the order the rows are read in,
+    # or by attempt number across steps.
+    final_step = uuid4()
+    latest = replace(
+        _delivery(final_step, 2, FlowOutboxDeliveryStatus.DELIVERED), step_order=2
+    )
+    webhook_delivery_repo = _webhook_delivery_repo()
+    webhook_delivery_repo.list_run_delivery_statuses.return_value = [
+        latest,
+        _delivery(uuid4(), 3, FlowOutboxDeliveryStatus.DELIVERED),
+        replace(
+            _delivery(final_step, 1, FlowOutboxDeliveryStatus.DEAD_LETTERED),
+            step_order=2,
+        ),
+    ]
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo_mock(),
+        provider_call_repo=_provider_call_repo(),
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+        webhook_delivery_repo=webhook_delivery_repo,
+    )
+    run_id = uuid4()
+
+    assert await service.latest_webhook_delivery(run_id=run_id) == latest
+    webhook_delivery_repo.list_run_delivery_statuses.assert_awaited_once_with(
+        run_id=run_id, tenant_id=user.tenant_id
+    )
+
+
+@pytest.mark.asyncio
 async def test_run_detail_carries_the_runs_transcription_usage(user):
     flow_run_repo = flow_run_repo_mock()
     provider_call_repo = _provider_call_repo()
