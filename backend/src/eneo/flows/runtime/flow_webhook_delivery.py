@@ -290,9 +290,11 @@ class FlowRunWebhookDeliveryService:
     ) -> FlowWebhookDeliveryResult:
         attempted_result = FlowWebhookDeliveryResult(attempted_count=1)
         payload_prepared = False
+        result_read = False
         try:
             payload = await self._prepare_before_sends_end(row=row, deadline=deadline)
             payload_prepared = True
+            result_read = payload.run_result_body is not None
             try:
                 await self._deliver_payload(row=row, payload=payload, deadline=deadline)
             finally:
@@ -300,8 +302,27 @@ class FlowRunWebhookDeliveryService:
                 # their read transaction before persisting the delivery outcome.
                 if self.webhook_delivery_repo.session.in_transaction():
                     await self.webhook_delivery_repo.session.rollback()
-        except WebhookSendNotStartedError:
-            return await self._release_unsent_claim(row=row)
+        except WebhookSendNotStartedError as exc:
+            if not result_read:
+                return await self._release_unsent_claim(row=row)
+            # Once the run's result has been read, a deadline that passes
+            # before the send spends the attempt, as a cut read does: a job
+            # that always gets that far would otherwise never run out of them.
+            try:
+                async with self.webhook_delivery_repo.session.begin():
+                    did_dead_letter = await self._record_failure(
+                        row=row,
+                        error=exc,
+                        force_dead_letter=False,
+                    )
+            except WebhookDeliveryClaimLostError:
+                return attempted_result
+            return attempted_result.combine(
+                FlowWebhookDeliveryResult(
+                    dead_lettered_count=int(did_dead_letter),
+                    retry_scheduled_count=int(not did_dead_letter),
+                )
+            )
         except (
             BadRequestException,
             FlowPublishedDefinitionWithoutExecutableStepsError,
