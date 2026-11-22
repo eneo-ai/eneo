@@ -573,6 +573,15 @@ class FlowRunArtifactResultPublic(BaseModel):
     )
 
 
+# Every outbox status by its member, so the schema stays an enum of strings
+# instead of a reference to the enum.
+OutboundHttpDeliveryStatus: TypeAlias = Literal[
+    FlowOutboxDeliveryStatus.PENDING,
+    FlowOutboxDeliveryStatus.DELIVERED,
+    FlowOutboxDeliveryStatus.DEAD_LETTERED,
+]
+
+
 class FlowRunOutboundHttpResultPublic(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -582,7 +591,7 @@ class FlowRunOutboundHttpResultPublic(BaseModel):
             "where the delivery stands."
         )
     )
-    delivery_status: Literal["pending", "delivered", "dead_lettered"] = Field(
+    delivery_status: OutboundHttpDeliveryStatus = Field(
         description=(
             "Where the run's outbound delivery stands. A step that sends the run "
             "result is sent when the run has completed, so a completed run can "
