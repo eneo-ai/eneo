@@ -2175,8 +2175,10 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
   64 lowercase hex digits) and the bytes in `content_base64`. Check each file
   against its `size` and `checksum`.
 - The texts and files of one result hold at most 20 MiB together, counted
-  before base64. Base64 makes a file about a third larger, so the body can
-  reach about 28 MB.
+  before base64. Base64 makes a file about a third larger, so a body of files
+  at the 20 MiB cap is about 28 MB. Texts grow when they are written as JSON:
+  a quote, a backslash or a line break takes two bytes, and most other control
+  characters six. There is no fixed maximum for the body.
 - A result is never sent in part. A result over 20 MiB, a document step that
   left no file, or content that is corrupt or was removed dead-letters the
   delivery without a request, and Eneo does not try again. A store that does
@@ -2209,68 +2211,25 @@ request is sent, with the receiver's host, the delivery and its attempt, and the
 
 ### Receiving the result
 
-A common receiver is a team page that keeps one record per meeting. It
-checks the token, skips a result it already has, checks every file, saves
-each text, and answers quickly:
+A common receiver is a team page that keeps one record per meeting:
 
-```python
-import base64, hashlib, hmac, os, re
-from pathlib import Path
-
-from fastapi import FastAPI, Request, Response
-
-TOKEN = os.environ["ENEO_RESULT_TOKEN"]  # the step's bearer token
-STORE = Path("meetings")
-app = FastAPI()
-
-
-def safe(name: str) -> str:
-    """A file name from text Eneo sends: never a path."""
-    return re.sub(r"[^\w .-]", "_", name).strip(" .")[:120] or "result"
-
-
-@app.post("/eneo/results")
-async def receive(request: Request) -> Response:
-    sent = request.headers.get("authorization", "").encode()
-    if not hmac.compare_digest(sent, f"Bearer {TOKEN}".encode()):
-        return Response(status_code=401)  # final: Eneo does not try again
-    result = await request.json()
-    record = STORE / safe(result["run_id"])
-    if record.exists():
-        return Response(status_code=200)  # a duplicate: already stored
-    draft = STORE / (safe(result["run_id"]) + ".partial")
-    draft.mkdir(parents=True, exist_ok=True)
-    for part in result["deliverables"]:
-        if part["kind"] == "text":
-            name = safe(part["label"] or result["run_label"] or "Meeting")
-            path = draft / f"{name} {result['run_date']}.md"
-            path.write_text(part["text"], encoding="utf-8")
-        elif part["kind"] == "artifact":
-            for file in part["files"]:
-                data = base64.b64decode(file["content_base64"], validate=True)
-                if (
-                    len(data) != file["size"]
-                    or hashlib.sha256(data).hexdigest() != file["checksum"]
-                ):
-                    return Response(status_code=503)  # damaged on the way: retried
-                (draft / safe(file["name"])).write_bytes(data)
-        # Any other kind is new: skip it.
-    draft.rename(record)
-    return Response(status_code=200)
-```
-
-- **Answer.** Eneo treats a `4xx` other than `408` and `429` as final and
-  does not send the result again. Answer `5xx` for a problem that will pass,
-  and `200` for a duplicate. Store the result and answer within the step's
-  timeout; do slow work afterwards.
-- **Duplicates.** Skip a result whose `run_id` you already have. The
-  `Idempotency-Key` header is the same for every attempt of one delivery, so
-  it works as a key too.
-- **Authentication.** The step sends a bearer token (`bearer_token`), an API
-  key in a header you name (`api_key`, `X-API-Key` unless set) or basic auth
-  (`basic_auth`). Agree on one with the flow author.
-- **Body size.** Allow at least 32 MiB at the receiver and at any proxy in
-  front of it, such as `client_max_body_size 32m;` in nginx.
+- **Token.** Compare the token Eneo sends with the one you expect in constant
+  time. The step sends a bearer token (`bearer_token`), an API key in a header
+  you name (`api_key`, `X-API-Key` unless set) or basic auth (`basic_auth`).
+  Agree on one with the flow author.
+- **Duplicates.** Skip a result whose `run_id` you already have, and answer
+  `200`. The `Idempotency-Key` header is the same for every attempt of one
+  delivery and on a redelivery, so it works as a key too.
+- **What to store.** Store each text by its `step_id` (or `step_order`), and
+  each file by its `file_id`, after checking its `size` and `checksum`.
+  `label`, `run_label` and file names are for display only: two of them can be
+  equal. Skip a `kind` you do not know.
+- **Answer.** Store the result and answer `2xx` within the step's timeout; do
+  slow work afterwards. Answer `5xx` for a problem that will pass. A `4xx`
+  other than `408` and `429` is final: Eneo does not send the result again.
+- **Body size.** Size the limit at the receiver and at any proxy in front of
+  it for the content you expect, counted as above. A `413` for a body over
+  the limit is final, so Eneo does not send that result again.
 
 **Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
 `delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
