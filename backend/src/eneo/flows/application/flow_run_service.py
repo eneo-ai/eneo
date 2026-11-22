@@ -991,11 +991,15 @@ class FlowRunService:
     ) -> FlowRunWebhookDeliveryRead | None:
         """The latest outbound delivery of a run the caller has been given
         access to, or None. Only its last step sends, so this is that step's
-        latest attempt."""
+        highest-numbered attempt, whatever order the rows are read in."""
         deliveries = await self.webhook_delivery_repo.list_run_delivery_statuses(
             run_id=run_id, tenant_id=self.user.tenant_id
         )
-        return deliveries[-1] if deliveries else None
+        return max(
+            deliveries,
+            key=lambda delivery: (delivery.step_order, delivery.attempt_no),
+            default=None,
+        )
 
     async def list_run_statuses(
         self,
