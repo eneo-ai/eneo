@@ -89,7 +89,7 @@ A practical cadence is every 2 seconds for 30 seconds, every 5 seconds until two
 - open review when `is_awaiting_review` is true;
 - stop when `is_terminal` is true.
 
-`awaiting_review` is non-terminal and remains pollable. There is no caller-registered webhook, SSE stream, or run-status WebSocket; the live text socket carries preview text only. A Flow-authored terminal `outbound_http` step is separate and does not report intermediate states to the caller.
+`awaiting_review` is non-terminal and remains pollable. There is no caller-registered webhook, SSE stream, or run-status WebSocket; the live text socket carries preview text only. A Flow-authored terminal `outbound_http` step is separate: it sends to the receiver the Flow's author configured, never back to the caller. When that step sends the run's result, it does so after the run has completed; follow it through `result_delivery.state` on status (`sending`, `retry_scheduled`, `delivered` or `dead_lettered`).
 
 Use run lists and status for routine views. They omit content. Status carries `result_delivery`, which tells where the latest delivery stands, without the address, headers or content. Read detail only for a screen that needs accepted inputs, results, files, error content, provider usage, or the full list of outbound deliveries.
 

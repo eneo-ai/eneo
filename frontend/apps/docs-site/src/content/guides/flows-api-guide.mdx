@@ -734,7 +734,14 @@ connection loss, worker crash, or claim expiry can occur after the receiver
 accepted a request but before Eneo committed its receipt, so duplicate POSTs
 are possible.
 
-There is no standard Eneo event envelope and no platform signature. The request
+A step whose body mode is `run_result` is the exception: it sends the run's
+finished result in the typed envelope `eneo.flow_run_result.v1` once the run
+has completed, and a failed delivery never fails the run. See
+[Sending the run result to a receiver](/guides/flows/integrating-flows#sending-the-run-result-to-a-receiver)
+and [Receiving the result](/guides/flows/integrating-flows#receiving-the-result).
+The rest of this section is about a plain POST step.
+
+There is no other Eneo event envelope and no platform signature. The request
 URL, headers, and body all come from the flow author's `output_config`; when no
 body template is authored, Eneo posts the step's raw text. The only header Eneo
 adds itself is `Idempotency-Key`, so a receiver that needs to authenticate the
@@ -1319,6 +1326,15 @@ successfully. A completed run returns exactly one closed result shape:
   `dead_lettered`. It says where the delivery stands and never exposes
   destination URLs, headers, credentials, or the sent payload.
 
+**For consumers.** A completed run's `outbound_http` result can now be
+`pending`, `delivered` or `dead_lettered`: a step that sends the run's result
+does so after the run has completed. A plain POST step still completes only
+once its delivery is `delivered`. To follow a delivery without reading
+content, poll `GET .../runs/{run_id}/status/` and read `result_delivery.state`.
+A run's `deliverables` is a union on `kind`: `artifact` entries carry `files`,
+`text` entries do not. The status response schema is `FlowRunStatusPublic`;
+`@eneo/eneo-js` keeps its alias `FlowRunSummary` for it.
+
 Every historical list item is projected from its own `flow_version`, so do not
 interpret old structured results with the currently published contract. The
 generated `FlowRunResult` type supports an exhaustive switch:
@@ -1622,9 +1638,11 @@ not one this version recognises, so which earlier steps it read is unknown. An
 empty list still means the step read no earlier step. `input_source` keeps the
 recorded value, and a step with no recorded source ran as `flow_input`.
 
-`summary.deliverables` lists the documents the run delivered, as the run's
-`deliverables` does: each with its `step_order`, `label` and the `file_id`,
-`name` and `availability` of its current-attempt files. It sits in the
+`summary.deliverables` lists the texts and documents the run delivered, as the
+run's `deliverables` does: each with its `kind`, `step_order` and `label`, and
+a document also with the `file_id`, `name` and `availability` of its
+current-attempt files. A text entry has no `files`; its text is the step's
+output in the bundle. It sits in the
 summary, outside the hashed `bundle`, so it leaves the content hash and the
 schema version unchanged. In a redacted export its labels and names pass
 through the same credential masking as the bundle. It is empty until the run

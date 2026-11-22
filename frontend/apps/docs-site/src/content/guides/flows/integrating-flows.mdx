@@ -892,18 +892,28 @@ Response:
 }
 ```
 
-#### Several documents from one run
+#### What a run delivers
 
-A flow can deliver more than one document. The flow author marks each Word or
-PDF step whose document the run returns with `output_config.deliverable`, and
-gives it a label. The last step
-counts as a deliverable whenever its output is a document. The run contract
-lists them in `deliverables` before the run starts, and a completed run lists
-them, in step order, in `deliverables`:
+A run delivers texts and documents. The flow author marks each text, Word or
+PDF step whose output the run returns with `output_config.deliverable`, and
+gives it a label. The last step counts too when its output is text or a
+document; when the last step sends the run's result
+([Sending the run result to a receiver](#sending-the-run-result-to-a-receiver)),
+the step before it counts in its place. The run contract lists them in
+`deliverables` before the run starts, and a completed run lists them, in step
+order, in `deliverables`. Each entry has a `kind`:
 
 ```json
 {
   "deliverables": [
+    {
+      "kind": "text",
+      "step_id": "00000000-0000-0000-0000-000000000101",
+      "step_order": 1,
+      "label": "Notes",
+      "output_type": "text",
+      "delivery": "payload"
+    },
     {
       "kind": "artifact",
       "step_id": "00000000-0000-0000-0000-000000000102",
@@ -937,19 +947,23 @@ them, in step order, in `deliverables`:
 Each `files` entry has the same fields as `result_files`; the example shortens
 them. Fetch each one with its `file_id` as in step 11.
 
+- `kind` is `text` or `artifact`. Switch on it, and skip a kind you do not
+  know: more may be added.
+- A `text` entry names the text and has no `files`: the text is the step's
+  output, read with the step's result (step 10). `delivery` is `payload`.
 - `deliverables` is empty until the run completes, and empty for a flow that
-  delivers no document.
-- `deliverables[].files` holds only the step's documents from its current
-  attempt. `result.files` keeps every current file of the last step, which can
-  include a text file beside the document.
-- A marked step whose document is missing is listed with `files: []`. On
-  the last step, reading the run fails, as before, only when the step left no
-  file at all; when it left only a text file, `result.files` holds that file
-  and its deliverable lists `files: []`.
+  delivers no text or document.
+- An `artifact` entry's `files` holds only the step's documents from its
+  current attempt. `result.files` keeps every current file of the last step,
+  which can include a text file beside the document.
+- A marked document step whose document is missing is listed with
+  `files: []`. On the last step, reading the run fails, as before, only when
+  the step left no file at all; when it left only a text file, `result.files`
+  holds that file and its deliverable lists `files: []`.
 - `result` and `result_files` are unchanged, so a client that reads only the
   last document keeps working.
 
-To mark a step, set `output_config.deliverable` on a Word or PDF step:
+To mark a step, set `output_config.deliverable` on a text, Word or PDF step:
 
 ```json
 {
@@ -964,7 +978,8 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
 
 - `label` is one line of at most 120 characters, shown as written, so it
   cannot hold `{{` or `}}`.
-- `file_name` is optional: one line of at most 200 characters of fixed text
+- `file_name` is optional, and only for a Word or PDF step: one line of at
+  most 200 characters of fixed text
   and `{{ flow_input.<field> }}` for fields of the flow's form. Nothing else
   between `{{ }}` is allowed, nor a field whose name marks it as sensitive,
   such as `password` or `token`, nor the form's run-date field: the run's day
@@ -978,8 +993,9 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
   a file name can hold, such as `///`, gives `Dokument 2026-11-19.docx`. An
   empty field is filled in as empty.
 - Documents of one type that would share a name all carry `Steg <n>`.
-- Saving a step whose output is not a document removes the key; publishing
-  or importing one refuses it.
+- Saving a step whose output cannot be a deliverable (JSON, a mapping of
+  speakers, or a request the step sends) drops the mark, and saving a text
+  step drops its `file_name`; publishing or importing either refuses it.
 
 ### 10. List and filter step output
 
@@ -2089,15 +2105,16 @@ export class EneoFlows {
 
 ## Sending the run result to a receiver
 
-An HTTP POST step whose body mode is `run_result` sends the run's result to a
-fixed HTTPS address. The result is sent when the run has completed, so a
-failing receiver never fails the run. The step does not call its model: it
-keeps the text it reads as its own text.
+An HTTP POST step whose body mode is `run_result` sends the run's result to one
+fixed HTTPS address. It is sent once the run has completed, so a failing
+receiver never fails the run. The sending step reads nothing and holds no
+content: it calls no model, and what it sends is what the run delivers
+([What a run delivers](#what-a-run-delivers)).
 
 ```json
 {
   "url": "https://receiver.example.org/eneo/results",
-  "auth": { "mode": "none" },
+  "auth": { "mode": "bearer_token", "token": "<secret>" },
   "body": { "mode": "run_result" }
 }
 ```
@@ -2111,21 +2128,30 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
   "run_id": "00000000-0000-0000-0000-000000000101",
   "run_created_at": "2026-11-20T08:00:00+00:00",
   "run_completed_at": "2026-11-20T08:05:00+00:00",
-  "text": "# Meeting\n\n- Decision: done",
+  "run_label": "Weekly stand-up",
+  "run_date": "2026-11-20",
   "deliverables": [
     {
-      "kind": "artifact",
+      "kind": "text",
       "step_id": "00000000-0000-0000-0000-000000000201",
       "step_order": 2,
       "label": "Minutes",
+      "output_type": "text",
+      "text": "# Minutes\n\n- Decision: ship on Friday"
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000202",
+      "step_order": 3,
+      "label": "Minutes for the archive",
       "output_type": "docx",
       "files": [
         {
           "file_id": "00000000-0000-0000-0000-000000000301",
-          "name": "Minutes.docx",
+          "name": "Minutes for the archive 2026-11-20.docx",
           "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
           "size": 18234,
-          "checksum": "<sha256 hex>",
+          "checksum": "3f9a5c1e0b7d4a2f8c6e1d9b0a4f7e2c5b8d1a6f3e0c9b2d7a4f1e8c5b2a9d6f",
           "content_base64": "UEsDBBQ..."
         }
       ]
@@ -2134,22 +2160,32 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
 }
 ```
 
-- `text` is the run's text result: the text the sending step reads, by default
-  the result of the step before it. The sending step's `output_type` is
-  `text`; saving, publishing or importing refuses any other type.
-- `deliverables` lists every document the run delivers, as in
-  `FlowRunPublic.deliverables`, with each file's bytes in `content_base64`.
-  Check each file against its `size` and `checksum` (SHA-256).
-- The files of one result may hold at most 20 MB together, counted before
-  base64. Base64 makes the body about a third larger, so plan for about
-  27 MB. A larger result, or a file whose content is gone or no longer
-  matches its checksum, is never sent in part: the delivery ends in dead
-  letter without a request.
-- Text longer than a step result keeps inline (`FLOW_MAX_INLINE_TEXT_BYTES`)
-  is never cut: the sending step cannot read it whole, and the run fails at
-  that step with `typed_io_input_too_large`.
+- `run_label` is the run's name, or `null` when it has none. `run_date` is the
+  run's day: the date it was given, otherwise the UTC day it was created. The
+  run's file names carry the same day.
+- `deliverables` lists, in step order, what the run delivers, as the run's
+  `deliverables` does, but with the content inline. Switch on `kind` and skip
+  a kind you do not know. `label` is `null` for an unmarked step without a
+  name.
+- A `text` entry carries the step's whole text in `text`, and has no `files`.
+  Each text is sent whole, also a text too long to keep inline in its step
+  result, which Eneo keeps in a file.
+- An `artifact` entry carries the step's document files. Each file has
+  `file_id`, `name`, `mimetype`, `size`, `checksum` (SHA-256 of the bytes, as
+  64 lowercase hex digits) and the bytes in `content_base64`. Check each file
+  against its `size` and `checksum`.
+- The texts and files of one result hold at most 20 MiB together, counted
+  before base64. Base64 makes a file about a third larger, so the body can
+  reach about 28 MB.
+- A result is never sent in part. A result over 20 MiB, a document step that
+  left no file, or content that is corrupt or was removed dead-letters the
+  delivery without a request, and Eneo does not try again. A store that does
+  not answer spends an attempt, and the delivery is tried again later.
 - Headers may read run data; the address may not. Content-Type is set by the
   mode and cannot be authored.
+- The sending step's `output_type` is `text`; saving, publishing or importing
+  refuses any other type. It takes no upload: saving or publishing it with
+  `input_config.runtime_input` answers `400`, naming that field.
 
 **Publishing.** The sending step needs something to send: a text or document
 step marked as a deliverable, or a text or document step right before it.
@@ -2159,13 +2195,82 @@ as a deliverable, or add one right before that step, then publish again. A
 draft without one can still be saved.
 
 **Receiver contract.** Answer `2xx` once the result is stored. Delivery is at
-least once: the same result can arrive again with the same `Idempotency-Key`,
-so store by that key. A `4xx` other than `408` and `429` refuses the result:
-the delivery ends in dead letter at once. A `5xx`, `408`, `429`, a redirect
-(it is not followed), or no answer within the step's timeout is retried: five
-attempts in all, waiting 30, 120, 300 and 900 seconds between them. After the
-last failed attempt the delivery ends in dead letter. An audit row is written before every attempt, with the receiver's host
-and the file ids, never the content.
+least once: the same result can arrive again with the same `Idempotency-Key`
+header, which stays the same on every attempt and on a redelivery. A `4xx`
+other than `408` and `429` refuses the result: the delivery ends in dead
+letter at once. A `5xx`, `408`, `429`, a redirect (it is not followed), or no
+answer within the step's timeout (30 seconds unless the author set another)
+is retried: five attempts in all, waiting 30, 120, 300 and 900 seconds
+between them. After the last failed attempt the delivery ends in dead letter.
+A dead-lettered result is one Eneo has no confirmation of: the receiver may
+have stored it while its answer was lost. An audit row is written before every
+request is sent, with the receiver's host, the delivery and its attempt, and the
+`step_ids` and `file_ids` it sends. It holds no label, file name or content.
+
+### Receiving the result
+
+A common receiver is a team page that keeps one record per meeting. It
+checks the token, skips a result it already has, checks every file, saves
+each text, and answers quickly:
+
+```python
+import base64, hashlib, hmac, os, re
+from pathlib import Path
+
+from fastapi import FastAPI, Request, Response
+
+TOKEN = os.environ["ENEO_RESULT_TOKEN"]  # the step's bearer token
+STORE = Path("meetings")
+app = FastAPI()
+
+
+def safe(name: str) -> str:
+    """A file name from text Eneo sends: never a path."""
+    return re.sub(r"[^\w .-]", "_", name).strip(" .")[:120] or "result"
+
+
+@app.post("/eneo/results")
+async def receive(request: Request) -> Response:
+    sent = request.headers.get("authorization", "").encode()
+    if not hmac.compare_digest(sent, f"Bearer {TOKEN}".encode()):
+        return Response(status_code=401)  # final: Eneo does not try again
+    result = await request.json()
+    record = STORE / safe(result["run_id"])
+    if record.exists():
+        return Response(status_code=200)  # a duplicate: already stored
+    draft = STORE / (safe(result["run_id"]) + ".partial")
+    draft.mkdir(parents=True, exist_ok=True)
+    for part in result["deliverables"]:
+        if part["kind"] == "text":
+            name = safe(part["label"] or result["run_label"] or "Meeting")
+            path = draft / f"{name} {result['run_date']}.md"
+            path.write_text(part["text"], encoding="utf-8")
+        elif part["kind"] == "artifact":
+            for file in part["files"]:
+                data = base64.b64decode(file["content_base64"], validate=True)
+                if (
+                    len(data) != file["size"]
+                    or hashlib.sha256(data).hexdigest() != file["checksum"]
+                ):
+                    return Response(status_code=503)  # damaged on the way: retried
+                (draft / safe(file["name"])).write_bytes(data)
+        # Any other kind is new: skip it.
+    draft.rename(record)
+    return Response(status_code=200)
+```
+
+- **Answer.** Eneo treats a `4xx` other than `408` and `429` as final and
+  does not send the result again. Answer `5xx` for a problem that will pass,
+  and `200` for a duplicate. Store the result and answer within the step's
+  timeout; do slow work afterwards.
+- **Duplicates.** Skip a result whose `run_id` you already have. The
+  `Idempotency-Key` header is the same for every attempt of one delivery, so
+  it works as a key too.
+- **Authentication.** The step sends a bearer token (`bearer_token`), an API
+  key in a header you name (`api_key`, `X-API-Key` unless set) or basic auth
+  (`basic_auth`). Agree on one with the flow author.
+- **Body size.** Allow at least 32 MiB at the receiver and at any proxy in
+  front of it, such as `client_max_body_size 32m;` in nginx.
 
 **Where it stands.** `FlowRunPublic.result.delivery_status` is `pending`,
 `delivered` or `dead_lettered`, and `webhook_deliveries` on the run detail
@@ -2239,7 +2344,7 @@ A finished run exposes its output in two places, and which one you use depends o
 | `file_backed_text` | Plain text too large to inline; it was written to a file instead       | `preview` is a bounded prefix, never the whole text. Check `file.availability`, then download `file` through the signed-URL endpoint                                                                                                                                                                          |
 | `structured`       | JSON matching the final step's output contract                         | Read `value`. `output_contract` is the schema that value satisfies, interpreted with the run's pinned `flow_version`                                                                                                                                                                                          |
 | `artifact`         | One or more generated files, typically DOCX or PDF                     | For each entry in `files`, check `availability`, then request a signed URL and `GET` it with no auth header                                                                                                                                                                                                   |
-| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status`: `delivered` means the receiver accepted the result, `pending` means sending is still going on (`result_delivery.state` on `/status/`), `dead_lettered` means it was not sent. The run is complete in all three. Attempt history is in `webhook_deliveries` on the run |
+| `outbound_http`    | The flow posted the result to a destination the flow author configured | Nothing to download. `delivery_status`: `delivered` means the receiver accepted the result, `pending` means sending is still going on (`result_delivery.state` on `/status/`), `dead_lettered` means Eneo has no confirmation that it arrived. The run is complete in all three. Attempt history is in `webhook_deliveries` on the run |
 
 `result.kind` is predictable before the run starts: the run contract's `final_output.output_type` (`text`, `json`, `pdf`, `docx`) and `final_output.delivery` tell you which branch to build the UI for.
 
