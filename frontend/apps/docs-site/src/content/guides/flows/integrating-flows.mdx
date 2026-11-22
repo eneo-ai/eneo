@@ -197,6 +197,26 @@ Response:
     "delivery": "artifact",
     "output_contract": null
   },
+  "deliverables": [
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "step_order": 2,
+      "label": "Summary",
+      "output_type": "pdf",
+      "output_mode": "render_verbatim",
+      "delivery": "artifact"
+    },
+    {
+      "kind": "artifact",
+      "step_id": "00000000-0000-0000-0000-000000000104",
+      "step_order": 4,
+      "label": "Report",
+      "output_type": "docx",
+      "output_mode": "pass_through",
+      "delivery": "artifact"
+    }
+  ],
   "form_fields": [
     {
       "name": "employee_name",
@@ -380,8 +400,9 @@ GET /api/v1/flows/{id}/runs/{run_id}/status/
 ```
 
 The content-free summary reports lifecycle and bounded dispatch diagnostics. It
-does not return accepted input, terminal errors, results, files, usage, or
-webhook deliveries.
+does not return accepted input, terminal errors, results, files or usage.
+`result_delivery` tells where the latest delivery stands, without the
+address, headers or content.
 
 Response:
 
@@ -953,8 +974,9 @@ To mark a step, set `output_config.deliverable` on a Word or PDF step:
   `Standup Eneo 2026-11-19.docx`. Characters a file name cannot hold become
   spaces. When a value, or the whole filled-in name, reads as a credential or
   is longer than 1,000 characters, or nothing is left, the document is named
-  by its label and the day: `Standup 2026-11-19.docx`. An empty field is
-  filled in as empty.
+  by its label and the day: `Standup 2026-11-19.docx`. A label with nothing
+  a file name can hold, such as `///`, gives `Dokument 2026-11-19.docx`. An
+  empty field is filled in as empty.
 - Documents of one type that would share a name all carry `Steg <n>`.
 - Saving a step whose output is not a document removes the key; publishing
   or importing one refuses it.

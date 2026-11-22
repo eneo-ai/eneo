@@ -91,7 +91,7 @@ A practical cadence is every 2 seconds for 30 seconds, every 5 seconds until two
 
 `awaiting_review` is non-terminal and remains pollable. There is no caller-registered webhook, SSE stream, or run-status WebSocket; the live text socket carries preview text only. A Flow-authored terminal `outbound_http` step is separate and does not report intermediate states to the caller.
 
-Use run lists and status for routine views. They omit content. Read detail only for a screen that needs accepted inputs, results, files, error content, provider usage, or outbound-delivery metadata.
+Use run lists and status for routine views. They omit content. Status carries `result_delivery`, which tells where the latest delivery stands, without the address, headers or content. Read detail only for a screen that needs accepted inputs, results, files, error content, provider usage, or the full list of outbound deliveries.
 
 ## 5. Finish or recover
 

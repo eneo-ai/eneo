@@ -35,7 +35,7 @@ Use these content-free surfaces for routine UI and polling:
 - run status;
 - status capabilities.
 
-These omit accepted input, result content, result-file metadata, terminal errors, usage, and outbound-delivery details.
+These omit accepted input, result content, result-file metadata, terminal errors, usage, and outbound-delivery details, except that run status carries `result_delivery`: it tells where the latest delivery stands, without the address, headers or content.
 
 The following are sensitive, audited reads:
 

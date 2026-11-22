@@ -132,7 +132,7 @@ function SpeakerMappingFields({
 /**
  * The form fields a file name can read: not the run's day, which every
  * generated name carries already. The core decides the rest (a sensitive
- * field name is refused on save).
+ * field name is refused on publishing).
  */
 function fileNameGroups(flow: FlowPublic, groups: VariableGroup[]): VariableGroup[] {
   const runDate = new Set(
