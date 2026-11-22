@@ -2724,6 +2724,16 @@ def _validate_runtime_input_publish_rules(*, step: FlowStepValidationView) -> No
     if not runtime_input.enabled:
         return
 
+    # A step that sends the run's result sends its deliverables and never reads
+    # an upload, so the run would ask for a file it drops.
+    if sends_run_result(step.output_mode, step.output_config):
+        raise FlowStepValidationError(
+            f"Step {step.step_order}: a step that sends the run's result cannot "
+            "take uploaded files (input_config.runtime_input).",
+            step_order=step.step_order,
+            context={"field": "input_config.runtime_input"},
+        )
+
     if step.output_mode == "transcribe_only" and runtime_input.input_format != "audio":
         raise FlowStepValidationError(
             f"Step {step.step_order}: transcribe_only steps require runtime_input.input_format 'audio'.",
