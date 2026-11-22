@@ -721,15 +721,19 @@ async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None
 
 
 @pytest.mark.asyncio
-async def test_streaming_rejects_an_ambiguous_activation_batch_before_mutating_skills() -> (
-    None
-):
+@pytest.mark.parametrize("second_id", ["duplicate", ""])
+async def test_streaming_rejects_invalid_activation_batch_before_mutating_skills(
+    second_id: str,
+) -> None:
     adapter = _adapter()
     runtime = _runtime()
     initial = runtime.snapshot()
-    call = ("duplicate", SKILL_ACTIVATION_TOOL_NAME, '{"skill_key":"skill-1"}')
+    calls = [
+        (call_id, SKILL_ACTIVATION_TOOL_NAME, '{"skill_key":"skill-1"}')
+        for call_id in ("duplicate", second_id)
+    ]
     prepared = PreparedModelStream(
-        stream=_AsyncChunkStream([_tool_chunk(calls=[call, call])]),
+        stream=_AsyncChunkStream([_tool_chunk(calls=calls)]),
         messages=[{"role": "system", "content": "Base instructions"}],
         kwargs={"tools": []},
         mcp_proxy=None,
