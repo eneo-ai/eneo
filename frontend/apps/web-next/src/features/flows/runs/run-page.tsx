@@ -3,13 +3,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  useSuspenseQuery,
-  type QueryKey
-} from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Info, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -39,9 +33,6 @@ import {
   currentDeliveries,
   deliveryUnderWay,
   RunWebhookDeliveries,
-  cachedResultDelivery,
-  currentResultDelivery,
-  useReadsOnReturn,
   type Delivery
 } from "./run-webhooks";
 import { RunFiles } from "./run-files";
@@ -76,16 +67,14 @@ import {
 } from "./run-status";
 import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } from "./run-actions";
 import { ReviewPanel } from "./review-panel";
+import { followsResultOnly, runProgressQueryOptions, type RunProgress } from "./run-progress-read";
 import {
   activeReviewQueryOptions,
-  getRunGraph,
-  getRunStatus,
   redispatchRun,
   runDetailQueryOptions,
   runKeys,
   runStepsQueryOptions,
   type RunDetail,
-  type RunGraph,
   type RunSummary
 } from "./runs-api";
 import { useNowAt } from "./use-now-at";
@@ -435,34 +424,29 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const rescue = useFocusRescue();
   const lastStatus = useRef<string | null>(null);
 
-  // Coming back to the tab or reconnecting reads the run's status and graph again, a finished
-  // run's too: a correction saved on it moves its revision. Not while its result is on its way.
-  const readsOnReturn = useReadsOnReturn(flowId, runId);
-
   // A poll that answers the same keeps the same data, so the page does not
   // render again: the data carries no clock (`useNowAt` keeps the deadlines),
   // and reading `isFetching` or `dataUpdatedAt` here on the success path
-  // would bring back one render per poll.
+  // would bring back one render per poll. Coming back to the tab or reconnecting
+  // reads it again (`runProgressQueryOptions` says what it reads once the run has
+  // finished).
   const progress = useQuery({
-    queryKey: runKeys.progress(flowId, runId),
-    queryFn: async ({ signal }) => {
-      const [status, graph] = await Promise.all([
-        getRunStatus(flowId, runId, signal),
-        getRunGraph(flowId, runId, signal)
-      ]);
-      return { status, graph };
-    },
-    refetchInterval: pollEvery<{ status: RunSummary; graph: RunGraph }>((data) =>
-      data
-        ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
-        : false
-    ),
+    ...runProgressQueryOptions(flowId, runId),
+    // One clock: while the run moves, it follows what the run shows; once the run has finished, it
+    // follows the result sent after it, its status alone, until it has landed or was given up.
+    refetchInterval: pollEvery<RunProgress>((data) => {
+      if (!data) return false;
+      const { status, graph } = data;
+      const delivery = status.result_delivery;
+      return isTerminal(status.status)
+        ? clock(deliverySignature(delivery), deliveryUnderWay(delivery))
+        : clock(progressSignature(status, graph), shouldPoll(status.status));
+    }),
     refetchIntervalInBackground: false,
-    // A result given up can be sent again from elsewhere, and nothing on a closed page sees it:
-    // opened again, the page reads the run's status even when it read it a moment ago.
-    refetchOnMount: () =>
-      cachedResultDelivery(queryClient, flowId, runId)?.state === "dead_lettered" ? "always" : true,
-    ...readsOnReturn
+    // Opened again while its result is on its way or was given up (it can be sent again from
+    // elsewhere, and nothing on a closed page sees it): its status is read at once, even when it
+    // was read a moment ago.
+    refetchOnMount: (query) => (followsResultOnly(query.state.data?.status) ? "always" : true)
   });
 
   const signature = progress.data
@@ -483,50 +467,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     })
   );
   const settled = progress.data ? isTerminal(progress.data.status.status) : false;
-  // The run's result, sent once the run has completed, moves on without the run: only the
-  // content-free status is read again until the delivery has settled, never the detail (an
-  // audited read) or the graph. While the run moves, its own status read carries the delivery.
-  const [deliveryClock] = useState(() => createPollClock());
-  // The display, this read's polling and what a return reads all go by the newer of the two reads.
-  const deliveryPoll = useQuery({
-    queryKey: runKeys.delivery(flowId, runId),
-    queryFn: ({ signal }) => getRunStatus(flowId, runId, signal),
-    enabled: settled && deliveryUnderWay(cachedResultDelivery(queryClient, flowId, runId)),
-    // It starts from the status the page just read, so it is not read twice on opening. Read from
-    // the cache: reading `progress.dataUpdatedAt` here would render the page on every poll. Only a
-    // status this read follows on from: a running run's would stand in for the first read once the
-    // run completes, and say nothing is under way.
-    initialData: () => {
-      const read = queryClient.getQueryData<{ status: RunSummary }>(
-        runKeys.progress(flowId, runId)
-      )?.status;
-      return read && isTerminal(read.status) && deliveryUnderWay(read.result_delivery)
-        ? read
-        : undefined;
-    },
-    initialDataUpdatedAt: () =>
-      queryClient.getQueryState(runKeys.progress(flowId, runId))?.dataUpdatedAt,
-    // Decided again when the run's own read moves too: a newer row it sees counts here as well.
-    refetchInterval: pollEvery<RunSummary>((data) => {
-      if (!data) return false;
-      const current = cachedResultDelivery(queryClient, flowId, runId);
-      return deliveryClock(deliverySignature(current), deliveryUnderWay(current));
-    }),
-    refetchIntervalInBackground: false
-  });
-  // The data comes from the reads, so that each answer renders; when each was read, from the
-  // cache, for the same reason as above.
-  const readAt = (key: QueryKey) => queryClient.getQueryState(key)?.dataUpdatedAt ?? 0;
-  const latestDelivery = currentResultDelivery(
-    progress.data && {
-      summary: progress.data.status,
-      readAt: readAt(runKeys.progress(flowId, runId))
-    },
-    deliveryPoll.data && {
-      summary: deliveryPoll.data,
-      readAt: readAt(runKeys.delivery(flowId, runId))
-    }
-  );
+  // The run's latest delivery as its status last said it: sent after the run, it moves on without it.
+  const latestDelivery = progress.data?.status.result_delivery ?? null;
   const steps = useShownRead(
     useQuery({
       ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),
@@ -667,8 +609,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       : [];
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
-  // A finished run no longer changes: reading it again is offered only after a read failed.
-  const offersRefresh = !settled || [progress, detail, steps].some((read) => read.isError);
+  // A finished run no longer changes: reading it again is offered only after a read failed. Not
+  // for its status read while its result is followed: that read is retried alone, and reading the
+  // whole run again would read its audited content.
+  const offersRefresh =
+    !settled ||
+    [detail, steps].some((read) => read.isError) ||
+    (progress.isError && !followsResultOnly(summary));
 
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">
@@ -928,13 +875,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           <>
             {/* A failed poll or read again keeps the run, and a review's draft, on the page. */}
             <RefreshError
-              queries={[
-                progress,
-                detail,
-                steps,
-                ...(awaitingReview ? [review] : []),
-                ...(deliveryPoll.isEnabled ? [deliveryPoll] : [])
-              ]}
+              queries={[progress, detail, steps, ...(awaitingReview ? [review] : [])]}
             />
             {run ? (
               <RunProblem

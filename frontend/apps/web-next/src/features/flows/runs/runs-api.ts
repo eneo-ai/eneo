@@ -76,9 +76,6 @@ export const runKeys = {
   run: (flowId: string, runId: string) => ["flows", flowId, "runs", runId] as const,
   progress: (flowId: string, runId: string) =>
     ["flows", flowId, "runs", runId, "progress"] as const,
-  /** The status read again while a result sent after the run is on its way. */
-  delivery: (flowId: string, runId: string) =>
-    ["flows", flowId, "runs", runId, "delivery"] as const,
   /** `version`: what the content-free reads said about the run when this was read. */
   detail: (flowId: string, runId: string, version: string) =>
     ["flows", flowId, "runs", runId, "detail", version] as const,

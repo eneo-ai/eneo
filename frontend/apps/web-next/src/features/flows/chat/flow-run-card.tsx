@@ -31,15 +31,8 @@ import {
 } from "../runs/run-status";
 import { stepTitle } from "../runs/run-steps";
 import { RunText } from "../runs/run-text";
-import {
-  getRunGraph,
-  getRunStatus,
-  runDetailQueryOptions,
-  runKeys,
-  type RunDetail,
-  type RunGraph,
-  type RunSummary
-} from "../runs/runs-api";
+import { runProgressQueryOptions, type RunProgress } from "../runs/run-progress-read";
+import { runDetailQueryOptions, type RunDetail } from "../runs/runs-api";
 import { useShownRead } from "../runs/use-shown-read";
 
 /** The tools of the flow chat that start a run: a new one, or a failed one again. */
@@ -115,17 +108,11 @@ export function FlowRunCard({
   const lastStatus = useRef<string | null>(null);
 
   // The content-free status and graph, polled while the run moves (the
-  // same query as the run page, so the two never read twice).
+  // run page's own read, so the two never read twice). A finished run's
+  // result, sent after it, is followed on its page, not here.
   const progress = useQuery({
-    queryKey: runKeys.progress(flowId, runId),
-    queryFn: async ({ signal }) => {
-      const [status, graph] = await Promise.all([
-        getRunStatus(flowId, runId, signal),
-        getRunGraph(flowId, runId, signal)
-      ]);
-      return { status, graph };
-    },
-    refetchInterval: pollEvery<{ status: RunSummary; graph: RunGraph }>((data) =>
+    ...runProgressQueryOptions(flowId, runId),
+    refetchInterval: pollEvery<RunProgress>((data) =>
       data
         ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
         : false
