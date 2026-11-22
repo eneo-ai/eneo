@@ -100,6 +100,7 @@ export const ROUTES: Record<string, Entry> = {
   "/spaces/$/assistants/$/edit": { url: (f) => `${f.space}/assistants/${f.assistant}/edit` },
   "/spaces/$/assistants/$/widget": { url: (f) => `${f.space}/assistants/${f.assistant}/widget` },
   "/spaces/$/chat": { url: (f) => `${f.space}/chat` },
+  "/spaces/$/group-chats/$/edit": { url: (f) => `${f.space}/group-chats/${f.assistant}/edit` },
   "/spaces/$/knowledge": { url: (f) => `${f.space}/knowledge` },
   "/spaces/$/knowledge/collections/$": {
     url: (f) => `${f.space}/knowledge/collections/${f.collection}`

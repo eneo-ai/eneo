@@ -29,9 +29,13 @@ const existing = [
 ];
 
 async function choose(name: string) {
-  fireEvent.click(screen.getByRole("button", { name: "Specialister" }));
+  const picker = screen.getByRole("button", { name: "Specialister" });
+  fireEvent.click(picker);
+  const search = await screen.findByRole("combobox");
+  await waitFor(() => expect(document.activeElement).toBe(search));
   expect(screen.queryByRole("option", { name: "Samordnaren" })).toBeNull();
   fireEvent.click(await screen.findByRole("option", { name }));
+  await waitFor(() => expect(picker.getAttribute("aria-expanded")).toBe("false"));
 }
 
 it("keeps existing assignments when adding a specialist and editing its routing description", async () => {
