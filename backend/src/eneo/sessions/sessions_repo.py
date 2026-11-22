@@ -122,6 +122,8 @@ class SessionRepository:
         self,
         session: AsyncSession,
         file_content_loader: FileContentLoader | None = None,
+        *,
+        include_user_uploads: bool,
     ):
         super().__init__()
         self.delegate: BaseRepositoryDelegate[SessionInDB] = BaseRepositoryDelegate(
@@ -129,6 +131,8 @@ class SessionRepository:
         )
         self.session = session
         self.file_content_loader = file_content_loader
+        # The principal's ``files`` read grant; see ``attach_question_files``.
+        self.include_user_uploads = include_user_uploads
 
     async def _hydrate_sessions(
         self,
@@ -160,17 +164,10 @@ class SessionRepository:
             ),
             McpAppViewRepo(self.session),
         )
-        if self.file_content_loader is None:
-            if any(
-                question.questions_files
-                for session in sessions
-                for question in session.questions
-            ):
-                raise RuntimeError("Session files require FileContentLoader")
-            return
         await attach_question_files(
             [question for session in sessions for question in session.questions],
             loader=self.file_content_loader,
+            include_user_uploads=self.include_user_uploads,
         )
 
     async def _hydrate_optional(

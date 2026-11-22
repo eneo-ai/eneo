@@ -1,7 +1,7 @@
 import asyncio
 import copy
 import re
-from collections import defaultdict
+from collections import Counter, defaultdict
 from collections.abc import AsyncGenerator, Callable, Collection, Sequence
 from contextlib import aclosing, nullcontext
 from dataclasses import dataclass, replace
@@ -217,6 +217,10 @@ def _extension_for_mime(mime_type: str) -> str:
     return _IMAGE_EXTENSIONS.get(mime_type.lower().split(";", 1)[0].strip(), "png")
 
 
+def _stored_tool_steps(steps: list[ToolCallMetadata]) -> list[ToolCallInfo]:
+    return [ToolCallInfo.model_validate(step, from_attributes=True) for step in steps]
+
+
 def _attach_generated_file_ids(
     tool_calls: list[ToolCallInfo], ids_by_call: dict[str, list[UUID]]
 ) -> None:
@@ -226,7 +230,12 @@ def _attach_generated_file_ids(
     (and approval entries may pre-exist), so the link is applied once every
     chunk is in rather than at either event.
     """
+    if not ids_by_call:
+        return
+    occurrences = Counter(call.tool_call_id for call in tool_calls)
     for tool_call in tool_calls:
+        if occurrences[tool_call.tool_call_id] > 1:
+            continue  # The output stays on the question; its producing step is ambiguous.
         ids = ids_by_call.get(tool_call.tool_call_id or "")
         if ids:
             tool_call.generated_file_ids = list(ids)
@@ -2902,7 +2911,7 @@ class AssistantService:
                 reasoning_string = ""
                 generated_files: list[File] = []
                 generated_file_ids_by_call: dict[str, list[UUID]] = {}
-                tool_calls: list[ToolCallInfo] = []
+                observed_steps: list[ToolCallMetadata] = []
                 mcp_tool_references: list[McpToolReference] = []
                 # TOOL_CALL chunks can fire twice in the approval flow. IDs
                 # identify exact events without collapsing distinct resources
@@ -3022,159 +3031,17 @@ class AssistantService:
                             # arguments are persisted from its TOOL_CALL chunk.
                             yield chunk
 
-                        if chunk.response_type == ResponseType.TOOL_CALL:
-                            if chunk.mcp_tool_references:
-                                for ref in chunk.mcp_tool_references:
-                                    if ref.id in mcp_ref_seen:
-                                        continue
+                        if chunk.response_type in (
+                            ResponseType.TOOL_CALL,
+                            ResponseType.TOOL_APPROVAL_REQUIRED,
+                            ResponseType.TOOL_APPROVAL_TIMEOUT,
+                        ):
+                            for ref in chunk.mcp_tool_references or ():
+                                if ref.id not in mcp_ref_seen:
                                     mcp_ref_seen.add(ref.id)
                                     mcp_tool_references.append(ref)
-                            if chunk.tool_calls_metadata:
-                                for tc in chunk.tool_calls_metadata:
-                                    # Check if this tool_call already exists (from TOOL_APPROVAL_REQUIRED)
-                                    existing = next(
-                                        (
-                                            t
-                                            for t in tool_calls
-                                            if t.tool_call_id
-                                            and t.tool_call_id == tc.tool_call_id
-                                        ),
-                                        None,
-                                    )
-                                    if existing:
-                                        # Update existing entry with approval status
-                                        existing.approved = tc.approved
-                                        existing.result_status = tc.result_status
-                                        # Pending entries are emitted before the argument
-                                        # JSON is complete; fill arguments in once a later
-                                        # chunk carries them.
-                                        if tc.arguments is not None:
-                                            existing.arguments = cast(
-                                                dict[str, object] | None,
-                                                tc.arguments,
-                                            )
-                                        # The TOOL_CALL chunk after execution carries the
-                                        # tool output; keep it so later turns can replay.
-                                        if tc.result is not None:
-                                            existing.result = tc.result
-                                        if tc.meta is not None:
-                                            existing.meta = tc.meta
-                                        if tc.structured_content is not None:
-                                            existing.structured_content = (
-                                                tc.structured_content
-                                            )
-                                        if tc.app_view is not None:
-                                            existing.app_view = tc.app_view
-                                        if tc.purpose is not None:
-                                            existing.purpose = tc.purpose
-                                    else:
-                                        # Add new tool call
-                                        tool_calls.append(
-                                            ToolCallInfo(
-                                                server_name=tc.server_name,
-                                                tool_name=tc.tool_name,
-                                                title=tc.title,
-                                                arguments=cast(
-                                                    dict[str, object] | None,
-                                                    tc.arguments,
-                                                ),
-                                                tool_call_id=tc.tool_call_id,
-                                                approved=tc.approved,
-                                                result_status=tc.result_status,
-                                                result=tc.result,
-                                                mcp_tool_name=tc.mcp_tool_name,
-                                                purpose=tc.purpose,
-                                                is_internal=tc.is_internal,
-                                                is_bundled=tc.is_bundled,
-                                                meta=tc.meta,
-                                                structured_content=tc.structured_content,
-                                                app_view=tc.app_view,
-                                            )
-                                        )
-                            yield chunk
-
-                        if chunk.response_type == ResponseType.TOOL_APPROVAL_REQUIRED:
-                            # Collect tool calls for approval flow (approval status will be updated later)
-                            if chunk.tool_calls_metadata:
-                                for tc in chunk.tool_calls_metadata:
-                                    # A "pending" TOOL_CALL chunk may already have
-                                    # registered this call — merge instead of
-                                    # duplicating it.
-                                    existing = next(
-                                        (
-                                            t
-                                            for t in tool_calls
-                                            if t.tool_call_id
-                                            and t.tool_call_id == tc.tool_call_id
-                                        ),
-                                        None,
-                                    )
-                                    if existing:
-                                        existing.approved = None
-                                        existing.result_status = tc.result_status
-                                        if tc.arguments is not None:
-                                            existing.arguments = cast(
-                                                dict[str, object] | None,
-                                                tc.arguments,
-                                            )
-                                    else:
-                                        tool_calls.append(
-                                            ToolCallInfo(
-                                                server_name=tc.server_name,
-                                                tool_name=tc.tool_name,
-                                                title=tc.title,
-                                                arguments=cast(
-                                                    dict[str, object] | None,
-                                                    tc.arguments,
-                                                ),
-                                                tool_call_id=tc.tool_call_id,
-                                                approved=None,
-                                                result_status=tc.result_status,
-                                                mcp_tool_name=tc.mcp_tool_name,
-                                                purpose=tc.purpose,
-                                                is_internal=tc.is_internal,
-                                                is_bundled=tc.is_bundled,
-                                            )
-                                        )
-                            yield chunk
-
-                        if chunk.response_type == ResponseType.TOOL_APPROVAL_TIMEOUT:
-                            if chunk.tool_calls_metadata:
-                                for tc in chunk.tool_calls_metadata:
-                                    existing = next(
-                                        (
-                                            t
-                                            for t in tool_calls
-                                            if t.tool_call_id
-                                            and t.tool_call_id == tc.tool_call_id
-                                        ),
-                                        None,
-                                    )
-                                    if existing:
-                                        existing.approved = False
-                                        existing.result_status = (
-                                            tc.result_status or "timeout_denied"
-                                        )
-                                    else:
-                                        tool_calls.append(
-                                            ToolCallInfo(
-                                                server_name=tc.server_name,
-                                                tool_name=tc.tool_name,
-                                                title=tc.title,
-                                                arguments=cast(
-                                                    dict[str, object] | None,
-                                                    tc.arguments,
-                                                ),
-                                                tool_call_id=tc.tool_call_id,
-                                                approved=False,
-                                                result_status=tc.result_status
-                                                or "timeout_denied",
-                                                mcp_tool_name=tc.mcp_tool_name,
-                                                purpose=tc.purpose,
-                                                is_internal=tc.is_internal,
-                                                is_bundled=tc.is_bundled,
-                                            )
-                                        )
+                            for step in chunk.tool_calls_metadata or ():
+                                step.record(observed_steps, chunk.response_type)
                             yield chunk
 
                         if chunk.response_type == ResponseType.ERROR:
@@ -3258,6 +3125,7 @@ class AssistantService:
                     )
 
                     skill_provenance, skill_activation = _final_skill_runtime_state()
+                    tool_calls = _stored_tool_steps(observed_steps)
                     _attach_generated_file_ids(tool_calls, generated_file_ids_by_call)
                     await self.session_service.complete_question_with_answer(
                         question_id=question_id,
@@ -3344,6 +3212,7 @@ class AssistantService:
                         response_string
                         or reasoning_string
                         or generated_files
+                        or observed_steps
                         or consultations
                         or skill_runtime.snapshot().changed
                     ):
@@ -3370,6 +3239,7 @@ class AssistantService:
                         skill_provenance, skill_activation = (
                             _final_skill_runtime_state()
                         )
+                        tool_calls = _stored_tool_steps(observed_steps)
                         _attach_generated_file_ids(
                             tool_calls, generated_file_ids_by_call
                         )
@@ -3433,23 +3303,7 @@ class AssistantService:
                         getattr(answer, "tool_calls_metadata", None) or [],
                     )
                     non_streaming_tool_calls = [
-                        ToolCallInfo(
-                            server_name=tc.server_name,
-                            tool_name=tc.tool_name,
-                            title=tc.title,
-                            arguments=tc.arguments,
-                            tool_call_id=tc.tool_call_id,
-                            approved=tc.approved,
-                            result_status=tc.result_status,
-                            result=tc.result,
-                            mcp_tool_name=tc.mcp_tool_name,
-                            purpose=tc.purpose,
-                            is_internal=tc.is_internal,
-                            is_bundled=tc.is_bundled,
-                            meta=tc.meta,
-                            structured_content=tc.structured_content,
-                            app_view=tc.app_view,
-                        )
+                        ToolCallInfo.model_validate(tc, from_attributes=True)
                         for tc in non_streaming_tool_metadata
                     ]
                     final_reasoning = getattr(answer, "reasoning_content", None)
@@ -4428,11 +4282,31 @@ class AssistantService:
                 require_tool_approval=require_tool_approval,
             )
             if knowledge.chunks:
+                references = [
+                    McpToolReference(
+                        id=_injected_blob_reference_id(blob.id),
+                        tool_call_id=None,
+                        mcp_tool_name=None,
+                        uri=f"eneo://info-blob/{blob.id}",
+                        mime_type="text/plain",
+                        content="\n\n".join(
+                            chunk.text
+                            for chunk in knowledge.chunks
+                            if chunk.info_blob_id == blob.id
+                        ),
+                        meta={"title": blob.title, "info_blob_id": str(blob.id)},
+                        order=index,
+                    )
+                    for index, blob in enumerate(knowledge.info_blobs)
+                ]
                 yield Completion(
                     response_type=ResponseType.TOOL_CALL,
                     tool_calls_metadata=[
                         ToolCallMetadata(
                             server_name="knowledge",
+                            upload_free_reference_ids=tuple(
+                                ref.id for ref in references
+                            ),
                             tool_name="retrieve",
                             arguments={"query": request.question, "mode": "inject"},
                             result_status="succeeded",
@@ -4442,23 +4316,7 @@ class AssistantService:
                             ),
                         )
                     ],
-                    mcp_tool_references=[
-                        McpToolReference(
-                            id=_injected_blob_reference_id(blob.id),
-                            tool_call_id=None,
-                            mcp_tool_name=None,
-                            uri=f"eneo://info-blob/{blob.id}",
-                            mime_type="text/plain",
-                            content="\n\n".join(
-                                chunk.text
-                                for chunk in knowledge.chunks
-                                if chunk.info_blob_id == blob.id
-                            ),
-                            meta={"title": blob.title, "info_blob_id": str(blob.id)},
-                            order=index,
-                        )
-                        for index, blob in enumerate(knowledge.info_blobs)
-                    ],
+                    mcp_tool_references=references,
                 )
             child_stream = cast(AsyncGenerator[Completion, None], result.completion)
             async with aclosing(child_stream):

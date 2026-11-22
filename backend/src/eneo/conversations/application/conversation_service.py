@@ -113,7 +113,9 @@ class ConversationService:
         Raises:
             ValueError: If neither session_id, assistant_id, nor group_chat_id is provided
         """
-        if not file_ids:
+        if file_ids:
+            await self.file_service.require_upload_read()
+        else:
             file_ids = []
 
         # case 1: continuing a conversation (session_id is provided)

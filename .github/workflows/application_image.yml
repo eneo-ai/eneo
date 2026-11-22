@@ -132,7 +132,7 @@ jobs:
         run: |
           docker run --rm --read-only --network none --entrypoint node "$IMAGE" -e '
             const [major, minor, patch] = process.versions.node.split(".").map(Number);
-            if (major !== 22 || minor < 23 || (minor === 23 && patch < 4)) {
+            if (major !== 22 || minor < 23 || (minor === 23 && patch < 5)) {
               throw new Error(`Unpatched frontend Node runtime: ${process.versions.node}`);
             }
             console.log(JSON.stringify(process.versions));

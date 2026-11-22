@@ -7,9 +7,24 @@ from eneo.questions.question import Question
 async def attach_question_files(
     questions: Sequence[Question],
     *,
-    loader: FileContentLoader,
+    loader: FileContentLoader | None,
+    include_user_uploads: bool,
 ) -> None:
-    """Hydrate files reached through concrete Question↔File relationships."""
+    """Hydrate files reached through concrete Question↔File relationships.
+
+    ``include_user_uploads`` is the principal's ``files`` read grant. Without
+    it, uploads are neither read nor attached and what tools read out of them
+    is left out too (``Question.leave_out_user_uploads``); generated outputs
+    still are attached.
+    """
+    if not include_user_uploads:
+        for question in questions:
+            question.leave_out_user_uploads()
+    if loader is None:
+        if any(question.questions_files for question in questions):
+            raise RuntimeError("Question files require FileContentLoader")
+        return
+
     groups = [
         FileAttachmentGroup(
             owner_kind="question",

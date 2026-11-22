@@ -142,7 +142,8 @@ async def persist_partial_question_answer(
     """
     try:
         async with sessionmanager.session() as session, session.begin():
-            repo = QuestionRepository(session)
+            # Write-only: nothing is read back, so no upload needs to be visible.
+            repo = QuestionRepository(session, include_user_uploads=False)
             await repo.update_with_answer(
                 question_id=question_id,
                 tenant_id=tenant_id,
@@ -181,7 +182,7 @@ async def persist_final_skill_runtime_state(
     """Commit final Skill evidence independently of a failing request transaction."""
 
     async with sessionmanager.session() as session, session.begin():
-        repo = QuestionRepository(session)
+        repo = QuestionRepository(session, include_user_uploads=False)
         await repo.update_skill_runtime_state(
             question_id=question_id,
             tenant_id=tenant_id,
@@ -206,8 +207,13 @@ class SessionService:
         file_content_loader_factory: (
             Callable[[AsyncSession], FileContentLoader] | None
         ) = None,
+        *,
+        include_user_uploads: bool,
     ):
         super().__init__()
+        # The principal's ``files`` read grant, as the injected repositories
+        # got it; the repositories built here per transaction follow it.
+        self._include_user_uploads = include_user_uploads
         self.session_repo = session_repo
         self.question_repo = question_repo
         self.user = user
@@ -222,16 +228,18 @@ class SessionService:
         return self._file_content_loader_factory(session)
 
     def _question_repository(self, session: AsyncSession) -> QuestionRepository:
-        loader = self._file_content_loader(session)
-        if loader is None:
-            return QuestionRepository(session)
-        return QuestionRepository(session, loader)
+        return QuestionRepository(
+            session,
+            self._file_content_loader(session),
+            include_user_uploads=self._include_user_uploads,
+        )
 
     def _session_repository(self, session: AsyncSession) -> SessionRepository:
-        loader = self._file_content_loader(session)
-        if loader is None:
-            return SessionRepository(session)
-        return SessionRepository(session, loader)
+        return SessionRepository(
+            session,
+            self._file_content_loader(session),
+            include_user_uploads=self._include_user_uploads,
+        )
 
     @asynccontextmanager
     async def _write_transaction(self) -> AsyncGenerator[None]:
@@ -401,14 +409,25 @@ class SessionService:
         tool_call_id: str,
     ) -> ToolCallInfo | None:
         """The stored record of one visible tool call, with its result."""
+        root_matches: list[ToolCallInfo] = []
         for question in session.questions or []:
-            for tc in question.tool_calls or []:
-                if tc.tool_call_id and tc.tool_call_id == tool_call_id:
-                    return tc
             for consultation in question.consultations or []:
                 for step in consultation.tool_calls:
                     if str(step.step_id) == tool_call_id:
                         return step
+            root_matches.extend(
+                step
+                for step in question.tool_calls or []
+                if step.tool_call_id == tool_call_id
+            )
+        # Repeated provider IDs can identify the same activation. Distinct
+        # records have no unambiguous root result.
+        if root_matches:
+            first, *remaining = root_matches
+            if not remaining or (
+                first.result is not None and all(step == first for step in remaining)
+            ):
+                return first
         return None
 
     async def get_sessions_by_assistant(

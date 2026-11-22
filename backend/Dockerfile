@@ -44,7 +44,7 @@ ADD --chmod=644 https://openaipublic.blob.core.windows.net/encodings/cl100k_base
 # The Vite app served by FastAPI when WEB_APP_ENABLED is enabled.
 # Build from the repository root with the required named frontend context:
 # docker buildx build --build-context web=./frontend backend
-FROM node:22.23.4-bookworm-slim AS web-build
+FROM node:22.23.5-bookworm-slim AS web-build
 ARG BUILDKIT_SBOM_SCAN_STAGE=true
 COPY --from=oven/bun:1.4.4 /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /repo
