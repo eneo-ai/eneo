@@ -50,6 +50,11 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.exceptions import TypedIOValidationException
+from eneo.object_content.content import (
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+    ObjectContentUnavailableError,
+)
 from eneo.object_content.content_service import ObjectContentService
 from tests.integration.flows import test_flow_consumer_api_contract as consumer
 from tests.integration.flows.test_flow_run_repository import _insert_service_key
@@ -310,6 +315,59 @@ async def test_a_read_that_stalls_past_the_send_deadline_spends_an_attempt(
     assert delivery.claim_token is None
     assert delivery.next_delivery_at > datetime.now(timezone.utc)
     assert await _sending_audits(run.id) == []
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ObjectContentIntegrityError("Stored object content failed verification"),
+        ObjectContentStateError("Object content is not readable"),
+    ],
+)
+async def test_a_file_whose_bytes_are_corrupt_or_gone_is_dead_lettered_unsent(
+    setup_database, run_with_a_document, monkeypatch, error
+):
+    """Bytes that no longer match, or content no longer readable, will not be
+    there on the next attempt either."""
+    run, delivery_id, _ = await run_with_a_document()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    read = AsyncMock(side_effect=error)
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", read)
+
+    outcome = await _run_outbox()
+
+    read.assert_awaited_once()
+    send.assert_not_awaited()
+    assert outcome["dead_lettered"] == 1, outcome
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "dead_lettered"
+    assert error.code in (delivery.delivery_last_error or "")
+    assert await _sending_audits(run.id) == []
+
+
+async def test_a_store_that_is_down_leaves_the_file_to_a_later_attempt(
+    setup_database, run_with_a_document, monkeypatch
+):
+    run, delivery_id, _ = await run_with_a_document()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    read = AsyncMock(
+        side_effect=ObjectContentUnavailableError(
+            "Durable object content is temporarily unavailable"
+        )
+    )
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", read)
+
+    outcome = await _run_outbox()
+
+    read.assert_awaited_once()
+    send.assert_not_awaited()
+    assert outcome["retry_scheduled"] == 1, outcome
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "pending"
+    assert delivery.delivery_attempts == 1
+    assert delivery.next_delivery_at > datetime.now(timezone.utc)
 
 
 async def test_a_document_is_sent_with_a_pool_of_one_connection(

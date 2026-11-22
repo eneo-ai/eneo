@@ -86,7 +86,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
 )
-from eneo.object_content.content import ContentReadGrant
+from eneo.object_content.content import (
+    ContentReadGrant,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+)
 from eneo.object_content.content_service import ObjectContentService
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
@@ -630,9 +634,17 @@ class FlowRunWebhookDeliveryService:
         be read, or no longer match, refuses the body."""
         contents: dict[UUID, bytes] = {}
         if source.grants:
-            payloads = await self.object_content().read_content_bytes(
-                list(source.grants.values())
-            )
+            try:
+                payloads = await self.object_content().read_content_bytes(
+                    list(source.grants.values())
+                )
+            except (ObjectContentIntegrityError, ObjectContentStateError) as exc:
+                # Bytes that no longer match, or content no longer readable,
+                # will not be there on a later attempt either. A store that is
+                # down is left to one.
+                raise ValueError(
+                    f"Run result delivery could not read its files: {exc.code}."
+                ) from exc
             contents = {
                 file_id: payloads[grant.content_id]
                 for file_id, grant in source.grants.items()
