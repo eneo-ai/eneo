@@ -13,6 +13,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { pollWhile } from "@/lib/api/query";
 import { refusalText } from "./run-messages";
+import { useReadsOnReturn } from "./run-webhooks";
 import { runStatusView, shouldPoll } from "./run-status";
 import {
   getRunStatus,
@@ -72,9 +73,12 @@ export function CorrectionHistory({
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
+  // Each page is an audited read: not read again on coming back while the result is on its way.
+  // Opening the history and reading more pages are asked for, and read as always.
   const history = useInfiniteQuery({
     ...transcriptRevisionsQueryOptions(flowId, runId, stepId),
-    enabled: open
+    enabled: open,
+    ...useReadsOnReturn(flowId, runId)
   });
   const items = history.data?.pages.flatMap((page) => page.items) ?? [];
 

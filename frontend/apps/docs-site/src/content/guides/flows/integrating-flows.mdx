@@ -2182,8 +2182,9 @@ The request is `application/json` with the schema `eneo.flow_run_result.v1`:
 - A result is never sent in part. A result over 20 MiB, a document step that
   left no file, or a file whose bytes are corrupt dead-letters the delivery
   without a request, and Eneo does not try again. A file whose bytes are
-  missing from the store spends one attempt without a request, and the next
-  attempt dead-letters the delivery. A store that does not answer spends an
+  missing from the store spends one attempt without a request. If attempts
+  remain, the next one dead-letters the delivery; found on the last attempt,
+  the delivery is dead-lettered at once. A store that does not answer spends an
   attempt, and the delivery is tried again later.
 - Headers may read run data; the address may not. Content-Type is set by the
   mode and cannot be authored.

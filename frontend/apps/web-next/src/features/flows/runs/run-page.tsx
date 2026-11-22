@@ -33,7 +33,8 @@ import {
   currentDeliveries,
   deliveryUnderWay,
   RunWebhookDeliveries,
-  sendingFinishedRunResult,
+  currentResultDelivery,
+  useReadsOnReturn,
   type Delivery
 } from "./run-webhooks";
 import { RunFiles } from "./run-files";
@@ -429,7 +430,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   // Coming back to the tab or reconnecting reads the run's status and graph again, a finished
   // run's too: a correction saved on it moves its revision. Not while its result is on its way.
-  const readAgainOnReturn = () => !sendingFinishedRunResult(queryClient, flowId, runId);
+  const readsOnReturn = useReadsOnReturn(flowId, runId);
 
   // A poll that answers the same keeps the same data, so the page does not
   // render again: the data carries no clock (`useNowAt` keeps the deadlines),
@@ -450,8 +451,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         : false
     ),
     refetchIntervalInBackground: false,
-    refetchOnWindowFocus: readAgainOnReturn,
-    refetchOnReconnect: readAgainOnReturn
+    ...readsOnReturn
   });
 
   const signature = progress.data
@@ -505,9 +505,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     ),
     refetchIntervalInBackground: false
   });
-  const latestDelivery =
-    (settled && deliveryUnderWay(statusDelivery) ? deliveryPoll.data?.result_delivery : null) ??
-    statusDelivery;
+  const latestDelivery = currentResultDelivery(progress.data?.status, deliveryPoll.data);
   const steps = useShownRead(
     useQuery({
       ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),

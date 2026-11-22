@@ -21,7 +21,7 @@ import {
   makeRunStep,
   makeRunSummary
 } from "./run-fixtures";
-import type { RunDetail, RunSummary } from "./runs-api";
+import { runKeys, type RunDetail, type RunSummary } from "./runs-api";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -1849,83 +1849,218 @@ describe("FlowRunPage", () => {
       }
     });
 
-    it("reads only the status of a finished run whose result is on its way, when the person comes back or the network returns", async () => {
-      vi.useFakeTimers({ shouldAdvanceTime: true });
-      answerAudioRun();
-      answerSentAfterRun(resultDelivery());
-      state.routes[STEPS] = () => ({
-        body: [
-          makeRunStep(1, {
-            input_payload_json: {
-              transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } }
-            }
-          }),
-          makeRunStep(2, {
-            output_payload_json: { text: "" },
-            diagnostics: [
-              {
-                code: "run_result_sent_after_run",
-                message: "Sent after the run.",
-                severity: "info"
-              }
-            ]
-          })
-        ]
-      });
-      renderRun(["flows_view", "flows_manage"]);
-      await transcriptLines();
-      expect(
-        screen.getByRole("region", { name: messages.flow_run_extras_send_heading })
-      ).toBeTruthy();
+    describe("while a finished run's result is on its way", () => {
+      const REVISIONS =
+        "GET /api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions";
+      const FLOW = "GET /api/v1/flows/{id}/";
       const asked = () => state.stub.calls.map((call) => `${call.method} ${call.path}`);
-      // Away past the app's 30 s: the result's polls wait, and its status is stale on return.
-      async function away(leave: () => void, back: () => void) {
+
+      function version(revision: number) {
+        return {
+          id: `rev-${revision}`,
+          correction_set_id: "set-1",
+          created_at: "2026-10-21T09:00:00Z",
+          edited_by_principal_type: "user",
+          edited_by_user_id: "user-1",
+          edited_by_service_id: null,
+          flow_id: "flow-1",
+          flow_run_id: "run-1",
+          step_id: "step-1",
+          tenant_id: "tenant-1",
+          revision,
+          segments_hash: "hash-1",
+          occurrences_json: [],
+          speaker_edits_json: [],
+          speaker_names: {}
+        };
+      }
+
+      /**
+       * A finished audio run whose result is on its way: its first step searched knowledge, its
+       * transcript has a history of two pages, and its trace can be read.
+       */
+      function answerSendingAudioRun() {
+        answerAudioRun();
+        answerSentAfterRun(resultDelivery());
+        answerEvidence();
+        state.routes[STEPS] = () => ({
+          body: [
+            makeRunStep(1, {
+              input_payload_json: {
+                transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } },
+                rag: { status: "no_chunks" }
+              }
+            }),
+            makeRunStep(2, {
+              output_payload_json: { text: "" },
+              diagnostics: [
+                {
+                  code: "run_result_sent_after_run",
+                  message: "Sent after the run.",
+                  severity: "info"
+                }
+              ]
+            })
+          ]
+        });
+        // A saved correction: the transcript offers its history.
+        state.routes[CORRECTIONS] = () => ({
+          body: [
+            {
+              flow_run_id: "run-1",
+              step_id: "step-1",
+              created_at: "2026-10-21T09:00:00Z",
+              updated_at: "2026-10-21T09:00:00Z",
+              edited_by_principal_type: "user",
+              schema_version: 3,
+              segments_hash: "hash-1",
+              stale: false,
+              revision: 2,
+              occurrences: [],
+              speaker_edits: [],
+              speaker_names: {}
+            }
+          ]
+        });
+        state.routes[REVISIONS] = (init: { params: { query?: { after_revision?: number } } }) => {
+          const second = init.params.query?.after_revision !== undefined;
+          return {
+            body: {
+              baseline: {
+                revision: 0,
+                occurrences_json: [],
+                speaker_edits_json: [],
+                speaker_names: {}
+              },
+              truncated: false,
+              next_after_revision: second ? null : 1,
+              items: [version(second ? 2 : 1)]
+            }
+          };
+        };
+      }
+
+      /**
+       * Away past the app's 30 s and back, by the tab or the network: the requests the return
+       * made. Focus and the network are given back even when an assertion fails.
+       */
+      async function away(how: "focus" | "network") {
+        const set = (on: boolean) =>
+          how === "focus" ? focusManager.setFocused(on) : onlineManager.setOnline(on);
         await act(() => vi.advanceTimersByTimeAsync(100));
         const before = asked().length;
-        act(leave);
-        await act(() => vi.advanceTimersByTimeAsync(31_000));
-        expect(asked().slice(before)).toEqual([]);
-        act(back);
-        await act(() => vi.advanceTimersByTimeAsync(100));
-        return asked().slice(before);
+        try {
+          act(() => set(false));
+          await act(() => vi.advanceTimersByTimeAsync(31_000));
+          expect(asked().slice(before)).toEqual([]);
+          act(() => set(true));
+          await act(() => vi.advanceTimersByTimeAsync(100));
+          return asked().slice(before);
+        } finally {
+          focusManager.setFocused(undefined);
+          onlineManager.setOnline(true);
+        }
       }
 
-      // Each return reads the result's status once, and nothing of the finished run itself: not its
-      // transcript's corrections either, an audited read. The flow keeps the app's rule.
-      const focusReads = await away(
-        () => focusManager.setFocused(false),
-        () => focusManager.setFocused(true)
-      );
-      focusManager.setFocused(undefined);
-      const reconnectReads = await away(
-        () => onlineManager.setOnline(false),
-        () => onlineManager.setOnline(true)
-      );
-      for (const reads of [focusReads, reconnectReads]) {
-        expect([...reads].sort()).toEqual([STATUS, "GET /api/v1/flows/{id}/"].sort());
+      /** Only the result's status, once, besides the flow the page frame reads. */
+      function onlyTheStatus(reads: string[]) {
+        expect(reads.filter((read) => read !== FLOW)).toEqual([STATUS]);
       }
 
-      // Delivered, as the result's own read sees: a finished run is read again on return as usual.
-      state.routes[STATUS] = () => ({
-        body: makeRunSummary({
+      const delivered = () =>
+        makeRunSummary({
           result_delivery: resultDelivery({
             delivery_status: "delivered",
             delivery_attempts: 1,
             delivered_at: "2026-10-21T08:01:09Z",
             state: "delivered"
           })
-        })
+        });
+
+      it("reads only the result's status on return, with the transcript, its history, the trace and the knowledge open, and reads the run again once the result is delivered", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSendingAudioRun();
+        renderRun(["flows_view", "flows_manage"]);
+        await transcriptLines();
+        expect(
+          screen.getByRole("region", { name: messages.flow_run_extras_send_heading })
+        ).toBeTruthy();
+        fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+        await screen.findByRole("button", { name: messages.flow_run_extras_debug_copy });
+        fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_knowledge_heading }));
+        fireEvent.click(
+          await screen.findByRole("button", { name: messages.flow_runs_knowledge_show })
+        );
+
+        // The history opens and shows its second page while the result is on its way.
+        fireEvent.click(
+          await screen.findByRole("button", { name: messages.flow_transcript_history_heading })
+        );
+        const history = await screen.findByRole("list", {
+          name: messages.flow_transcript_history_heading
+        });
+        expect(within(history).getByText(/Version 1/)).toBeTruthy();
+        fireEvent.click(
+          screen.getByRole("button", { name: messages.flow_transcript_history_more })
+        );
+        expect(await within(history).findByText(/Version 2/)).toBeTruthy();
+        expect(calls(REVISIONS)).toHaveLength(2);
+
+        // Each return reads the result's status once, and nothing of the finished run itself.
+        const reads = { focus: await away("focus"), network: await away("network") };
+        onlyTheStatus(reads.focus);
+        onlyTheStatus(reads.network);
+
+        // Delivered, as the result's own read sees: a return reads the finished run again.
+        state.routes[STATUS] = () => ({ body: delivered() });
+        // A minute in, the result's status is read every 5 s.
+        await act(() => vi.advanceTimersByTimeAsync(5_100));
+        expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+        const afterDelivery = await away("focus");
+        expect(afterDelivery).toContain(GRAPH);
+        expect(afterDelivery).toContain(CORRECTIONS);
+        expect(afterDelivery).toContain(REVISIONS);
       });
-      // A minute in, the result's status is read every 5 s.
-      await act(() => vi.advanceTimersByTimeAsync(5_100));
-      expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
-      const afterDelivery = await away(
-        () => focusManager.setFocused(false),
-        () => focusManager.setFocused(true)
-      );
-      focusManager.setFocused(undefined);
-      expect(afterDelivery).toContain(GRAPH);
-      expect(afterDelivery).toContain(CORRECTIONS);
+
+      it("goes by the run's own status once it says the result has settled, even when the result's read still says it is on its way", async () => {
+        vi.useFakeTimers({ shouldAdvanceTime: true });
+        answerSendingAudioRun();
+        const { rerender, queryClient } = renderRun(["flows_view", "flows_manage"]);
+        await transcriptLines();
+
+        // Past the app's 30 s, just after one of the result's polls: the run's own read is stale,
+        // the result's is fresh and says it is on its way.
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        const polled = calls(STATUS).length;
+        while (calls(STATUS).length === polled) await act(() => vi.advanceTimersByTimeAsync(50));
+        await act(() => vi.advanceTimersByTimeAsync(50));
+
+        // The page opens again, and the run's own read finds the result delivered.
+        state.routes[STATUS] = () => ({ body: delivered() });
+        const statuses = calls(STATUS).length;
+        rerender(<div />);
+        rerender(
+          <Suspense>
+            <FlowRunPage flowId="flow-1" runId="run-1" />
+          </Suspense>
+        );
+        await transcriptLines();
+        expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        expect(calls(STATUS)).toHaveLength(statuses + 1);
+        expect(
+          queryClient.getQueryData<RunSummary>(runKeys.delivery("flow-1", "run-1"))?.result_delivery
+            ?.state
+        ).toBe("sending");
+        expect(
+          queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress("flow-1", "run-1"))
+            ?.status.result_delivery?.state
+        ).toBe("delivered");
+
+        const reads = await away("focus");
+        expect(reads).toContain(GRAPH);
+        expect(reads).toContain(CORRECTIONS);
+      });
     });
 
     it("shows a transcribing step's transcript as the step's result, and its text when it has no lines", async () => {

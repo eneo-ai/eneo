@@ -3,7 +3,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
-import type { QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import type { Schema } from "@/lib/api/models";
 import { isTerminal } from "./run-status";
 import { runKeys, type RunSummary } from "./runs-api";
@@ -20,20 +20,39 @@ export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | unde
 }
 
 /**
- * Whether the run has finished and its result is still on its way, as the page last read it.
- * Coming back to the tab or reconnecting then reads the result's status alone, not the finished
- * run's reads (the status and graph, the audited corrections). Read from that status first
- * (`runKeys.delivery`): after the run finished, only it sees the delivery settle.
+ * The delivery of the run's result the page goes by. Once the run has finished, the result moves
+ * on without it, and only the result's own status read (`followed`) sees it move: that read counts
+ * while the run's own status says the result is on its way. Otherwise the run's own status counts,
+ * also when the result's read, kept from earlier, still says it is on its way.
  */
-export function sendingFinishedRunResult(
-  queryClient: QueryClient,
-  flowId: string,
-  runId: string
-): boolean {
-  const run = queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress(flowId, runId));
-  if (!run || !isTerminal(run.status.status)) return false;
-  const delivery = queryClient.getQueryData<RunSummary>(runKeys.delivery(flowId, runId));
-  return deliveryUnderWay(delivery?.result_delivery ?? run.status.result_delivery);
+export function currentResultDelivery(
+  run: Pick<RunSummary, "status" | "result_delivery"> | null | undefined,
+  followed: Pick<RunSummary, "result_delivery"> | null | undefined
+): Delivery | null {
+  const own = run?.result_delivery ?? null;
+  if (!run || !isTerminal(run.status) || !deliveryUnderWay(own)) return own;
+  return followed?.result_delivery ?? own;
+}
+
+/**
+ * How a read of the run's own data behaves when the person comes back to the tab or the network
+ * returns: as the app's default, except while the run has finished and its result is on its way.
+ * Then only the result's status is read (`runKeys.delivery`); the run's other reads, the audited
+ * ones among them, wait until the result has settled. Decided when the person comes back, from
+ * what the page last read.
+ */
+export function useReadsOnReturn(flowId: string, runId: string) {
+  const queryClient = useQueryClient();
+  const readAgain = () => {
+    const run = queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress(flowId, runId));
+    const followed = queryClient.getQueryData<RunSummary>(runKeys.delivery(flowId, runId));
+    return !(
+      run &&
+      isTerminal(run.status.status) &&
+      deliveryUnderWay(currentResultDelivery(run.status, followed))
+    );
+  };
+  return { refetchOnWindowFocus: readAgain, refetchOnReconnect: readAgain };
 }
 
 /**
