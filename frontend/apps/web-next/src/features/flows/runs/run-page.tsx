@@ -641,12 +641,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       : [];
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
-  // A finished run no longer changes: reading it again is offered only while the result it sends
-  // is on its way, or after a read failed.
-  const offersRefresh =
-    !settled ||
-    deliveryUnderWay(latestDelivery) ||
-    [progress, detail, steps, deliveryPoll].some((read) => read.isError);
+  // A finished run no longer changes: reading it again is offered only after a read failed.
+  const offersRefresh = !settled || [progress, detail, steps].some((read) => read.isError);
 
   const actions = summary ? (
     <div className="flex flex-wrap items-center gap-2">

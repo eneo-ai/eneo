@@ -942,43 +942,99 @@ describe("FlowRunPage", () => {
     ]);
   });
 
-  it("offers a refresh while the result sent after the run is on its way, and says when its status read failed", async () => {
+  /** Every read of the run that is not its status: the audited detail, steps, graph, transcripts. */
+  function otherReads() {
+    return [calls(DETAIL).length, calls(STEPS).length, calls(GRAPH).length, transcriptReads()];
+  }
+
+  function transcriptReads() {
+    return state.stub.calls.filter((call) => call.path.includes("transcript")).length;
+  }
+
+  const refreshRetry = () =>
+    screen.getByRole("button", {
+      name: messages.query_error_retry_named.replace(
+        "{section}",
+        messages.query_error_refresh_title
+      )
+    });
+
+  /** The refresh error's retry reads the result's status alone, keeps the error while it fails and clears it once read. */
+  async function retryOnlyTheStatus() {
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
+    // Where the delivery last stood stays on the page.
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    const statuses = calls(STATUS).length;
+    const others = otherReads();
+
+    // Still busy: one status read, nothing else, and the error and the last state stay.
+    fireEvent.click(refreshRetry());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(calls(STATUS)).toHaveLength(statuses + 1);
+    expect(screen.getByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(otherReads()).toEqual(others);
+    expect(state.announce).not.toHaveBeenCalledWith(messages.flow_run_more_refreshed);
+
+    // Answered: the error goes, again from the status alone.
+    state.routes[STATUS] = () => ({
+      body: makeRunSummary({ result_delivery: resultDelivery({ delivery_attempts: 1 }) })
+    });
+    fireEvent.click(refreshRetry());
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+    expect(calls(STATUS)).toHaveLength(statuses + 2);
+    expect(otherReads()).toEqual(others);
+    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    expect(state.announce).not.toHaveBeenCalledWith(messages.flow_run_more_refreshed);
+  }
+
+  const busy = () => ({ status: 503, body: { message: "Busy", code: "service_unavailable" } });
+
+  it("offers no refresh of the whole run while its result is on its way, and retries a failed status read alone", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerSentAfterRun(resultDelivery());
     renderRun();
     expect(
       await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
     ).toBeTruthy();
-    // The run is finished, but what it sends is not.
-    expect(screen.getByRole("button", { name: messages.flow_run_more_refresh })).toBeTruthy();
+    // The run is finished: reading it again would read the audited detail; its status follows the
+    // result on its own.
+    expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull();
 
-    state.routes[STATUS] = () => ({
-      status: 503,
-      body: { message: "Busy", code: "service_unavailable" }
-    });
+    state.routes[STATUS] = busy;
     await act(() => vi.advanceTimersByTimeAsync(2_100));
     expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
-    expect(screen.getByRole("button", { name: messages.flow_run_more_refresh })).toBeTruthy();
-    // Where the delivery last stood stays on the page.
-    expect(screen.getByText(messages.flow_runs_result_sending)).toBeTruthy();
+    await retryOnlyTheStatus();
+  });
 
-    // Delivered: a finished run with nothing under way offers no refresh again.
-    state.routes[STATUS] = () => ({
-      body: makeRunSummary({
-        result_delivery: resultDelivery({
-          delivery_status: "delivered",
-          delivery_attempts: 1,
-          delivered_at: "2026-10-21T08:01:09Z",
-          state: "delivered"
-        })
-      })
-    });
-    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_more_refresh }));
-    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
-    await waitFor(() =>
-      expect(screen.queryByRole("button", { name: messages.flow_run_more_refresh })).toBeNull()
-    );
-    expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+  it("says when the result's first own status read failed on a page open while the run completed, and retries it alone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+
+    // The run's own read sees it complete; every status read after it fails.
+    answerSentAfterRun(resultDelivery());
+    const completed = state.routes[STATUS]!;
+    let answered = false;
+    state.routes[STATUS] = (init: never) => {
+      if (answered) return busy();
+      answered = true;
+      return completed(init);
+    };
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(
+      await screen.findByRole("region", { name: messages.flow_run_extras_send_heading })
+    ).toBeTruthy();
+    // The result's reads start from the status that saw the run complete: not read twice.
+    expect(calls(STATUS)).toHaveLength(2);
+
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(3);
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    await retryOnlyTheStatus();
   });
 
   it("uses the words for the result sent after the run as soon as the run completes, before its steps are read again", async () => {
