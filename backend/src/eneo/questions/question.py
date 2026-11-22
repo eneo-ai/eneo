@@ -12,6 +12,7 @@ from pydantic import (
     model_serializer,
     model_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from eneo.ai_models.completion_models.completion_model import CompletionModel
 from eneo.authentication.signed_urls import redact_reference_tokens
@@ -183,7 +184,7 @@ class ToolCallInfo(BaseModel):
     app_view: Optional[dict[str, Any]] = None
     # Internal evidence from the executing step. A missing value never
     # authorizes raw data, regardless of when the question was written.
-    upload_free_reference_ids: tuple[UUID, ...] | None = Field(
+    upload_free_reference_ids: SkipJsonSchema[tuple[UUID, ...] | None] = Field(
         default=None, exclude=True
     )
 

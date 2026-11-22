@@ -173,6 +173,23 @@ def _with_tool_calls(question: Question, upload: File, generated: File) -> Quest
     return question
 
 
+def test_tool_visibility_survives_storage_and_stays_out_of_the_public_contract():
+    source_id = uuid4()
+    step = ToolCallInfo(
+        server_name="knowledge",
+        tool_name="search",
+        upload_free_reference_ids=(source_id,),
+    )
+    restored = ToolCallInfo.model_validate(step.storage_record())
+
+    assert restored.upload_free_reference_ids == (source_id,)
+    assert "upload_free_reference_ids" not in restored.model_dump(mode="json")
+    assert (
+        "upload_free_reference_ids"
+        not in ToolCallInfo.model_json_schema()["properties"]
+    )
+
+
 async def test_without_the_grant_what_a_tool_read_out_of_an_upload_is_left_out():
     upload = _file("private-payroll.txt", "CONFIDENTIAL-PAYROLL-42")
     generated = _file("summary.txt", "GENERATED-SUMMARY")
