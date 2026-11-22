@@ -31,6 +31,7 @@ import { formatSeconds } from "./run-format";
 import { RunFailure } from "./run-failure";
 import {
   currentDeliveries,
+  deliverySignature,
   deliveryUnderWay,
   RunWebhookDeliveries,
   type Delivery
@@ -90,13 +91,6 @@ const INPUT_LOSS_CODES = new Set([
 
 /** The step's diagnostic for a step that sends the run's result once the run has completed. */
 const SENT_AFTER_RUN = "run_result_sent_after_run";
-
-/** What changes when a delivery moves on; equal signatures mean nothing new. */
-function deliverySignature(delivery: Delivery | null | undefined): string {
-  return delivery
-    ? `${delivery.id}:${delivery.state}:${delivery.delivery_attempts}:${delivery.next_delivery_at ?? ""}`
-    : "";
-}
 
 /**
  * Where the run's sent result stands, in the result's words: the same state
@@ -540,7 +534,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const refresh = () => queryClient.invalidateQueries({ queryKey: runKeys.run(flowId, runId) });
   const [refreshing, setRefreshing] = useState(false);
   // Reads everything on the page again, the audited content and the transcripts
-  // included: the person asked.
+  // included: the person asked. The run's graph is the exception while a finished
+  // run's result is followed: where `runProgressQueryOptions` keeps it, its status
+  // alone is read.
   async function refreshNow() {
     if (refreshing) return;
     setRefreshing(true);

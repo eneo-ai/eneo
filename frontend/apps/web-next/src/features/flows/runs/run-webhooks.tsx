@@ -20,6 +20,13 @@ export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | unde
   return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
 }
 
+/** What changes when a delivery moves on; equal signatures mean nothing new. */
+export function deliverySignature(delivery: Delivery | null | undefined): string {
+  return delivery
+    ? `${delivery.id}:${delivery.state}:${delivery.delivery_attempts}:${delivery.next_delivery_at ?? ""}`
+    : "";
+}
+
 /**
  * How a read of the run's own data behaves when the person comes back to the tab or the network
  * returns: as the app's default, except while the run has finished and its result is on its way.
