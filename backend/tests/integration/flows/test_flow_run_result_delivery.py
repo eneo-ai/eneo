@@ -381,8 +381,10 @@ async def _result_delivery_status(run, *, admin_user, test_tenant) -> str:
             tenant=providers.Object(test_tenant),
         )
         service = container.flow_run_service()
-        view = await service.get_run_with_result_files_and_usage(
-            flow_id=run.flow_id, run_id=run.id
+        view = await service.enrich_run_with_result_files_and_usage(
+            run=await service.get_run(
+                run_id=run.id, flow_id=run.flow_id, access_kind="content"
+            )
         )
         detail_view = await service.get_run_detail_with_result_files_and_usage(
             flow_id=run.flow_id, run_id=run.id

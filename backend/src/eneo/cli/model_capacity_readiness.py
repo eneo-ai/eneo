@@ -122,10 +122,7 @@ def add_use(
 
 
 async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantReadiness:
-    from eneo.flows.enums import (
-        flow_output_mode_uses_completion_model,
-        is_terminal_flow_run_status,
-    )
+    from eneo.flows.enums import is_terminal_flow_run_status
     from eneo.flows.published_definition import parse_verified_published_definition
 
     records: dict[UUID, ModelReadiness] = {}
@@ -146,7 +143,7 @@ async def report_tenant(source: ReadinessSource, owner: TenantInDB) -> TenantRea
         assistant_ids = {
             step.assistant_id
             for step in definition.runtime_steps()
-            if flow_output_mode_uses_completion_model(step.output_mode)
+            if step.may_call_completion_provider
         }
         for assistant_id in sorted(assistant_ids):
             # A completion step runs its assistant's model; one that resolves to
