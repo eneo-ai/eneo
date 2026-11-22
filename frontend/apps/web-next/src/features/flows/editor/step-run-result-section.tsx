@@ -143,7 +143,8 @@ export function StepRunResultSections({
         title={t("flow_step_editor_run_result_receiver_title")}
       >
         <Anchor formId={formId} anchor="output_config.http">
-          <TemplateScope value={{ flow, stepOrder: stepOrder + 1 }}>
+          {/* Its headers are read when the result is sent; the step itself holds nothing to read. */}
+          <TemplateScope value={{ flow, stepOrder }}>
             <HttpFields
               formId={formId}
               flowId={flow.id}
@@ -151,11 +152,7 @@ export function StepRunResultSections({
               direction="output"
               config={readHttpConfig(draft.output_config, "output")}
               onChange={(http) => onChange(applyHttpOutputChange(draft, http))}
-              groups={variableGroups({
-                flow,
-                stepOrder: stepOrder + 1,
-                inputConfig: draft.input_config
-              })}
+              groups={variableGroups({ flow, stepOrder })}
               problems={problems}
             />
           </TemplateScope>

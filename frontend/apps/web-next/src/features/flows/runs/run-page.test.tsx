@@ -508,7 +508,8 @@ describe("FlowRunPage", () => {
       within(delivery!).getByText(messages.flow_run_extras_webhook_dead_lettered)
     ).toBeTruthy();
     expect(delivery!.textContent).toContain("5 försök");
-    expect(within(deliveries).getByText(messages.flow_run_extras_webhook_retry_note)).toBeTruthy();
+    // Given up: no attempt is left for the note about trying again.
+    expect(within(deliveries).queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
     await expectNoAxeViolations(container);
   });
 
@@ -887,6 +888,10 @@ describe("FlowRunPage", () => {
     expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
     expect(screen.getByText(messages.flow_run_extras_send_retry_note)).toBeTruthy();
     await expectNoAxeViolations(container);
+    // The status the page opened with is where the delivery's own reads start: read once.
+    expect(calls(STATUS)).toHaveLength(1);
+    // Where it stood on arrival is on the screen, not news.
+    expect(state.announce).not.toHaveBeenCalled();
     const [details, graphs, steps] = [
       calls(DETAIL).length,
       calls(GRAPH).length,
@@ -906,6 +911,10 @@ describe("FlowRunPage", () => {
     expect(
       screen.getByText(messages.flow_runs_result_retry_at.replace("{time}", time))
     ).toBeTruthy();
+    // Each move is said aloud as it happens, in the result's own words.
+    expect(state.announce).toHaveBeenCalledWith(
+      messages.flow_runs_result_retry_at.replace("{time}", time)
+    );
 
     // Delivered: the status says so, and nothing is read again after it.
     const delivered = resultDelivery({
@@ -918,6 +927,7 @@ describe("FlowRunPage", () => {
     await act(() => vi.advanceTimersByTimeAsync(5_100));
     expect(await within(sending).findByText(messages.flow_run_extras_send_delivered)).toBeTruthy();
     expect(screen.getByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_result_delivered);
     const statuses = calls(STATUS).length;
     await act(() => vi.advanceTimersByTimeAsync(60_000));
     expect(calls(STATUS)).toHaveLength(statuses);
@@ -945,6 +955,21 @@ describe("FlowRunPage", () => {
     expect(screen.queryByText(messages.flow_run_extras_webhook_heading)).toBeNull();
     expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
     release();
+
+    // Followed on from there: it lands, and the page says so.
+    state.routes[STATUS] = () => ({
+      body: makeRunSummary({
+        result_delivery: resultDelivery({
+          delivery_status: "delivered",
+          delivery_attempts: 1,
+          delivered_at: "2026-10-21T08:01:09Z",
+          state: "delivered"
+        })
+      })
+    });
+    await act(() => vi.advanceTimersByTimeAsync(6_100));
+    expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+    expect(state.announce).toHaveBeenCalledWith(messages.flow_runs_result_delivered);
   });
 
   it("keeps a run complete when the result sent after it could not be sent", async () => {
@@ -965,6 +990,8 @@ describe("FlowRunPage", () => {
     expect(screen.getAllByText(messages.flow_runs_status_completed).length).toBeGreaterThan(0);
     expect(screen.queryByText(messages.flow_runs_status_failed)).toBeNull();
     expect(screen.queryByText(messages.flow_run_extras_webhook_retry_note)).toBeNull();
+    // Nothing more will be tried, so no note says it will.
+    expect(screen.queryByText(messages.flow_run_extras_send_retry_note)).toBeNull();
   });
 
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {

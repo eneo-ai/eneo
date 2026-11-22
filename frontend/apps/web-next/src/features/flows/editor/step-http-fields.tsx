@@ -23,6 +23,7 @@ import {
   httpsHostFixed,
   httpUrlProblem,
   isSecretSentinel,
+  runResultUrlFixed,
   type HttpBodyMode,
   type HttpConfig,
   type HttpHeader,
@@ -477,7 +478,10 @@ export function HttpFields({
       ? t("flow_step_editor_http_url_missing")
       : urlProblem === "invalid"
         ? t("flow_step_editor_http_url_invalid")
-        : null;
+        : // The save refuses it too; said here as soon as the field is left.
+          sendsRunResult && !runResultUrlFixed(url)
+          ? t("flow_step_editor_http_run_result_url_fixed")
+          : null;
   const urlError = problem ?? localUrlProblem;
 
   const inUse =

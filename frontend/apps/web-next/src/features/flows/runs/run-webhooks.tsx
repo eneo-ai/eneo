@@ -112,7 +112,8 @@ export function RunWebhookDeliveries({
   sentAfterRun: (order: number) => boolean;
 }) {
   const t = useTranslations();
-  const unsettled = deliveries.filter((delivery) => delivery.state !== "delivered");
+  // The note on trying again holds only while an attempt is still to come.
+  const unsettled = deliveries.filter(deliveryUnderWay);
   return (
     <div className="flex flex-col gap-2">
       <List hasDividers density="compact" edge="flush">
