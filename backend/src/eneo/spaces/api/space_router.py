@@ -622,6 +622,7 @@ async def create_space_assistant(
     status_code=410,
     response_model=GeneralError,
     response_description="Group chats are retired.",
+    responses=responses.get_responses([401, 403, 404]),
     description=(
         "Retired: group chats became assistants with specialists. Always 410. "
         "Create an assistant and add its specialists instead."
