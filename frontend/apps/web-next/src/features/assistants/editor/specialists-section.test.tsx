@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -8,7 +8,7 @@ import { SpecialistsSection } from "./specialists-section";
 
 const save = vi.hoisted(() => vi.fn().mockResolvedValue({}));
 vi.mock("./use-assistant", () => ({
-  useUpdateAssistant: () => ({ mutateAsync: save, isPending: false })
+  useUpdateAssistant: () => ({ mutateAsync: save })
 }));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({
@@ -70,6 +70,35 @@ it("keeps existing assignments when adding a specialist and editing its routing 
   fireEvent.click(screen.getByRole("button", { name: "Ta bort specialist" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith({ specialists: [] }));
 });
+
+it.each(["Spara", "Ta bort specialist"])(
+  "keeps focus and accepts one edit while %s is pending",
+  async (label) => {
+    const request = Promise.withResolvers<object>();
+    save.mockReturnValueOnce(request.promise);
+    renderInApp(
+      <SpecialistsSection
+        assistant={{ id: "parent", permissions: ["edit"], specialists: existing }}
+        supportsTools
+      />
+    );
+    await choose("IT");
+    const button = screen.getByRole("button", { name: label });
+    const other = screen.getByRole("button", {
+      name: label === "Spara" ? "Ta bort specialist" : "Spara"
+    });
+    button.focus();
+    fireEvent.click(button);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    expect(button.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(button);
+    fireEvent.click(button);
+    fireEvent.click(other);
+    expect(save).toHaveBeenCalledTimes(1);
+    await act(async () => request.resolve({}));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Specialister" }));
+  }
+);
 
 it("shows a reader the configured specialists without editing controls", () => {
   renderInApp(
