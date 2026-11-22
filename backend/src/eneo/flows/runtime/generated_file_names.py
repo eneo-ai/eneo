@@ -6,10 +6,11 @@ import math
 import unicodedata
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from functools import cached_property
 from typing import cast
 
+from eneo.flows.domain.flow import flow_run_day
 from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.domain.step_deliverable import (
     file_name_expressions,
@@ -90,14 +91,10 @@ class GeneratedFileNames:
         run_label: str | None = None,
         run_date: date | None = None,
     ) -> GeneratedFileNames:
-        if run_created_at.tzinfo is None:
-            run_created_at = run_created_at.replace(tzinfo=timezone.utc)
         return cls(
             # A run's own name, when a file name can keep any of it.
             flow_name=run_label if run_label and _clean(run_label) else flow_name,
-            # Eneo has no user or tenant time zone: a run without a day of its
-            # own is dated by its UTC day.
-            run_day=run_date or run_created_at.astimezone(timezone.utc).date(),
+            run_day=flow_run_day(run_date=run_date, created_at=run_created_at),
             step_names={step.step_order: step.user_description or "" for step in steps},
             documents={
                 output_type: tuple(

@@ -503,10 +503,11 @@ def _kind_configuration(
             )
         case FlowStepKind.SEND_RUN_RESULT:
             # It reads the step before it, so the save refuses it first; what
-            # it sends is the run's result, not its input.
+            # it sends is the run's result, not its input. Text is a type every
+            # step's output feeds, so no step put before it is refused for it.
             return _configuration(
                 input_source=FlowInputSource.PREVIOUS_STEP,
-                input_type=read_type,
+                input_type=FlowInputType.TEXT,
                 output_mode=FlowOutputMode.HTTP_POST,
                 output_type=FlowOutputType.TEXT,
                 output_config={

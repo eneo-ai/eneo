@@ -19,7 +19,7 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunDeliverablePublic,
     FlowRunTextDeliverablePublic,
 )
-from eneo.flows.domain.flow import FlowRun, FlowStepResult
+from eneo.flows.domain.flow import FlowRun, FlowStepResult, flow_run_day
 from eneo.flows.domain.step_output import (
     FileBackedStepText,
     StepOutputMetadataError,
@@ -163,6 +163,12 @@ def run_result_body(
         "run_id": str(run.id),
         "run_created_at": run.created_at.isoformat(),
         "run_completed_at": run.finished_at.isoformat(),
+        # The run's own name and day, so a receiver can title and file the
+        # result without reading them out of file names.
+        "run_label": run.run_label,
+        "run_date": flow_run_day(
+            run_date=run.run_date, created_at=run.created_at
+        ).isoformat(),
         "deliverables": [_body_part(part, contents=contents) for part in parts],
     }
 

@@ -39,6 +39,7 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunOutputContract,
     FlowRunResultPublic,
     FlowRunStructuredResultPublic,
+    OutboundHttpDeliveryStatus,
     final_step_delivery_status,
 )
 from eneo.flows.api.flow_runtime_paths import (
@@ -429,9 +430,11 @@ def _project_run_result(
         # read without it is a run that completed on delivery.
         return FlowRunOutboundHttpResultPublic(
             kind="outbound_http",
-            delivery_status=(
-                final_delivery_status or FlowOutboxDeliveryStatus.DELIVERED
-            ).value,
+            # The alias lists every member; the model refuses one added later.
+            delivery_status=cast(
+                OutboundHttpDeliveryStatus,
+                final_delivery_status or FlowOutboxDeliveryStatus.DELIVERED,
+            ),
         )
 
     if final_output.delivery is FlowOutputDelivery.ARTIFACT:

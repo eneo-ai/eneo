@@ -4690,6 +4690,51 @@ def test_a_result_with_something_to_send_publishes() -> None:
     assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []
 
 
+def test_a_marked_text_earlier_in_the_flow_is_something_to_send() -> None:
+    # The step before the sender holds JSON, which is never delivered; the
+    # marked text two steps back is.
+    steps = [
+        _step(
+            1,
+            output_mode="compose_text",
+            output_type="text",
+            output_config={"deliverable": {"label": "Sammanfattning"}},
+        ),
+        _step(2),
+        _step(
+            3,
+            output_mode="http_post",
+            output_type="text",
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    assert publish_step_refusals(steps, metadata_json=None, prompt_templates={}) == []
+
+
+def test_a_step_that_sends_the_run_result_takes_no_upload() -> None:
+    # It sends the run's deliverables and never reads an upload, so a run
+    # would ask for a file it drops.
+    steps = [
+        _step(1, output_mode="compose_text", output_type="text"),
+        _step(
+            2,
+            output_mode="http_post",
+            output_type="text",
+            input_config=_UPLOAD_RUN,
+            output_config=_SEND_RUN_RESULT,
+        ),
+    ]
+
+    [saved] = draft_step_refusals(steps, metadata_json=None)
+    [published] = publish_step_refusals(steps, metadata_json=None, prompt_templates={})
+
+    for refusal in (saved, published):
+        assert refusal.context is not None
+        assert refusal.context["field"] == "input_config.runtime_input"
+        assert refusal.context["step_order"] == 2
+
+
 # A read of a step the flow does not have, and of free-text run input the run
 # form does not collect.
 _STALE_READS = "{{ step_99.output.text }} {{ flow_input.text }}"

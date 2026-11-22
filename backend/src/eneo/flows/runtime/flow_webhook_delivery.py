@@ -86,7 +86,11 @@ from eneo.main.exceptions import (
     NotFoundException,
     TypedIOValidationException,
 )
-from eneo.object_content.content import ContentReadGrant
+from eneo.object_content.content import (
+    ContentReadGrant,
+    ObjectContentIntegrityError,
+    ObjectContentStateError,
+)
 from eneo.object_content.content_service import ObjectContentService
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.tenant_repo import TenantRepository
@@ -411,6 +415,7 @@ class FlowRunWebhookDeliveryService:
         deadline: FlowWebhookDeliveryDeadline,
     ) -> WebhookDeliveryPayload:
         preparation = asyncio.timeout_at(deadline.sends_end_at)
+        reading_files = False
         try:
             async with preparation:
                 async with self.webhook_delivery_repo.session.begin():
@@ -419,16 +424,24 @@ class FlowRunWebhookDeliveryService:
                     return payload
                 # The files' bytes are read on a connection of their own, once
                 # this delivery's transaction no longer holds one.
+                reading_files = True
                 return await self._with_run_result_body(
                     payload, source=source, tenant_id=row.tenant_id
                 )
         except TimeoutError as exc:
-            if preparation.expired():
-                raise WebhookSendNotStartedError(
-                    "The webhook delivery job ran out of time while preparing "
-                    "the request."
+            if not preparation.expired():
+                raise
+            # A slow job gives its claim back unspent, but a store that never
+            # answers would then hold the delivery forever: a read cut by the
+            # deadline spends the attempt and waits out the backoff.
+            if reading_files:
+                raise TimeoutError(
+                    "The webhook delivery job ran out of time while reading the "
+                    "run result's files."
                 ) from exc
-            raise
+            raise WebhookSendNotStartedError(
+                "The webhook delivery job ran out of time while preparing the request."
+            ) from exc
 
     async def _release_unsent_claim(
         self, *, row: FlowRunWebhookDeliveryRow
@@ -621,9 +634,17 @@ class FlowRunWebhookDeliveryService:
         be read, or no longer match, refuses the body."""
         contents: dict[UUID, bytes] = {}
         if source.grants:
-            payloads = await self.object_content().read_content_bytes(
-                list(source.grants.values())
-            )
+            try:
+                payloads = await self.object_content().read_content_bytes(
+                    list(source.grants.values())
+                )
+            except (ObjectContentIntegrityError, ObjectContentStateError) as exc:
+                # Bytes that no longer match, or content no longer readable,
+                # will not be there on a later attempt either. A store that is
+                # down is left to one.
+                raise ValueError(
+                    f"Run result delivery could not read its files: {exc.code}."
+                ) from exc
             contents = {
                 file_id: payloads[grant.content_id]
                 for file_id, grant in source.grants.items()

@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -17,10 +18,12 @@ from eneo.flows.api.flow_run_contract_models import (
     FlowRunTextDeliverablePublic,
 )
 from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.runtime import RuntimeStep
 from eneo.flows.enums import FlowOutputType
 from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
 from eneo.flows.http_transport import EffectiveHttpRequest
 from eneo.flows.runtime.flow_webhook_delivery import WebhookDeliveryPayload
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
 from eneo.flows.runtime.run_result_body import (
     RUN_RESULT_MAX_BYTES,
     RunResultText,
@@ -73,6 +76,8 @@ RUN = SimpleNamespace(
     flow_id=UUID("00000000-0000-4000-8000-000000000002"),
     created_at=datetime(2026, 11, 20, 8, 0, tzinfo=timezone.utc),
     finished_at=datetime(2026, 11, 20, 8, 5, tzinfo=timezone.utc),
+    run_label=None,
+    run_date=None,
 )
 
 
@@ -92,6 +97,8 @@ def test_each_deliverable_file_is_sent_with_its_bytes_and_checksum() -> None:
         "run_id": str(RUN.id),
         "run_created_at": "2026-11-20T08:00:00+00:00",
         "run_completed_at": "2026-11-20T08:05:00+00:00",
+        "run_label": None,
+        "run_date": "2026-11-20",
         "deliverables": [
             {
                 "kind": "artifact",
@@ -113,6 +120,78 @@ def test_each_deliverable_file_is_sent_with_its_bytes_and_checksum() -> None:
         ],
     }
     assert run_result_file_ids([deliverable]) == [file.file_id]
+
+
+# 00:30 in Stockholm on 21 November is still the 20th in UTC; Eneo has no time
+# zone to name a day by, so a run without a day of its own is dated by its
+# UTC day.
+STOCKHOLM_JUST_AFTER_MIDNIGHT = datetime(
+    2026, 11, 21, 0, 30, tzinfo=ZoneInfo("Europe/Stockholm")
+)
+
+
+def _run(**overrides: object) -> SimpleNamespace:
+    return SimpleNamespace(**{**vars(RUN), **overrides})
+
+
+def _body_of(run: SimpleNamespace) -> dict[str, object]:
+    file = _file()
+    body = run_result_body(
+        run=run,  # pyright: ignore[reportArgumentType]
+        parts=[_deliverable(file)],
+        contents={file.file_id: CONTENT},
+    )
+    assert isinstance(body, dict)
+    return body
+
+
+def test_a_named_and_dated_run_sends_its_name_and_day() -> None:
+    """A receiver titles and files the result by the run's own name and
+    day."""
+    body = _body_of(_run(run_label="Stand-up", run_date=date(2026, 11, 18)))
+
+    assert body["run_label"] == "Stand-up"
+    assert body["run_date"] == "2026-11-18"
+
+
+def test_a_run_without_a_name_or_day_sends_its_utc_creation_day() -> None:
+    body = _body_of(_run(created_at=STOCKHOLM_JUST_AFTER_MIDNIGHT))
+
+    assert body["run_label"] is None
+    assert body["run_date"] == "2026-11-20"
+
+
+@pytest.mark.parametrize("run_date", [date(2026, 11, 18), None])
+def test_the_body_and_the_file_names_give_a_run_the_same_day(
+    run_date: date | None,
+) -> None:
+    run = _run(created_at=STOCKHOLM_JUST_AFTER_MIDNIGHT, run_date=run_date)
+    names = GeneratedFileNames.for_run(
+        flow_name="Möte",
+        steps=(
+            RuntimeStep(
+                step_id=uuid4(),
+                step_order=1,
+                assistant_id=uuid4(),
+                user_description=None,
+                input_source="flow_input",
+                input_bindings=None,
+                input_config=None,
+                output_mode="pass_through",
+                output_config=None,
+                output_type="docx",
+            ),
+        ),
+        run_created_at=run.created_at,
+        form_values={},
+        run_label=run.run_label,
+        run_date=run.run_date,
+    )
+
+    day = _body_of(run)["run_date"]
+
+    assert day == (run_date or date(2026, 11, 20)).isoformat()
+    assert names.name(step_order=1, output_type="docx") == f"Möte {day}.docx"
 
 
 @pytest.mark.parametrize(
