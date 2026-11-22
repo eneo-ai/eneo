@@ -29,8 +29,8 @@ configuration has been corrected.
 
 ## Read the answer and its steps
 
-The main answer is the orchestrating assistant's synthesis. Expand **View
-steps** to see each question sent to a specialist, its actual answer, its
+The main answer is the orchestrating assistant's synthesis. In the primary web
+app, expand **View steps** to see each question sent to a specialist, its actual answer, its
 sources and the tools it used. Repeated questions to the same specialist appear
 as separate steps. Opening a saved conversation restores these recorded steps
 without running the assistants again.
@@ -137,5 +137,6 @@ Space's catalog. If none qualifies, an editor must choose an eligible model.
 It has no instructions, so review each former group: give it a prompt that says
 what the combined answer should look like, and check the specialists and their
 descriptions. Mentions (`@assistant`) and the "show response labels" setting are
-gone; the steps under the answer show who said what. Calls to the old
+gone. Open **View steps** in the primary web app to see who said what, including
+for a new answer you started in the beta. Calls to the old
 `/api/v1/group-chats/` endpoints answer `410` with `code: "group_chats_retired"`.

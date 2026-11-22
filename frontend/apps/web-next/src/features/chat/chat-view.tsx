@@ -671,17 +671,14 @@ function ConversationView({
     lastMessage?.role === "assistant"
       ? lastMessage.parts
           .map(approvalForPart)
-          .findLast((approval) => approval?.status === "pending")
+          .findLast(
+            (approval) =>
+              approval?.status === "pending" &&
+              pendingTools(approval, approvals.decisions).length > 0
+          )
       : undefined;
-  const decisionBar =
-    phone === true &&
-    // A pending call only waits while its stream is open: a broken stream
-    // gives the composer back (and its retry).
-    busy &&
-    waitingApproval &&
-    pendingTools(waitingApproval, approvals.decisions).length > 0
-      ? waitingApproval
-      : null;
+  // A broken stream gives the composer back with its retry action.
+  const decisionBar = phone === true && busy ? (waitingApproval ?? null) : null;
   // The decision is made: the composer is back where the bar was, and the
   // focus goes with it if it had none left.
   const barApprovalId = decisionBar?.approval_id ?? null;

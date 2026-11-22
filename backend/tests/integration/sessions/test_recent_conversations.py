@@ -26,7 +26,7 @@ from eneo.database.tables.sessions_table import Sessions
 from eneo.database.tables.spaces_table import Spaces, SpacesUserGroups, SpacesUsers
 from eneo.database.tables.user_groups_table import UserGroups
 from eneo.database.tables.users_table import usergroups_users_table
-from eneo.main.models import ModelId
+from eneo.main.models import GeneralError, ModelId
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleCreate
 from eneo.users.user import UserAdd, UserInDB, UserState
@@ -383,6 +383,29 @@ async def test_lists_exactly_the_partners_whose_history_opens(
             f"listed={str(partner_id) in listed_partners}"
         )
     assert len(listed_partners) == 3
+
+
+async def test_retired_group_routes_return_the_documented_error(
+    client, db_container, member, patch_auth_service_jwt
+):
+    async with db_container() as container:
+        space_id = await _space(
+            container.session(),
+            tenant_id=member.tenant_id,
+            name="Personal",
+            owner_id=member.id,
+        )
+    headers = {"Authorization": f"Bearer {await _token(db_container, member)}"}
+    for method, path in (
+        ("GET", "/api/v1/group-chats/"),
+        ("GET", f"/api/v1/group-chats/{uuid4()}/"),
+        ("POST", f"/api/v1/spaces/{space_id}/applications/group-chats/"),
+    ):
+        response = await client.request(method, path, headers=headers)
+        assert response.status_code == 410, response.text
+        error = GeneralError.model_validate(response.json())
+        assert error.code == "group_chats_retired"
+        assert "assistant" in error.message
 
 
 async def test_history_by_group_chat_id_is_gone(

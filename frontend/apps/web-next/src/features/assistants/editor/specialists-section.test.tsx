@@ -15,8 +15,7 @@ vi.mock("@/features/spaces/use-space", () => ({
     space: makeSpace({
       assistants: [
         { id: "parent", name: "Samordnaren" },
-        { id: "legal", name: "Juridik" },
-        { id: "it", name: "IT", description: "IT-policy" }
+        { id: "legal", name: "Juridik" }
       ]
     })
   })

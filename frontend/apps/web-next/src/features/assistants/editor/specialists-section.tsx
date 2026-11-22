@@ -25,10 +25,15 @@ export function SpecialistsSection({
   const [submitted, setSubmitted] = useState(false);
   const field = useRef<HTMLTextAreaElement>(null);
   const saved = assistant.specialists ?? [];
-  const candidates = (space.applications?.assistants.items ?? []).filter(
-    (item) => item.id !== assistant.id
+  // A visible saved link remains editable even when it is absent from the picker catalog.
+  const candidates = new Map(
+    saved.map((item) => [item.id, { name: item.handle, description: item.default_description }])
   );
-  const candidate = candidates.find((item) => item.id === selected);
+  for (const item of space.applications?.assistants.items ?? []) {
+    if (item.id !== assistant.id)
+      candidates.set(item.id, { name: item.name, description: item.description });
+  }
+  const candidate = candidates.get(selected);
   const member = saved.find((item) => item.id === selected);
   const required = !candidate?.description?.trim();
   const invalid = required && !description.trim();
@@ -65,7 +70,7 @@ export function SpecialistsSection({
             value={selected}
             placeholder={t("choose_a_specialist_to_add")}
             isDisabled={update.isPending}
-            options={candidates.map(({ id, name }) => ({ value: id, label: name }))}
+            options={[...candidates].map(([value, { name: label }]) => ({ value, label }))}
             onChange={select}
           />
           {candidate && (

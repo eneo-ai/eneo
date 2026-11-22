@@ -38,7 +38,9 @@
         },
         {
           "id": "assistant-specialists",
-          "permissions": { "allOf": ["assistants"] },
+          "permissions": {
+            "allOf": ["assistants"]
+          },
           "type": "new",
           "area": "assistants",
           "title": {
@@ -46,8 +48,8 @@
             "sv": "Assistenter som rådfrågar specialister"
           },
           "body": {
-            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. Expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
-            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. Expandera Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
+            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. In the primary web app, expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
+            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. I det ordinarie webbgränssnittet kan du välja Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
           }
         },
         {
