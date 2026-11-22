@@ -48,6 +48,7 @@ from eneo.completion_models.domain.execution_budget import (
 )
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
+    history_may_contain_uploads,
 )
 from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
@@ -2564,6 +2565,14 @@ class AssistantService:
             space=space, assistant=assistant
         )
 
+        if assistant.specialists:
+            # Project linked metadata for this reader without changing the stored configuration.
+            assistant = copy.copy(assistant)
+            assistant.specialists = [
+                link
+                for link in assistant.specialists
+                if actor.can_read_assistant(space.get_assistant(assistant_id=link.id))
+            ]
         return assistant, permissions, effective_config
 
     async def get_preflight_target(
@@ -4021,6 +4030,7 @@ class AssistantService:
         require_tool_approval: bool,
         num_chunks_override: int | None = None,
         prompt_addendum: str | None = None,
+        question_may_contain_uploads: bool = False,
     ) -> tuple["CompletionModelResponse", "DatastoreResult"]:
         """Execute with short preparation reads when no caller transaction exists."""
         db_session = self.repo.session
@@ -4028,6 +4038,7 @@ class AssistantService:
             resources = await self._prepare_execution_resources(prepared, session)
         response, datastore_result = await prepared.assistant_to_ask.ask(
             question=prepared.cleaned_question,
+            question_may_contain_uploads=question_may_contain_uploads,
             completion_service=self.completion_service,
             references_service=self.references_service,
             rerank=resources.rerank,
@@ -4053,6 +4064,18 @@ class AssistantService:
         )
 
         return response, datastore_result
+
+    async def _require_delegation_reranker(self, turn: _PreparedAssistantTurn) -> None:
+        model_id = turn.assistant_to_ask.rerank_model_id
+        if model_id is not None and (
+            self.rerank_service is None
+            or not await self.rerank_service.selectable(
+                model_id, turn.space.security_classification
+            )
+        ):
+            raise UnauthorizedException(
+                "The configured reranker is no longer eligible."
+            )
 
     async def _resolve_delegation_candidates(
         self,
@@ -4087,6 +4110,7 @@ class AssistantService:
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
                 )
+                await self._require_delegation_reranker(child)
             except _UNAVAILABLE_CANDIDATE as exc:
                 # A member the caller may not use, or one whose own model,
                 # knowledge or classification is not usable right now, is left
@@ -4234,16 +4258,7 @@ class AssistantService:
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
                 )
-                rerank_model_id = fresh.assistant_to_ask.rerank_model_id
-                if rerank_model_id is not None and (
-                    self.rerank_service is None
-                    or not await self.rerank_service.selectable(
-                        rerank_model_id, fresh.space.security_classification
-                    )
-                ):
-                    raise UnauthorizedException(
-                        "The configured reranker is no longer eligible."
-                    )
+                await self._require_delegation_reranker(fresh)
                 if (
                     fresh.space.id != plan.space_id
                     or provider_policy(fresh) != policies[assistant_id]
@@ -4251,6 +4266,10 @@ class AssistantService:
                     raise UnauthorizedException(
                         "Assistant configuration changed; start a new turn."
                     )
+
+        parent_may_contain_uploads = bool(
+            prepared.files
+        ) or history_may_contain_uploads(session.questions)
 
         async def execute(
             request: ConsultationRequest,
@@ -4277,6 +4296,7 @@ class AssistantService:
                 child,
                 child_session,
                 inputs,
+                question_may_contain_uploads=parent_may_contain_uploads,
                 stream=True,
                 version=version,
                 require_tool_approval=require_tool_approval,
@@ -4308,7 +4328,9 @@ class AssistantService:
                                 ref.id for ref in references
                             ),
                             tool_name="retrieve",
-                            arguments={"query": request.question, "mode": "inject"},
+                            # The model-written query already lives on the consultation.
+                            # This shareable step contains only configured knowledge.
+                            arguments={"mode": "inject"},
                             result_status="succeeded",
                             is_internal=True,
                             result="\n\n".join(

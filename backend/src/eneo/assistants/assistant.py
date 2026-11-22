@@ -588,6 +588,7 @@ class Assistant(Entity):
         skill_runtime: "SkillActivationRuntime | None" = None,
         document_template: "DocumentTemplateReference | None" = None,
         rerank: "RerankSpec | None" = None,
+        question_may_contain_uploads: bool = False,
     ) -> tuple["CompletionModelResponse", DatastoreResult]:
         # Overrides come from the orchestrating service (personal assistant
         # governance). When set, they take precedence over the values stored on
@@ -672,6 +673,7 @@ class Assistant(Entity):
         response = await completion_service.get_response(
             model=completion_model,
             text_input=question,
+            question_may_contain_uploads=question_may_contain_uploads,
             files=completion_message_files,
             prompt=_with_addendum(
                 prompt_override

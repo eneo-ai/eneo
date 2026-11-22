@@ -464,7 +464,14 @@ async def test_revoked_parent_receives_no_partial_evidence_after_child_timeout()
                 ),
             )
         ]
-    assert events[-1].consultations[0].status == "denied"
+    denied = events[-1].consultations[0]
+    assert denied.status == "denied"
+    assert denied.answer == denied.question == ""
+    assert not denied.tool_calls and not denied.references
+    assert runtime.consultations == [denied]
+    stored = ConsultationInfo.from_execution(denied)
+    assert stored.public().answer == stored.storage_record()["question"] == ""
+    assert "Protected evidence" not in json.dumps(stored.storage_record())
     assert "Protected evidence" not in runtime.result_for("one")
 
 
@@ -541,6 +548,26 @@ def specialist_plan(turn: TurnFixture, monkeypatch: pytest.MonkeyPatch, speciali
         turn.assistant.id,
         (AssistantCandidate(specialist.id, specialist.name, "Specialist"),),
     )
+
+
+async def test_specialist_configuration_is_projected_for_each_reader(turn: TurnFixture):
+    from eneo.spaces.api.space_models import SpaceRoleValue
+
+    hidden = copy.deepcopy(turn.assistant)
+    hidden.id = uuid4()
+    hidden.published = False
+    give_specialists(turn, hidden)
+    member = turn.space.members[turn.user.id]
+    member.role = SpaceRoleValue.VIEWER
+    viewed, _, _ = await turn.service.get_assistant_with_effective_config(
+        turn.assistant.id
+    )
+    assert viewed.specialists == []
+    member.role = SpaceRoleValue.EDITOR
+    edited, _, _ = await turn.service.get_assistant_with_effective_config(
+        turn.assistant.id
+    )
+    assert [link.id for link in edited.specialists] == [hidden.id]
 
 
 async def test_a_widget_visitor_is_answered_by_the_assistant_alone(
@@ -820,14 +847,22 @@ async def test_consultation_history_preserves_repeated_steps_but_hides_raw_resul
 
 
 @pytest.mark.parametrize(
-    "knowledge_mode, stop",
-    [("inject", None), ("tool", None), ("tool", "cancel"), ("tool", "timeout")],
+    "knowledge_mode, stop, parent_upload",
+    [
+        ("inject", None, False),
+        ("tool", None, False),
+        ("inject", None, True),
+        ("tool", None, True),
+        ("tool", "cancel", False),
+        ("tool", "timeout", False),
+    ],
 )
 async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     turn: TurnFixture,
     monkeypatch: pytest.MonkeyPatch,
     knowledge_mode: str,
     stop: str | None,
+    parent_upload: bool,
 ):
     import re
 
@@ -837,6 +872,7 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
         SKILL_ACTIVATION_TOOL_NAME,
     )
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
+    from eneo.files.file_models import File, FileType
     from eneo.info_blobs.info_blob import (
         InfoBlobChunkInDBWithScore,
         InfoBlobInDBWithScore,
@@ -854,6 +890,21 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     child.name = "IT"
     child.prompt.text = "Use the IT evidence."
     child.knowledge_mode = KnowledgeMode(knowledge_mode)
+
+    upload = File(
+        id=uuid4(),
+        user_id=turn.user.id,
+        tenant_id=turn.user.tenant_id,
+        name="request.txt",
+        mimetype="text/plain",
+        file_type=FileType.TEXT,
+        checksum="test",
+        size=6,
+        text="Review",
+    )
+    turn.service.file_service.get_files_by_ids.side_effect = (
+        lambda file_ids: [upload] if upload.id in file_ids else []
+    )
     embedding = EmbeddingModel(
         id=uuid4(),
         created_at=None,
@@ -1037,6 +1088,7 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
             question="Review",
             assistant_id=turn.assistant.id,
             delegation_plan=plan,
+            file_ids=[upload.id] if parent_upload else [],
             stream=knowledge_mode == "tool",
             version=2,
         )
@@ -1095,10 +1147,25 @@ async def test_specialist_keeps_skill_and_knowledge_in_existing_execution_path(
     knowledge_step = next(
         step for step in saved.tool_calls if step.server_name == "knowledge"
     )
-    assert knowledge_step.upload_free_reference_ids == (saved.references[0].id,)
+    projected = Question.model_construct(
+        consultations=[ConsultationInfo.model_validate(saved.storage_record())]
+    )
+    projected.leave_out_user_uploads()
+    restricted = projected.consultations[0]
+    if parent_upload and knowledge_mode == "tool":
+        assert knowledge_step.upload_free_reference_ids is None
+        assert not restricted.references
+        redacted = next(
+            step for step in restricted.tool_calls if step.server_name == "knowledge"
+        )
+        assert not redacted.arguments and redacted.result is None
+    else:
+        assert knowledge_step.upload_free_reference_ids == (saved.references[0].id,)
+        assert restricted.references == saved.references
     if knowledge_mode == "inject":
         # Reference rows are keyed by their own id: reusing the blob id made
         # the second question citing the same blob violate the primary key.
+        assert knowledge_step.arguments == {"mode": "inject"}
         assert saved.references[0].id != source_id
         assert str(saved.references[0].id)[:8] == str(source_id)[:8]
     assert called == (["search_knowledge"] if knowledge_mode == "tool" else [])
@@ -1414,6 +1481,7 @@ async def test_unreadable_specialists_are_excluded_before_history_writes(
         "NoModelSelectedException",
         "KnowledgeModelUnavailableException",
         "SecurityClassificationMismatchException",
+        "unavailable_reranker",
     ],
 )
 async def test_specialists_with_unusable_configuration_are_left_out(
@@ -1439,11 +1507,14 @@ async def test_specialists_with_unusable_configuration_are_left_out(
         ),
     )
     prepare = turn.service._prepare_turn
-    exc_type = getattr(exceptions, failure)
+    if failure == "unavailable_reranker":
+        broken.rerank_model_id = uuid4()
 
     async def prepare_or_fail(**kwargs):
-        if kwargs["assistant_id"] == broken.id:
-            raise exc_type("The selected AI model is not available in this space.")
+        if kwargs["assistant_id"] == broken.id and failure != "unavailable_reranker":
+            raise getattr(exceptions, failure)(
+                "The selected AI model is not available in this space."
+            )
         return await prepare(**kwargs)
 
     monkeypatch.setattr(turn.service, "_prepare_turn", prepare_or_fail)

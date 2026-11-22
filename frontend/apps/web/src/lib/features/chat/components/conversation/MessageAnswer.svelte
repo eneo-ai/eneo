@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { awaitingConsultationSteps } from "../../consultationApproval";
   import { analysisStep } from "../../analysisStep";
   import { analysisStepLabels } from "../../analysisStepLabels";
   import { toolFileInputs, type ToolInputFile } from "../../toolFileInputs";
@@ -138,10 +139,11 @@
   const pendingToolCalls = $derived([
     ...(pendingConsultations.length ? [] : (mcpToolCalls ?? []).filter(isPending)).map((step) => ({
       ...step,
-      consultationName: ""
+      consultationName: "",
+      step_id: undefined
     })),
     ...pendingConsultations.flatMap((consultation) =>
-      (consultation.tool_calls ?? [])
+      awaitingConsultationSteps(consultation)
         .filter((step) => step.tool_call_id && pendingToolIds.includes(step.tool_call_id))
         .map((step) => ({
           ...step,
@@ -279,6 +281,7 @@
         skillName: isSkillActivation(tc) ? (tc.title ?? tc.tool_name) : null,
         args: tc.arguments,
         toolCallId: tc.tool_call_id,
+        renderKey: `${tc.tool_call_id ?? ""}:${i}`,
         status,
         previousAttempt: status === "failed" && !isSkillActivation(tc) && previousAttempts.has(i),
         // Function steps (capability calls, whichever provider served them)
@@ -536,7 +539,7 @@
         {/if}
         {#if !folded || openInternalRuns.has(runIndex)}
           <div class="flex flex-col {rowGap} {folded ? 'pl-7' : ''}">
-            {#each visibleSteps as step, i (step.toolCallId ?? i)}
+            {#each visibleSteps as step (step.renderKey)}
               {#if step.skillName !== null}
                 <SkillActivationStep
                   name={step.skillName}
@@ -568,7 +571,7 @@
           </div>
         {/if}
         {#if folded && !openInternalRuns.has(runIndex)}
-          {#each run.steps.filter(createdDocument) as step, i (step.toolCallId ?? i)}
+          {#each run.steps.filter(createdDocument) as step (step.renderKey)}
             <InternalToolStep
               runningLabel={step.toolName}
               doneLabel={step.doneLabel}
@@ -587,7 +590,7 @@
 
   {#if pendingToolCalls.length > 0}
     <div class="mb-5 flex flex-col gap-2">
-      {#each pendingToolCalls as toolCall, idx (toolCall.tool_call_id ?? idx)}
+      {#each pendingToolCalls as toolCall, idx (toolCall.step_id ?? toolCall.tool_call_id ?? idx)}
         {@const isLastToolCall = idx === pendingToolCalls.length - 1}
         {@const isPendingTool =
           toolCall.tool_call_id && pendingToolIds.includes(toolCall.tool_call_id)}

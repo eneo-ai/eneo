@@ -1189,7 +1189,10 @@ async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
         for e in _tool_call_events(completions)
         if e.tool_calls_metadata[0].result_status == "pending"
     ]
-    assert pending_ids == ["call_1", second_id]
+    assert len(pending_ids) == len(set(pending_ids)) == 2
+    assert pending_ids[0] == "call_1"
+    if second_id != "call_1":
+        assert pending_ids[1] == second_id
     assert mcp_proxy.calls == [
         [("server__tool", {"q": "a"}), ("server__tool", {"other": "b"})]
     ]
@@ -1201,7 +1204,7 @@ async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
     ]
     assert [(call.tool_call_id, call.arguments) for call in results] == [
         ("call_1", {"q": "a"}),
-        (second_id, {"other": "b"}),
+        (pending_ids[1], {"other": "b"}),
     ]
 
 
@@ -1890,8 +1893,10 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
+@pytest.mark.parametrize("last_tool", ["server__tool", "unregistered"])
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     monkeypatch: pytest.MonkeyPatch,
+    last_tool: str,
 ):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1899,8 +1904,13 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     max_rounds = _cap_tool_rounds(monkeypatch, 3)
     follow_ups = [
         _AsyncChunkStream([_tool_call_chunk(tool_call_id=f"call_{i}")])
-        for i in range(1, max_rounds + 1)
+        for i in range(1, max_rounds)
     ]
+    follow_ups.append(
+        _AsyncChunkStream(
+            [_tool_call_chunk(tool_call_id=f"call_{max_rounds}", tool_name=last_tool)]
+        )
+    )
     follow_ups.append(
         _AsyncChunkStream([_text_chunk("partial answer", finish_reason="stop")])
     )
@@ -1956,7 +1966,10 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
         for tm in (c.tool_calls_metadata or [])
         if tm.result_status == "failed" and tm.tool_call_id == f"call_{max_rounds}"
     ]
-    assert refused_events
+    assert len(refused_events) == 1
+    assert refused_events[0].mcp_tool_name == (
+        last_tool if last_tool == "server__tool" else "unknown_tool"
+    )
 
 
 async def test_forced_final_drops_ignored_tool_calls_without_pending_events(
