@@ -33,6 +33,7 @@ import {
   currentDeliveries,
   deliveryUnderWay,
   RunWebhookDeliveries,
+  sendingFinishedRunResult,
   type Delivery
 } from "./run-webhooks";
 import { RunFiles } from "./run-files";
@@ -426,6 +427,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const rescue = useFocusRescue();
   const lastStatus = useRef<string | null>(null);
 
+  // Coming back to the tab or reconnecting reads the run's status and graph again, a finished
+  // run's too: a correction saved on it moves its revision. Not while its result is on its way.
+  const readAgainOnReturn = () => !sendingFinishedRunResult(queryClient, flowId, runId);
+
   // A poll that answers the same keeps the same data, so the page does not
   // render again: the data carries no clock (`useNowAt` keeps the deadlines),
   // and reading `isFetching` or `dataUpdatedAt` here on the success path
@@ -444,7 +449,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
         : false
     ),
-    refetchIntervalInBackground: false
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: readAgainOnReturn,
+    refetchOnReconnect: readAgainOnReturn
   });
 
   const signature = progress.data

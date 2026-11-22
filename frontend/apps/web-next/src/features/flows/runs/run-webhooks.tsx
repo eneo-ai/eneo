@@ -3,7 +3,10 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
+import type { QueryClient } from "@tanstack/react-query";
 import type { Schema } from "@/lib/api/models";
+import { isTerminal } from "./run-status";
+import { runKeys, type RunSummary } from "./runs-api";
 
 export type Delivery = Schema<"FlowRunWebhookDeliveryStatePublic">;
 
@@ -14,6 +17,23 @@ export type Delivery = Schema<"FlowRunWebhookDeliveryStatePublic">;
  */
 export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | undefined): boolean {
   return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
+}
+
+/**
+ * Whether the run has finished and its result is still on its way, as the page last read it.
+ * Coming back to the tab or reconnecting then reads the result's status alone, not the finished
+ * run's reads (the status and graph, the audited corrections). Read from that status first
+ * (`runKeys.delivery`): after the run finished, only it sees the delivery settle.
+ */
+export function sendingFinishedRunResult(
+  queryClient: QueryClient,
+  flowId: string,
+  runId: string
+): boolean {
+  const run = queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress(flowId, runId));
+  if (!run || !isTerminal(run.status.status)) return false;
+  const delivery = queryClient.getQueryData<RunSummary>(runKeys.delivery(flowId, runId));
+  return deliveryUnderWay(delivery?.result_delivery ?? run.status.result_delivery);
 }
 
 /**

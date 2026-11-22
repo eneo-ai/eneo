@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { focusManager } from "@tanstack/react-query";
+import { focusManager, onlineManager } from "@tanstack/react-query";
 import { Profiler, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -1847,6 +1847,85 @@ describe("FlowRunPage", () => {
         }
         cleanup();
       }
+    });
+
+    it("reads only the status of a finished run whose result is on its way, when the person comes back or the network returns", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerAudioRun();
+      answerSentAfterRun(resultDelivery());
+      state.routes[STEPS] = () => ({
+        body: [
+          makeRunStep(1, {
+            input_payload_json: {
+              transcription: { file_ids: ["audio-1"], source: { attempt_no: 1 } }
+            }
+          }),
+          makeRunStep(2, {
+            output_payload_json: { text: "" },
+            diagnostics: [
+              {
+                code: "run_result_sent_after_run",
+                message: "Sent after the run.",
+                severity: "info"
+              }
+            ]
+          })
+        ]
+      });
+      renderRun(["flows_view", "flows_manage"]);
+      await transcriptLines();
+      expect(
+        screen.getByRole("region", { name: messages.flow_run_extras_send_heading })
+      ).toBeTruthy();
+      const asked = () => state.stub.calls.map((call) => `${call.method} ${call.path}`);
+      // Away past the app's 30 s: the result's polls wait, and its status is stale on return.
+      async function away(leave: () => void, back: () => void) {
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        const before = asked().length;
+        act(leave);
+        await act(() => vi.advanceTimersByTimeAsync(31_000));
+        expect(asked().slice(before)).toEqual([]);
+        act(back);
+        await act(() => vi.advanceTimersByTimeAsync(100));
+        return asked().slice(before);
+      }
+
+      // Each return reads the result's status once, and nothing of the finished run itself: not its
+      // transcript's corrections either, an audited read. The flow keeps the app's rule.
+      const focusReads = await away(
+        () => focusManager.setFocused(false),
+        () => focusManager.setFocused(true)
+      );
+      focusManager.setFocused(undefined);
+      const reconnectReads = await away(
+        () => onlineManager.setOnline(false),
+        () => onlineManager.setOnline(true)
+      );
+      for (const reads of [focusReads, reconnectReads]) {
+        expect([...reads].sort()).toEqual([STATUS, "GET /api/v1/flows/{id}/"].sort());
+      }
+
+      // Delivered, as the result's own read sees: a finished run is read again on return as usual.
+      state.routes[STATUS] = () => ({
+        body: makeRunSummary({
+          result_delivery: resultDelivery({
+            delivery_status: "delivered",
+            delivery_attempts: 1,
+            delivered_at: "2026-10-21T08:01:09Z",
+            state: "delivered"
+          })
+        })
+      });
+      // A minute in, the result's status is read every 5 s.
+      await act(() => vi.advanceTimersByTimeAsync(5_100));
+      expect(await screen.findByText(messages.flow_runs_result_delivered)).toBeTruthy();
+      const afterDelivery = await away(
+        () => focusManager.setFocused(false),
+        () => focusManager.setFocused(true)
+      );
+      focusManager.setFocused(undefined);
+      expect(afterDelivery).toContain(GRAPH);
+      expect(afterDelivery).toContain(CORRECTIONS);
     });
 
     it("shows a transcribing step's transcript as the step's result, and its text when it has no lines", async () => {

@@ -11,8 +11,9 @@ import logging
 import zipfile
 from collections.abc import AsyncIterator
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock
-from uuid import UUID
+from hashlib import sha256
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
@@ -29,6 +30,11 @@ from eneo.database.tables.flow_tables import (
     FlowRunWebhookDeliveries,
     FlowStepAttempts,
     FlowStepResults,
+)
+from eneo.database.tables.object_content_table import (
+    FileContentReferences,
+    ObjectContents,
+    ObjectStoreObjects,
 )
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
@@ -51,12 +57,20 @@ from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.exceptions import TypedIOValidationException
+from eneo.object_content.configuration import ObjectContentSettings
 from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentFailureCode,
+    ContentState,
     ObjectContentIntegrityError,
     ObjectContentStateError,
     ObjectContentUnavailableError,
+    StorageKind,
 )
 from eneo.object_content.content_service import ObjectContentService
+from eneo.object_content.object_store_provider import ObjectStoreProvider
+from eneo.object_content.runtime import object_content_runtime
+from eneo.object_content.s3_object_store import ObjectStoreNotFoundError, S3ObjectStore
 from tests.integration.flows import test_flow_consumer_api_contract as consumer
 from tests.integration.flows.test_flow_run_repository import _insert_service_key
 from tests.integration.flows.test_flow_run_result_delivery import RUN_RESULT_CONFIG
@@ -456,11 +470,12 @@ async def test_a_plain_webhook_whose_deadline_passes_at_the_send_gives_the_claim
         ObjectContentStateError("Object content is not readable"),
     ],
 )
-async def test_a_file_whose_bytes_are_corrupt_or_gone_is_dead_lettered_unsent(
+async def test_a_file_whose_bytes_are_corrupt_or_no_longer_readable_is_dead_lettered_unsent(
     setup_database, run_with_a_document, monkeypatch, error
 ):
-    """Bytes that no longer match, or content no longer readable, will not be
-    there on the next attempt either."""
+    """Bytes that no longer match, or content that stopped being readable
+    after the body was checked, will not be there on the next attempt either.
+    A stored object found missing is the test below."""
     run, delivery_id, _ = await run_with_a_document()
     send = AsyncMock(return_value=_response(200))
     monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
@@ -476,6 +491,118 @@ async def test_a_file_whose_bytes_are_corrupt_or_gone_is_dead_lettered_unsent(
     assert delivery.delivery_status == "dead_lettered"
     assert error.code in (delivery.delivery_last_error or "")
     assert await _sending_audits(run.id) == []
+
+
+async def test_a_file_whose_stored_object_is_gone_spends_one_attempt_then_is_dead_lettered_unsent(
+    setup_database, run_with_a_document, monkeypatch
+):
+    """The store answers that the object is not there. The first attempt marks
+    the content missing and is tried again later; the next attempt finds the
+    file's content no longer stored and dead-letters the delivery before any
+    read. Nothing is sent, and the run stays completed."""
+    run, delivery_id, file_id = await run_with_a_document()
+    # The file's bytes live in the object store, not inline in Postgres.
+    content_id = uuid4()
+    digest = sha256(CONTENT).digest()
+    async with sessionmanager.session() as session, session.begin():
+        session.add(
+            ObjectContents(
+                id=content_id,
+                tenant_id=run.tenant_id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                state=ContentState.AVAILABLE.value,
+                access_class=ContentAccessClass.PRIVATE_RESOURCE.value,
+                sha256=digest,
+                size_bytes=len(CONTENT),
+                declared_media_type=DOCX,
+                verified_media_type=DOCX,
+                idempotency_key=f"gone-{content_id.hex}",
+                request_fingerprint=digest,
+                available_at=sa.func.now(),
+            )
+        )
+        await session.flush()
+        session.add(
+            ObjectStoreObjects(
+                content_id=content_id,
+                storage_kind=StorageKind.OBJECT_STORE.value,
+                object_key=f"test/object-content/{content_id.hex}",
+                verification_chunk_size_bytes=len(CONTENT),
+                verification_chunk_sha256=digest,
+            )
+        )
+        # A reference names its content for good: the file's is replaced, not moved.
+        await session.execute(
+            sa.delete(FileContentReferences).where(
+                FileContentReferences.file_id == file_id
+            )
+        )
+        session.add(
+            FileContentReferences(
+                file_id=file_id,
+                content_id=content_id,
+                variant=FileContentVariant.ORIGINAL.value,
+                ordinal=0,
+            )
+        )
+    # Only the store's client is replaced: it answers that the object is gone.
+    store = MagicMock(spec=S3ObjectStore)
+    store.open_verified_read.return_value.__aenter__.side_effect = (
+        ObjectStoreNotFoundError("The object is not in the bucket")
+    )
+    settings = ObjectContentSettings(
+        _env_file=None,
+        endpoint_url="http://localhost:1",
+        region="local",
+        bucket="gone-test",
+        access_key_id="test",
+        secret_access_key="test",
+        deployment_id=uuid4(),
+        allow_insecure_http=True,
+    )
+    monkeypatch.setattr(
+        object_content_runtime.service,
+        "_object_store_provider",
+        ObjectStoreProvider.fixed(settings, store),
+    )
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+
+    first = await _run_outbox()
+
+    assert first["retry_scheduled"] == 1, first
+    store.open_verified_read.assert_called_once()
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "pending"
+    assert delivery.delivery_attempts == 1
+    assert (delivery.delivery_last_error or "").startswith(
+        "ObjectContentUnavailableError"
+    )
+    [content] = await _read(
+        sa.select(ObjectContents.state, ObjectContents.failure_code).where(
+            ObjectContents.id == content_id
+        )
+    )
+    assert content.state == ContentState.FAILED.value
+    assert content.failure_code == ContentFailureCode.BACKEND_MISSING.value
+
+    second = await _run_outbox(now=delivery.next_delivery_at + timedelta(seconds=1))
+
+    assert second["dead_lettered"] == 1, second
+    # The missing content is not asked of the store again.
+    store.open_verified_read.assert_called_once()
+    send.assert_not_awaited()
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "dead_lettered"
+    assert delivery.delivery_attempts == 2
+    # Refused before any read: the file's content is no longer stored.
+    assert "no longer stored" in (delivery.delivery_last_error or "")
+    assert str(file_id) in (delivery.delivery_last_error or "")
+    assert await _sending_audits(run.id) == []
+    run_status = await _read_one(
+        sa.select(FlowRuns.status).where(FlowRuns.id == run.id)
+    )
+    assert run_status.status == "completed"
 
 
 async def test_a_store_that_is_down_leaves_the_file_to_a_later_attempt(
