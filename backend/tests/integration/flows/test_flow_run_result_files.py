@@ -3,6 +3,7 @@ is committed before each send. The content is stored nowhere but its file."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -31,6 +32,7 @@ from eneo.database.tables.flow_tables import (
 )
 from eneo.files.file_models import FileContentVariant, FileType
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.flows.application import flow_webhook_delivery_policy as webhook_policy
 from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
@@ -43,10 +45,12 @@ from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRepository,
 )
+from eneo.flows.runtime import tasks as tasks_module
 from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
 from eneo.flows.runtime.run_outcome import finalize_run_from_current_results
 from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
 from eneo.main.exceptions import TypedIOValidationException
+from eneo.object_content.content_service import ObjectContentService
 from tests.integration.flows import test_flow_consumer_api_contract as consumer
 from tests.integration.flows.test_flow_run_repository import _insert_service_key
 from tests.integration.flows.test_flow_run_result_delivery import RUN_RESULT_CONFIG
@@ -252,6 +256,59 @@ async def test_files_over_the_cap_dead_letter_before_any_send(
     )
     assert delivery.delivery_status == "dead_lettered"
     assert MARKER not in (delivery.delivery_last_error or "")
+    assert await _sending_audits(run.id) == []
+
+
+async def _delivery(delivery_id: UUID) -> sa.Row:
+    return await _read_one(
+        sa.select(
+            FlowRunWebhookDeliveries.delivery_status,
+            FlowRunWebhookDeliveries.delivery_attempts,
+            FlowRunWebhookDeliveries.next_delivery_at,
+            FlowRunWebhookDeliveries.claim_token,
+            FlowRunWebhookDeliveries.delivery_last_error,
+        ).where(FlowRunWebhookDeliveries.id == delivery_id)
+    )
+
+
+async def test_a_read_that_stalls_past_the_send_deadline_spends_an_attempt(
+    setup_database, run_with_a_document, monkeypatch
+):
+    """A store that never answers would otherwise hand the claim back on
+    every job, and the delivery would never run out of attempts."""
+    run, delivery_id, _ = await run_with_a_document()
+    send = AsyncMock(return_value=_response(200))
+    monkeypatch.setattr(FlowHttpRuntimeHelper, "send_request", send)
+    read_started = asyncio.Event()
+
+    async def _stalled_read(_self, _grants):
+        read_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(ObjectContentService, "read_content_bytes", _stalled_read)
+    # The sends end 2 s after the start, well after the delivery's own
+    # database step.
+    budget = webhook_policy.FlowWebhookDeliveryBudget(
+        max_request_timeout_seconds=0.1,
+        preparation_margin_seconds=1.7,
+        persistence_margin_seconds=2.0,
+        finish_margin_seconds=2.0,
+        claim_window_seconds=0.2,
+    )
+
+    outcome = await asyncio.wait_for(
+        tasks_module._deliver_flow_webhook_outbox(budget=budget, limit=1),
+        timeout=budget.job_timeout_seconds,
+    )
+
+    assert read_started.is_set()
+    send.assert_not_awaited()
+    assert outcome["retry_scheduled"] == 1, outcome
+    delivery = await _delivery(delivery_id)
+    assert delivery.delivery_status == "pending"
+    assert delivery.delivery_attempts == 1
+    assert delivery.claim_token is None
+    assert delivery.next_delivery_at > datetime.now(timezone.utc)
     assert await _sending_audits(run.id) == []
 
 

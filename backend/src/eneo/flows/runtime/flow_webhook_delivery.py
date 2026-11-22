@@ -411,6 +411,7 @@ class FlowRunWebhookDeliveryService:
         deadline: FlowWebhookDeliveryDeadline,
     ) -> WebhookDeliveryPayload:
         preparation = asyncio.timeout_at(deadline.sends_end_at)
+        reading_files = False
         try:
             async with preparation:
                 async with self.webhook_delivery_repo.session.begin():
@@ -419,16 +420,24 @@ class FlowRunWebhookDeliveryService:
                     return payload
                 # The files' bytes are read on a connection of their own, once
                 # this delivery's transaction no longer holds one.
+                reading_files = True
                 return await self._with_run_result_body(
                     payload, source=source, tenant_id=row.tenant_id
                 )
         except TimeoutError as exc:
-            if preparation.expired():
-                raise WebhookSendNotStartedError(
-                    "The webhook delivery job ran out of time while preparing "
-                    "the request."
+            if not preparation.expired():
+                raise
+            # A slow job gives its claim back unspent, but a store that never
+            # answers would then hold the delivery forever: a read cut by the
+            # deadline spends the attempt and waits out the backoff.
+            if reading_files:
+                raise TimeoutError(
+                    "The webhook delivery job ran out of time while reading the "
+                    "run result's files."
                 ) from exc
-            raise
+            raise WebhookSendNotStartedError(
+                "The webhook delivery job ran out of time while preparing the request."
+            ) from exc
 
     async def _release_unsent_claim(
         self, *, row: FlowRunWebhookDeliveryRow
