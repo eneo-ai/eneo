@@ -1,6 +1,7 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { HStack } from "@astryxdesign/core/HStack";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter, LayoutHeader } from "@astryxdesign/core/Layout";
 import { List, ListItem } from "@astryxdesign/core/List";
@@ -653,19 +654,22 @@ function AddStepPicker({
                 <Text type="supporting" size="sm" className="phone:basis-full me-auto">
                   {lands}
                 </Text>
-                <Button label={t("cancel")} isDisabled={pending} onClick={onCancel} />
-                <Button
-                  type="submit"
-                  variant="primary"
-                  label={
-                    selected
-                      ? t("flow_add_step_submit", { name: rowName(selected.task) })
-                      : t("flow_step_editor_add_title")
-                  }
-                  isLoading={pending}
-                  isInterruptible
-                  isDisabled={!selected}
-                />
+                {/* The two wrap together, so Avbryt never sits alone above a long "Lägg till …". */}
+                <HStack gap={3} wrap="wrap" justify="end">
+                  <Button label={t("cancel")} isDisabled={pending} onClick={onCancel} />
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    label={
+                      selected
+                        ? t("flow_add_step_submit", { name: rowName(selected.task) })
+                        : t("flow_step_editor_add_title")
+                    }
+                    isLoading={pending}
+                    isInterruptible
+                    isDisabled={!selected}
+                  />
+                </HStack>
               </div>
             </form>
           </LayoutFooter>

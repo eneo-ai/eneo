@@ -309,6 +309,8 @@ function DeliverableFields({
             label={t("flow_step_editor_deliverable_reset")}
             size="sm"
             variant="ghost"
+            // Its text in line with the explanation above; the ghost's padding is only on hover.
+            className="-ms-3"
             onClick={() => {
               flushSync(() => {
                 setCustomising(false);
