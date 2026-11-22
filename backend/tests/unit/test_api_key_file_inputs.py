@@ -580,6 +580,29 @@ async def test_token_preflight_cannot_read_denied_files(
     files._content_loader.load.assert_not_awaited()
 
 
+async def test_chat_checks_attachments_before_selecting_a_group_member():
+    user = TEST_USER.model_copy()
+    user.active_api_key = _key(user)
+    attachment = _file(user)
+    group = AsyncMock()
+    service = ConversationService(
+        assistant_service=Mock(),
+        group_chat_service=group,
+        session_service=Mock(),
+        completion_service=Mock(),
+        space_service=Mock(),
+        file_service=_files(user, attachment),
+    )
+    with pytest.raises(UnauthorizedException) as denied:
+        await service.ask_conversation(
+            question="Review this attachment",
+            group_chat_id=uuid4(),
+            file_ids=[attachment.id],
+        )
+    assert denied.value.code == "insufficient_resource_permission"
+    group.ask_group_chat.assert_not_awaited()
+
+
 async def test_app_run_cannot_read_denied_input_before_execution():
     user = TEST_USER.model_copy()
     user.active_api_key = _key(user)
