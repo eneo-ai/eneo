@@ -418,7 +418,7 @@ async def test_writing_a_name_or_feedback_text_starts_its_time_again(
         named_days_ago=10,
         feedback_days_ago=40,
     )
-    repository = SessionRepository(retention_session)
+    repository = SessionRepository(retention_session, include_user_uploads=False)
     await repository.update(SessionUpdate(id=renamed, name="New name"))
     await repository.add_feedback(
         SessionFeedback(value=-1, text="New feedback"), renamed
@@ -481,7 +481,7 @@ async def test_a_title_made_late_from_the_turns_goes_with_their_oldest_question(
             )
         )
     await retention_session.flush()
-    repository = SessionRepository(retention_session)
+    repository = SessionRepository(retention_session, include_user_uploads=False)
     await repository.update(
         SessionUpdate(id=titled, name="Title made today"),
         title_from_turns_at=await _revision(retention_session, titled),
@@ -534,7 +534,9 @@ async def test_a_title_made_while_a_turn_it_read_is_removed_is_not_stored(
     read_at = await _revision(retention_session, titled)
 
     await run_registered_retention(retention_session)
-    stored = await SessionRepository(retention_session).update(
+    stored = await SessionRepository(
+        retention_session, include_user_uploads=False
+    ).update(
         SessionUpdate(id=titled, name="Title quoting the removed turn"),
         title_from_turns_at=read_at,
     )

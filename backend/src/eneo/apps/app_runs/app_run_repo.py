@@ -32,6 +32,24 @@ def _serialize_skill_provenance(
     )
 
 
+async def get_update_targets_for_jobs(
+    session: AsyncSession, job_ids: list[UUID]
+) -> Sequence[tuple[UUID, UUID, UUID, UUID, bool]]:
+    stmt = (
+        sa.select(
+            AppRuns.id,
+            AppRuns.user_id,
+            AppRuns.app_id,
+            Spaces.id,
+            Spaces.user_id.is_not(None),
+        )
+        .join(Apps, Apps.id == AppRuns.app_id)
+        .join(Spaces, Spaces.id == Apps.space_id)
+        .where(AppRuns.job_id.in_(job_ids))
+    )
+    return (await session.execute(stmt)).tuples().all()
+
+
 class AppRunRepository:
     def __init__(
         self,
@@ -135,23 +153,6 @@ class AppRunRepository:
         )
 
         return await self._to_domain_many(app_runs_in_db)
-
-    async def get_update_targets_for_jobs(
-        self, job_ids: list[UUID]
-    ) -> Sequence[tuple[UUID, UUID, UUID, UUID, bool]]:
-        stmt = (
-            sa.select(
-                AppRuns.id,
-                AppRuns.user_id,
-                AppRuns.app_id,
-                Spaces.id,
-                Spaces.user_id.is_not(None),
-            )
-            .join(Apps, Apps.id == AppRuns.app_id)
-            .join(Spaces, Spaces.id == Apps.space_id)
-            .where(AppRuns.job_id.in_(job_ids))
-        )
-        return (await self.session.execute(stmt)).tuples().all()
 
     async def add(self, app_run: AppRun) -> AppRun:
         stmt = (
