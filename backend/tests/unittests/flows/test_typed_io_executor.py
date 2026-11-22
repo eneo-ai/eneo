@@ -473,6 +473,121 @@ async def test_resolve_step_input_json_question_binding_overrides_previous_struc
     assert len(summaries) == 1
 
 
+# A reviewed speaker step's result as the run reads it back from storage
+# (JSONB orders an object's keys shortest first): one name set in review, one
+# speaker left unnamed.
+_REVIEWED_SPEAKERS = {
+    "speakers": [
+        {
+            "name": "Bertil Berg",
+            "label": "SPEAKER_00",
+            "evidence": "",
+            "confidence": "high",
+        },
+        {"name": None, "label": "SPEAKER_01", "evidence": "", "confidence": "low"},
+    ]
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("structured", "expected"),
+    [
+        pytest.param(
+            _REVIEWED_SPEAKERS,
+            "[\n"
+            "  {\n"
+            '    "name": "Bertil Berg",\n'
+            '    "label": "SPEAKER_00",\n'
+            '    "evidence": "",\n'
+            '    "confidence": "high"\n'
+            "  },\n"
+            "  {\n"
+            '    "name": null,\n'
+            '    "label": "SPEAKER_01",\n'
+            '    "evidence": "",\n'
+            '    "confidence": "low"\n'
+            "  }\n"
+            "]",
+            id="reviewed",
+        ),
+        pytest.param({"speakers": []}, "", id="no-speakers"),
+    ],
+)
+async def test_resolve_step_input_text_step_reads_the_named_speakers(
+    user, structured, expected
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text="[00:00:00 - 00:00:07] Bertil Berg: Hej.",
+            structured=structured,
+        )
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        output_mode="compose_text",
+        input_bindings={"question": "{{step_2.output.structured.speakers}}"},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == expected
+    assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_text_step_reads_a_speaker_by_index(user):
+    # A text step's source_refs become its question, which resolves an index.
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text="[00:00:00 - 00:00:07] Bertil Berg: Hej.",
+            structured=_REVIEWED_SPEAKERS,
+        )
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_2",
+                    "output": "structured",
+                    "field_path": "speakers.0.name",
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == "Bertil Berg"
+
+
 @pytest.mark.asyncio
 async def test_resolve_step_input_question_binding_rejects_missing_text_artifact(user):
     executor, _, _, _ = _build_executor(user)

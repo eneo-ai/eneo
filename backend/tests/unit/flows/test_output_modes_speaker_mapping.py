@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
 from eneo.flows.enums import FlowInputType, FlowOutputMode, FlowOutputType
 from eneo.flows.flow_capability_manifest import (
     CAPABILITY_REGISTRY,
     supports_step_io_tuple,
 )
-from eneo.flows.output_modes import speaker_mapping_violation
+from eneo.flows.output_modes import (
+    effective_output_contract,
+    speaker_mapping_violation,
+)
 
 
 @pytest.mark.parametrize(
@@ -60,3 +64,23 @@ def test_manifest_io_rule_and_exposure() -> None:
     assert capability.exposure == "not_exposed"
     assert capability.not_exposed_reason
     assert "temporary" not in capability.not_exposed_reason.lower()
+
+
+def test_a_speaker_step_follows_its_fixed_contract() -> None:
+    for mode in ("speaker_mapping", FlowOutputMode.SPEAKER_MAPPING):
+        assert (
+            effective_output_contract(output_mode=mode, output_contract=None)
+            == SPEAKER_MAPPING_OUTPUT_CONTRACT
+        )
+
+
+def test_another_step_follows_its_authored_contract() -> None:
+    authored = {"type": "object", "properties": {"titel": {"type": "string"}}}
+    assert (
+        effective_output_contract(output_mode="pass_through", output_contract=authored)
+        is authored
+    )
+    assert (
+        effective_output_contract(output_mode="pass_through", output_contract=None)
+        is None
+    )
