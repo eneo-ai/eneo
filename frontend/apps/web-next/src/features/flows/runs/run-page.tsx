@@ -3,7 +3,13 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { Collapsible } from "@/components/astryx/collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  useSuspenseQuery,
+  type QueryKey
+} from "@tanstack/react-query";
 import { Info, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
@@ -33,6 +39,7 @@ import {
   currentDeliveries,
   deliveryUnderWay,
   RunWebhookDeliveries,
+  cachedResultDelivery,
   currentResultDelivery,
   useReadsOnReturn,
   type Delivery
@@ -476,11 +483,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // content-free status is read again until the delivery has settled, never the detail (an
   // audited read) or the graph. While the run moves, its own status read carries the delivery.
   const [deliveryClock] = useState(() => createPollClock());
-  const statusDelivery = progress.data?.status.result_delivery ?? null;
+  // The display, this read's polling and what a return reads all go by the newer of the two reads.
   const deliveryPoll = useQuery({
     queryKey: runKeys.delivery(flowId, runId),
     queryFn: ({ signal }) => getRunStatus(flowId, runId, signal),
-    enabled: settled && deliveryUnderWay(statusDelivery),
+    enabled: settled && deliveryUnderWay(cachedResultDelivery(queryClient, flowId, runId)),
     // It starts from the status the page just read, so it is not read twice on opening. Read from
     // the cache: reading `progress.dataUpdatedAt` here would render the page on every poll. Only a
     // status this read follows on from: a running run's would stand in for the first read once the
@@ -495,17 +502,27 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     },
     initialDataUpdatedAt: () =>
       queryClient.getQueryState(runKeys.progress(flowId, runId))?.dataUpdatedAt,
-    refetchInterval: pollEvery<RunSummary>((data) =>
-      data
-        ? deliveryClock(
-            deliverySignature(data.result_delivery),
-            deliveryUnderWay(data.result_delivery)
-          )
-        : false
-    ),
+    // Decided again when the run's own read moves too: a newer row it sees counts here as well.
+    refetchInterval: pollEvery<RunSummary>((data) => {
+      if (!data) return false;
+      const current = cachedResultDelivery(queryClient, flowId, runId);
+      return deliveryClock(deliverySignature(current), deliveryUnderWay(current));
+    }),
     refetchIntervalInBackground: false
   });
-  const latestDelivery = currentResultDelivery(progress.data?.status, deliveryPoll.data);
+  // The data comes from the reads, so that each answer renders; when each was read, from the
+  // cache, for the same reason as above.
+  const readAt = (key: QueryKey) => queryClient.getQueryState(key)?.dataUpdatedAt ?? 0;
+  const latestDelivery = currentResultDelivery(
+    progress.data && {
+      summary: progress.data.status,
+      readAt: readAt(runKeys.progress(flowId, runId))
+    },
+    deliveryPoll.data && {
+      summary: deliveryPoll.data,
+      readAt: readAt(runKeys.delivery(flowId, runId))
+    }
+  );
   const steps = useShownRead(
     useQuery({
       ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),

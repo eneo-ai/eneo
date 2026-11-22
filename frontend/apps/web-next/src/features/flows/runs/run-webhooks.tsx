@@ -3,7 +3,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import type { Schema } from "@/lib/api/models";
 import { isTerminal } from "./run-status";
 import { runKeys, type RunSummary } from "./runs-api";
@@ -19,19 +19,47 @@ export function deliveryUnderWay(delivery: Pick<Delivery, "state"> | null | unde
   return delivery?.state === "sending" || delivery?.state === "retry_scheduled";
 }
 
+/** A read of the run's status, and when it was read (its query's `dataUpdatedAt`). */
+export type StatusRead = {
+  summary: Pick<RunSummary, "status" | "result_delivery">;
+  readAt: number;
+};
+
 /**
  * The delivery of the run's result the page goes by. Once the run has finished, the result moves
- * on without it, and only the result's own status read (`followed`) sees it move: that read counts
- * while the run's own status says the result is on its way. Otherwise the run's own status counts,
- * also when the result's read, kept from earlier, still says it is on its way.
+ * on without it, and two reads see it: the run's own status (`run`) and the result's own status
+ * read (`followed`), which follows it while it is on its way. The newer of the two counts: the one
+ * that saw the row later (its `updated_at`, as an instant), and when both saw it at the same time,
+ * the one read later; the core says whether a pending row is being sent or waits at read time.
+ * While the run moves, or when it has no result to send, its own status counts.
  */
 export function currentResultDelivery(
-  run: Pick<RunSummary, "status" | "result_delivery"> | null | undefined,
-  followed: Pick<RunSummary, "result_delivery"> | null | undefined
+  run: StatusRead | null | undefined,
+  followed: StatusRead | null | undefined
 ): Delivery | null {
-  const own = run?.result_delivery ?? null;
-  if (!run || !isTerminal(run.status) || !deliveryUnderWay(own)) return own;
-  return followed?.result_delivery ?? own;
+  const own = run?.summary.result_delivery ?? null;
+  const other = followed?.summary.result_delivery;
+  if (!run || !own || !isTerminal(run.summary.status) || !followed || !other) return own;
+  const [ownAt, otherAt] = [Date.parse(own.updated_at), Date.parse(other.updated_at)];
+  if (ownAt !== otherAt) return otherAt > ownAt ? other : own;
+  return followed.readAt > run.readAt ? other : own;
+}
+
+/**
+ * `currentResultDelivery` from what the page last read: for what decides on reading, outside the
+ * page's render (when to read the result's status again, and what a return reads).
+ */
+export function cachedResultDelivery(
+  queryClient: QueryClient,
+  flowId: string,
+  runId: string
+): Delivery | null {
+  const run = queryClient.getQueryState<{ status: RunSummary }>(runKeys.progress(flowId, runId));
+  const followed = queryClient.getQueryState<RunSummary>(runKeys.delivery(flowId, runId));
+  return currentResultDelivery(
+    run?.data && { summary: run.data.status, readAt: run.dataUpdatedAt },
+    followed?.data && { summary: followed.data, readAt: followed.dataUpdatedAt }
+  );
 }
 
 /**
@@ -45,11 +73,10 @@ export function useReadsOnReturn(flowId: string, runId: string) {
   const queryClient = useQueryClient();
   const readAgain = () => {
     const run = queryClient.getQueryData<{ status: RunSummary }>(runKeys.progress(flowId, runId));
-    const followed = queryClient.getQueryData<RunSummary>(runKeys.delivery(flowId, runId));
     return !(
       run &&
       isTerminal(run.status.status) &&
-      deliveryUnderWay(currentResultDelivery(run.status, followed))
+      deliveryUnderWay(cachedResultDelivery(queryClient, flowId, runId))
     );
   };
   return { refetchOnWindowFocus: readAgain, refetchOnReconnect: readAgain };
