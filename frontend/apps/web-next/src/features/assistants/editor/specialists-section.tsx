@@ -119,7 +119,7 @@ export function SpecialistsSection({
                 onChange={setDescription}
                 placeholder={candidate.description ?? undefined}
                 isRequired={required}
-                isDisabled={pendingAction !== null}
+                isReadOnly={pendingAction !== null}
                 status={
                   submitted && invalid
                     ? { type: "error", message: t("specialist_description_required") }

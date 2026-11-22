@@ -71,9 +71,13 @@ it("keeps existing assignments when adding a specialist and editing its routing 
   await waitFor(() => expect(save).toHaveBeenCalledWith({ specialists: [] }));
 });
 
-it.each(["Spara", "Ta bort specialist"])(
-  "keeps focus and accepts one edit while %s is pending",
-  async (label) => {
+it.each([
+  { label: "Spara", focus: "button" },
+  { label: "Ta bort specialist", focus: "button" },
+  { label: "Spara", focus: "textbox" }
+])(
+  "keeps focus on the $focus and accepts one edit while $label is pending",
+  async ({ label, focus }) => {
     const request = Promise.withResolvers<object>();
     save.mockReturnValueOnce(request.promise);
     renderInApp(
@@ -87,11 +91,14 @@ it.each(["Spara", "Ta bort specialist"])(
     const other = screen.getByRole("button", {
       name: label === "Spara" ? "Ta bort specialist" : "Spara"
     });
-    button.focus();
+    const role = screen.getByRole("textbox");
+    const origin = focus === "textbox" ? role : button;
+    origin.focus();
     fireEvent.click(button);
     expect(button.getAttribute("aria-busy")).toBe("true");
     expect(button.hasAttribute("disabled")).toBe(false);
-    expect(document.activeElement).toBe(button);
+    expect(role).toHaveProperty("readOnly", true);
+    expect(document.activeElement).toBe(origin);
     fireEvent.click(button);
     fireEvent.click(other);
     expect(save).toHaveBeenCalledTimes(1);
