@@ -94,6 +94,9 @@ def _shape(provider: object, names: dict[int, str], *, top: bool = False) -> obj
         return (type(provider), _shape(provider.provides, names))
     if isinstance(provider, providers.Object):
         return (type(provider), provider.provides, overridden)
+    if isinstance(provider, providers.Delegate):
+        # Injects the provider itself, so it must be the copy's own.
+        return (type(provider), _shape(provider.provides, names), overridden)
     assert isinstance(
         provider, (providers.Callable, providers.Factory, providers.BaseSingleton)
     ), f"Describe {type(provider).__name__} here before Container declares one."
