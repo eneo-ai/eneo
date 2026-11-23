@@ -195,14 +195,16 @@ function headerTokens(call: Record<string, unknown>): string[] {
 /**
  * The earlier steps the step that sends the run's result reads in its own
  * right, in run order: those the values of its headers that are not secret
- * name. The result it sends is not a read.
+ * name by alias or by name. The result it sends is not a read, and neither is
+ * the previous step: the core builds its headers once it has answered, so
+ * there the previous step is its own result.
  */
 export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
   const config = isRecord(sender.output_config) ? sender.output_config : {};
   const reads = new Map<number, FlowStep | null>();
   for (const token of headerTokens(config)) {
     const target = readTarget(token, sender, steps);
-    if (target.kind === "step") {
+    if (target.kind === "step" && target.via !== "previous") {
       reads.set(target.order, steps.find((step) => step.step_order === target.order) ?? null);
     } else if (target.kind === "deleted" && !reads.has(target.order)) {
       reads.set(target.order, null);

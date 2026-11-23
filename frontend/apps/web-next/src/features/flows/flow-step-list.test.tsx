@@ -521,6 +521,24 @@ describe("FlowStepList", () => {
         "Steg 3: Skicka läser Steg 1: Sammanfatta. Ändra först vad som läses där, sedan går steget att ta bort."
       )
     ).toBeTruthy();
+    cleanup();
+
+    // In its headers the previous step is its own result: no read of Steg 2.
+    const config = list[2]!.output_config as Record<string, unknown>;
+    renderList(true, null, {}, true, [
+      list[0]!,
+      list[1]!,
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          ...config,
+          custom_headers: [{ name: "X-Fall", value: "{{föregående_steg}}", secret: false }]
+        }
+      })
+    ]);
+    const previous = screen.getByRole("article", { name: "Steg 3 Skicka" });
+    expect(within(previous).queryByText(messages.flows_step_reads)).toBeNull();
   });
 
   it("folds each step's suggestions into one quiet row with their count", async () => {

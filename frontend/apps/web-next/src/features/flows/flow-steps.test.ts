@@ -220,6 +220,8 @@ describe("stepReadersByNameOrPlace", () => {
     expect(orders(steps(withHeader("{{step_1.output.text}}")), 0)).toEqual([3]);
     // The result it sends is not a read: the step before it is not counted.
     expect(orders(steps(withHeader("{{Sammanfatta}}")), 1)).toEqual([]);
+    // In its headers the previous step is its own result, as the core resolves it.
+    expect(orders(steps(withHeader("{{föregående_steg}}")), 1)).toEqual([]);
     // A secret header's value is never read.
     expect(orders(steps(withHeader("{{Sammanfatta}}", true)), 0)).toEqual([]);
     // The removal check finds the same reader.
