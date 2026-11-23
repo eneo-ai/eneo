@@ -104,6 +104,16 @@ describe("flow retention", () => {
     expect(backend.PUT.mock.calls[0]![1].body).toEqual({ policy: { days: 30 } });
   });
 
+  it("follows a later read of the space's time while the dialog is open", async () => {
+    backend.GET.mockResolvedValue(settings(null, { days: 60 }));
+    const { queryClient } = renderSettings(["retention_manage"]);
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    expect(await screen.findByText(/Från ytan: 60 dagar/)).toBeTruthy();
+    backend.GET.mockResolvedValue(settings(null, { days: 14 }));
+    await queryClient.refetchQueries({ queryKey: ["flows", "retention", "flow-1"] });
+    expect(await screen.findByText(/Från ytan: 14 dagar/)).toBeTruthy();
+  });
+
   it("says the space has no time when nothing applies", async () => {
     backend.GET.mockResolvedValue(settings(null, null));
     await openDialog();

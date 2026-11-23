@@ -137,9 +137,8 @@ function RetentionForm({
   const savedDays = settings.local_policy?.days ?? null;
   const [days, setDays] = useState(savedDays);
   const [refused, setRefused] = useState(false);
-  // The space's time as the server last gave it: a refusal may name a newer one than
-  // this form read, and that one then applies to an empty field too.
-  const [spaceDays, setSpaceDays] = useState(settings.inherited_policy?.days ?? null);
+  // The space's time as the server last gave it, by a read or by a refusal.
+  const spaceDays = settings.inherited_policy?.days ?? null;
   // The field's value is over the space's time; a new value clears it.
   const [overCap, setOverCap] = useState(false);
   const field = useRef<HTMLInputElement>(null);
@@ -166,7 +165,11 @@ function RetentionForm({
         toastApiError(error, t);
         return;
       }
-      setSpaceDays(refusedAt);
+      // The refusal names a newer space time than the one read; an empty field inherits it.
+      queryClient.setQueryData<Schema<"FlowRunRetentionPolicySettings">>(
+        policyKey(flow.id),
+        (current) => (current ? { ...current, inherited_policy: { days: refusedAt } } : current)
+      );
       setOverCap(true);
       field.current?.focus();
     }
