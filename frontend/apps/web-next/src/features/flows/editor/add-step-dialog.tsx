@@ -155,7 +155,7 @@ function AddStepPicker({
   pending: boolean;
   onCancel: () => void;
   onClose: () => void;
-  onSaved: (flow: FlowPublic) => void;
+  onSaved: (flow: FlowPublic, sentRevision: number) => void;
   onPendingChange: (pending: boolean) => void;
   onReloaded: (flow: FlowPublic) => void;
 }) {
@@ -261,24 +261,23 @@ function AddStepPicker({
   }, [chosenId]);
 
   const add = useMutation({
-    mutationFn: ({ task, option }: Row) =>
-      updateFlowEditor(
-        flow.id,
-        newStepUpdate(flow, position, option, {
-          name: stepName(task),
-          format,
-          url,
-          tool: tool
-            ? { mcp_server_id: tool.mcp_server_id, tool_id: tool.tool_id, arguments: {} }
-            : null,
-          prompt: task.prompt ? t(task.prompt) : undefined
-        })
-      ),
+    mutationFn: async ({ task, option }: Row) => {
+      const update = newStepUpdate(flow, position, option, {
+        name: stepName(task),
+        format,
+        url,
+        tool: tool
+          ? { mcp_server_id: tool.mcp_server_id, tool_id: tool.tool_id, arguments: {} }
+          : null,
+        prompt: task.prompt ? t(task.prompt) : undefined
+      });
+      return { updated: await updateFlowEditor(flow.id, update), sent: update.expected_revision };
+    },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
-    onSuccess: (updated, { task }) => {
+    onSuccess: ({ updated, sent }, { task }) => {
       announce(t("flow_step_editor_added", { name: stepName(task) }));
-      onSaved(updated);
+      onSaved(updated, sent);
       onClose();
     },
     onError: (error, { option }) => {
@@ -708,7 +707,8 @@ export function AddStepDialog({
   position: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSaved: (flow: FlowPublic) => void;
+  /** The flow the core answered, and the revision the add was fenced on. */
+  onSaved: (flow: FlowPublic, sentRevision: number) => void;
 }): React.JSX.Element {
   const [pending, setPending] = useState(false);
   const { space } = useSpace();

@@ -1108,7 +1108,14 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                     }}
                     onCancel={closeStep}
                     onUnsavedChange={onUnsavedChange}
-                    onAddStep={canEdit ? setAddAt : undefined}
+                    onStepAdded={
+                      canEdit
+                        ? (updated) => {
+                            saved(updated);
+                            announce(t("flows_step_added"));
+                          }
+                        : undefined
+                    }
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,

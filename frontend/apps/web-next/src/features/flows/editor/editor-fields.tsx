@@ -75,17 +75,29 @@ export function EditorSection({
   id,
   title,
   description,
+  isFocusTarget = false,
   children
 }: {
   id: string;
   title: string;
   description?: string;
+  /** The heading can take focus (`id`), for a change that leaves nothing else to focus. */
+  isFocusTarget?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section aria-labelledby={id} className="border-ax-border flex flex-col gap-4 border-t pt-5">
       <div className="flex flex-col gap-1">
-        <Heading level={3} id={id}>
+        <Heading
+          level={3}
+          id={id}
+          tabIndex={isFocusTarget ? -1 : undefined}
+          className={
+            isFocusTarget
+              ? "focus-visible:outline-ring rounded-ax-inner focus-visible:outline-2 focus-visible:outline-offset-2"
+              : undefined
+          }
+        >
           {title}
         </Heading>
         {description && (

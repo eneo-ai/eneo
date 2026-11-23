@@ -251,7 +251,8 @@ describe("AddStepDialog", () => {
     ).toBe(true);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till Gör text av data" }));
 
-    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated));
+    // With the revision the add was fenced on, which tells the editor it was its own.
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4));
     expect(sent()).toEqual({
       expected_revision: 4,
       definition: {},

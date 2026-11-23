@@ -86,7 +86,7 @@ function renderEditor(
     suggestionDismissal?: SuggestionDismissal;
     suggestionRuns?: number;
     navigation?: StepNavigation;
-    onAddStep?: (position: number) => void;
+    onStepAdded?: (flow: FlowPublic) => void;
     /** The step assistant as the step list already read it. */
     cachedAssistant?: ReturnType<typeof makeAssistant>;
     stepId?: string;
@@ -114,7 +114,7 @@ function renderEditor(
       suggestionDismissal={overrides.suggestionDismissal}
       suggestionRuns={overrides.suggestionRuns}
       navigation={overrides.navigation}
-      onAddStep={overrides.onAddStep}
+      onStepAdded={overrides.onStepAdded}
     />,
     { queryClient }
   );
@@ -3019,13 +3019,15 @@ describe("FlowStepEditor deliverables", () => {
   }, 20_000);
 
   it("offers to add a step before the send when no step before it can be included", async () => {
-    const onAddStep = vi.fn();
-    renderEditor(nothingFlow(false), { stepId: "step-send", onAddStep });
+    renderEditor(nothingFlow(false), { stepId: "step-send", onStepAdded: vi.fn() });
     expect(await screen.findByText(messages.flow_step_editor_run_result_empty_none)).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", { name: messages.flow_step_editor_run_result_add_before })
     );
-    expect(onAddStep).toHaveBeenCalledWith(2);
+    const dialog = await screen.findByRole("dialog", { name: messages.flow_step_editor_add_title });
+    expect(
+      within(dialog).getByText("Hamnar efter Steg 1: Plocka ut, före Steg 2: Skicka")
+    ).toBeTruthy();
   }, 20_000);
 
   it("names the steps that could be included too, under what is sent", async () => {

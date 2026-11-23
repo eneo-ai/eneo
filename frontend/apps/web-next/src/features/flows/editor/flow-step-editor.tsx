@@ -28,6 +28,7 @@ import {
   refreshFlowAssistant,
   updateFlowEditor
 } from "./editor-api";
+import { AddStepDialog } from "./add-step-dialog";
 import { Anchor, focusAnchor, problemStatus, TemplateScope } from "./editor-fields";
 import { RecordUploadProvider, useEditorUploads } from "./editor-uploads";
 import {
@@ -73,7 +74,7 @@ import { stepNameTaken } from "./step-kinds";
 import { stepLabel } from "./step-labels";
 import { StepOutputSection } from "./step-output-section";
 import { StepReadOnly } from "./step-read-only";
-import { StepRunResultSections } from "./step-run-result-section";
+import { openStepButtonId, sendsHeadingId, StepRunResultSections } from "./step-run-result-section";
 import { StepRequestPreviewButton } from "./step-request-preview";
 import { stepUsesModel } from "./step-rules";
 import {
@@ -121,8 +122,11 @@ type EditorProps = {
   anchorRequest?: { anchor: FieldAnchor } | null;
   /** Told true while the step has edits that are not saved, and false once it has none. */
   onUnsavedChange?: (unsaved: boolean) => void;
-  /** Opens "Lägg till steg" at a place in the flow; absent, no step is offered to add. */
-  onAddStep?: (position: number) => void;
+  /**
+   * Told the flow the core answered when a step was added from the editor
+   * ("Lägg till steg före utskicket"); absent, no step is offered to add.
+   */
+  onStepAdded?: (flow: FlowPublic) => void;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -356,7 +360,7 @@ function StepEditorSession({
   suggestionRuns = 0,
   anchorRequest = null,
   onUnsavedChange,
-  onAddStep,
+  onStepAdded,
   onGoStep
 }: Omit<EditorProps, "navigation"> & { onGoStep?: (stepId: string) => void }) {
   const t = useTranslations();
@@ -386,6 +390,23 @@ function StepEditorSession({
   // version (the chat, another tab) changed the same field.
   const [stepBases, setStepBases] = useState<StepEdits>({});
   const [assistantBases, setAssistantBases] = useState<AssistantEdits>({});
+  // "Lägg till steg" opened from here, at that place.
+  const [addAt, setAddAt] = useState<number | null>(null);
+  // The form kept mounted across this editor's own add: the revision it
+  // moved to, and the key the form had before it.
+  const [held, setHeld] = useState<{ revision: number; key: number } | null>(null);
+  // The step added from here. Focus goes to it once the dialog has closed and
+  // given focus back (its effect runs before this one, the parent's).
+  const focusAfterAdd = useRef<string | null>(null);
+  useEffect(() => {
+    const added = focusAfterAdd.current;
+    if (addAt !== null || added === null) return;
+    focusAfterAdd.current = null;
+    (
+      document.getElementById(openStepButtonId(formId, added)) ??
+      document.getElementById(sendsHeadingId(formId))
+    )?.focus();
+  }, [addAt, formId]);
 
   const latestStep = findStep(latest, stepId);
   // Files uploaded in this edit go again when it ends without saving them.
@@ -509,6 +530,7 @@ function StepEditorSession({
       uploads.keepSaved(updated);
       setReceived(updated);
       setPinned(null);
+      setHeld(null);
       setStepEdits({});
       setAssistantEdits({});
       setContractDrafts({});
@@ -572,6 +594,7 @@ function StepEditorSession({
     onSuccess: (fresh) => {
       setReceived(fresh);
       setPinned(fresh);
+      setHeld(null);
       setStale(false);
       setServerProblems({});
       setFormProblems([]);
@@ -640,6 +663,36 @@ function StepEditorSession({
 
   function pin() {
     if (!pinned || !pinnedSession?.dirty) setPinned(flow);
+  }
+
+  // Remounted per saved revision, so local states (a secret being replaced)
+  // start over after a save or a reload; this editor's own add keeps them.
+  const formKey = held?.revision === flow.draft_revision ? held.key : flow.draft_revision;
+
+  /**
+   * A step added from here, at `position`. The edits move onto the flow the
+   * core answered only when the add was fenced on the revision they sit on
+   * and left this step as saved: the next save is then fenced on the new
+   * revision and sends only the edits. Any other newer revision (another
+   * tab, the chat) keeps the banner and its conflict check.
+   */
+  function stepAdded(updated: FlowPublic, sentRevision: number, position: number) {
+    const before = findStep(flow, stepId);
+    const after = findStep(updated, stepId);
+    const own =
+      sentRevision === flow.draft_revision &&
+      before !== null &&
+      after !== null &&
+      EDITABLE_STEP_FIELDS.every((field) =>
+        sameStepField(field, stepConfigOf(before)[field], stepConfigOf(after)[field])
+      );
+    setReceived(updated);
+    if (own) {
+      setPinned(updated);
+      setHeld({ revision: updated.draft_revision, key: formKey });
+    }
+    focusAfterAdd.current = updated.steps.find((step) => step.step_order === position)?.id ?? "";
+    onStepAdded?.(updated);
   }
 
   function changeStep(next: StepConfig) {
@@ -1022,10 +1075,9 @@ function StepEditorSession({
           )}
         </div>
 
-        {/* Remounted per saved revision: local states (a secret being replaced) start over. */}
         <RecordUploadProvider value={uploads.record}>
           <TemplateScope value={{ flow, stepOrder }}>
-            <div key={flow.draft_revision} className="flex flex-col gap-6">
+            <div key={formKey} className="flex flex-col gap-6">
               <Anchor formId={formId} anchor="user_description">
                 <TextInput
                   label={t("flow_step_name")}
@@ -1063,7 +1115,7 @@ function StepEditorSession({
                   onChange={changeStep}
                   problems={shownProblems}
                   onGoStep={onGoStep}
-                  onAddStepBefore={onAddStep}
+                  onAddStepBefore={onStepAdded ? setAddAt : undefined}
                 />
               ) : (
                 <>
@@ -1194,6 +1246,19 @@ function StepEditorSession({
           />
         </div>
       </div>
+
+      {onStepAdded && (
+        // On the flow the edits sit on: its revision fences the add.
+        <AddStepDialog
+          flow={flow}
+          position={addAt ?? stepOrder}
+          open={addAt !== null}
+          onOpenChange={(open) => {
+            if (!open) setAddAt(null);
+          }}
+          onSaved={(updated, sentRevision) => stepAdded(updated, sentRevision, addAt ?? stepOrder)}
+        />
+      )}
 
       {/* "Avbryt" on the save bar and every other way out ask the same: leave the step's edits. */}
       <LeaveConfirmation

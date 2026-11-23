@@ -16,6 +16,16 @@ import { applyHttpOutputChange } from "./step-rules";
 import type { FlowPublic, StepConfig } from "./step-types";
 import { variableGroups } from "./step-variables";
 
+/** The id of the button in "Vad som skickas" that opens `stepId`. */
+export function openStepButtonId(formId: string, stepId: string): string {
+  return `${formId}-open-${stepId}`;
+}
+
+/** The id of the "Vad som skickas" heading, which takes focus when no button can. */
+export function sendsHeadingId(formId: string): string {
+  return `${formId}-sends`;
+}
+
 /**
  * What the step that sends the run's result sends, in step order, and to
  * whom. It sends nothing of its own: the steps the run delivers are chosen
@@ -59,6 +69,7 @@ export function StepRunResultSections({
     return (
       <Button
         key={id}
+        id={openStepButtonId(formId, id)}
         label={label}
         size="sm"
         variant="ghost"
@@ -77,7 +88,11 @@ export function StepRunResultSections({
 
   return (
     <>
-      <EditorSection id={`${formId}-sends`} title={t("flow_step_editor_run_result_sends_title")}>
+      <EditorSection
+        id={sendsHeadingId(formId)}
+        title={t("flow_step_editor_run_result_sends_title")}
+        isFocusTarget
+      >
         {run.deliverables.length > 0 ? (
           <VStack gap={4}>
             <List hasDividers density="compact" edge="flush">
@@ -99,6 +114,7 @@ export function StepRunResultSections({
                   endContent={
                     onGoStep && step.id ? (
                       <Button
+                        id={openStepButtonId(formId, step.id)}
                         label={t("flow_step_editor_run_result_open")}
                         aria-label={openLabel(step)}
                         size="sm"
