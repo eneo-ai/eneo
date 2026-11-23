@@ -21,6 +21,7 @@ import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { stepName } from "../flow-steps";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
+import { storeFlow } from "../flows-api";
 import {
   classificationPreviewQueryOptions,
   flowAssistantQueryOptions,
@@ -592,6 +593,9 @@ function StepEditorSession({
       return fresh;
     },
     onSuccess: (fresh) => {
+      // The page takes it as it takes a save, so the form and the page are on
+      // one version again and read the later prompts for it.
+      storeFlow(queryClient, fresh);
       setReceived(fresh);
       setPinned(fresh);
       setHeld(null);

@@ -1148,8 +1148,7 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
     expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
   });
 
-  it("names no reader after a reload ahead of the page, and names it once the page has caught up", async () => {
-    withChat();
+  it("names the reader right after a reload, which hands the version it read to the page", async () => {
     let prompt = "Jämför med {{step_1}}.";
     laterPrompt(() => prompt);
     const { queryClient } = await renderPage("?step=step-1");
@@ -1161,17 +1160,12 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
     });
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
     await screen.findByText(messages.flow_step_editor_stale_title);
-    // Changed elsewhere: the reload reads it, the page has not.
+    // Changed elsewhere: the reload reads it, and the page takes it from there.
     prompt = "Jämför med {{step_2}}.";
     flow = inserted();
     await click(messages.flow_step_editor_reload);
-    await waitFor(() =>
-      expect(screen.queryByText(messages.flow_step_editor_stale_title)).toBeNull()
-    );
-    expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(4);
-    await noReaderLine();
-    fireEvent.click(await screen.findByRole("button", { name: "Verktyg klart" }));
     expect(await within(await delivery()).findByText("Läses av Steg 4: Skriv svar.")).toBeTruthy();
+    expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow("flow-1"))?.draft_revision).toBe(5);
     await readAs(queryClient, prompt);
   });
 
