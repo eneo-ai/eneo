@@ -115,11 +115,13 @@ Clear it and use the space's time:
 }
 ```
 
-Every Flow response separates three facts:
+The Flow's retention `GET` and `PUT` return three fields:
 
 - `local_policy`: the time stored on the Flow, or `null`;
 - `inherited_policy`: the space's time, or `null`;
 - `effective`: the resolved result, including its source and both contributors.
+
+The ordinary Flow response has only `run_history_retention`, with the space's and the Flow's times under `contributors`.
 
 ## Legal holds
 
