@@ -172,9 +172,10 @@ function DeliverableFields({
             : t(`flow_step_editor_deliverable_place_${place}`)}
         </Text>
       </VStack>
-      {/* Held while the name is typed: the first letter marks the step, and
-          the row going then would move the field under the cursor. */}
-      {(!deliverable || customising) && (
+      {/* Below the field: the first letter typed marks the step, and the row
+          goes then without moving the field under the cursor. */}
+      {fields}
+      {!deliverable && (
         <HStack gap={2} wrap="wrap">
           <Button
             id={keepId}
@@ -201,7 +202,6 @@ function DeliverableFields({
           )}
         </HStack>
       )}
-      {fields}
       {deliverable && (
         <VStack gap={2} align="start">
           <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">

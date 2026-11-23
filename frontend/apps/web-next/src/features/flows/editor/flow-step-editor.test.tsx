@@ -2483,15 +2483,32 @@ describe("FlowStepEditor deliverables", () => {
     const after = above();
     expect(after).toHaveLength(before.length);
     after.forEach((button, index) => expect(button).toBe(before[index]));
+  }, 20_000);
 
-    // "Behåll" then keeps the name typed, not the step's.
+  it("offers no Behåll once a name is typed: the name marks the step, and Ångra valet takes it back", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf"
+          })
+        ]
+      })
+    );
     fireEvent.click(
-      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_keep })
+      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
     );
-    expect((await labelField()).value).toBe("Protokoll till nämnden");
-    expect(document.activeElement).toBe(
+    const label = await labelField();
+    fireEvent.change(label, { target: { value: "P" } });
+    expect(
+      screen.queryByRole("button", { name: messages.flow_step_editor_deliverable_keep })
+    ).toBeNull();
+    expect(
       screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
-    );
+    ).toBeTruthy();
+    expect(document.activeElement).toBe(label);
   }, 20_000);
 
   it("names a text step by its place right before the step that sends, without a file name", async () => {
