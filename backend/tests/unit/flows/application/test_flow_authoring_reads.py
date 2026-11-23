@@ -161,29 +161,37 @@ def test_run_form_fields_name_the_role_a_field_has():
     assert [field.get("role") for field in fields] == ["run_label", "run_date", None]
 
 
-def _model(name: str, *, realtime: bool = False, can_access: bool = True):
+def _model(
+    name: str,
+    *,
+    realtime: bool = False,
+    can_access: bool = True,
+    eligibility: str = "eligible",
+):
     return SimpleNamespace(
         id=uuid4(),
         nickname=name,
         name=name.lower(),
         can_access=can_access,
         supports_realtime=realtime,
-        realtime_eligibility="eligible",
+        realtime_eligibility=eligibility,
     )
 
 
 def test_the_transcription_offer_names_what_the_space_has_and_marks_the_defaults():
-    files, live, withheld = (
+    files, live, withheld, unusable = (
         _model("Filer"),
         _model("Direkt", realtime=True),
         _model("Spärrad", can_access=False),
+        # Marked, but its provider cannot carry live text: not offered as live.
+        _model("Utan adress", realtime=True, eligibility="endpoint_required"),
     )
     first, marked = (
         SimpleNamespace(id=uuid4(), name="Talare A"),
         SimpleNamespace(id=uuid4(), name="Talare B"),
     )
     space = SimpleNamespace(
-        transcription_models=[files, live, withheld],
+        transcription_models=[files, live, withheld, unusable],
         get_marked_default_transcription_model=lambda: files,
         usable_transcription_services=[first, marked],
         default_transcription_service=marked,
@@ -195,6 +203,7 @@ def test_the_transcription_offer_names_what_the_space_has_and_marks_the_defaults
         "transcription_models": [
             {"name": "Filer", "streams_live": False, "default": True},
             {"name": "Direkt", "streams_live": True, "default": False},
+            {"name": "Utan adress", "streams_live": False, "default": False},
         ],
         "speaker_services": [
             {"name": "Talare A", "default": False},

@@ -35,7 +35,7 @@ from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesTranscriptionModels
 from eneo.flows.api import flow_live_transcription_socket_router
-from eneo.flows.runtime.live_transcription import tickets
+from eneo.flows.runtime.live_transcription import relay, tickets
 from eneo.main.config import get_settings
 from eneo.users.user import UserAdd, UserState
 from tests.integration.module_session_support import (
@@ -801,23 +801,45 @@ async def test_a_provider_switched_off_after_admission_opens_nothing(
 async def test_a_gateway_registered_as_openai_streams_live_text(
     client, app, flow_process_auth_headers, db_container
 ):
+    # The whole way: a model on the gateway, added without the mark, marked by
+    # the admin, picked as the flow's live model, then streamed through.
     headers = dict(flow_process_auth_headers)
     async with (
         fake_realtime_server() as model_server,
         _served(app) as (base_url, _server),
     ):
-        flow = await _published_flow(
+        flow = await _draft_flow(client, headers, db_container, supports_realtime=False)
+        live = await _create_transcription_model(
             client,
             headers,
-            db_container,
-            provider_type="openai",
             endpoint=_provider_endpoint(model_server),
+            supports_realtime=False,
+            provider_type="openai",
         )
-        stack = LiveStack(client, headers, flow, model_server, base_url, _server)
-        session = await stack.open_session()
+        await _add_to_space(db_container, flow.space_id, live["id"])
+        unmarked = await _with_live_model(client, headers, flow, live["id"])
+        assert unmarked.status_code == 400, unmarked.text
 
+        marked = await client.put(
+            f"/api/v1/admin/tenant-models/transcription/{live['id']}/",
+            headers=headers,
+            json={"supports_realtime": True},
+        )
+        assert marked.status_code == 200, marked.text
+        assert marked.json()["streams_live"] is True
+        picked = await _with_live_model(client, headers, flow, live["id"])
+        assert picked.status_code == 200, picked.text
+        published = await client.post(
+            f"/api/v1/flows/{flow.flow_id}/publish/", headers=headers
+        )
+        assert published.status_code == 200, published.text
+
+        response = await client.post(flow.sessions_path, headers=headers)
+        assert response.status_code == 201, response.text
+        session = response.json()
         async with connect(
-            stack.socket_url(session), subprotocols=_subprotocols(session["ticket"])
+            f"{base_url}{session['websocket_path']}",
+            subprotocols=_subprotocols(session["ticket"]),
         ) as socket:
             assert json.loads(await socket.recv())["type"] == "ready"
             await socket.send(TENTH_OF_A_SECOND)
@@ -825,13 +847,51 @@ async def test_a_gateway_registered_as_openai_streams_live_text(
             await socket.send(json.dumps({"type": "stop"}))
             events = [json.loads(message) async for message in socket]
 
+    assert session["model"]["id"] == live["id"]
     assert events[-1] == {"type": "transcript.done", "text": "Hej världen"}
     assert model_server.path == "/v1/realtime"
     assert model_server.authorization == f"Bearer {PROVIDER_API_KEY}"
     assert model_server.received[0] == {
         "type": "session.update",
-        "model": flow.model_name,
+        "model": live["model_name"],
     }
+
+
+async def test_a_gateway_moved_to_openais_own_service_after_admission_opens_nothing(
+    client, app, flow_process_auth_headers, db_container, monkeypatch
+):
+    # Checked when the socket opens, not only at admission: otherwise the key
+    # would go to OpenAI's own service. The spy stands in for the upstream
+    # connection, so nothing leaves the test even if the check is missing.
+    opened: list[str] = []
+
+    async def spy(upstream_url: str, headers: dict[str, str]):
+        opened.append(upstream_url)
+        raise OSError("this test opens no upstream connection")
+
+    monkeypatch.setattr(relay, "_connect_upstream", spy)
+    headers = dict(flow_process_auth_headers)
+    async with _served(app) as (base_url, _server):
+        flow = await _published_flow(
+            client, headers, db_container, provider_type="openai"
+        )
+        response = await client.post(flow.sessions_path, headers=headers)
+        assert response.status_code == 201, response.text
+        session = response.json()
+        await _change_provider_of(
+            db_container,
+            flow.model_id,
+            config={"endpoint": "https://api.openai.com/v1"},
+        )
+
+        async with connect(
+            f"{base_url}{session['websocket_path']}",
+            subprotocols=_subprotocols(session["ticket"]),
+        ) as socket:
+            events = [json.loads(message) async for message in socket]
+
+    assert opened == []
+    assert [event["code"] for event in events] == ["model_unavailable"]
 
 
 async def test_a_gateway_endpoint_saved_in_credentials_streams_live_text(
