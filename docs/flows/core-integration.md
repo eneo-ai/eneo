@@ -430,9 +430,10 @@ admin area is for admins again, without the retention-only entry. web-next
 keeps every string it reads: the keys only it still used moved to its
 `extra/` catalog. The SDK lost the settings client's flow wrappers and the MCP
 `flowUsage` wrapper; its flows client stays for applications that run flows.
-Run-history retention and legal holds have no screen in either app: they are
-set through the API (see the retention guide) until the platform initiative
-under Open decisions settles them. The backend is unchanged.
+In web-next a space's time is set in the space's settings and a Flow's own
+run-history time in the Flow's settings. Legal holds have no screen in either
+app: they are set through the API (see the retention guide) until the platform
+initiative under Open decisions settles them. The backend is unchanged.
 
 ## Documents
 
