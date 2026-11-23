@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from arq.jobs import Job as ArqJob
 from arq.jobs import JobStatus
+from arq.worker import create_worker
 from freezegun import freeze_time
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -1082,6 +1083,8 @@ async def test_deleting_a_queued_run_cancels_dispatch_and_removes_its_only_file(
 async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
     client, db_session, admin_user_api_key, recovery_recording, monkeypatch
 ):
+    from eneo.worker.arq import WorkerSettings
+
     url, _, _ = recovery_recording
     headers = {"X-API-Key": admin_user_api_key.key}
     setup = await client.patch(
@@ -1098,8 +1101,9 @@ async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
             url + "runs/", json={"text": prompt}, headers=headers
         )
     assert response.status_code == 203, response.text
+    run_id = UUID(response.json()["id"])
     async with db_session() as session:
-        run = await session.get(AppRuns, UUID(response.json()["id"]))
+        run = await session.get(AppRuns, run_id)
         assert run.input_text == prompt
         job = await session.get(Jobs, run.job_id)
         assert job.dispatch_envelope == {"version": 1, "file_ids": []}
@@ -1118,7 +1122,17 @@ async def test_recovered_text_run_reads_its_original_prompt_from_the_run(
         )
 
     monkeypatch.setattr(CompletionService, "get_response", complete)
-    assert await app_run_worker.run_app({"job_id": job_id}, info.args[0])
+    worker = create_worker(
+        WorkerSettings, redis_pool=job_manager._redis, handle_signals=False
+    )
+    # Consume just this delivery from the general worker's queue.
+    await worker.start_jobs([str(job_id).encode()])
+    await worker.tasks[str(job_id)]
+
+    detail = await client.get(f"/api/v1/app-runs/{run_id}/", headers=headers)
+    assert detail.status_code == 200, detail.text
+    result = detail.json()
+    assert (result["status"], result["output"]) == (Status.COMPLETE, "summary")
 
 
 @pytest.mark.parametrize("redispatch", [False, True], ids=["submission", "recovery"])
