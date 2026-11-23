@@ -39,6 +39,8 @@ class _AsyncChunkStream:
 
 
 class _FakeMCPProxy:
+    tool_context_without_uploads = True
+
     def model_result_text(self, text: str) -> str:
         return text
 
@@ -274,13 +276,15 @@ def _reasoning_chunk(reasoning: str) -> object:
 async def test_non_streaming_activates_skill_before_follow_up() -> None:
     adapter = _adapter()
     runtime = _runtime()
+    proxy = _FakeMCPProxy()
+    proxy.tool_context_without_uploads = False
     responses = [
         _response(
             tool_calls=[
                 _provider_tool_call(
                     call_id="activation-1",
                     name=SKILL_ACTIVATION_TOOL_NAME,
-                    arguments='{"skill_key":"skill-1"}',
+                    arguments='{"skill_key":"skill-1","draft_note":"example from an attachment"}',
                 )
             ],
             finish_reason="tool_calls",
@@ -296,9 +300,18 @@ async def test_non_streaming_activates_skill_before_follow_up() -> None:
             context=SimpleNamespace(),
             model_kwargs={},
             skill_runtime=runtime,
+            mcp_proxy=proxy,
         )
 
     assert completion.text == "Payroll answer"
+    activation = next(
+        step
+        for step in completion.tool_calls_metadata
+        if step.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME
+    )
+    assert activation.arguments == {"mode": "on_demand", "skill_key": "skill-1"}
+    assert activation.upload_free_reference_ids == ()
+    assert "example from an attachment" not in str(activation)
     assert runtime.snapshot().accepted == ("skill-1",)
     follow_up_messages = completion_call.await_args_list[1].kwargs["messages"]
     assert follow_up_messages[0]["role"] == "system"
@@ -705,6 +718,34 @@ async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None
     assert runtime.snapshot().rejected[0].reason is (
         SkillActivationRejectionReason.UNKNOWN_KEY
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("second_id", ["duplicate", ""])
+async def test_streaming_rejects_invalid_activation_batch_before_mutating_skills(
+    second_id: str,
+) -> None:
+    adapter = _adapter()
+    runtime = _runtime()
+    initial = runtime.snapshot()
+    calls = [
+        (call_id, SKILL_ACTIVATION_TOOL_NAME, '{"skill_key":"skill-1"}')
+        for call_id in ("duplicate", second_id)
+    ]
+    prepared = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_chunk(calls=calls)]),
+        messages=[{"role": "system", "content": "Base instructions"}],
+        kwargs={"tools": []},
+        mcp_proxy=None,
+        skill_runtime=runtime,
+        has_tools=True,
+    )
+    events = [
+        event
+        async for event in adapter.iterate_stream(stream=prepared, model_kwargs={})
+    ]
+    assert events[-1].response_type == ResponseType.ERROR
+    assert runtime.snapshot() == initial
 
 
 @pytest.mark.asyncio

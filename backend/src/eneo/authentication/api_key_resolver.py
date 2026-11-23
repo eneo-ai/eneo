@@ -29,6 +29,20 @@ class ResourceDenialContext(TypedDict, total=False):
     ownership: str
 
 
+# What a denial tells its caller. The level the key holds is not among them:
+# it goes to the audit log only.
+PUBLIC_DENIAL_CONTEXT_KEYS: frozenset[str] = frozenset(
+    {
+        "resource_type",
+        "required_level",
+        "scope_type",
+        "action",
+        "auth_layer",
+        "required_capability",
+    }
+)
+
+
 class ApiKeyValidationError(Exception):
     def __init__(
         self,

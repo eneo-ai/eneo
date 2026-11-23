@@ -10,8 +10,41 @@ import { createContext, useContext, useEffect, useId, useMemo, useRef, useState 
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import type { ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
+import type { EneoUIMessage, ToolApprovalData, ToolCallInfo } from "@/lib/chat/types";
 import { humanizeToolName, readableArguments } from "./tool-presentation";
+
+/** Both root and delegated tools use the same approval endpoint and decision UI. */
+export function approvalForPart(
+  part: EneoUIMessage["parts"][number]
+): ToolApprovalData | undefined {
+  if (part.type === "data-tool-approval") return part.data;
+  if (part.type !== "data-consultation") return;
+  const { status, approval_id, awaiting_tool_call_ids, tool_calls } = part.data;
+  if (status !== "awaiting_approval" || !approval_id) return;
+  const awaiting = new Set(awaiting_tool_call_ids);
+  const tools = (tool_calls ?? []).filter(
+    (step) =>
+      step.tool_call_id &&
+      awaiting.has(step.tool_call_id) &&
+      !step.is_internal &&
+      step.approved == null &&
+      (step.result_status == null ||
+        step.result_status === "pending" ||
+        step.result_status === "awaiting_approval")
+  );
+  if (tools.length)
+    return {
+      approval_id,
+      status: "pending",
+      tools: tools.map(({ tool_call_id, server_name, tool_name, title, arguments: args }) => ({
+        tool_call_id,
+        server_name,
+        tool_name,
+        title,
+        arguments: args
+      }))
+    };
+}
 
 export type ToolDecision = "approved" | "denied";
 type DecisionItem = { tool_call_id: string; approved: boolean };

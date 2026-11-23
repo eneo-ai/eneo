@@ -35,7 +35,7 @@ from eneo.files.file_models import File, FileType
 from eneo.files.model_file_references import file_handle, model_file_references
 from eneo.info_blobs.info_blob import SourceMetadataEntry
 from eneo.info_blobs.source_metadata import format_source_metadata_lines
-from eneo.questions.question import ToolCallInfo
+from eneo.questions.question import Question, ToolCallInfo
 from eneo.sessions.session import SessionInDB
 from eneo.tokens.token_utils import (
     count_image_tokens_from_blob,
@@ -45,6 +45,26 @@ from eneo.tokens.token_utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def replayable_tool_call_id(step: ToolCallInfo) -> str | None:
+    # Skill activations are rebuilt from the turn's own runtime.
+    if step.result is None or step.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
+        return None
+    return step.tool_call_id or None
+
+
+def history_may_contain_uploads(history: Sequence[Question]) -> bool:
+    """A model can quote an upload or a replayable tool result without a file handle."""
+    return any(
+        turn.files
+        or any(
+            step.upload_free_reference_ids is None
+            and replayable_tool_call_id(step) is not None
+            for step in turn.tool_calls or ()
+        )
+        for turn in history
+    )
 
 
 def _replayable_tool_calls(
@@ -81,17 +101,12 @@ def _replayable_tool_calls(
     revisions = current_user_revisions(tool_made, generated_files)
     replayable: list[MessageToolCall] = []
     for tc in tool_calls:
-        if tc.tool_call_id is None or tc.tool_call_id == "":
-            continue
-        if tc.result is None:
-            continue
-        # Skill activations are rebuilt from the turn's own Skill runtime; the
-        # activation tool may not even be registered on a later turn.
-        if tc.mcp_tool_name == SKILL_ACTIVATION_TOOL_NAME:
+        call_id = replayable_tool_call_id(tc)
+        if call_id is None:
             continue
         replayable.append(
             MessageToolCall(
-                tool_call_id=tc.tool_call_id,
+                tool_call_id=call_id,
                 tool_name=tc.mcp_tool_name or tc.tool_name,
                 # Legacy URLs become credential-free handles on replay, too.
                 arguments=cast(

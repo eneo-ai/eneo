@@ -7,6 +7,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import Select
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import ScalarResult
 from sqlalchemy.orm import selectinload
 
@@ -19,22 +20,20 @@ from eneo.database.association_writes import (
 )
 from eneo.database.database import AsyncSession
 from eneo.database.tables.assistant_table import (
+    MIGRATED_GROUP_CHAT_METADATA_KEY,
     AssistantIntegrationKnowledge,
     AssistantMCPServers,
     AssistantMCPServerTools,
     Assistants,
     AssistantsFiles,
     AssistantsGroups,
+    AssistantSpecialists,
     AssistantsWebsites,
 )
 from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
-from eneo.database.tables.group_chats_table import (
-    GroupChatsAssistantsMapping,
-    GroupChatsTable,
-)
 from eneo.database.tables.help_assistant_assignment_history_table import (
     HelpAssistantAssignmentHistory,
 )
@@ -57,6 +56,7 @@ from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoade
 from eneo.files.file_models import File, FileMetadata, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import is_provided
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.prompts.prompt import Prompt
 from eneo.skills.domain.skill import PersonalDefaultsSnapshot
@@ -68,6 +68,16 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.users.user import UserInDB
+
+
+def _editable_metadata(metadata: dict[str, object] | None) -> dict[str, object] | None:
+    if metadata is None:
+        return None
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key != MIGRATED_GROUP_CHAT_METADATA_KEY
+    }
 
 
 @dataclass(frozen=True)
@@ -392,6 +402,7 @@ class AssistantRepository:
             .selectinload(TenantIntegrationDBModel.integration),
             selectinload(Assistants.mcp_servers),
             selectinload(Assistants.assistant_mcp_server_tools),
+            selectinload(Assistants.assistant_specialists),
         ]
 
     async def _set_is_selected_to_false(self, assistant_id: UUID):
@@ -587,7 +598,7 @@ class AssistantRepository:
                 inline_file_text=assistant.inline_file_text,
                 knowledge_mode=assistant.knowledge_mode,
                 data_retention_days=assistant.data_retention_days,
-                metadata_json=assistant.metadata_json,
+                metadata_json=_editable_metadata(assistant.metadata_json),
                 icon_id=assistant.icon_id,
                 rerank_model_id=assistant.rerank_model_id,
             )
@@ -610,6 +621,10 @@ class AssistantRepository:
                 ],
                 enabled_capabilities=assistant.enabled_capabilities,
                 mcp_server_ids=[server.id for server in assistant.mcp_servers],
+                specialists={
+                    specialist.id: specialist.user_description
+                    for specialist in assistant.specialists
+                },
                 prompt=assistant.prompt,
                 document_template=assistant.document_template,
             ),
@@ -930,6 +945,18 @@ class AssistantRepository:
     ) -> None:
         await self.lock(assistant_id, space_id)
         values = change.scalar_values()
+        if is_provided(change.metadata_json):
+            metadata = _editable_metadata(change.metadata_json)
+            marker = {MIGRATED_GROUP_CHAT_METADATA_KEY: True}
+            # Preserve the database's retention policy even when an editor clears
+            # all custom metadata or sends a stale copy of the assistant.
+            values["metadata_json"] = sa.case(
+                (
+                    Assistants.metadata_json.contains(marker),
+                    sa.literal({**(metadata or {}), **marker}, type_=JSONB),
+                ),
+                else_=sa.literal(metadata, type_=JSONB),
+            )
         if any(
             selection is not None
             for selection in (
@@ -940,6 +967,7 @@ class AssistantRepository:
                 change.enabled_capabilities,
                 change.mcp_server_ids,
                 change.mcp_tools,
+                change.specialists,
                 change.prompt,
                 change.document_template,
             )
@@ -1013,6 +1041,16 @@ class AssistantRepository:
             )
         if change.mcp_tools is not None:
             await self._set_mcp_tools(assistant_id, change.mcp_tools)
+        if change.specialists is not None:
+            await replace_association_values(
+                self.session,
+                AssistantSpecialists,
+                AssistantSpecialists.assistant_id,
+                assistant_id,
+                AssistantSpecialists.specialist_id,
+                AssistantSpecialists.description,
+                change.specialists,
+            )
         if change.prompt is not None:
             await self._add_prompt(assistant_id, change.prompt)
         if change.document_template is not None:
@@ -1075,13 +1113,12 @@ class AssistantRepository:
             )
             .values(space_id=target_space_id)
         )
+        # Specialists are a same-space relation in both directions.
         await self.session.execute(
-            sa.delete(GroupChatsAssistantsMapping).where(
-                GroupChatsAssistantsMapping.assistant_id == assistant_id,
-                GroupChatsAssistantsMapping.group_chat_id.in_(
-                    sa.select(GroupChatsTable.id).where(
-                        GroupChatsTable.space_id == source_space_id,
-                    )
-                ),
+            sa.delete(AssistantSpecialists).where(
+                sa.or_(
+                    AssistantSpecialists.assistant_id == assistant_id,
+                    AssistantSpecialists.specialist_id == assistant_id,
+                )
             )
         )

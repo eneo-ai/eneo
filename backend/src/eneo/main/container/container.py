@@ -98,6 +98,7 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.files.upload_access import may_read_user_uploads
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -109,11 +110,6 @@ from eneo.governance_policy.infrastructure.governance_policy_repo_impl import (
 )
 from eneo.governance_policy.presentation.governance_policy_assembler import (
     GovernancePolicyAssembler,
-)
-from eneo.group_chat.application.group_chat_service import GroupChatService
-from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
-from eneo.group_chat.presentation.assemblers.group_chat_assembler import (
-    GroupChatAssembler,
 )
 from eneo.groups_legacy.group_repo import GroupRepository
 from eneo.groups_legacy.group_service import GroupService
@@ -619,7 +615,6 @@ class Container(containers.DeclarativeContainer):
     assistant_assembler = providers.Factory(
         AssistantAssembler, user=user, prompt_assembler=prompt_assembler
     )
-    group_chat_assembler = providers.Factory(GroupChatAssembler)
     completion_model_assembler = providers.Factory(CompletionModelAssembler)
     integration_knowledge_assembler = providers.Factory(IntegrationKnowledgeAssembler)
     space_assembler = providers.Factory(
@@ -832,20 +827,28 @@ class Container(containers.DeclarativeContainer):
 
     step_repo = providers.Factory(StepRepository, session=session)
     user_groups_repo = providers.Factory(UserGroupsRepository, session=session)
+    # Whether the principal may read the files users uploaded to conversations:
+    # an API key needs its ``files`` read grant. The repositories that hydrate
+    # a conversation's turns or an App run's inputs leave those uploads out
+    # otherwise.
+    user_uploads_readable = providers.Callable(may_read_user_uploads, user=user)
     analysis_repo = providers.Factory(
         AnalysisRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     session_repo = providers.Factory(
         SessionRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     question_repo = providers.Factory(
         QuestionRepository,
         session=session,
         file_content_loader=file_content_loader,
+        include_user_uploads=user_uploads_readable,
     )
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
 
@@ -866,6 +869,7 @@ class Container(containers.DeclarativeContainer):
         session=session,
         factory=app_run_factory,
         file_repo=file_repo,
+        include_user_uploads=user_uploads_readable,
     )
     service_repo = providers.Factory(
         ServiceRepository,
@@ -883,7 +887,6 @@ class Container(containers.DeclarativeContainer):
         embedding_model_repo=embedding_model_repo2,
         http_auth_encryption=http_auth_encryption_service,
     )
-    group_chat_repo = providers.Factory(GroupChatRepository, session=session)
     website_repo = providers.Factory(
         WebsiteRepository,
         session=session,
@@ -1290,6 +1293,7 @@ class Container(containers.DeclarativeContainer):
         protocol=file_protocol,
         object_content=object_content_service,
         upload_admission=upload_admission,
+        audit_service=audit_service,
     )
     widget_service = providers.Factory(
         WidgetService,
@@ -1329,6 +1333,7 @@ class Container(containers.DeclarativeContainer):
         session_repo=session_repo,
         file_service=file_service,
         file_content_loader_factory=providers.Object(_file_content_loader_for_session),
+        include_user_uploads=user_uploads_readable,
     )
     resource_mover_service = providers.Factory(
         ResourceMoverService,
@@ -1434,18 +1439,6 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
         space_repo=space_repo,
         rerank_service=rerank_service,
-    )
-    group_chat_service = providers.Factory(
-        GroupChatService,
-        user=user,
-        space_service=space_service,
-        space_repo=space_repo,
-        group_chat_repo=group_chat_repo,
-        actor_manager=actor_manager,
-        assistant_service=assistant_service,
-        session_service=session_service,
-        completion_service=completion_service,
-        icon_repo=icon_repo,
     )
     app_template_service = providers.Factory(
         AppTemplateService,
@@ -1731,14 +1724,12 @@ class Container(containers.DeclarativeContainer):
         question_repo=question_repo,
         space_service=space_service,
         session_service=session_service,
-        group_chat_service=group_chat_service,
         completion_service=completion_service,
     )
 
     conversation_service = providers.Factory(
         ConversationService,
         assistant_service=assistant_service,
-        group_chat_service=group_chat_service,
         session_service=session_service,
         completion_service=completion_service,
         space_service=space_service,

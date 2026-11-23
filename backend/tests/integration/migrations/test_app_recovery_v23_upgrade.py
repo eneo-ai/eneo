@@ -14,7 +14,8 @@ seed_default_models = expand.seed_default_models
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _RELEASE = "202611201300"
-_DEVELOP = "202611190900"
+_DEVELOP_INDEXES = "202611190900"
+_DEVELOP = "202611201210"
 _MERGE = "202611201305"
 
 
@@ -27,8 +28,15 @@ def _index_ids(cursor):
     return cursor.fetchall()
 
 
-@pytest.mark.parametrize("start", [_RELEASE, _DEVELOP])
-def test_upgrade_preserves_indexes_and_applies_missing_revisions(start):
+@pytest.mark.parametrize(
+    ("start", "index_revision"),
+    [
+        (_RELEASE, _RELEASE),
+        (_DEVELOP_INDEXES, _DEVELOP_INDEXES),
+        (_DEVELOP, _DEVELOP_INDEXES),
+    ],
+)
+def test_upgrade_preserves_indexes_and_applies_missing_revisions(start, index_revision):
     with PostgresContainer("pgvector/pgvector:pg16") as postgres:
         url = postgres.get_connection_url()
         config = expand._alembic_config(url)
@@ -41,7 +49,7 @@ def test_upgrade_preserves_indexes_and_applies_missing_revisions(start):
                 "SELECT EXISTS (SELECT FROM information_schema.columns WHERE "
                 "table_name = 'sessions' AND column_name = 'feedback_set_at')"
             )
-            assert cursor.fetchone() == (start == _DEVELOP,)
+            assert cursor.fetchone() == (start != _RELEASE,)
 
             command.upgrade(config, _MERGE)
             cursor.execute("SELECT version_num FROM alembic_version")
@@ -51,8 +59,8 @@ def test_upgrade_preserves_indexes_and_applies_missing_revisions(start):
 
             # Split the merge, then downgrade only one side. The other side
             # still owns the indexes and must continue using the same objects.
-            command.downgrade(config, start)
-            command.downgrade(config, f"{start}@-1")
+            command.downgrade(config, index_revision)
+            command.downgrade(config, f"{index_revision}@-1")
             assert _index_ids(cursor) == indexes
             command.upgrade(config, _MERGE)
             assert _index_ids(cursor) == indexes

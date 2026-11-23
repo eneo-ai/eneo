@@ -21,7 +21,6 @@ export function usePreflight(request: {
   fileIds: string[];
   sessionId?: string | null;
   assistantId?: string | null;
-  groupChatId?: string | null;
   revision?: string | null;
 }): { estimate: PreflightState; pending: boolean } {
   const [preflight, setPreflight] = useState<{ key: string; response: PreflightState } | null>(
@@ -29,7 +28,7 @@ export function usePreflight(request: {
   );
   const generation = useRef(0);
 
-  const { question, sessionId, assistantId, groupChatId } = request;
+  const { question, sessionId, assistantId } = request;
   const fileKey = request.fileIds.join(",");
 
   const key = JSON.stringify([
@@ -37,10 +36,9 @@ export function usePreflight(request: {
     fileKey,
     sessionId ?? null,
     assistantId ?? null,
-    groupChatId ?? null,
     request.revision ?? null
   ]);
-  const shouldRequest = Boolean(question || fileKey || (assistantId && !sessionId && !groupChatId));
+  const shouldRequest = Boolean(question || fileKey || (assistantId && !sessionId));
 
   useEffect(() => {
     const current = ++generation.current;
@@ -56,8 +54,7 @@ export function usePreflight(request: {
               question,
               file_ids: fileKey ? fileKey.split(",") : [],
               session_id: sessionId ?? null,
-              assistant_id: assistantId ?? null,
-              group_chat_id: groupChatId ?? null
+              assistant_id: assistantId ?? null
             }
           })
         );
@@ -76,7 +73,7 @@ export function usePreflight(request: {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [question, fileKey, sessionId, assistantId, groupChatId, key, shouldRequest]);
+  }, [question, fileKey, sessionId, assistantId, key, shouldRequest]);
 
   // A new draft/partner/session must not expose the old estimate while waiting.
   const answered = preflight?.key === key;

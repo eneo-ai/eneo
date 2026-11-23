@@ -31,7 +31,6 @@ class SeededSpace:
     id: UUID
     assistant_id: UUID
     app_id: UUID
-    group_chat_id: UUID
     file_id: UUID
     fetch_on: bool
 
@@ -82,9 +81,8 @@ async def _add_space(
     client, headers, db_container, server: SharedServer, *, fetch_on: bool
 ) -> SeededSpace:
     """A space with an assistant and an app, each with its own prompt and the
-    space's own attachment, and a group chat. The assistant switches both
-    tools of the shared server on; the space switches ``fetch`` off unless
-    ``fetch_on``."""
+    space's own attachment. The assistant switches both tools of the shared
+    server on; the space switches ``fetch`` off unless ``fetch_on``."""
     created = await client.post(
         "/api/v1/spaces/", json={"name": f"dash-{uuid4().hex[:8]}"}, headers=headers
     )
@@ -127,13 +125,6 @@ async def _add_space(
     )
     assert updated.status_code == 200, updated.text
 
-    group_chat = await client.post(
-        f"/api/v1/spaces/{space_id}/applications/group-chats/",
-        json={"name": f"gc-{uuid4().hex[:6]}"},
-        headers=headers,
-    )
-    assert group_chat.status_code in (200, 201), group_chat.text
-
     async with db_container() as container:
         session = container.session()
         # A new space may already offer the tenant's enabled servers.
@@ -170,7 +161,6 @@ async def _add_space(
         id=space_id,
         assistant_id=assistant_id,
         app_id=app_id,
-        group_chat_id=UUID(group_chat.json()["id"]),
         file_id=file_id,
         fetch_on=fetch_on,
     )
@@ -214,7 +204,6 @@ async def test_dashboard_statements_do_not_grow_with_the_callers_spaces(
         applications = dashboard[space.id]["applications"]
         assert _ids(applications, "assistants") == [space.assistant_id]
         assert _ids(applications, "apps") == [space.app_id]
-        assert _ids(applications, "group_chats") == [space.group_chat_id]
 
     async with db_container() as container:
         spaces = {
@@ -243,4 +232,3 @@ async def test_dashboard_statements_do_not_grow_with_the_callers_spaces(
         assert app.prompt is not None
         assert app.prompt.text == f"app {space.id}"
         assert [file.id for file in app.attachments] == [space.file_id]
-        assert [chat.id for chat in loaded.group_chats] == [space.group_chat_id]

@@ -37,6 +37,35 @@
           }
         },
         {
+          "id": "assistant-specialists",
+          "permissions": {
+            "allOf": ["assistants"]
+          },
+          "type": "new",
+          "area": "assistants",
+          "title": {
+            "en": "Assistants that consult specialists",
+            "sv": "Assistenter som rådfrågar specialister"
+          },
+          "body": {
+            "en": "An assistant can now consult other assistants in its space before it answers. Add them under Specialists in the assistant's settings and describe what each one should be asked about. The assistant asks them focused questions, can follow up, and writes one combined answer. In either web app, expand View steps under the answer to see each question, the specialist's reply, its sources and the tools it used. Consulting needs a model that supports tools.",
+            "sv": "En assistent kan nu rådfråga andra assistenter i sin yta innan den svarar. Lägg till dem under Specialister i assistentens inställningar och beskriv vad var och en ska frågas om. Assistenten ställer avgränsade frågor till dem, kan ställa följdfrågor och skriver ett samlat svar. I båda webbgränssnitten kan du välja Visa steg under svaret för att se varje fråga, specialistens svar, dess källor och verktyg. Att rådfråga kräver en modell med verktygsstöd."
+          }
+        },
+        {
+          "id": "group-chats-became-assistants",
+          "type": "improved",
+          "area": "spaces",
+          "title": {
+            "en": "Group chats are now assistants",
+            "sv": "Gruppchattar är nu assistenter"
+          },
+          "body": {
+            "en": "To find your group conversations, open the same space, choose Assistants, open the assistant with the group's former name and select History. Its members are now specialists. If you cannot see the assistant, ask your administrator to review your assistant access.",
+            "sv": "Du hittar dina tidigare gruppkonversationer under Assistenter i samma yta. Öppna assistenten med gruppens tidigare namn och välj Historik. Medlemmarna är nu specialister. Om assistenten saknas kan din administratör se över din behörighet till assistenter."
+          }
+        },
+        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",
@@ -235,6 +264,19 @@
             "en": "In Admin > File storage, the upload limits now explain the storage limit for files kept in the database and what large files cost there. Limits above 200 MB now apply, up to that storage limit, unless operations still sets a lower limit on the server.",
             "sv": "Under Admin > Fillagring förklarar uppladdningsgränserna nu lagringsgränsen för filer som sparas i databasen och vad stora filer kostar där. Gränser över 200 MB gäller nu, upp till lagringsgränsen, om inte driften fortfarande sätter en lägre gräns på servern."
           }
+        },
+        {
+          "id": "app-run-progress-after-interruption",
+          "type": "fixed",
+          "area": "spaces",
+          "title": {
+            "en": "App runs show when processing starts",
+            "sv": "Appkörningar visar när bearbetningen börjar"
+          },
+          "body": {
+            "en": "When you reopen an app result, you can see whether processing has started. If the worker stops, the run stays in progress until it is marked as failed. You can then start a new run.",
+            "sv": "När du öppnar ett appresultat igen ser du om bearbetningen har börjat. Om den avbryts står körningen kvar som pågående tills den markeras som misslyckad. Då kan du starta en ny körning."
+          }
         }
       ]
     },
@@ -249,7 +291,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["file_creation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Create, edit and restore documents",
@@ -267,7 +309,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["file_analysis"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Explore CSV and Excel files in chat",
@@ -285,7 +327,7 @@
           "area": "chat",
           "permissions": {
             "allOf": ["compute", "charts"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Calculate and create charts",
@@ -301,7 +343,7 @@
           "type": "improved",
           "area": "chat",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "title": {
             "en": "Send messages while files are uploading",
@@ -552,7 +594,7 @@
         {
           "id": "knowledge-on-demand",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -569,7 +611,7 @@
           "id": "image-variations",
           "permissions": {
             "allOf": ["image_generation"],
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -585,7 +627,7 @@
         {
           "id": "copy-rich-text",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -641,7 +683,7 @@
         {
           "id": "model-details",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -657,7 +699,7 @@
         {
           "id": "chat-polish",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -673,7 +715,7 @@
         {
           "id": "attachments",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -705,7 +747,7 @@
         {
           "id": "open-shared-sources",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "knowledge",
@@ -951,7 +993,7 @@
         {
           "id": "rename-conversations",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "new",
           "area": "chat",
@@ -967,7 +1009,7 @@
         {
           "id": "aborted-answers-saved",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -983,7 +1025,7 @@
         {
           "id": "provider-outage-message",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "improved",
           "area": "chat",
@@ -999,7 +1041,7 @@
         {
           "id": "webp-avif-uploads",
           "permissions": {
-            "anyOf": ["personal_chat", "assistants", "group_chats"]
+            "anyOf": ["personal_chat", "assistants"]
           },
           "type": "fixed",
           "area": "chat",

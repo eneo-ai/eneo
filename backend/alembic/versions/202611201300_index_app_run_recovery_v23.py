@@ -10,7 +10,7 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 
-from alembic import op
+from alembic import context, op
 
 revision: str = "202611201300"
 down_revision: str | None = "202610261200"
@@ -47,10 +47,11 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    context = op.get_context()
-    # After splitting the merge, the other head can still own these indexes.
-    if "202611190900" in context.get_current_heads():
+    migration = op.get_context()
+    # A later revision can represent the other branch after the merge is split.
+    applied = context.script.iterate_revisions(migration.get_current_heads(), "base")
+    if any(rev.revision == "202611190900" for rev in applied):
         return
-    with context.autocommit_block():
+    with migration.autocommit_block():
         for name in _INDEXES:
             op.execute(f"DROP INDEX CONCURRENTLY IF EXISTS {name}")

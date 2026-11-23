@@ -206,6 +206,14 @@ async def test_skill_reference_uses_prepared_tools_without_enabling_its_server(e
         return (identity,)
 
     proxy.get_model_tool_identities.side_effect = prepared_identities
+
+    def counted_tools():
+        # The definitions the context budget counts are the ones the model
+        # gets, reference identities included.
+        proxy.include_reference_identities.assert_called_once()
+        return []
+
+    proxy.get_tools_for_llm.side_effect = counted_tools
     response = await service.get_response(
         model=_make_completion_model(),
         text_input="Write an update",
@@ -225,6 +233,7 @@ async def test_skill_reference_uses_prepared_tools_without_enabling_its_server(e
     if enabled:
         assert f"MCP {server.id}, tool today; available" in context.prompt
         proxy.include_reference_identities.assert_called_once()
+        proxy.get_tools_for_llm.assert_called_once()
         proxy.close.assert_awaited_once()
     else:
         assert (

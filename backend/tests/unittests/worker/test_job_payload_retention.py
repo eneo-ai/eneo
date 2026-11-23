@@ -3,14 +3,17 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
-from uuid import uuid4
+from uuid import UUID, uuid4
 
+import orjson
 import pytest
 from arq.worker import Function, create_worker
 
 from eneo.analysis.analysis import AnalysisJobStatus
 from eneo.analysis.analysis_job_manager import AnalysisJobManager
+from eneo.analysis.analysis_router import get_conversation_insight_job
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask, ResourceTaskParams
+from eneo.main.exceptions import NotFoundException
 from eneo.worker import analysis_tasks
 from eneo.worker.analysis_tasks import analyze_conversation_insights_task
 from eneo.worker.arq import WorkerSettings
@@ -65,6 +68,27 @@ class _FakeRedis:
         del ttl
         self.store[key] = value
 
+    def store_pre_retirement_job(
+        self,
+        tenant_id: UUID,
+        job_id: UUID,
+        assistant_id: UUID | None,
+        group_chat_id: UUID | None,
+    ) -> None:
+        now = datetime.now(timezone.utc)
+        self.store[f"analysis_insights:{tenant_id}:{job_id}"] = orjson.dumps(
+            {
+                "job_id": job_id,
+                "tenant_id": tenant_id,
+                "status": "queued",
+                "question": "stored question",
+                "assistant_id": assistant_id,
+                "group_chat_id": group_chat_id,
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+
 
 def _insights_container(redis: _FakeRedis, tenant_id: object) -> MagicMock:
     container = MagicMock()
@@ -89,21 +113,19 @@ def _payload(**extra: object) -> AnalyzeConversationInsightsTask:
     )
 
 
-async def test_insights_task_uses_the_job_records_question_not_the_payloads():
-    """Mutants: the task reads the question from the queued payload; an old
-    payload that still carries a question no longer parses."""
+async def test_insights_task_uses_the_stored_question_and_assistant():
     redis = _FakeRedis()
     tenant_id = uuid4()
     job_id = uuid4()
-    manager = AnalysisJobManager(redis)  # pyright: ignore[reportArgumentType]
+    container = _insights_container(redis, tenant_id)
+    manager = AnalysisJobManager(container.redis_client())
+    assistant_id = uuid4()
     await manager.create_job(
         job_id=job_id,
         tenant_id=tenant_id,
         question="stored question",
-        assistant_id=None,
-        group_chat_id=None,
+        assistant_id=assistant_id,
     )
-    container = _insights_container(redis, tenant_id)
 
     await analyze_conversation_insights_task(
         job_id=job_id,
@@ -112,12 +134,54 @@ async def test_insights_task_uses_the_job_records_question_not_the_payloads():
     )
 
     service = container.analysis_service.return_value
-    assert (
-        service.generate_unified_analysis_answer.call_args.kwargs["question"]
-        == "stored question"
-    )
+    arguments = service.generate_unified_analysis_answer.await_args.kwargs
+    assert arguments["question"] == "stored question"
+    assert arguments["assistant_id"] == assistant_id
     job = await manager.get_job(tenant_id=tenant_id, job_id=job_id)
     assert job is not None and job.status == AnalysisJobStatus.COMPLETED
+
+
+async def test_pre_retirement_group_job_runs_and_can_be_polled_by_its_original_id():
+    redis = _FakeRedis()
+    tenant_id, job_id, group_id = uuid4(), uuid4(), uuid4()
+    redis.store_pre_retirement_job(
+        tenant_id, job_id, assistant_id=None, group_chat_id=group_id
+    )
+    container = _insights_container(redis, tenant_id)
+
+    await analyze_conversation_insights_task(
+        job_id=job_id,
+        params=_payload(assistant_id=None, group_chat_id=group_id),
+        container=container,
+    )
+    result = await get_conversation_insight_job(job_id=job_id, container=container)
+
+    service = container.analysis_service.return_value
+    assert (
+        service.generate_unified_analysis_answer.await_args.kwargs["assistant_id"]
+        == group_id
+    )
+    assert service.authorize_insight_job.await_args.args[0].assistant_id == group_id
+    assert result.status == AnalysisJobStatus.COMPLETED and result.answer == "answer"
+
+
+@pytest.mark.parametrize(
+    ("assistant_id", "group_chat_id"),
+    [(None, None), (UUID(int=1), UUID(int=2))],
+    ids=["missing-target", "ambiguous-target"],
+)
+async def test_poll_hides_a_persisted_job_without_exactly_one_target(
+    assistant_id: UUID | None, group_chat_id: UUID | None
+):
+    redis = _FakeRedis()
+    tenant_id, job_id = uuid4(), uuid4()
+    redis.store_pre_retirement_job(tenant_id, job_id, assistant_id, group_chat_id)
+    container = _insights_container(redis, tenant_id)
+
+    with pytest.raises(NotFoundException):
+        await get_conversation_insight_job(job_id=job_id, container=container)
+
+    container.analysis_service.return_value.authorize_insight_job.assert_not_awaited()
 
 
 async def test_insights_task_fails_closed_without_a_job_record():
@@ -142,15 +206,14 @@ async def test_insights_task_fails_closed_when_the_record_has_no_question():
     redis = _FakeRedis()
     tenant_id = uuid4()
     job_id = uuid4()
-    manager = AnalysisJobManager(redis)  # pyright: ignore[reportArgumentType]
+    container = _insights_container(redis, tenant_id)
+    manager = AnalysisJobManager(container.redis_client())
     await manager.create_job(
         job_id=job_id,
         tenant_id=tenant_id,
         question="",
-        assistant_id=None,
-        group_chat_id=None,
+        assistant_id=uuid4(),
     )
-    container = _insights_container(redis, tenant_id)
 
     with pytest.raises(ValueError):
         await analyze_conversation_insights_task(
@@ -168,15 +231,14 @@ async def test_a_failed_insights_job_logs_the_kind_of_error_not_its_text():
     redis = _FakeRedis()
     tenant_id = uuid4()
     job_id = uuid4()
-    manager = AnalysisJobManager(redis)  # pyright: ignore[reportArgumentType]
+    container = _insights_container(redis, tenant_id)
+    manager = AnalysisJobManager(container.redis_client())
     await manager.create_job(
         job_id=job_id,
         tenant_id=tenant_id,
         question="stored question",
-        assistant_id=None,
-        group_chat_id=None,
+        assistant_id=uuid4(),
     )
-    container = _insights_container(redis, tenant_id)
     service = container.analysis_service.return_value
     service.generate_unified_analysis_answer.side_effect = chained_error()
 

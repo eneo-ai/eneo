@@ -13,15 +13,21 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ModelKwargs,
     ResponseType,
+    function_definition_to_tool,
 )
+from eneo.assistants.delegation import current_assistant_delegation
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.domain.removable_names import FILE_DESCRIPTIONS
 from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.completion_models.domain.execution_budget import current_execution_budget
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
-from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextBuilder,
+    history_may_contain_uploads,
+)
 from eneo.files.file_models import File
 from eneo.files.file_reference import (
     file_reference_base_url,
@@ -446,6 +452,7 @@ class CompletionService:
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
         document_template: "DocumentTemplateReference | None" = None,
+        question_may_contain_uploads: bool = False,
     ) -> CompletionModelResponse:
         if files is None:
             files = []
@@ -467,6 +474,11 @@ class CompletionService:
         # The governed personal-default path already filters is_enabled upstream
         # (effective_config_service), so re-filtering here is idempotent.
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
+        budget = current_execution_budget()
+        if budget is not None:
+            budget.reference_prefixes.update(
+                str(chunk.info_blob_id)[:8] for chunk in info_blob_chunks
+            )
         model_adapter = await self._get_adapter(model)
         initial_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
@@ -486,9 +498,10 @@ class CompletionService:
         # URLs.
         # Generated images count as history files too: a follow-up edit needs
         # a reference URL for the image the assistant produced last turn.
+        history = session.questions if session else []
         history_files = [
             file
-            for question in (session.questions if session else [])
+            for question in history
             for file in [*question.files, *question.generated_files]
         ]
         # Persistent attachments marked "open with tool" are URL-only: their
@@ -535,6 +548,12 @@ class CompletionService:
             mcp_proxy = self._mcp_proxy_factory.create(
                 mcp_servers,
                 identity_headers=identity_headers,
+                tool_context_without_uploads=not (
+                    files
+                    or transcription_inputs
+                    or question_may_contain_uploads
+                    or history_may_contain_uploads(history)
+                ),
                 mcp_server_tool_repo=self.mcp_server_tool_repo,
                 app_view_repo=(
                     McpAppViewRepo(self.session) if self.session is not None else None
@@ -560,6 +579,18 @@ class CompletionService:
                     else (),
                     rendered_prompt=prompt,
                 )
+            # Read after the reference identities are switched on, so the
+            # budget counts the definitions the model is given.
+            extra_tools = (
+                mcp_proxy.get_tools_for_llm()
+                if mcp_proxy and model.supports_tool_calling
+                else []
+            )
+            delegation = current_assistant_delegation()
+            if delegation is not None:
+                extra_tools.append(
+                    function_definition_to_tool(delegation.tool_definition)
+                )
             context = self.context_builder.build_context(
                 input_str=text_input,
                 max_tokens=max_tokens,
@@ -579,11 +610,7 @@ class CompletionService:
                 ),
                 knowledge_catalog=knowledge_catalog,
                 vision=model.vision,
-                extra_tool_dicts=(
-                    mcp_proxy.get_tools_for_llm()
-                    if mcp_proxy and model.supports_tool_calling
-                    else None
-                ),
+                extra_tool_dicts=extra_tools,
                 file_reference_urls=file_reference_urls,
                 inline_file_text=inline_file_text,
                 url_only_prompt_file_ids={file.id for file in referenced_prompt_files},
