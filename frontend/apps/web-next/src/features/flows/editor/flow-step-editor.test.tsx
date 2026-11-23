@@ -1774,6 +1774,34 @@ describe("FlowStepEditor", () => {
     expect(screen.queryByText(messages.flow_step_editor_control_title)).toBeNull();
   }, 20_000);
 
+  it("says in the read view of a draft step that sends the run's result that it has nothing to send yet", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_type: "json" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            user_description: "Skicka körningens resultat",
+            input_source: "previous_step",
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect(await screen.findByText("https://hook.example.org/")).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_run_result_empty_title)).toBeTruthy();
+  }, 20_000);
+
   it("folds a long instruction under Visa hela and wraps a long address anywhere", async () => {
     const prompt = "Läs ärendet noga. ".repeat(170);
     const url = `https://api.example.org/${"a".repeat(180)}`;

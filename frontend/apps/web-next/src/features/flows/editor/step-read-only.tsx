@@ -189,24 +189,31 @@ export function StepReadOnly({
 
   // The step that sends the run's result reads as its editor does: what it sends, and to whom.
   if (sendsRunResult(step)) {
-    // Never empty once published: publishing refuses a step with nothing to send.
+    // Empty only on a draft: publishing refuses a step with nothing to send.
     const sent = flowDeliverables(flow.steps).deliverables;
     return (
       <div ref={rootRef} className="flex flex-col gap-6">
-        <MetadataList title={t("flow_step_editor_run_result_sends_title")} label={label}>
-          {sent.map((item) => (
-            <MetadataListItem
-              key={item.id ?? item.step_order}
-              label={
-                readDeliverable(item.output_config)?.label ||
-                item.user_description?.trim() ||
-                t("flow_step_editor_unnamed")
-              }
-            >
-              {outputTypeLabel(item.output_type, t)}
-            </MetadataListItem>
-          ))}
-        </MetadataList>
+        <div className="flex flex-col gap-2">
+          <MetadataList title={t("flow_step_editor_run_result_sends_title")} label={label}>
+            {sent.map((item) => (
+              <MetadataListItem
+                key={item.id ?? item.step_order}
+                label={
+                  readDeliverable(item.output_config)?.label ||
+                  item.user_description?.trim() ||
+                  t("flow_step_editor_unnamed")
+                }
+              >
+                {outputTypeLabel(item.output_type, t)}
+              </MetadataListItem>
+            ))}
+          </MetadataList>
+          {sent.length === 0 && (
+            <Text type="supporting" as="p" display="block" className="m-0">
+              {t("flow_step_editor_run_result_empty_title")}
+            </Text>
+          )}
+        </div>
         {httpOut && (
           <MetadataList title={t("flow_step_editor_run_result_receiver_title")} label={label}>
             <MetadataListItem label={t("flow_step_editor_http_url_run_result")}>
