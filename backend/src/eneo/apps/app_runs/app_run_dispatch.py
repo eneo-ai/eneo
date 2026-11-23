@@ -1,7 +1,7 @@
 """Recover committed submissions from their job row and the owning app run."""
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -41,16 +41,23 @@ def _recovery_page(limit: int):
     )
 
 
-def interrupted_app_jobs(now: datetime):
-    deadline = now - APP_RUN_QUEUE_TIMEOUT
+def _recovery_time(now: datetime | None):
+    if now is not None:
+        return sa.literal(now)
+    return sa.func.statement_timestamp(type_=sa.DateTime(timezone=True))
+
+
+def expired_or_interrupted_app_jobs(now: datetime | None = None):
+    checked_at = _recovery_time(now)
+    deadline = checked_at - APP_RUN_QUEUE_TIMEOUT
     return (
         _recovery_page(APP_RUN_RECOVERY_BATCH)
-        .with_only_columns(Jobs.id)
+        .with_only_columns(Jobs.id, checked_at)
         .where(
             sa.or_(
                 sa.and_(
                     Jobs.status == _RUNNING,
-                    Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
+                    Jobs.updated_at < checked_at - APP_RUN_RECOVERY_GRACE,
                 ),
                 sa.and_(
                     Jobs.status == _QUEUED,
@@ -69,12 +76,17 @@ def interrupted_app_jobs(now: datetime):
     )
 
 
-def next_retryable_app_submission(now: datetime):
-    return _recovery_page(1).where(
-        Jobs.status == _QUEUED,
-        Jobs.dispatch_envelope.is_not(None),
-        Jobs.created_at > now - APP_RUN_QUEUE_TIMEOUT,
-        Jobs.updated_at < now - APP_RUN_RECOVERY_GRACE,
+def next_retryable_app_submission(now: datetime | None = None):
+    attempted_at = _recovery_time(now)
+    return (
+        _recovery_page(1)
+        .add_columns(attempted_at)
+        .where(
+            Jobs.status == _QUEUED,
+            Jobs.dispatch_envelope.is_not(None),
+            Jobs.created_at > attempted_at - APP_RUN_QUEUE_TIMEOUT,
+            Jobs.updated_at < attempted_at - APP_RUN_RECOVERY_GRACE,
+        )
     )
 
 
@@ -92,18 +104,19 @@ async def _fail_locked_job(
     )
 
 
-async def fail_interrupted_app_runs(
+async def fail_expired_or_interrupted_app_runs(
     session: AsyncSession, *, now: datetime | None = None
 ) -> list[UUID]:
-    now = now or datetime.now(timezone.utc)
     async with session.begin():
-        ids = list(await session.scalars(interrupted_app_jobs(now)))
+        rows = await session.execute(expired_or_interrupted_app_jobs(now))
         repo = JobRepository(session)
-        for job_id in ids:
+        failed: list[UUID] = []
+        for job_id, checked_at in rows:
             await _fail_locked_job(
-                repo, job_id, JobFailureCode.PROCESSING_INTERRUPTED, now
+                repo, job_id, JobFailureCode.PROCESSING_INTERRUPTED, checked_at
             )
-        return ids
+            failed.append(job_id)
+        return failed
 
 
 async def _submission_params(session: AsyncSession, job: Jobs) -> AppRunParams:
@@ -139,10 +152,12 @@ async def retry_app_submissions(
         # Redis needs the ownership proof for this ID only. The next job remains
         # claimable while this transaction is waiting for its own broker reply.
         async with session.begin():
-            attempted_at = now or datetime.now(timezone.utc)
-            job = await session.scalar(next_retryable_app_submission(attempted_at))
-            if job is None:
+            row = (
+                await session.execute(next_retryable_app_submission(now))
+            ).one_or_none()
+            if row is None:
                 break
+            job, attempted_at = row
             try:
                 params = await _submission_params(session, job)
             except ValueError:

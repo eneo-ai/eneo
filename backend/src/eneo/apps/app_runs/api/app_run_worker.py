@@ -5,7 +5,7 @@ from uuid import UUID
 from eneo.apps.app_runs.api.app_run_models import AppRunParams
 from eneo.apps.app_runs.app_run_dispatch import (
     claim_app_job,
-    fail_interrupted_app_runs,
+    fail_expired_or_interrupted_app_runs,
     retry_app_submissions,
 )
 from eneo.apps.app_runs.app_run_repo import get_update_targets_for_jobs
@@ -65,7 +65,7 @@ async def run_app(
 @worker.cron_job(manages_own_session=True, run_at_startup=True)
 async def reconcile_app_run_jobs(container: Container) -> None:
     session = cast(AsyncSession, container.session())
-    for reconcile in (fail_interrupted_app_runs, retry_app_submissions):
+    for reconcile in (fail_expired_or_interrupted_app_runs, retry_app_submissions):
         failed_ids = await reconcile(session)
         if not failed_ids:
             continue

@@ -1,6 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from datetime import datetime, timezone
 from time import monotonic, sleep
 
 import pytest
@@ -8,7 +7,7 @@ from testcontainers.postgres import PostgresContainer
 
 from alembic import command
 from eneo.apps.app_runs.app_run_dispatch import (
-    interrupted_app_jobs,
+    expired_or_interrupted_app_jobs,
     next_retryable_app_submission,
 )
 from tests.integration.migrations import test_file_icon_staged_backfill_expand as expand
@@ -84,10 +83,9 @@ def test_recovery_indexes_wait_for_an_in_flight_job_write():
             assert {name for (name,) in query.fetchall()} == _INDEXES
             query.execute("SET enable_seqscan = off")
             query.execute("SET plan_cache_mode = force_generic_plan")
-            now = datetime.now(timezone.utc)
             for name, statement in (
-                ("app_interruption_scan", interrupted_app_jobs(now)),
-                ("app_redispatch_scan", next_retryable_app_submission(now)),
+                ("app_interruption_scan", expired_or_interrupted_app_jobs()),
+                ("app_redispatch_scan", next_retryable_app_submission()),
             ):
                 assert "ix_jobs_active_task_updated_id" in _prepared_plan(
                     connection, name=name, statement=statement

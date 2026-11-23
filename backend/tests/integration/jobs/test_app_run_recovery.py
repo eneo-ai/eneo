@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from arq.jobs import Job as ArqJob
 from arq.jobs import JobStatus
+from freezegun import freeze_time
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -20,7 +21,7 @@ from eneo.apps.app_runs.api.app_run_models import AppRunParams
 from eneo.apps.app_runs.app_run_dispatch import (
     APP_RUN_QUEUE_TIMEOUT,
     claim_app_job,
-    fail_interrupted_app_runs,
+    fail_expired_or_interrupted_app_runs,
     retry_app_submissions,
 )
 from eneo.apps.app_runs.app_run_service import AppRunService
@@ -562,10 +563,10 @@ async def test_claim_error_fails_only_an_unstarted_app_run(
         publish.assert_not_awaited()
         if failure_point == "after_commit":
             async with sessionmanager.session() as recovery:
-                assert job_id not in await fail_interrupted_app_runs(
+                assert job_id not in await fail_expired_or_interrupted_app_runs(
                     recovery, now=datetime.now(timezone.utc) + timedelta(minutes=4)
                 )
-                assert job_id in await fail_interrupted_app_runs(
+                assert job_id in await fail_expired_or_interrupted_app_runs(
                     recovery, now=datetime.now(timezone.utc) + timedelta(minutes=6)
                 )
     else:
@@ -834,6 +835,37 @@ async def test_retry_backlog_does_not_hide_interrupted_or_expired_results(
         assert detail.json()["status"] == Status.FAILED
 
 
+async def test_maintenance_and_worker_share_the_database_deadline(
+    app_run_fixture, db_session, monkeypatch
+):
+    job_id, _, _ = await app_run_fixture()
+    async with db_session() as session:
+        database_now = (await session.execute(sa.select(sa.func.now()))).scalar_one()
+        await session.execute(
+            sa.update(Jobs)
+            .where(Jobs.id == job_id)
+            .values(
+                dispatch_envelope={"version": 1, "file_ids": []},
+                created_at=database_now - APP_RUN_QUEUE_TIMEOUT + timedelta(minutes=1),
+                updated_at=database_now - timedelta(minutes=6),
+            )
+        )
+
+    broker = AsyncMock()
+    monkeypatch.setattr(job_manager, "redispatch_app", broker)
+    with freeze_time(database_now + timedelta(minutes=2), real_asyncio=True):
+        await _run_app_maintenance()
+    async with db_session() as session:
+        assert await claim_app_job(JobRepository(session), job_id)
+        job = await session.get(Jobs, job_id)
+        assert (
+            database_now
+            <= job.dispatch_attempted_at
+            < job.created_at + APP_RUN_QUEUE_TIMEOUT
+        )
+    broker.assert_awaited_once()
+
+
 async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery(
     app_run_fixture, db_session, monkeypatch, client, admin_user_api_key
 ):
@@ -865,7 +897,9 @@ async def test_recovery_deadline_survives_redis_outage_and_refuses_late_delivery
     async with db_session() as session:
         assert not await claim_app_job(JobRepository(session), job_id)
     async with sessionmanager.session() as session:
-        assert await fail_interrupted_app_runs(session, now=deadline) == [job_id]
+        assert await fail_expired_or_interrupted_app_runs(session, now=deadline) == [
+            job_id
+        ]
     async with db_session() as session:
         assert await session.scalar(
             sa.select(Jobs.dispatch_envelope.is_(None)).where(Jobs.id == job_id)
@@ -998,7 +1032,7 @@ async def test_recovery_skips_a_live_worker_between_checkpoint_transactions(
                 seen = await observer.get(Jobs, id)
                 assert returned_at is not None and seen.updated_at >= returned_at
             async with sessionmanager.session() as recovery:
-                assert id not in await fail_interrupted_app_runs(recovery)
+                assert id not in await fail_expired_or_interrupted_app_runs(recovery)
         return await touch(self, id)
 
     monkeypatch.setattr(Transcriber, "transcribe_from_filepath", transcribe)

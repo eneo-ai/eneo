@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Generator
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -80,6 +80,8 @@ def _job_schema(database_url: str) -> tuple[set[str], set[str]]:
 def _prepared_type(value: object) -> str:
     if isinstance(value, datetime):
         return "timestamptz"
+    if isinstance(value, timedelta):
+        return "interval"
     if isinstance(value, str):
         return "text"
     if isinstance(value, int):
