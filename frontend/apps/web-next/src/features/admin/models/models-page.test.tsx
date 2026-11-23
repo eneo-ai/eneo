@@ -637,22 +637,24 @@ describe("ModelsPage", () => {
   });
 
   it("shows a marked model as not in use after its provider stops carrying live text", async () => {
+    const marked = (id: string, name: string, nickname: string, streams: boolean) => ({
+      id,
+      name,
+      nickname,
+      is_deprecated: false,
+      is_org_enabled: true,
+      is_org_default: false,
+      provider_id: "p-vllm",
+      security_classification: null,
+      supports_realtime: true,
+      streams_live: streams
+    });
     const live = (streams: boolean) =>
       ({
         ...presentation,
         transcription_models: [
-          {
-            id: "t1",
-            name: "pianissimo-sv",
-            nickname: "Pianissimo",
-            is_deprecated: false,
-            is_org_enabled: true,
-            is_org_default: false,
-            provider_id: "p-vllm",
-            security_classification: null,
-            supports_realtime: true,
-            streams_live: streams
-          }
+          marked("t1", "pianissimo-sv", "Pianissimo", streams),
+          marked("t2", "forte-sv", "Forte", streams)
         ]
       }) as unknown as ModelsPresentation;
     const withEligibility = (eligibility: string) =>
@@ -662,6 +664,12 @@ describe("ModelsPage", () => {
     renderPage(live(true));
     const card = screen.getByRole("region", { name: "vLLM" });
     expect(within(card).queryByText("Markerad, används inte")).toBeNull();
+    expect(within(card).getByRole("button", { name: "Forte" })).toBeTruthy();
+    // The search hides one of the two marked models; the notice still counts both.
+    fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
+      target: { value: "pianissimo" }
+    });
+    expect(within(card).queryByRole("button", { name: "Forte" })).toBeNull();
 
     // Saved with outbound headers: the backend answers that it cannot carry live text.
     api.PUT.mockImplementation(() =>
@@ -686,7 +694,7 @@ describe("ModelsPage", () => {
 
     await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
     expect(toast.warning.mock.calls[0]?.[0]).toContain(
-      "1 modell visas nu som ”Markerad, används inte”."
+      "2 modeller visas nu som ”Markerad, används inte”."
     );
     // The page refetches providers and models; no reload.
     expect(await within(card).findByText("Markerad, används inte")).toBeTruthy();
