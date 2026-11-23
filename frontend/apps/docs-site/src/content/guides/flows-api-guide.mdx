@@ -340,7 +340,7 @@ Run and step history follows the space's time (`data_retention_days` on `PATCH /
 }
 ```
 
-Send `{ "policy": null }` to clear the Flow's time and use the space's. `days` accepts `1..2555`; any other field, such as the removed `mode`, is rejected with 422. A time longer than the space's is refused with 400 and `eneo_error_code` 9086 (`retention_exceeds_space`), and `context` names the cap: `{ "cap_days": 7, "cap_origin": "space" }`. Changing a shared space's time needs `retention_manage` and a signed-in person; an API key gets 403 `retention_person_required`. Neither time schedules or performs deletion by itself.
+Send `{ "policy": null }` to clear the Flow's time and use the space's. `days` accepts `1..2555`; any other field, such as the removed `mode`, is rejected with 422. A time longer than the space's is refused with 400 and `eneo_error_code` 9086 (`retention_exceeds_space`), and `context` names the cap: `{ "cap_days": 7, "cap_origin": "space" }`. Changing a shared space's time needs `retention_manage` and a signed-in person; an API key gets 403 `retention_person_required`. Neither time schedules or performs deletion of Flow history by itself.
 
 Every Flow response includes a `run_history_retention` projection with `state`, `effective_days`, `source`, and the Space and Flow contributors. With `state: "configured"`, `source` is `space` or `flow`. With `state: "off"`, neither the space nor the Flow has a time: `source` is `none` and `effective_days` is `null`. The projection reports what applies; it does not claim that a particular run has been purged. A Flow time stored before the space's time was lowered shows in `contributors.flow` while the shorter `effective_days` applies.
 
