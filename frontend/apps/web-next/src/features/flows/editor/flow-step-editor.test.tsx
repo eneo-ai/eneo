@@ -3505,6 +3505,8 @@ describe("FlowStepEditor Leverans", () => {
     expect(
       within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
     ).toBeTruthy();
+    // Part of the result, it is said once: no header line beside it.
+    expect(within(delivery).queryByText(inHeader)).toBeNull();
   }, 20_000);
 
   it("keeps naming a known reader while another later prompt cannot be read", async () => {
