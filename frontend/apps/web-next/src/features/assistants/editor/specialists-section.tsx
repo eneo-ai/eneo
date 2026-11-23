@@ -73,7 +73,11 @@ export function SpecialistsSection({
 
   const members = saved.map(({ id, user_description }) => ({ id, user_description }));
   return (
-    <SettingsGroup title={t("specialists")} description={t("specialists_description")}>
+    <SettingsGroup
+      id="specialists"
+      title={t("specialists")}
+      description={t("specialists_description")}
+    >
       {saved.map((item) => (
         <SettingsRow key={item.id} title={item.handle}>
           {item.user_description || item.default_description}

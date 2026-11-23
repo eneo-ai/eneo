@@ -15,6 +15,11 @@ test("opens a former group editor bookmark in the same assistant's settings", as
     (url) => url.pathname === `${space}/assistants/${assistant.id}/edit`
   );
   await expect(page).toHaveTitle(new RegExp(name));
+  await page
+    .locator("[data-editor-index]")
+    .getByRole("link", { name: /^Verktyg/ })
+    .click();
+  await expect(page.getByRole("heading", { name: "Specialister", exact: true })).toBeVisible();
 });
 
 test("edits, restores and deletes real prompt history and validates, previews and downloads a native avatar", async ({

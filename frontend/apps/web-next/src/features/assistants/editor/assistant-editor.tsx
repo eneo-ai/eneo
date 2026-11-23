@@ -8,12 +8,11 @@ import {
   MessageSquareCode,
   Paperclip,
   Play,
-  Plug,
   Send,
   ShieldCheck,
   SlidersHorizontal,
-  Users,
-  Sparkles
+  Sparkles,
+  Wrench
 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
@@ -126,20 +125,6 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
         />
       )
     },
-    {
-      id: "specialists",
-      label: t("specialists"),
-      icon: Users,
-      group: content,
-      summary: summary.chosen(assistant.specialists?.length ?? 0),
-      node: (
-        <SpecialistsSection
-          key={assistant.id}
-          assistant={assistant}
-          supportsTools={ai.toolModel?.supports_tool_calling === true}
-        />
-      )
-    },
     ...(canAttachSkills && (!space.personal || space.default_assistant?.id !== assistant.id)
       ? [
           {
@@ -160,11 +145,22 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
       : []),
     {
       id: "mcp",
-      label: t("mcp_servers"),
-      icon: Plug,
+      label: t("tools"),
+      icon: Wrench,
       group: content,
-      summary: summary.chosen(assistant.mcp_servers?.length ?? 0),
-      node: <McpSection assistant={assistant} />
+      summary: summary.chosen(
+        (assistant.mcp_servers?.length ?? 0) + (assistant.specialists?.length ?? 0)
+      ),
+      node: (
+        <div className="flex flex-col gap-8">
+          <McpSection assistant={assistant} />
+          <SpecialistsSection
+            key={assistant.id}
+            assistant={assistant}
+            supportsTools={ai.toolModel?.supports_tool_calling === true}
+          />
+        </div>
+      )
     },
     {
       id: "attachments",

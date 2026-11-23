@@ -59,8 +59,10 @@ it("lists its sections on a phone's index under the same groups as the app edito
       row.getAttribute("data-editor-row")
     )
   ]);
+  const tools = document.querySelector('[data-editor-section="mcp"]');
+  expect(tools?.querySelector("#specialists")?.textContent).toContain("Specialister");
   expect(groups).toEqual([
-    ["Innehåll", ["general", "instructions", "knowledge", "specialists", "mcp", "attachments"]],
+    ["Innehåll", ["general", "instructions", "knowledge", "mcp", "attachments"]],
     ["Modell och funktioner", ["ai", "capabilities"]],
     ["Åtkomst", ["security", "api-keys", "widget", "publishing"]]
   ]);
