@@ -44130,8 +44130,9 @@ export interface components {
     };
     /**
      * WidgetExternalToolServerPublic
-     * @description An MCP server outside Eneo that the widget's assistant reaches, with
-     *     the tools the assistant has switched on there.
+     * @description An MCP server outside Eneo, configured in the widget's space, with the
+     *     tools the assistant has switched on there. Restrictions at run time can
+     *     narrow what a turn calls.
      */
     WidgetExternalToolServerPublic: {
       /**
