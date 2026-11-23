@@ -16,6 +16,7 @@ from eneo.files.file_models import (
     FileContentVariant,
     FileInfo,
     FileMetadata,
+    FileOrigin,
     FileType,
 )
 from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
@@ -309,6 +310,7 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     file_service = MagicMock()
     file_service.prepare_document_upload.return_value = _prepared_context(prepared)
     file_service.save_prepared_file = AsyncMock(return_value=saved_file)
+    file_service.with_origin.return_value = file_service
     service = FlowTemplateAssetService(
         user=user,
         flow_repo=flow_repo,
@@ -326,6 +328,10 @@ async def test_upload_asset_persists_docx_template_bytes_and_body_placeholder(
     )
 
     file_service.prepare_document_upload.assert_called_once_with(upload)
+    # The template is saved with the flow it was uploaded to as its origin.
+    file_service.with_origin.assert_called_once_with(
+        FileOrigin(space_id=flow.space_id, flow_id=flow.id)
+    )
     # The saver must receive the inspected bytes again: inspection drained the
     # one-pass original stream, so the persisted original re-serves them.
     file_service.save_prepared_file.assert_awaited_once()
@@ -368,6 +374,7 @@ async def test_upload_asset_rejects_invalid_docx_before_file_persistence(
     template_asset_repo = AsyncMock()
     prepared = _prepared_template(payload)
     file_service = MagicMock()
+    file_service.with_origin.return_value = file_service
     file_service.prepare_document_upload.return_value = _prepared_context(prepared)
     file_service.save_prepared_file = AsyncMock()
     service = FlowTemplateAssetService(
@@ -588,6 +595,7 @@ async def test_upload_asset_rejects_oversized_docx_before_reading_body(
     flow_repo.get.return_value = flow
     template_asset_repo = AsyncMock()
     file_service = MagicMock()
+    file_service.with_origin.return_value = file_service
     rejected_context = MagicMock()
     rejected_context.__aenter__ = AsyncMock(
         side_effect=FileTooLargeException(

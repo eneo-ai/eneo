@@ -20,6 +20,9 @@ from eneo.database.tables.users_table import Users
 from eneo.files.file_models import FileType, FileUsageKind
 
 FILE_USAGE_INFO_KEY = "file_usage"
+_ORIGIN_NOT_RECORDED = (
+    "NULL means not recorded, not an ordinary file. A fact, never an access grant."
+)
 
 
 def file_usage(kind: FileUsageKind | None) -> dict[str, FileUsageKind | None]:
@@ -66,6 +69,22 @@ class Files(BasePublic):
         ForeignKey("files.id", ondelete="SET NULL"),
         index=True,
         info=file_usage(None),
+    )
+
+    # Where a Flow file came from, written when the File is created and never
+    # changed. Facts, not ownership: no foreign keys (the File outlives its run,
+    # flow and space), and no read, change or deletion checks them.
+    origin_space_id: Mapped[Optional[UUID]] = mapped_column(
+        comment=f"Space of the flow the file was created for. {_ORIGIN_NOT_RECORDED}",
+    )
+    origin_flow_id: Mapped[Optional[UUID]] = mapped_column(
+        comment=f"Flow the file was created for. {_ORIGIN_NOT_RECORDED}",
+    )
+    origin_flow_run_id: Mapped[Optional[UUID]] = mapped_column(
+        comment=(
+            "Flow run that created the file; NULL for an upload or a template. "
+            f"{_ORIGIN_NOT_RECORDED}"
+        ),
     )
 
     # Temporary Release A read source. Normal metadata queries must never
@@ -118,6 +137,14 @@ class Files(BasePublic):
             "AND owner_service_id IS NOT NULL"
             ")",
             name="ck_files_owner_identity",
+        ),
+        # No origin, or at least its space and flow (an upload or a template
+        # has no run).
+        CheckConstraint(
+            "(origin_space_id IS NULL AND origin_flow_id IS NULL "
+            "AND origin_flow_run_id IS NULL) "
+            "OR (origin_space_id IS NOT NULL AND origin_flow_id IS NOT NULL)",
+            name="ck_files_origin",
         ),
         UniqueConstraint("id", "tenant_id", name="uq_files_id_tenant_id"),
         Index(

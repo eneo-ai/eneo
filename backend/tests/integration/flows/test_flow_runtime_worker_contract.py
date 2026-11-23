@@ -25,6 +25,7 @@ from eneo.database.tables.flow_tables import (
     FlowRunAuditOutbox,
     FlowRuns,
     FlowRunWebhookDeliveries,
+    Flows,
     FlowStepAttempts,
     FlowStepResults,
 )
@@ -2056,3 +2057,218 @@ async def test_task_bootstrap_gives_the_executor_its_tool_reader_and_caller(
         assert result == {"status": "completed"}
     finally:
         await flow_runtime_tasks.execution_heartbeats().stop()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_identity", [False, True])
+async def test_task_bootstrap_records_the_runs_origin_on_the_files_it_creates(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    service_identity,
+):
+    # The worker builds the run's File service itself; a file the run creates
+    # through it records the run's space, flow and run, for a user's run and a
+    # service key's run alike.
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.database.tables.service_principals_table import ServicePrincipals
+    from eneo.files.file_models import FileType
+    from eneo.files.file_repo import FileRepository
+
+    service_id = None
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        space_id = await FlowRepository(session=session).get_space_id(
+            flow_id=context.flow_id, tenant_id=context.tenant_id
+        )
+        if service_identity:
+            service_id = uuid4()
+            await session.execute(
+                sa.insert(ServicePrincipals).values(
+                    id=service_id,
+                    tenant_id=test_tenant.id,
+                    display_name="Flow worker",
+                    scope_type="tenant",
+                    state="active",
+                )
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == context.run_id)
+                .values(
+                    principal_type="service_key",
+                    principal_user_id=None,
+                    principal_service_id=service_id,
+                    runtime_service_permission="write",
+                )
+            )
+        await session.commit()
+    assert space_id is not None
+    created: list[UUID] = []
+
+    async def create_a_file(executor, **kwargs):
+        file = await executor.file_service.save_generated_file(
+            payload=b"Run output.",
+            name="run-output.txt",
+            mimetype="text/plain",
+            file_type=FileType.TEXT,
+        )
+        await executor.session.commit()
+        created.append(file.id)
+        return {"status": "completed"}
+
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", create_a_file)
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.SERVICE_KEY
+            if service_identity
+            else PrincipalType.USER,
+            principal_user_id=None if service_identity else admin_user.id,
+            principal_service_id=service_id,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+        assert result == {"status": "completed"}
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()
+
+    async with sessionmanager.session() as session, session.begin():
+        stored = await FileRepository(session).get_by_id_for_lifecycle(created[0])
+    assert stored is not None
+    assert (
+        stored.origin_space_id,
+        stored.origin_flow_id,
+        stored.origin_flow_run_id,
+    ) == (space_id, context.flow_id, context.run_id)
+    assert stored.owner_service_id == service_id
+    assert stored.owner_user_id == (None if service_identity else admin_user.id)
+
+
+@pytest.mark.asyncio
+async def test_task_bootstrap_raises_before_the_executor_when_the_flow_has_no_space(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    # A run's files must not be created without their origin: when the flow's
+    # space cannot be read, the task fails before the executor starts.
+    from eneo.authentication.principal_types import PrincipalType
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        await session.commit()
+
+    async def no_space(self, **kwargs):
+        return None
+
+    executed = AsyncMock(return_value={"status": "completed"})
+    monkeypatch.setattr(FlowRepository, "get_space_id", no_space)
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", executed)
+    try:
+        with pytest.raises(RuntimeError, match="flow not found"):
+            await flow_runtime_tasks._execute_flow_run_async(
+                run_id=context.run_id,
+                flow_id=context.flow_id,
+                tenant_id=context.tenant_id,
+                run_revision=context.run_revision,
+                principal_type=PrincipalType.USER,
+                principal_user_id=admin_user.id,
+                principal_service_id=None,
+                task_id=None,
+                retry_count=0,
+                invocation_deadline=None,
+            )
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()
+    executed.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_task_cancels_a_queued_run_whose_flow_was_deleted(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    # A deleted flow keeps its space: the worker builds the run's File service
+    # and lets the executor cancel the run, instead of failing the task.
+    from eneo.authentication.principal_types import PrincipalType
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        await session.commit()
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(Flows)
+            .where(Flows.id == context.flow_id)
+            .values(deleted_at=sa.func.now())
+        )
+
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.USER,
+            principal_user_id=admin_user.id,
+            principal_service_id=None,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()
+
+    assert result == {
+        "status": "cancelled",
+        "reason": FlowApiErrorCode.FLOW_DELETED.value,
+    }
+    run_row, _, _, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.CANCELLED.value
+    assert (
+        FlowRunError.model_validate(run_row.error_json).code
+        == FlowApiErrorCode.FLOW_DELETED
+    )

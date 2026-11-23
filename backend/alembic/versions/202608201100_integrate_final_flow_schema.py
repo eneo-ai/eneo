@@ -7,6 +7,8 @@ Create Date: 2026-08-20 11:00:00.000000
 
 from __future__ import annotations
 
+import logging
+
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
@@ -213,6 +215,24 @@ def _add_service_principal_integration() -> None:
 
 
 def _add_file_ownership() -> None:
+    """Move file ownership from ``user_id`` to the owner columns without rewriting rows.
+
+    ``user_id`` is renamed to ``owner_user_id`` and made nullable, and
+    ``owner_type`` (a constant default) and ``owner_service_id`` are added. These
+    are catalogue changes: no row or index of ``files`` is rewritten, and the
+    table does not grow during the upgrade. The renamed column keeps the place
+    ``user_id`` had in the table.
+
+    Five steps still read the whole table: validating the two owner foreign keys
+    and the two owner checks, and building the service-owner index. The user key
+    must be validated because Postgres cannot change the ON DELETE rule of an
+    existing foreign key, so the CASCADE key is replaced by a RESTRICT one. This
+    revision has no autocommit block, so its steps run in one transaction and
+    NOT VALID followed by VALIDATE does not shorten the lock: ``files`` stays
+    locked until that transaction commits. Upgrade with the application
+    stopped; the cost is the time these reads take.
+    """
+    logger = logging.getLogger("alembic.runtime.migration")
     op.add_column(
         "files",
         sa.Column(
@@ -222,15 +242,19 @@ def _add_file_ownership() -> None:
             server_default="user",
         ),
     )
-    op.add_column(
+    op.alter_column(
         "files",
-        sa.Column("owner_user_id", postgresql.UUID(as_uuid=True), nullable=True),
+        "user_id",
+        new_column_name="owner_user_id",
+        existing_type=postgresql.UUID(as_uuid=True),
+        nullable=True,
     )
     op.add_column(
         "files",
         sa.Column("owner_service_id", postgresql.UUID(as_uuid=True), nullable=True),
     )
-    op.execute("UPDATE files SET owner_user_id = user_id")
+    op.drop_constraint("files_users_fkey", "files", type_="foreignkey")
+    logger.info("files: renamed user_id to owner_user_id without rewriting any row")
     op.create_foreign_key(
         "fk_files_owner_user_id",
         "files",
@@ -248,6 +272,22 @@ def _add_file_ownership() -> None:
         ["id"],
         ondelete="RESTRICT",
         postgresql_not_valid=True,
+    )
+    estimated_rows = (
+        0
+        if op.get_context().as_sql
+        else op.get_bind().scalar(
+            sa.text(
+                "SELECT reltuples::bigint FROM pg_class WHERE oid = 'files'::regclass"
+            )
+        )
+    )
+    logger.info(
+        "files: validating the owner keys and checks and building the service-owner "
+        "index; each step reads the whole table (%s)",
+        f"planner estimate: {estimated_rows} rows"
+        if estimated_rows > 0
+        else "no row estimate yet",
     )
     op.execute("ALTER TABLE files VALIDATE CONSTRAINT fk_files_owner_user_id")
     op.execute("ALTER TABLE files VALIDATE CONSTRAINT fk_files_owner_service_id")
@@ -270,8 +310,6 @@ def _add_file_ownership() -> None:
         ["tenant_id", "owner_service_id", "created_at"],
         postgresql_where=sa.text("owner_type = 'service_key'"),
     )
-    op.drop_constraint("files_users_fkey", "files", type_="foreignkey")
-    op.drop_column("files", "user_id")
 
 
 def _add_assistant_integration() -> None:
@@ -398,6 +436,12 @@ def upgrade() -> None:
 
 
 def _restore_legacy_file_ownership() -> None:
+    """Give ``files`` back its ``user_id`` column without rewriting rows.
+
+    ``owner_user_id`` is renamed back to ``user_id``, made NOT NULL again and gets
+    the CASCADE key under its old name. Setting NOT NULL and adding the key read
+    the whole table; no row is rewritten, wherever the column sits in the table.
+    """
     service_owned_count = (
         op.get_bind()
         .execute(sa.text("SELECT count(*) FROM files WHERE owner_type = 'service_key'"))
@@ -407,14 +451,17 @@ def _restore_legacy_file_ownership() -> None:
         raise RuntimeError(
             "Cannot downgrade Flow integration while service-owned files exist"
         )
-    op.add_column(
-        "files",
-        sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=True),
-    )
-    op.execute("UPDATE files SET user_id = owner_user_id")
+    op.drop_index("ix_files_service_owner_created_at", table_name="files")
+    op.drop_constraint("ck_files_owner_identity", "files", type_="check")
+    op.drop_constraint("ck_files_owner_type", "files", type_="check")
+    op.drop_constraint("fk_files_owner_service_id", "files", type_="foreignkey")
+    op.drop_constraint("fk_files_owner_user_id", "files", type_="foreignkey")
+    op.drop_column("files", "owner_service_id")
+    op.drop_column("files", "owner_type")
     op.alter_column(
         "files",
-        "user_id",
+        "owner_user_id",
+        new_column_name="user_id",
         existing_type=postgresql.UUID(as_uuid=True),
         nullable=False,
     )
@@ -426,14 +473,6 @@ def _restore_legacy_file_ownership() -> None:
         ["id"],
         ondelete="CASCADE",
     )
-    op.drop_index("ix_files_service_owner_created_at", table_name="files")
-    op.drop_constraint("ck_files_owner_identity", "files", type_="check")
-    op.drop_constraint("ck_files_owner_type", "files", type_="check")
-    op.drop_constraint("fk_files_owner_service_id", "files", type_="foreignkey")
-    op.drop_constraint("fk_files_owner_user_id", "files", type_="foreignkey")
-    op.drop_column("files", "owner_service_id")
-    op.drop_column("files", "owner_user_id")
-    op.drop_column("files", "owner_type")
 
 
 def downgrade() -> None:
