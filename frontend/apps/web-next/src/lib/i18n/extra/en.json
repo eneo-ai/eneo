@@ -2246,6 +2246,7 @@
   "flow_step_editor_run_result_empty_candidates": "Open a text or document step and turn on Include in the run's result.",
   "flow_step_editor_run_result_empty_none": "Add a step that creates text or a document before the step that sends.",
   "flow_step_editor_run_result_add_before": "Add a step before the step that sends",
+  "flow_step_editor_run_result_add_before_save_first": "Save the step first. A change here names a step by number, and that number moves when a step is added before it.",
   "flow_step_editor_run_result_older_version": "Reload to see what the newest version sends.",
   "flow_step_editor_run_result_receiver_title": "Recipient",
   "flow_step_editor_http_url_run_result": "Recipient's address",

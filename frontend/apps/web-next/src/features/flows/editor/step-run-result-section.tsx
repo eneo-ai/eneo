@@ -3,6 +3,7 @@ import { HStack } from "@astryxdesign/core/HStack";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
+import { useId } from "react";
 import { useTranslations } from "use-intl";
 import { EmptyState } from "@/components/composites/empty-state";
 import { flowDeliverables } from "../flow-deliverables";
@@ -45,6 +46,7 @@ export function StepRunResultSections({
   problems,
   onGoStep,
   onAddStepBefore,
+  addBlocked = false,
   olderVersion
 }: {
   formId: string;
@@ -58,10 +60,17 @@ export function StepRunResultSections({
   onGoStep?: (stepId: string) => void;
   /** Adds a step right before the step that sends; absent, it is not offered. */
   onAddStepBefore?: () => void;
+  /**
+   * An unsaved edit names this step or a later one by number. An add before
+   * it moves those numbers, and the core renumbers only what is saved, so the
+   * add waits for a save and says so.
+   */
+  addBlocked?: boolean;
   /** The form holds unsaved edits on an older version of the flow than the newest. */
   olderVersion: boolean;
 }) {
   const t = useTranslations();
+  const addBlockedId = useId();
   // A step's button that a newer version hides hands focus to the heading.
   const handoff = useFocusHandoff(olderVersion, () =>
     document.getElementById(sendsHeadingId(formId))
@@ -167,12 +176,30 @@ export function StepRunResultSections({
               actions={
                 run.candidates.length === 0 &&
                 onAddStepBefore && (
-                  <Button
-                    label={t("flow_step_editor_run_result_add_before")}
-                    size="sm"
-                    variant="secondary"
-                    onClick={onAddStepBefore}
-                  />
+                  <VStack gap={2}>
+                    <Button
+                      label={t("flow_step_editor_run_result_add_before")}
+                      size="sm"
+                      variant="secondary"
+                      isDisabled={addBlocked}
+                      aria-describedby={addBlocked ? addBlockedId : undefined}
+                      onClick={() => {
+                        if (!addBlocked) onAddStepBefore();
+                      }}
+                    />
+                    {addBlocked && (
+                      <Text
+                        id={addBlockedId}
+                        type="supporting"
+                        size="sm"
+                        as="p"
+                        display="block"
+                        className="m-0 max-w-prose"
+                      >
+                        {t("flow_step_editor_run_result_add_before_save_first")}
+                      </Text>
+                    )}
+                  </VStack>
                 )
               }
             />

@@ -332,6 +332,45 @@ it("adds a step before the send from the sender with unsaved edits, and lists it
   });
 });
 
+it("asks for a save before adding a step before the send while an edit names a step at or after it by number", async () => {
+  const [first, sender] = senderFlow().steps;
+  flow = makeFlow({
+    steps: [
+      first!,
+      {
+        ...sender!,
+        output_config: {
+          ...sender!.output_config,
+          custom_headers: [{ name: "X-Ref", value: "fast", secret: false }]
+        }
+      }
+    ]
+  });
+  await renderPage("?step=step-send");
+  const value = await screen.findByRole("textbox", { name: "Värde för header 1" });
+  const add = await screen.findByRole("button", {
+    name: messages.flow_step_editor_run_result_add_before
+  });
+  expect(add.getAttribute("aria-disabled")).toBeNull();
+
+  // The sender is step 2: an add before it would make step_2 name the new step.
+  fireEvent.change(value, { target: { value: "{{step_2.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+  const reason = screen.getByText(messages.flow_step_editor_run_result_add_before_save_first);
+  expect(add.getAttribute("aria-describedby")).toBe(reason.id);
+  fireEvent.click(add);
+  expect(screen.queryByRole("dialog", { name: "Lägg till steg" })).toBeNull();
+
+  // A number past the last step names the sender once a step is added before it.
+  fireEvent.change(value, { target: { value: "{{step_3.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBe("true"));
+
+  // An earlier step keeps its number: the add is offered again.
+  fireEvent.change(value, { target: { value: "{{step_1.output.text}}" } });
+  await waitFor(() => expect(add.getAttribute("aria-disabled")).toBeNull());
+  expect(screen.queryByText(messages.flow_step_editor_run_result_add_before_save_first)).toBeNull();
+});
+
 const STALE = {
   status: 400,
   body: { message: "Stale", code: "stale_revision", eneo_error_code: 9000 }

@@ -18,7 +18,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { SuccessMark } from "@/components/composites/success-mark";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
 import { useSecretMutation } from "@/lib/api/use-secret-mutation";
-import { stepName } from "../flow-steps";
+import { readTarget, stepName, tokensOf } from "../flow-steps";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
 import { storeFlow } from "../flows-api";
@@ -646,6 +646,15 @@ function StepEditorSession({
   // The step that sends the run's result reads nothing and calls no model:
   // it shows what is sent and to whom.
   const sendsResult = sendsRunResult(draft);
+  // An add before the step that sends moves it and every later step down one
+  // place. The core renumbers what is saved, not edits waiting here, so an
+  // edit naming one of those steps by number (or one past the last, which
+  // would name this one) waits for a save first.
+  const addMovesAlias =
+    sendsResult &&
+    tokensOf(JSON.stringify(stepEdits)).some(
+      (token) => readTarget(token, { step_order: stepOrder }, flow.steps).kind === "not_earlier"
+    );
   const isLast = isLastStep(flow, { step_order: stepOrder });
   const groups = variableGroups({ flow, stepOrder, inputConfig: draft.input_config });
   // Only the AI instruction runs once per section, so only it reads the section's number.
@@ -1120,6 +1129,7 @@ function StepEditorSession({
                   problems={shownProblems}
                   onGoStep={onGoStep}
                   onAddStepBefore={onStepAdded ? () => setAdding(true) : undefined}
+                  addBlocked={addMovesAlias}
                   olderVersion={newerElsewhere}
                 />
               ) : (
