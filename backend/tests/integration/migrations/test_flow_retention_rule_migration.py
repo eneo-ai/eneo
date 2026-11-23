@@ -174,6 +174,23 @@ def _columns(conn) -> set[tuple[str, str]]:
     )
 
 
+def _definitions(conn) -> dict[tuple[str, str], tuple]:
+    return {
+        (table, column): tuple(definition)
+        for table, column, *definition in _rows(
+            conn,
+            """
+            SELECT table_name, column_name, data_type, character_maximum_length,
+                   is_nullable, column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name IN ('tenants', 'spaces', 'flows')
+              AND column_name LIKE 'flow_run_history_retention_%%'
+            """,
+        )
+    }
+
+
 def _checks(conn) -> dict[str, bool]:
     return dict(
         _rows(
@@ -231,7 +248,8 @@ def test_the_downgrade_restores_valid_policies_and_upgrades_again(
 ) -> None:
     """Mutants: a flow time chosen after the upgrade has no mode, so the
     restored completeness check fails; a check comes back unvalidated; a
-    restored mode is outside the earlier values."""
+    restored mode is outside the earlier values; a restored column differs
+    from its earlier type, length, nullability or default."""
     conn, cfg = migration_db
     ids = _seed(conn)
     command.upgrade(cfg, RULE_REVISION)
@@ -243,7 +261,15 @@ def test_the_downgrade_restores_valid_policies_and_upgrades_again(
 
     command.downgrade(cfg, PREVIOUS_REVISION)
 
-    assert REMOVED_COLUMNS <= _columns(conn)
+    definitions = _definitions(conn)
+    assert {column: definitions.get(column) for column in REMOVED_COLUMNS} == {
+        (table, column): (
+            ("character varying", 32, "YES", None)
+            if column.endswith("_mode")
+            else ("integer", None, "YES", None)
+        )
+        for table, column in REMOVED_COLUMNS
+    }
     checks = _checks(conn)
     assert {name: checks.get(name) for name in REMOVED_CHECKS} == dict.fromkeys(
         REMOVED_CHECKS, True
