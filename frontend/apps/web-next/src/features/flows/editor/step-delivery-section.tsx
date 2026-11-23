@@ -5,7 +5,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { VStack } from "@astryxdesign/core/VStack";
 import { ArrowRight, Send } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -66,7 +66,9 @@ function DeliverableFields({
   draft,
   groups,
   onChange,
-  problems
+  problems,
+  root,
+  handoff
 }: {
   formId: string;
   flow: FlowPublic;
@@ -76,18 +78,16 @@ function DeliverableFields({
   groups: VariableGroup[];
   onChange: (next: StepConfig) => void;
   problems: FieldProblems;
+  /** The fields' root, where the switch is found. */
+  root: RefObject<HTMLElement | null>;
+  /** Hands focus on, should a newer version take the focused control away. */
+  handoff: ReturnType<typeof useFocusHandoff>;
 }) {
   const t = useTranslations();
   // The fields of a step included by its place, opened without a change yet: nothing is marked.
   const [customising, setCustomising] = useState(false);
   const keepId = useId();
   const resetId = useId();
-  // A newer version that takes the place away takes its controls with it:
-  // focus on one of them goes to the switch that stands in their stead.
-  const root = useRef<HTMLElement>(null);
-  const handoff = useFocusHandoff(place === null, () =>
-    root.current?.querySelector<HTMLElement>('[role="switch"]')
-  );
   const deliverable = readDeliverable(draft.output_config);
   const isDocument = stepDeliversArtifact(draft);
   // What the step is named in the result until the author names it.
@@ -291,6 +291,12 @@ export function StepDeliverySection({
     flow.steps.map((step) => (step.id === stepId ? { ...step, ...draft } : step))
   );
   const included = run.deliverables.some((step) => step.id === stepId);
+  // A newer version takes the place's controls and the button to the step
+  // that sends with it: focus on one of them goes to the switch, which stays.
+  const fieldsRoot = useRef<HTMLElement>(null);
+  const handoff = useFocusHandoff(olderVersion, () =>
+    fieldsRoot.current?.querySelector<HTMLElement>('[role="switch"]')
+  );
   // On an older version, the step shows its own mark, not a place it may no longer hold.
   const place = !olderVersion && run.byPlace?.step.id === stepId ? run.byPlace.place : null;
   // Readers come from the flow's saved fields, as the form shows it: a later
@@ -355,6 +361,8 @@ export function StepDeliverySection({
         groups={groups}
         onChange={onChange}
         problems={problems}
+        root={fieldsRoot}
+        handoff={handoff}
       />
       {/* Whether it leaves for the receiver, and how: the header line belongs
           to the line about the result, and the button to both. */}
@@ -374,7 +382,7 @@ export function StepDeliverySection({
         </HStack>
       )}
       {senderId && onGoStep && (
-        <HStack>
+        <HStack {...handoff}>
           <Button
             label={t("flow_step_editor_delivery_open_sender")}
             size="sm"

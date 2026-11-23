@@ -1141,8 +1141,11 @@ describe("the open step while the flow changes", () => {
    * puts focus on a control of its place, then a newer version arrives with
    * nothing clicked: focus goes to the switch that takes the place's controls.
    */
-  async function focusMovesToSwitch(focus: (section: HTMLElement) => Promise<void>) {
-    flow = makeFlow({ steps: [first, senderFlow().steps[1]!] });
+  async function focusMovesToSwitch(
+    focus: (section: HTMLElement) => Promise<void>,
+    steps = [first, senderFlow().steps[1]!]
+  ) {
+    flow = makeFlow({ steps });
     const { queryClient } = await renderPage("?step=step-1");
     await changeName();
     await focus(await delivery());
@@ -1162,6 +1165,18 @@ describe("the open step while the flow changes", () => {
       });
       act(() => keep.focus());
     }));
+
+  it("hands focus from the button to the step that sends to the switch", () =>
+    // Step 1 is not delivered by its place here: the switch stood there all along.
+    focusMovesToSwitch(
+      async (section) => {
+        const open = within(section).getByRole("button", {
+          name: messages.flow_step_editor_delivery_open_sender
+        });
+        act(() => open.focus());
+      },
+      [first, second, { ...senderFlow().steps[1]!, step_order: 3 }]
+    ));
 
   it("hands focus from a name field opened but not typed in to the switch", () =>
     focusMovesToSwitch(async (section) => {
