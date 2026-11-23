@@ -182,11 +182,18 @@ function httpTokens(step: FlowStep): string[] {
   });
 }
 
-/** What the values of a call's headers that are not secret read. */
+/**
+ * What the values of a call's headers that are not secret read. A row without
+ * a name is no header: the core does not send it.
+ */
 function headerTokens(call: Record<string, unknown>): string[] {
   const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
   return headers.flatMap((header) =>
-    isRecord(header) && header.secret !== true && typeof header.value === "string"
+    isRecord(header) &&
+    typeof header.name === "string" &&
+    header.name.trim() !== "" &&
+    header.secret !== true &&
+    typeof header.value === "string"
       ? tokensOf(header.value)
       : []
   );

@@ -229,6 +229,17 @@ describe("stepReadersByNameOrPlace", () => {
     expect(stepReaders(named[0]!, named).map((step) => step.step_order)).toEqual([3]);
   });
 
+  it("does not count a header row without a name, which the core does not send", () => {
+    const config = sender(2).output_config as Record<string, unknown>;
+    for (const name of ["", "  "]) {
+      const last = makeStep(2, {
+        output_mode: "http_post",
+        output_config: { ...config, custom_headers: [{ name, value: "{{Sammanfatta}}" }] }
+      });
+      expect(orders([makeStep(1, { user_description: "Sammanfatta" }), last], 0)).toEqual([]);
+    }
+  });
+
   it("leaves the removal check to named reads", () => {
     const steps = [makeStep(1), makeStep(2)];
     expect(orders(steps, 0)).toEqual([2]);
