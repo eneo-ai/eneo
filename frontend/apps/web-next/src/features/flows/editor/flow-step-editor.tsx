@@ -223,37 +223,39 @@ export function FlowStepEditor({ navigation, ...props }: EditorProps): React.JSX
                 }
               }))}
             />
-            <span className="flex-1" />
-            <IconButton
-              label={
-                navigation.previous
-                  ? t("flow_step_editor_previous_named", { step: navigation.previous.name })
-                  : t("flow_step_editor_previous")
-              }
-              icon={<ChevronLeft aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              isDisabled={!navigation.previous}
-              onClick={() => {
-                const target = navigation.previous;
-                if (target) navigation.onGo(target.id);
-              }}
-            />
-            <IconButton
-              label={
-                navigation.next
-                  ? t("flow_step_editor_next_named", { step: navigation.next.name })
-                  : t("flow_step_editor_next")
-              }
-              icon={<ChevronRight aria-hidden="true" />}
-              variant="ghost"
-              size="sm"
-              isDisabled={!navigation.next}
-              onClick={() => {
-                const target = navigation.next;
-                if (target) navigation.onGo(target.id);
-              }}
-            />
+            {/* One group: on a narrow bar the arrows wrap together, at the end. */}
+            <span className="ms-auto flex flex-none items-center gap-x-2">
+              <IconButton
+                label={
+                  navigation.previous
+                    ? t("flow_step_editor_previous_named", { step: navigation.previous.name })
+                    : t("flow_step_editor_previous")
+                }
+                icon={<ChevronLeft aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={!navigation.previous}
+                onClick={() => {
+                  const target = navigation.previous;
+                  if (target) navigation.onGo(target.id);
+                }}
+              />
+              <IconButton
+                label={
+                  navigation.next
+                    ? t("flow_step_editor_next_named", { step: navigation.next.name })
+                    : t("flow_step_editor_next")
+                }
+                icon={<ChevronRight aria-hidden="true" />}
+                variant="ghost"
+                size="sm"
+                isDisabled={!navigation.next}
+                onClick={() => {
+                  const target = navigation.next;
+                  if (target) navigation.onGo(target.id);
+                }}
+              />
+            </span>
           </>
         ) : null}
       </nav>
@@ -794,6 +796,14 @@ function StepEditorSession({
           "flow_step_editor_deliverable_label_too_long",
           { max: DELIVERABLE_LABEL_MAX }
         );
+      } else if (deliverable.label.includes("{{") || deliverable.label.includes("}}")) {
+        // A second copy of the core's rule (flow_validators.py, the label is shown as
+        // written and never filled in), so the field says it before publishing does.
+        // The test with the core's own labels keeps the two alike.
+        problems["output_config.deliverable.label"] = t(
+          "flow_step_editor_deliverable_label_braces",
+          { open: "{{", close: "}}" }
+        );
       }
       if (Array.from(deliverable.file_name ?? "").length > DELIVERABLE_FILE_NAME_MAX) {
         problems["output_config.deliverable.file_name"] = t(
@@ -1103,6 +1113,7 @@ function StepEditorSession({
                       groups={groups}
                       onChange={changeStep}
                       problems={shownProblems}
+                      dirty={dirty}
                       onGoStep={onGoStep}
                     />
                   )}
@@ -1170,15 +1181,18 @@ function StepEditorSession({
             </Text>
           )}
         </div>
-        <Button label={dirty ? t("cancel") : t("close")} onClick={onCancel} />
-        <Button
-          type="submit"
-          form={formId}
-          variant={dirty ? "primary" : "secondary"}
-          label={t("flow_step_editor_save")}
-          isLoading={save.isPending}
-          isInterruptible
-        />
+        {/* One group: "Spara steget" stays beside the way out when the bar wraps. */}
+        <div className="ms-auto flex flex-none items-center gap-3">
+          <Button label={dirty ? t("cancel") : t("close")} onClick={onCancel} />
+          <Button
+            type="submit"
+            form={formId}
+            variant={dirty ? "primary" : "secondary"}
+            label={t("flow_step_editor_save")}
+            isLoading={save.isPending}
+            isInterruptible
+          />
+        </div>
       </div>
 
       {/* "Avbryt" on the save bar and every other way out ask the same: leave the step's edits. */}
@@ -1186,7 +1200,9 @@ function StepEditorSession({
         active={unsaved}
         onLeave={uploads.release}
         title={t("flow_step_editor_discard_title")}
-        description={t("flow_step_editor_discard_description")}
+        description={t("flow_step_editor_discard_description", {
+          count: Math.max(changeCount, 1)
+        })}
         confirmLabel={t("flow_step_editor_discard")}
         cancelLabel={t("flow_step_editor_keep_editing")}
       />

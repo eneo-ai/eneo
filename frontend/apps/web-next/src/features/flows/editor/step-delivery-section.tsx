@@ -93,9 +93,15 @@ function DeliverableFields({
     const output_config = withTidyDeliverable(draft.output_config) as StepConfig["output_config"];
     if (output_config !== draft.output_config) onChange({ ...draft, output_config });
   };
-  /** Marks the step under its name; focus goes to the button that takes the mark away. */
+  /**
+   * Marks the step, under a name typed already or else the step's; focus goes
+   * to the button that takes the mark away.
+   */
   const keep = () => {
-    flushSync(() => set({ label: stepName }));
+    flushSync(() => {
+      setCustomising(false);
+      set(deliverable ?? { label: stepName });
+    });
     document.getElementById(resetId)?.focus();
   };
 
@@ -167,7 +173,9 @@ function DeliverableFields({
             : t(`flow_step_editor_deliverable_place_${place}`)}
         </Text>
       </VStack>
-      {!deliverable && (
+      {/* Held while the name is typed: the first letter marks the step, and
+          the row going then would move the field under the cursor. */}
+      {(!deliverable || customising) && (
         <HStack gap={2} wrap="wrap">
           <Button
             id={keepId}
@@ -208,9 +216,7 @@ function DeliverableFields({
             id={resetId}
             label={t("flow_step_editor_deliverable_reset")}
             size="sm"
-            variant="ghost"
-            // Its text in line with the explanation above; the ghost's padding is only on hover.
-            className="-ms-3"
+            variant="secondary"
             onClick={() => {
               flushSync(() => {
                 setCustomising(false);
@@ -240,6 +246,7 @@ export function StepDeliverySection({
   groups,
   onChange,
   problems,
+  dirty,
   onGoStep
 }: {
   formId: string;
@@ -250,6 +257,8 @@ export function StepDeliverySection({
   groups: VariableGroup[];
   onChange: (next: StepConfig) => void;
   problems: FieldProblems;
+  /** The step has unsaved changes, which the step that sends does not show yet. */
+  dirty: boolean;
   /** Opens another step of the flow; absent, the step that sends is not offered. */
   onGoStep?: (stepId: string) => void;
 }) {
@@ -333,6 +342,12 @@ export function StepDeliverySection({
           />
         )}
       </HStack>
+      {senderId && onGoStep && dirty && (
+        // It opens the saved flow; leaving asks first, as every other way out does.
+        <Text type="supporting" size="sm" as="p" display="block" className="m-0 max-w-prose">
+          {t("flow_step_editor_delivery_save_first")}
+        </Text>
+      )}
     </EditorSection>
   );
 }

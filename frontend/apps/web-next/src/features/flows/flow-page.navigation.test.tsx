@@ -225,6 +225,37 @@ it("closes a direct step link in the same flow without traversing earlier histor
   expect(router.state.location.href).toBe(BASE);
 });
 
+it("says whether one change or several are lost on leaving the step", async () => {
+  await renderPage();
+  await openFirst();
+  await changeName();
+  await click("Alla steg");
+  let dialog = await screen.findByRole("alertdialog", {
+    name: messages.flow_step_editor_discard_title
+  });
+  expect(
+    within(dialog).getByText("Ändringen i steget är inte sparad och försvinner om du lämnar det.")
+  ).toBeTruthy();
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: messages.flow_step_editor_keep_editing })
+  );
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  fireEvent.click(
+    screen.getByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    })
+  );
+  await click("Alla steg");
+  dialog = await screen.findByRole("alertdialog", {
+    name: messages.flow_step_editor_discard_title
+  });
+  expect(
+    within(dialog).getByText(
+      "Ändringarna i steget är inte sparade och försvinner om du lämnar det."
+    )
+  ).toBeTruthy();
+});
+
 it.each(["Back", "Alla steg", "Nästa steg: Skriv svar"])(
   "can stay after %s, then leave without corrupting the history",
   async (action) => {

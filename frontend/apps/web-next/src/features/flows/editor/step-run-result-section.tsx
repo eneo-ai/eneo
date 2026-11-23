@@ -50,12 +50,12 @@ export function StepRunResultSections({
   );
   const name = (step: Pick<FlowStep, "user_description">) =>
     step.user_description?.trim() || t("flow_step_editor_unnamed");
+  const openLabel = (step: FlowStep) =>
+    t("flow_step_editor_run_result_open_step", { order: step.step_order, name: name(step) });
+  // A step that could be sent has no row of its own: its button names it.
   const openButton = ({ id, ...step }: FlowStep) => {
     if (!onGoStep || !id) return null;
-    const label = t("flow_step_editor_run_result_open_step", {
-      order: step.step_order,
-      name: name(step)
-    });
+    const label = openLabel({ id, ...step });
     return (
       <Button
         key={id}
@@ -87,12 +87,25 @@ export function StepRunResultSections({
                   // Nodes, not strings: a long name wraps instead of being cut.
                   label={<Text>{readDeliverable(step.output_config)?.label || name(step)}</Text>}
                   description={
-                    <VStack gap={1} align="start">
-                      <Text type="supporting" size="sm">
-                        {outputTypeLabel(step.output_type, t)}
-                      </Text>
-                      {openButton(step)}
-                    </VStack>
+                    <Text type="supporting" size="sm">
+                      {t("flow_step_editor_run_result_row", {
+                        order: step.step_order,
+                        type: outputTypeLabel(step.output_type, t)
+                      })}
+                    </Text>
+                  }
+                  // The row names the result and its step: the button only says
+                  // "Öppna", and its full name starts with that word (WCAG 2.5.3).
+                  endContent={
+                    onGoStep && step.id ? (
+                      <Button
+                        label={t("flow_step_editor_run_result_open")}
+                        aria-label={openLabel(step)}
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => onGoStep(step.id!)}
+                      />
+                    ) : undefined
                   }
                 />
               ))}

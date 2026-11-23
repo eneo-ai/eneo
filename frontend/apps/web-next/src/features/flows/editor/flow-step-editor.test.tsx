@@ -806,6 +806,30 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("keeps the arrows together, and the save beside the way out, when a narrow bar wraps", async () => {
+    renderEditor(makeFlow(), {
+      navigation: {
+        position: 1,
+        count: 2,
+        previous: null,
+        next: { id: "step-2", name: "Skriv svar" },
+        steps: [],
+        onGo: vi.fn()
+      }
+    });
+    await nameField();
+    // A wrapping row moves groups, not their buttons: each pair is one group.
+    const bar = screen.getByRole("navigation", { name: "Stegen" });
+    const previous = within(bar).getByRole("button", { name: "Föregående steg" });
+    const next = within(bar).getByRole("button", { name: "Nästa steg: Skriv svar" });
+    expect(previous.parentElement).toBe(next.parentElement);
+    expect(previous.parentElement).not.toBe(bar);
+    const close = screen.getByRole("button", { name: messages.close });
+    const save = screen.getByRole("button", { name: messages.flow_step_editor_save });
+    expect(close.parentElement).toBe(save.parentElement);
+    expect(close.parentElement?.textContent).not.toContain(messages.flow_step_editor_no_changes);
+  });
+
   it("docks a save bar that says what is unsaved, then that the save landed", async () => {
     const saved = makeFlow({
       draft_revision: 5,
@@ -2413,6 +2437,63 @@ describe("FlowStepEditor deliverables", () => {
     });
   }, 30_000);
 
+  it("undoes the choice with a button that says so", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf",
+            output_config: { deliverable: { label: "Protokoll" } }
+          })
+        ]
+      })
+    );
+    expect(await screen.findByRole("button", { name: "Ångra valet" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ta bort valet" })).toBeNull();
+  }, 20_000);
+
+  it("keeps the name field where it is on the first keystroke after opening it", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({
+            user_description: "Protokoll",
+            output_mode: "render_verbatim",
+            output_type: "pdf"
+          })
+        ]
+      })
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: messages.flow_step_editor_deliverable_customise })
+    );
+    const label = await labelField();
+    // Every button above the field: none may come or go while the name is typed.
+    const above = () =>
+      screen
+        .getAllByRole("button")
+        .filter(
+          (button) => button.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING
+        );
+    const before = above();
+    fireEvent.change(label, { target: { value: "Protokoll till nämnden" } });
+    expect(document.activeElement).toBe(label);
+    const after = above();
+    expect(after).toHaveLength(before.length);
+    after.forEach((button, index) => expect(button).toBe(before[index]));
+
+    // "Behåll" then keeps the name typed, not the step's.
+    fireEvent.click(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_keep })
+    );
+    expect((await labelField()).value).toBe("Protokoll till nämnden");
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: messages.flow_step_editor_deliverable_reset })
+    );
+  }, 20_000);
+
   it("names a text step by its place right before the step that sends, without a file name", async () => {
     renderEditor(
       makeFlow({
@@ -2504,6 +2585,35 @@ describe("FlowStepEditor deliverables", () => {
     await saveStep();
     expect(patchBodies()).toHaveLength(1);
   }, 20_000);
+
+  // The same labels as the core's own test (test_flow_validators.py, a deliverable
+  // label with braces), so the editor refuses what publishing would.
+  it.each<[string, boolean]>([
+    ["Report {{ flow_input.text }}", false],
+    ["Report {{", false],
+    ["Report }}", false],
+    ["Rapport: vecka 47 (utkast) – 50 %", true]
+  ])(
+    "holds the label %j to the core's rule on braces (saved: %s)",
+    async (value, saved) => {
+      const error =
+        "Namnet visas som det står och kan inte innehålla {{ eller }}. Skriv det som vanlig text.";
+      api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+      renderEditor(deliveryFlow());
+      fireEvent.click(await deliverySwitch());
+      fireEvent.change(await labelField(), { target: { value } });
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      if (saved) {
+        await waitFor(() => expect(patchBodies()).toHaveLength(1));
+        expect(screen.queryByText(error)).toBeNull();
+        return;
+      }
+      expect(await screen.findByText(error)).toBeTruthy();
+      expect(document.activeElement).toBe(await labelField());
+      expect(patchBodies()).toHaveLength(0);
+    },
+    20_000
+  );
 
   it.each([
     {
@@ -2826,7 +2936,32 @@ describe("FlowStepEditor deliverables", () => {
       name: messages.flow_step_editor_run_result_sends_title
     });
     expect(within(sends).getByText("Protokoll")).toBeTruthy();
-    expect(within(sends).getByText(messages.flow_output_type_docx)).toBeTruthy();
+    expect(within(sends).getByText("Steg 1 · Word-dokument")).toBeTruthy();
+  }, 20_000);
+
+  it("opens a step it sends from the row, with a short button whose name starts the same", async () => {
+    const onGo = vi.fn();
+    renderEditor(resultFlow({ body: { mode: "run_result" } }), {
+      stepId: "step-2",
+      navigation: { position: 2, count: 2, previous: null, next: null, steps: [], onGo }
+    });
+    const sends = await screen.findByRole("region", {
+      name: messages.flow_step_editor_run_result_sends_title
+    });
+    const row = within(sends).getByRole("listitem");
+    expect(within(row).getByText("Till Startsidan")).toBeTruthy();
+    expect(within(row).getByText("Steg 1 · Word-dokument")).toBeTruthy();
+    // The visible word begins the name a voice user says (WCAG 2.5.3).
+    const open = within(row).getByRole("button", { name: "Öppna steg 1 – Protokoll" });
+    expect(open.textContent).toBe("Öppna");
+    // No tooltip to cover the row above it.
+    expect(
+      screen
+        .queryAllByRole("tooltip", { hidden: true })
+        .filter((tooltip) => tooltip.textContent?.includes("Protokoll"))
+    ).toEqual([]);
+    fireEvent.click(open);
+    expect(onGo).toHaveBeenCalledWith("step-1");
   }, 20_000);
 
   /** Text, then JSON (or only JSON), then the step that sends: nothing is sent. */
@@ -3152,6 +3287,8 @@ describe("FlowStepEditor Leverans", () => {
         "Skickas inte till startsidan.example.org. Slå på växeln ovan om det här resultatet ska följa med."
       )
     ).toBeTruthy();
+    const saveFirst = "Spara först för att se ändringen i utskicket.";
+    expect(within(delivery).queryByText(saveFirst)).toBeNull();
     fireEvent.click(
       within(delivery).getByRole("switch", {
         name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
@@ -3160,6 +3297,8 @@ describe("FlowStepEditor Leverans", () => {
     expect(
       within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
     ).toBeTruthy();
+    // The step that sends shows the saved flow: an unsaved change is not there yet.
+    expect(within(delivery).getByText(saveFirst)).toBeTruthy();
     fireEvent.click(
       within(delivery).getByRole("button", { name: messages.flow_step_editor_delivery_open_sender })
     );
