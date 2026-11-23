@@ -3406,7 +3406,7 @@ describe("FlowStepEditor Leverans", () => {
     const delivery = await section();
     expect(
       await within(delivery).findByText(
-        "Skickas inte till startsidan.example.org. Slå på växeln ovan om det här resultatet ska följa med."
+        "Skickas inte till startsidan.example.org. Slå på Ta med i körningens resultat ovan om det ska följa med."
       )
     ).toBeTruthy();
     const saveFirst = "Spara först för att se ändringen i utskicket.";
