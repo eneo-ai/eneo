@@ -8294,7 +8294,7 @@
   "flow_step_editor_delivery_description": "Shows whether the step is part of the run's result, which shows on the run page and goes with what is sent.",
   "flow_step_editor_delivery_read_next": "Goes on to the next step: {step}.",
   "flow_step_editor_delivery_read_by": "Read by {steps}.",
-  "flow_step_editor_delivery_unread_off": "No later step reads it. Turn on Include in the run's result below if the step should be included.",
+  "flow_step_editor_delivery_unread_off": "No later step reads it, and it is not part of the run's result.",
   "flow_step_editor_delivery_unread_included": "No later step reads it, but it is part of the run's result.",
   "flow_step_editor_delivery_sent_to": "Sent to {host} when the run is complete.",
   "flow_step_editor_delivery_not_sent_to": "Not part of the run's result sent to {host}. Turn on Include in the run's result above if it should go with it.",

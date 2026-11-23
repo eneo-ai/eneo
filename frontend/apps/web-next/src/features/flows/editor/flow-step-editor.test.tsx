@@ -3355,7 +3355,9 @@ describe("FlowStepEditor Leverans", () => {
     );
     const delivery = await section();
     expect(
-      await within(delivery).findByText(messages.flow_step_editor_delivery_unread_off)
+      await within(delivery).findByText(
+        "Läses inte av senare steg och ingår inte i körningens resultat."
+      )
     ).toBeTruthy();
     fireEvent.click(
       within(delivery).getByRole("switch", {
@@ -3365,6 +3367,22 @@ describe("FlowStepEditor Leverans", () => {
     expect(
       within(delivery).getByText(messages.flow_step_editor_delivery_unread_included)
     ).toBeTruthy();
+  }, 20_000);
+
+  it("tells how to send a result no later step reads once, on the line about the receiver", async () => {
+    routeAssistants();
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          sender(3)
+        ]
+      })
+    );
+    const delivery = await section();
+    await within(delivery).findByText(messages.flow_step_editor_delivery_unread_off);
+    expect(within(delivery).getAllByText(/Slå på Ta med i körningens resultat/)).toHaveLength(1);
   }, 20_000);
 
   it("stops saying no step reads the result once a later prompt is invalidated and cannot be read again", async () => {
