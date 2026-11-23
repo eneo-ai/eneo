@@ -424,6 +424,48 @@ describe("AddStepDialog", () => {
     ).toBe("true");
   });
 
+  it("names the step it added even when a newer flow arrives before the core answers", async () => {
+    const updated = makeFlow({
+      draft_revision: 5,
+      steps: [...flow.steps, makeStep({ id: "step-new", step_order: 3 })]
+    });
+    let answer = () => {};
+    let sent = false;
+    const answered = new Promise<void>((resolve) => (answer = resolve));
+    const patch = api.stub.client.PATCH;
+    api.stub.client.PATCH = (() => {
+      sent = true;
+      return answered.then(() => ({
+        data: updated,
+        response: new Response(null, { status: 200 })
+      }));
+    }) as unknown as typeof patch;
+    const onSaved = vi.fn();
+    const at = (current: FlowPublic) => (
+      <SpaceProvider routeId="space-1">
+        <AddStepDialog flow={current} position={2} open onOpenChange={() => {}} onSaved={onSaved} />
+      </SpaceProvider>
+    );
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace());
+    try {
+      const { rerender } = renderInApp(at(flow), { queryClient });
+      const dialog = await screen.findByRole("dialog", {
+        name: messages.flow_step_editor_add_title
+      });
+      fireEvent.click(
+        await within(dialog).findByRole("button", { name: "Lägg till Gör text av data" })
+      );
+      // A read in the background brings the saved flow, the new step in it, first.
+      await waitFor(() => expect(sent).toBe(true));
+      rerender(at(updated));
+      answer();
+      await waitFor(() => expect(onSaved).toHaveBeenCalledWith(updated, 4, "step-new"));
+    } finally {
+      api.stub.client.PATCH = patch;
+    }
+  });
+
   it("adds at the end after the last step when it does not send", async () => {
     api.routes[KINDS] = textKinds;
     const { dialog } = await openDialog("end", textFlow);

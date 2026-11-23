@@ -274,16 +274,18 @@ function AddStepPicker({
           : null,
         prompt: task.prompt ? t(task.prompt) : undefined
       });
-      return { updated: await updateFlowEditor(flow.id, update), sent: update.expected_revision };
+      const updated = await updateFlowEditor(flow.id, update);
+      // The core answered the revision the add was fenced on: the one step not
+      // in the flow it was fenced on is the added one. Worked out here, on that
+      // flow: a newer one can be on screen by the time the answer arrives.
+      const added = updated.steps.find((step) => !flow.steps.some((seen) => seen.id === step.id));
+      return { updated, sent: update.expected_revision, added: added?.id ?? null };
     },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
-    onSuccess: ({ updated, sent }, { task }) => {
+    onSuccess: ({ updated, sent, added }, { task }) => {
       announce(t("flow_step_editor_added", { name: stepName(task) }));
-      // The core answered the revision the add was fenced on: the one step
-      // not in this flow is the added one.
-      const added = updated.steps.find((step) => !flow.steps.some((seen) => seen.id === step.id));
-      onSaved(updated, sent, added?.id ?? null);
+      onSaved(updated, sent, added);
       onClose();
     },
     onError: (error, { option }) => {
