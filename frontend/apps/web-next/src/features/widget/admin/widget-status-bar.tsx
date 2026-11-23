@@ -4,7 +4,8 @@ import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useId, useRef, useState } from "react";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { toastApiError } from "@/lib/api/toast";
 import type { AutosaveSnapshot, Widget, WidgetAutosave } from "./autosave";
 import { blockerLabel } from "./blockers";
@@ -13,8 +14,8 @@ import { toastWidgetError, widgetErrorMessage } from "./errors";
 /**
  * Lifecycle of one widget: status, save state, why it cannot be activated
  * yet (or, once active, what keeps it from serving properly), and the
- * activate / pause / archive actions. Activation and archiving are for tenant
- * admins; pausing is the kill switch every editor has.
+ * activate / pause / archive actions. Tenant admins can activate and archive widgets.
+ * Any editor can pause a widget.
  */
 export function WidgetStatusBar({
   autosave,
@@ -34,14 +35,16 @@ export function WidgetStatusBar({
   onReload: () => Promise<void>;
 }) {
   const t = useTranslations();
+  const ids = useId();
   const widget = state.widget;
   const blockers = widget.activation_blockers ?? [];
   const refusals = [...new Set(Object.values(state.refusals))];
   const canActivate = isAdmin && blockers.length === 0 && !state.hasPending;
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [archiving, setArchiving] = useState(false);
-  // Busy buttons stay enabled so they keep focus; a second press is ignored.
   const [busy, setBusy] = useState<"activate" | "pause" | null>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const rescueFocus = useFocusRescue();
 
   async function activate() {
     if (busy) return;
@@ -50,17 +53,20 @@ export function WidgetStatusBar({
       await autosave.flush();
       if (autosave.hasPending) return;
       await onActivate();
+      rescueFocus(heading.current);
     } catch (error) {
       toastWidgetError(error, t);
     } finally {
       setBusy(null);
     }
   }
+
   async function pause() {
     if (busy) return;
     setBusy("pause");
     try {
       await onPause();
+      rescueFocus(heading.current);
     } catch (error) {
       toastApiError(error, t);
     } finally {
@@ -117,6 +123,11 @@ export function WidgetStatusBar({
         : widget.status === "paused"
           ? t("widget_admin_resume_admin_only")
           : null;
+  const externalToolsNote =
+    isAdmin && blockers.length === 0 && (widget.status === "draft" || widget.status === "paused")
+      ? t("widget_admin_external_tools_note")
+      : null;
+  const externalToolsNoteId = `${ids}-external-tools-note`;
   const activateLabel =
     widget.status === "paused" ? t("widget_admin_resume") : t("widget_admin_activate");
 
@@ -127,7 +138,12 @@ export function WidgetStatusBar({
     >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-3">
-          <h2 id="widget-status-title" className="text-base font-semibold">
+          <h2
+            id="widget-status-title"
+            ref={heading}
+            tabIndex={-1}
+            className="text-base font-semibold"
+          >
             {t("widget_admin_status")}
           </h2>
           <Badge
@@ -171,22 +187,27 @@ export function WidgetStatusBar({
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
+          {/* Keyed apart: a pressed Activate must not become the Pause button
+              under the user's focus, nor Pause the Activate button. */}
           {widget.status === "active" ? (
             <Button
+              key="pause"
               label={t("widget_admin_pause")}
               isLoading={busy === "pause"}
               isInterruptible
-              clickAction={pause}
+              onClick={() => void pause()}
             />
           ) : widget.status !== "archived" ? (
             <Button
+              key="activate"
               variant="primary"
               label={activateLabel}
               isDisabled={!canActivate}
               isLoading={busy === "activate"}
               isInterruptible
               tooltip={activateTooltip ?? undefined}
-              clickAction={activate}
+              aria-describedby={externalToolsNote ? externalToolsNoteId : undefined}
+              onClick={() => void activate()}
             />
           ) : null}
           {isAdmin && widget.status !== "archived" && (
@@ -210,8 +231,6 @@ export function WidgetStatusBar({
         </div>
       )}
       {blockers.length > 0 ? (
-        // An active widget with blockers is live but not serving as configured
-        // (an unpublished assistant, no allowed website, no AI disclosure).
         <div
           id="widget-status-blockers"
           className="bg-ax-warning-muted text-ax-text rounded-lg px-3 py-2 text-sm"
@@ -230,6 +249,10 @@ export function WidgetStatusBar({
       ) : adminOnlyNote ? (
         <p id="widget-status-admin-only" className="text-ax-text-secondary text-sm">
           {adminOnlyNote}
+        </p>
+      ) : externalToolsNote ? (
+        <p id={externalToolsNoteId} className="text-ax-text-secondary text-sm">
+          {externalToolsNote}
         </p>
       ) : null}
 

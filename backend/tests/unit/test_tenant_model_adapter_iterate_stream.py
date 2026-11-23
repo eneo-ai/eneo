@@ -5,6 +5,7 @@ import base64
 import hashlib
 import json
 import logging
+import time
 from contextlib import suppress
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -18,6 +19,7 @@ from eneo.ai_models.completion_models.completion_model import (
     GeneratedFile,
     ResponseType,
 )
+from eneo.audit.domain.action_types import ActionType
 from eneo.completion_models.infrastructure.adapters import tenant_model_adapter
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     CONFIRMATION_DECLINED_MESSAGE,
@@ -43,6 +45,8 @@ from eneo.main import stream_lifecycle
 from eneo.main.config import get_settings
 from eneo.main.exceptions import OpenAIException, TypedIOValidationException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
+from eneo.mcp_servers.infrastructure.proxy import mcp_proxy_session
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
     ToolApprovalWaitResult,
@@ -50,6 +54,8 @@ from eneo.mcp_servers.infrastructure.tool_approval import (
 from eneo.model_providers.infrastructure.litellm_transport import (
     PROVIDER_UNREACHABLE,
 )
+from eneo.widgets.application import widget_ask_service
+from eneo.widgets.domain.widget import Widget, WidgetPrivacy
 from tests.log_capture import CHAIN, SENTINEL, chained_error, emitted, logged_errors
 
 
@@ -1742,7 +1748,8 @@ async def test_iterate_stream_forwards_the_arguments_of_a_pending_call_in_pieces
 
 
 @pytest.mark.asyncio
-async def test_iterate_stream_emits_pending_per_parallel_tool_call():
+@pytest.mark.parametrize("second_id", ["call_2", "call_1"], ids=["distinct", "reused"])
+async def test_iterate_stream_tracks_each_parallel_tool_call(second_id):
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
     follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
@@ -1755,10 +1762,10 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
             ),
             _tool_call_delta_chunk(index=0, arguments='{"q":"a"}'),
             _tool_call_delta_chunk(
-                index=1, tool_call_id="call_2", tool_name="server__tool"
+                index=1, tool_call_id=second_id, tool_name="server__tool"
             ),
             _tool_call_delta_chunk(
-                index=1, arguments='{"q":"b"}', finish_reason="tool_calls"
+                index=1, arguments='{"other":"b"}', finish_reason="tool_calls"
             ),
         ],
         eneo_context={
@@ -1787,9 +1794,205 @@ async def test_iterate_stream_emits_pending_per_parallel_tool_call():
         for e in _tool_call_events(completions)
         if e.tool_calls_metadata[0].result_status == "pending"
     ]
-    assert pending_ids == ["call_1", "call_2"]
+    assert pending_ids == ["call_1", second_id]
     assert mcp_proxy.calls == [
-        [("server__tool", {"q": "a"}), ("server__tool", {"q": "b"})]
+        [("server__tool", {"q": "a"}), ("server__tool", {"other": "b"})]
+    ]
+    results = [
+        call
+        for event in _tool_call_events(completions)
+        for call in event.tool_calls_metadata
+        if call.result_status == "succeeded"
+    ]
+    assert [(call.tool_call_id, call.arguments) for call in results] == [
+        ("call_1", {"q": "a"}),
+        (second_id, {"other": "b"}),
+    ]
+
+
+async def test_open_circuit_records_one_failed_widget_attempt_without_sending(
+    monkeypatch,
+):
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
+    )
+    widget.id = uuid4()
+    widget.privacy = WidgetPrivacy(retention_days=0)
+    server_id = uuid4()
+    server = MCPServer(
+        id=server_id,
+        tenant_id=widget.tenant_id,
+        name="server",
+        http_url="https://server.invalid/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name="tool",
+                description="Test tool",
+                input_schema={
+                    "type": "object",
+                    "properties": {"lookup_topic": {"type": "string"}},
+                },
+            )
+        ],
+    )
+    proxy = mcp_proxy_session.MCPProxySession([server])
+    monkeypatch.setitem(
+        mcp_proxy_session._CIRCUIT_BREAKER_STATE,
+        server_id,
+        {"failures": 1, "open_until": time.time() + 60},
+    )
+    client = AsyncMock()
+    monkeypatch.setattr(proxy, "_get_or_create_client", AsyncMock(return_value=client))
+    monkeypatch.setattr(
+        tenant_model_adapter,
+        "_acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    )
+    sink = AsyncMock()
+    # A failed enqueue exercises the audit payload and its fallback in the same turn.
+    sink.log_async.return_value = None
+    audit = widget_ask_service.ExternalToolCallAudit(
+        sink,
+        widget,
+        visitor_id=uuid4(),
+        session_id=uuid4(),
+        question_id=None,
+        preview=False,
+    )
+    arguments = {"lookup_topic": "synthetic-visitor-value", SENTINEL: "extra"}
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_call_chunk(arguments=json.dumps(arguments))]),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+    )
+    with emitted(widget_ask_service.logger) as records:
+        async for event in _make_adapter().iterate_stream(stream):
+            await audit.observe(event)
+        await audit.settle()
+
+    client.call_tool.assert_not_awaited()
+    sink.log_async.assert_awaited_once()
+    entry = sink.log_async.await_args.kwargs
+    assert entry["action"] == ActionType.WIDGET_EXTERNAL_TOOL_CALLED
+    assert "attempted" in entry["description"]
+    assert (entry["metadata"]["tool_call_id"], entry["metadata"]["result_status"]) == (
+        "call_1",
+        "failed",
+    )
+    [fallback] = [record for record in records if "not enqueued" in record.getMessage()]
+    assert vars(fallback)["result_status"] == "failed"
+    for logged in (repr(entry), fallback.getMessage(), repr(vars(fallback))):
+        assert "lookup_topic" not in logged
+        assert SENTINEL not in logged
+        assert "synthetic-visitor-value" not in logged
+    assert "temporarily unavailable" in next(
+        msg["content"] for msg in stream.messages if msg["role"] == "tool"
+    )
+
+
+@pytest.mark.parametrize("second_id", ["call_2", "call_1"], ids=["distinct", "reused"])
+async def test_a_call_cut_by_the_budget_is_one_failed_widget_attempt(
+    monkeypatch, second_id
+):
+    """Both calls of an unattended round show approved; the budget runs the
+    first, and the second ends as a refused attempt for its own tool, also
+    when the provider gave both the same id."""
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=3)
+    widget = Widget.create(
+        tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
+    )
+    widget.id = uuid4()
+    server_id = uuid4()
+    server = MCPServer(
+        id=server_id,
+        tenant_id=widget.tenant_id,
+        name="server",
+        http_url="https://server.invalid/mcp",
+        tools=[
+            MCPServerTool(
+                mcp_server_id=server_id,
+                name=name,
+                description="Test tool",
+                input_schema={"type": "object", "properties": {}},
+            )
+            for name in ("lookup", "notify")
+        ],
+    )
+    proxy = mcp_proxy_session.MCPProxySession([server])
+    sent = AsyncMock(return_value=[{"content": [{"type": "text", "text": "ok"}]}])
+    monkeypatch.setattr(proxy, "call_tools_parallel", sent)
+    monkeypatch.setattr(
+        tenant_model_adapter,
+        "_acompletion_call",
+        AsyncMock(
+            return_value=_AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+        ),
+    )
+    sink = AsyncMock()
+    audit = widget_ask_service.ExternalToolCallAudit(
+        sink,
+        widget,
+        visitor_id=uuid4(),
+        session_id=uuid4(),
+        question_id=None,
+        preview=False,
+    )
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream(
+            [
+                _tool_call_delta_chunk(
+                    index=0,
+                    tool_call_id="call_1",
+                    tool_name="server__lookup",
+                    arguments="{}",
+                ),
+                _tool_call_delta_chunk(
+                    index=1,
+                    tool_call_id=second_id,
+                    tool_name="server__notify",
+                    arguments="{}",
+                    finish_reason="tool_calls",
+                ),
+            ]
+        ),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+    )
+    completions = []
+    async for event in _make_adapter().iterate_stream(stream):
+        completions.append(event)
+        await audit.observe(event)
+    await audit.settle()
+
+    assert [
+        (metadata.tool_call_id, metadata.mcp_tool_name, metadata.result_status)
+        for completion in _events(completions, ResponseType.TOOL_CALL)
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.result_status != "pending"
+    ] == [
+        ("call_1", "server__lookup", "approved"),
+        (second_id, "server__notify", "approved"),
+        ("call_1", "server__lookup", "succeeded"),
+        (second_id, "server__notify", "failed"),
+    ]
+    sent.assert_awaited_once_with([("server__lookup", {})])
+    assert [
+        (
+            entry.kwargs["metadata"]["tool_call_id"],
+            entry.kwargs["metadata"]["mcp_tool_name"],
+            entry.kwargs["metadata"]["result_status"],
+        )
+        for entry in sink.log_async.await_args_list
+    ] == [
+        ("call_1", "server__lookup", "succeeded"),
+        (second_id, "server__notify", "failed"),
     ]
 
 
@@ -3425,6 +3628,16 @@ def _tool_result(messages, call_id: str) -> dict:
     return json.loads(content)
 
 
+def _statuses_of(completions, call_id: str) -> list[str | None]:
+    """One call's statuses in the TOOL_CALL events once it was decided."""
+    return [
+        metadata.result_status
+        for completion in _events(completions, ResponseType.TOOL_CALL)
+        for metadata in completion.tool_calls_metadata or []
+        if metadata.tool_call_id == call_id and metadata.result_status != "pending"
+    ]
+
+
 def _decided_statuses(completions) -> set[tuple[object, ...]]:
     """Each call's approval, status and internal flag once it was decided
     (its announcement while the model writes it is pending)."""
@@ -3533,6 +3746,38 @@ async def test_a_turn_that_cannot_ask_refuses_a_call_that_requires_confirmation(
     assert _decided_statuses(completions) == {(False, "denied", True)}
 
 
+async def test_a_turn_that_cannot_ask_still_runs_an_external_call_beside_a_refused_one():
+    """Only a destructive tool of Eneo's own servers needs confirmation. In a
+    turn where nobody can be asked it is refused, and an external tool in the
+    same round still runs."""
+    messages: list[dict] = []
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0, tool_call_id="call_run", tool_name="flows__run_flow"
+            ),
+            _tool_call_delta_chunk(index=0, arguments="{}"),
+            _tool_call_delta_chunk(
+                index=1, tool_call_id="call_ext", tool_name="server__tool"
+            ),
+            _tool_call_delta_chunk(index=1, arguments="{}", finish_reason="tool_calls"),
+        ],
+        messages,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+    )
+
+    assert proxy.calls == [[("server__tool", {})]]
+    assert (
+        _tool_result(messages, "call_run")
+        == tenant_model_adapter.CONFIRMATION_UNAVAILABLE_RESULT
+    )
+    assert _statuses_of(completions, "call_run") == ["denied", "denied"]
+    assert _statuses_of(completions, "call_ext") == ["approved", "succeeded"]
+
+
 async def test_only_the_call_that_requires_confirmation_waits_for_the_person():
     """An internal tool without the hint and an external tool, in a request
     that does not require approval, run as before, whatever the person
@@ -3617,6 +3862,8 @@ async def test_a_call_outside_the_budget_never_asks_for_approval(monkeypatch):
     assert not _events(completions, ResponseType.TOOL_APPROVAL_REQUIRED)
     assert proxy.calls == [[("flows__read_flow", {})]]
     assert _tool_result(messages, "run") == {"error": TOOL_CALL_LIMIT_MESSAGE}
+    # Absent from the decisions event; its only record is the refusal.
+    assert _statuses_of(completions, "run") == ["failed"]
 
 
 async def test_an_unavailable_confirmation_leaves_room_for_an_unattended_read(
@@ -3655,7 +3902,7 @@ async def test_declining_an_approval_preserves_the_turn_budget_for_a_later_reque
     _cap_tool_calls(monkeypatch, per_round=1, per_turn=1)
     manager = _decided(ToolApprovalDecision(tool_call_id="run", approved=False))
     messages = []
-    proxy, _ = await _confirming_round(
+    proxy, completions = await _confirming_round(
         [
             _tool_call_delta_chunk(
                 index=0, tool_call_id="run", tool_name="flows__run_flow", arguments="{}"
@@ -3682,6 +3929,9 @@ async def test_declining_an_approval_preserves_the_turn_budget_for_a_later_reque
     assert _tool_result(messages, "run")["denied"]
     assert _tool_result(messages, "read") == {"error": TOOL_CALL_LIMIT_MESSAGE}
     assert proxy.calls == [[("flows__read_flow", {})]]
+    # The window cut "read" before the person decided: it is not listed as
+    # decided, only refused over the limit.
+    assert _statuses_of(completions, "read") == ["failed"]
 
 
 async def test_required_approval_asks_about_external_and_confirmation_calls_at_once():

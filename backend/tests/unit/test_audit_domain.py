@@ -512,6 +512,7 @@ def test_actor_types_enum():
     assert ActorType.USER == "user"
     assert ActorType.SYSTEM == "system"
     assert ActorType.API_KEY == "api_key"
+    assert ActorType.WIDGET_VISITOR == "widget_visitor"
 
 
 def test_outcome_enum():
@@ -535,10 +536,15 @@ class TestEnumCompleteness:
             assert isinstance(entity.value, str)
             assert isinstance(entity, str)
 
-    def test_actor_type_count_is_3(self):
-        """ActorType enum should have exactly 3 members."""
-        assert len(ActorType) == 3
-        assert set(ActorType) == {ActorType.USER, ActorType.SYSTEM, ActorType.API_KEY}
+    def test_actor_type_count_is_4(self):
+        """ActorType enum should have exactly 4 members."""
+        assert len(ActorType) == 4
+        assert set(ActorType) == {
+            ActorType.USER,
+            ActorType.SYSTEM,
+            ActorType.API_KEY,
+            ActorType.WIDGET_VISITOR,
+        }
 
     def test_outcome_count_is_2(self):
         """Outcome enum should have exactly 2 members."""
