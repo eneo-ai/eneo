@@ -163,18 +163,15 @@ function templateFieldTokens(step: FlowStep): string[] {
 
 /**
  * What an HTTP call reads: the texts the core fills in (`interpolated_template_sites`):
- * its address, the header name or user name its credential goes under, its
- * body when that is a template, and the values of its headers that are not secret.
+ * its address, its body when that is a template, and what it sends in headers
+ * (`headerTokens`).
  */
 function callTokens(call: unknown): string[] {
   if (!isRecord(call)) return [];
-  const auth = isRecord(call.auth) ? call.auth : {};
   const body = isRecord(call.body) ? call.body : {};
   return [
     ...[
       call.url,
-      auth.mode === "api_key" ? auth.header_name : null,
-      auth.mode === "basic_auth" ? auth.username : null,
       body.mode === "json_template" || body.mode === "text_template" ? body.template : null
     ].flatMap((text) => (typeof text === "string" ? tokensOf(text) : [])),
     ...headerTokens(call)
@@ -182,20 +179,27 @@ function callTokens(call: unknown): string[] {
 }
 
 /**
- * What the values of a call's headers that are not secret read. A row without
- * a name is no header: the core does not send it.
+ * What a call sends in headers reads: the header name or user name its
+ * credential goes under, and the values of its headers that are not secret.
+ * A row without a name is no header: the core does not send it.
  */
 function headerTokens(call: Record<string, unknown>): string[] {
+  const auth = isRecord(call.auth) ? call.auth : {};
+  const credentialName =
+    auth.mode === "api_key" ? auth.header_name : auth.mode === "basic_auth" ? auth.username : null;
   const headers = Array.isArray(call.custom_headers) ? call.custom_headers : [];
-  return headers.flatMap((header) =>
-    isRecord(header) &&
-    typeof header.name === "string" &&
-    header.name.trim() !== "" &&
-    header.secret !== true &&
-    typeof header.value === "string"
-      ? tokensOf(header.value)
-      : []
-  );
+  return [
+    ...(typeof credentialName === "string" ? tokensOf(credentialName) : []),
+    ...headers.flatMap((header) =>
+      isRecord(header) &&
+      typeof header.name === "string" &&
+      header.name.trim() !== "" &&
+      header.secret !== true &&
+      typeof header.value === "string"
+        ? tokensOf(header.value)
+        : []
+    )
+  ];
 }
 
 /**
@@ -215,9 +219,9 @@ function webhookTarget(
 
 /**
  * The earlier steps the step that sends the run's result reads in its own
- * right, in run order: those the values of its headers that are not secret
- * name, read as the core fills them in (`webhookTarget`). The result it
- * sends is not a read.
+ * right, in run order: those what it sends in headers names (`headerTokens`),
+ * read as the core fills them in (`webhookTarget`). The result it sends is
+ * not a read.
  */
 export function senderReads(sender: FlowStep, steps: readonly FlowStep[]): StepRead[] {
   const config = isRecord(sender.output_config) ? sender.output_config : {};

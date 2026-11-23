@@ -665,6 +665,45 @@ it("agrees on the cards and in what the step that sends lists after the first of
   expect(within(sends).getByRole("button", { name: "Öppna steg 2 – Bilaga" })).toBeTruthy();
 });
 
+it("agrees in Leverans, on the card that sends and in the removal dialog that a step its API key's header name names is read", async () => {
+  flow = makeFlow({
+    steps: [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { user_description: "Granska", input_source: "flow_input" }),
+      makeStep(3, {
+        user_description: "Skicka",
+        output_mode: "http_post",
+        output_config: {
+          url: "https://startsidan.example.org/in",
+          auth: { mode: "api_key", header_name: "X-{{Sammanfatta}}", key: "hemlig" },
+          body: { mode: "run_result" }
+        }
+      })
+    ]
+  });
+  await renderPage("?step=step-1");
+  const delivery = await screen.findByRole("region", {
+    name: messages.flow_step_editor_delivery_title
+  });
+  expect(await within(delivery).findByText("Läses av Steg 3: Skicka.")).toBeTruthy();
+  expect(
+    within(delivery).getByText(
+      "Skickas till startsidan.example.org i en header i steget som skickar körningens resultat."
+    )
+  ).toBeTruthy();
+
+  await click("Alla steg");
+  const sending = await screen.findByRole("article", { name: "Steg 3 Skicka" });
+  expect(within(sending).getByText(messages.flows_step_reads)).toBeTruthy();
+  expect(within(sending).getByText("Steg 1: Sammanfatta")).toBeTruthy();
+  const trigger = screen.getByRole("button", { name: "Fler åtgärder för Steg 1: Sammanfatta" });
+  fireEvent.click(trigger);
+  const menu = document.getElementById(trigger.getAttribute("aria-controls") ?? "")!;
+  fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort steg" }));
+  const dialog = await screen.findByRole("alertdialog", { name: "Ta bort steget?" });
+  expect(within(dialog).getByText(/^Steg 3: Skicka läser Steg 1: Sammanfatta\./)).toBeTruthy();
+});
+
 it("closes a direct step link in the same flow without traversing earlier history", async () => {
   const { router } = await renderPage("?step=step-2");
   await nameField();
