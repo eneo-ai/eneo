@@ -61,7 +61,10 @@ RETENTION_RULES: Mapping[str, RuleTask | RuleExemption] = MappingProxyType(
         # is no level here: an empty space gives its flows no time, even when
         # the organisation keeps a conversation time, so no conversation
         # setting makes a run removable without a space administrator's
-        # choice. Nothing removes a run automatically yet.
+        # choice. A personal space has no writer for its time, so its flows in
+        # practice have only the flow level; a value stored outside the API
+        # caps them, as it caps conversations. Nothing removes a run
+        # automatically yet.
         RetentionRule.FLOW_RUN_HISTORY: RuleExemption(
             "No task removes Flow run history; an administrator's explicit "
             "purge selects runs by this period.",
