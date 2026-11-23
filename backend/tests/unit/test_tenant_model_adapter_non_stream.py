@@ -354,6 +354,16 @@ async def test_a_request_without_a_stream_refuses_every_call_under_a_confirmatio
     ]
 
 
+async def test_a_request_without_a_stream_answers_the_calls_in_their_order():
+    proxy, follow_up, _ = await _without_a_stream(
+        _named_call("a", "flows__run_flow"), _named_call("b", "server__tool")
+    )
+
+    assert proxy.calls == [[("server__tool", {})]]
+    assert [call_id for call_id, _ in _tool_replies(follow_up)] == ["a", "b"]
+    assert _tool_replies(follow_up)[1] == ("b", "ok")
+
+
 @pytest.mark.asyncio
 async def test_get_response_propagates_unknown_usage_dimensions_across_tool_round():
     adapter = _make_adapter()

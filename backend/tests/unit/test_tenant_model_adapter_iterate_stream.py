@@ -3967,6 +3967,60 @@ async def test_a_withheld_reused_id_takes_no_place_in_the_window(monkeypatch):
     ]
 
 
+async def test_the_model_reads_the_replies_in_the_order_of_its_calls(monkeypatch):
+    """The replies to one response follow its calls, whatever became of each,
+    so two calls under one id keep their place."""
+    _cap_tool_calls(monkeypatch, per_round=1, per_turn=3)
+    messages: list[dict] = []
+    sent: list[list[dict]] = []
+    manager = _decided()
+
+    proxy, completions = await _confirming_round(
+        [
+            _tool_call_delta_chunk(
+                index=0,
+                tool_call_id="x",
+                tool_name="flows__read_flow",
+                arguments='{"q":"x"}',
+            ),
+            _tool_call_delta_chunk(
+                index=1,
+                tool_call_id="y",
+                tool_name="flows__read_flow",
+                arguments='{"q":"y"}',
+            ),
+            _tool_call_delta_chunk(
+                index=2,
+                tool_call_id="x",
+                tool_name="flows__run_flow",
+                arguments="{}",
+                finish_reason="tool_calls",
+            ),
+        ],
+        messages,
+        sent=sent,
+        require_tool_approval=False,
+        approval_manager=manager,
+        approval_context=_approval_context(),
+    )
+
+    manager.request_approval.assert_not_awaited()
+    assert proxy.calls == [[("flows__read_flow", {"q": "y"})]]
+    assert [
+        call_id
+        for call_id, _, status in _decided_calls(completions)
+        if status == "approved"
+    ] == ["y"]
+    (request,) = sent
+    (asked,) = [message for message in request if message.get("tool_calls")]
+    assert [call["id"] for call in asked["tool_calls"]] == ["x", "y", "x"]
+    assert _tool_replies(request) == [
+        ("x", _WITHHELD),
+        ("y", "tool-ok"),
+        ("x", _WITHHELD),
+    ]
+
+
 async def test_only_the_call_that_requires_confirmation_waits_for_the_person():
     """An internal tool without the hint and an external tool, in a request
     that does not require approval, run as before, whatever the person

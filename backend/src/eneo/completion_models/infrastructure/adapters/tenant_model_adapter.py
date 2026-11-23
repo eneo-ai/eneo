@@ -558,6 +558,11 @@ _RoundCall: TypeAlias = tuple[_AccumulatedToolCall, ToolCallMetadata]
 
 _Call = TypeVar("_Call")
 
+# A round's tool replies, keyed by the call object each answers (``id(call)``)
+# rather than its provider id, which can be reused. They are sent in the order
+# of the calls once every call has its outcome.
+_Replies: TypeAlias = dict[int, dict[str, Any]]
+
 
 @dataclass
 class PreparedModelStream:
@@ -856,7 +861,7 @@ def _unasked_call_metadata(
 
 def _answer_calls_not_run(
     *,
-    messages: list[dict[str, Any]],
+    replies: _Replies,
     denied: list[_RoundCall],
     withheld: list[tuple[_RoundCall, dict[str, Any]]],
     over_limit: list[_RoundCall],
@@ -884,13 +889,11 @@ def _answer_calls_not_run(
         )
         if denial_reason:
             denial_payload["user_reason"] = denial_reason
-        messages.append(
-            {
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": json.dumps(denial_payload),
-            }
-        )
+        replies[id(tc)] = {
+            "role": "tool",
+            "tool_call_id": tc["id"],
+            "content": json.dumps(denial_payload),
+        }
         denied_metadata.append(
             replace(
                 tool_metadata,
@@ -901,7 +904,7 @@ def _answer_calls_not_run(
         )
     for (tc, tool_metadata), result in withheld:
         payload = json.dumps(result)
-        messages.append({"role": "tool", "tool_call_id": tc["id"], "content": payload})
+        replies[id(tc)] = {"role": "tool", "tool_call_id": tc["id"], "content": payload}
         denied_metadata.append(
             replace(
                 tool_metadata,
@@ -910,24 +913,26 @@ def _answer_calls_not_run(
                 result=payload,
             )
         )
-    denied_metadata.extend(_refuse_over_limit_calls(over_limit, messages=messages))
+    denied_metadata.extend(_refuse_over_limit_calls(over_limit, replies=replies))
     return denied_metadata
 
 
 def _refuse_over_limit_calls(
-    calls: list[_RoundCall], *, messages: list[dict[str, Any]]
+    calls: list[_RoundCall], *, replies: _Replies
 ) -> list[ToolCallMetadata]:
     """Answer a streamed round's calls beyond the limit, without running them.
 
-    Each gets its tool result in ``messages``, since a provider rejects a
+    Each gets its tool result in ``replies``, since a provider rejects a
     transcript with an unanswered call. The records returned show the reader
     that they did not run.
     """
     payload = json.dumps({"error": TOOL_CALL_LIMIT_MESSAGE})
     for call, _ in calls:
-        messages.append(
-            {"role": "tool", "tool_call_id": call["id"] or "", "content": payload}
-        )
+        replies[id(call)] = {
+            "role": "tool",
+            "tool_call_id": call["id"] or "",
+            "content": payload,
+        }
     return [_over_limit_record(tool_metadata) for _, tool_metadata in calls]
 
 
@@ -2596,6 +2601,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     results: list[dict[str, Any]] = []
                     proxy_calls: list[tuple[str, dict[str, Any]]] = []
+                    replies: _Replies = {}
                     # A request without a stream cannot ask the person, so a
                     # call that needs their confirmation is refused, never run,
                     # with every call under its id (_split_shared_id_calls).
@@ -2676,13 +2682,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             result_status = "failed"
                         assert mcp_proxy is not None
                         llm_text = mcp_proxy.model_result_text(llm_text)
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.call_id,
-                                "content": result_budget.admit(llm_text),
-                            }
-                        )
+                        replies[id(call)] = {
+                            "role": "tool",
+                            "tool_call_id": call.call_id,
+                            "content": result_budget.admit(llm_text),
+                        }
                         assert mcp_proxy is not None
                         server_name, tool_name, title = _tool_names(
                             mcp_proxy, call.name
@@ -2718,13 +2722,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                         unasked_result = _withheld_result(
                             mcp_proxy, call.name, can_ask=False
                         )
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.call_id,
-                                "content": json.dumps(unasked_result),
-                            }
-                        )
+                        replies[id(call)] = {
+                            "role": "tool",
+                            "tool_call_id": call.call_id,
+                            "content": json.dumps(unasked_result),
+                        }
                         collected_tool_metadata.append(
                             _unasked_call_metadata(
                                 mcp_proxy, call, unasked_args, unasked_result
@@ -2736,18 +2738,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                             over_limit_args = self._parse_tool_arguments(call.arguments)
                         except OpenAIException:
                             over_limit_args = None
-                        messages.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": call.call_id,
-                                "content": json.dumps(
-                                    {"error": TOOL_CALL_LIMIT_MESSAGE}
-                                ),
-                            }
-                        )
+                        replies[id(call)] = {
+                            "role": "tool",
+                            "tool_call_id": call.call_id,
+                            "content": json.dumps({"error": TOOL_CALL_LIMIT_MESSAGE}),
+                        }
                         collected_tool_metadata.append(
                             _over_limit_call_metadata(mcp_proxy, call, over_limit_args)
                         )
+                    # The replies follow the calls, whatever became of each.
+                    messages.extend(replies[id(call)] for call in external_calls)
                     if external_calls:
                         assert mcp_proxy is not None
                         await self._refresh_mcp_tools_after_round(
@@ -3832,6 +3832,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                             }
                         )
 
+                    replies: _Replies = {}
                     # Execute approved tools
                     if approved_calls:
                         proxy_calls: list[tuple[str, dict[str, Any]]] = [
@@ -3890,13 +3891,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             else:
                                 llm_text = generated.append_references(llm_text)
                             llm_text = mcp_proxy.model_result_text(llm_text)
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tc["id"],
-                                    "content": result_budget.admit(llm_text),
-                                }
-                            )
+                            replies[id(tc)] = {
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": result_budget.admit(llm_text),
+                            }
                             execution_metadata.append(
                                 replace(
                                     metadata,
@@ -3923,7 +3922,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
                     # Answer the calls that did not run: denied, or over a limit.
                     denied_metadata = _answer_calls_not_run(
-                        messages=messages,
+                        replies=replies,
                         denied=denied_calls,
                         withheld=withheld,
                         over_limit=over_limit_calls,
@@ -3937,6 +3936,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                             response_type=ResponseType.TOOL_CALL,
                             tool_calls_metadata=denied_metadata,
                         )
+                    # The replies follow the calls of the assistant message,
+                    # whatever became of each; every call has one.
+                    messages.extend(replies[id(tc)] for tc in tool_calls)
 
                     # Re-fetch tools in case a tool we just ran (e.g. load_tools
                     # on a progressive-discovery server) activated new tools via
