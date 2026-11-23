@@ -6,6 +6,7 @@
  * (`flowInputBindings.ts`, `flowStepMaterial.ts` in apps/web) for display.
  * The prompt lives on the step assistant, so the caller passes it in.
  */
+import { sendsRunResult } from "./editor/step-configs";
 import type { FlowPublic, FlowStep, FlowStepSlot } from "./flows-api";
 
 /** One source a step reads. */
@@ -305,6 +306,26 @@ export function stepReaders(
     .filter((later) =>
       readFacts(later, steps, prompts.get(later.assistant_id)).named.has(step.step_order)
     )
+    .sort((a, b) => a.step_order - b.step_order);
+}
+
+/**
+ * The later steps that read a step, by name or by place (the previous step,
+ * all earlier ones), in run order: where its result goes next in the flow.
+ * The step that sends the run's result is left out; it sends the run's
+ * results, not what it reads.
+ */
+export function stepReadersByNameOrPlace(
+  step: FlowStep,
+  steps: readonly FlowStep[],
+  prompts: StepPrompts = new Map()
+): FlowStep[] {
+  return steps
+    .filter((later) => later.step_order > step.step_order && !sendsRunResult(later))
+    .filter((later) => {
+      const facts = readFacts(later, steps, prompts.get(later.assistant_id));
+      return facts.named.has(step.step_order) || facts.implicit.has(step.step_order);
+    })
     .sort((a, b) => a.step_order - b.step_order);
 }
 

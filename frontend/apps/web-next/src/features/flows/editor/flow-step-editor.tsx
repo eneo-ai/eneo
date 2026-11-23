@@ -54,6 +54,7 @@ import {
   withTidyDeliverable
 } from "./step-configs";
 import { StepControlSection } from "./step-control-section";
+import { StepDeliverySection } from "./step-delivery-section";
 import {
   assistantChanges,
   buildEditorUpdate,
@@ -1091,6 +1092,20 @@ function StepEditorSession({
                       announce(t("flow_editor_tools_contract_example_accepted"));
                     }}
                   />
+
+                  {stepCanBeDeliverable(draft) && (
+                    <StepDeliverySection
+                      formId={formId}
+                      sectionId={`${formId}-delivery`}
+                      flow={flow}
+                      stepId={stepId}
+                      draft={draft}
+                      groups={groups}
+                      onChange={changeStep}
+                      problems={shownProblems}
+                      onGoStep={onGoStep}
+                    />
+                  )}
                 </>
               )}
 

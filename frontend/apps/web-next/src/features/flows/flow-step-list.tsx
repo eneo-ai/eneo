@@ -6,16 +6,15 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
 import { ArrowDown, ArrowUp, Ellipsis, Plus, Workflow } from "lucide-react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { Fragment, useId, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { ListError } from "@/components/composites/query-state";
-import { flowAssistantQueryOptions } from "./editor/editor-api";
+import { useStepPrompts } from "./editor/editor-api";
 import { FILE_INPUT_TYPES, readRuntimeInput } from "./editor/step-configs";
-import { stepUsesModel } from "./editor/step-rules";
 import type { FlowStep } from "./flows-api";
 import type { StepChange } from "./flow-changes";
 import { inputTypeLabel, producesLabel, readLabel, stepLabel } from "./flow-labels";
@@ -295,23 +294,6 @@ function StepCard({
         />
       ) : null}
     </article>
-  );
-}
-
-/**
- * The prompts of the flow's AI steps, read through the step assistants as
- * they arrive. Only an editor may read the assistants (`enabled`).
- */
-function useStepPrompts(flowId: string, steps: readonly FlowStep[], enabled: boolean): StepPrompts {
-  const assistants = useQueries({
-    queries: steps
-      .filter((step) => stepUsesModel(step))
-      .map((step) => ({ ...flowAssistantQueryOptions(flowId, step.assistant_id), enabled }))
-  });
-  return new Map(
-    assistants.flatMap((query) =>
-      query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
-    )
   );
 }
 

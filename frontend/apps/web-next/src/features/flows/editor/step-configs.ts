@@ -364,6 +364,20 @@ export function sendsRunResult(step: {
 }
 
 /**
+ * The host the step that sends the run's result sends to, or null while its
+ * address is not one it can send to (a fixed https address).
+ */
+export function runResultHost(step: { output_config?: unknown }): string | null {
+  const url = readHttpConfig(step.output_config, "output").url.trim();
+  if (!runResultUrlFixed(url)) return null;
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Where the call names a Content-Type header, which a body that sends the
  * run's result sets itself: the API key's header name, or a header that is sent.
  */

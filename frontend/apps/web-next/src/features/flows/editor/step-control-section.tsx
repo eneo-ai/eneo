@@ -237,7 +237,10 @@ export function StepControlSection({
     draft.output_classification_override !== null;
   if (!hasReview && !classifies) return null;
   return (
-    <EditorSection id={sectionId} title={t("flow_step_editor_control_title")}>
+    <EditorSection
+      id={sectionId}
+      title={hasReview ? t("flow_step_editor_control_title") : t("flows_classification_heading")}
+    >
       {hasReview && (
         <Review
           formId={formId}

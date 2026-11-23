@@ -6,6 +6,7 @@ import {
   orderWithout,
   readTarget,
   stepReaders,
+  stepReadersByNameOrPlace,
   stepReads,
   stepsInOrder,
   templateParts,
@@ -151,6 +152,62 @@ describe("stepReaders", () => {
         })
       )
     ).toEqual([]);
+  });
+});
+
+describe("stepReadersByNameOrPlace", () => {
+  const sender = (order: number) =>
+    makeStep(order, {
+      output_mode: "http_post",
+      output_config: {
+        url: "https://startsidan.example.org/in",
+        auth: { mode: "none" },
+        body: { mode: "run_result" }
+      }
+    });
+  const orders = (
+    steps: ReturnType<typeof makeStep>[],
+    at: number,
+    prompts?: Map<string, string>
+  ) => stepReadersByNameOrPlace(steps[at]!, steps, prompts).map((step) => step.step_order);
+
+  it("counts the step after it, every step that reads all earlier ones, and a step that names it", () => {
+    const steps = [
+      makeStep(1),
+      makeStep(2),
+      makeStep(3, { input_source: "all_previous_steps" }),
+      makeStep(4, { input_bindings: { question: "{{step_1}}" } })
+    ];
+    expect(orders(steps, 0)).toEqual([2, 3, 4]);
+    expect(orders(steps, 1)).toEqual([3]);
+    expect(orders(steps, 3)).toEqual([]);
+  });
+
+  it("counts a later step whose prompt names it, once the prompt is read", () => {
+    const steps = [
+      makeStep(1, { user_description: "Sammanfatta" }),
+      makeStep(2, { input_source: "flow_input" }),
+      makeStep(3, { input_source: "flow_input" })
+    ];
+    expect(orders(steps, 0)).toEqual([]);
+    expect(orders(steps, 0, new Map([["assistant-3", "Läs {{Sammanfatta}}."]]))).toEqual([3]);
+  });
+
+  it("leaves out the step that sends the run's result, which sends what the run delivers", () => {
+    const steps = [makeStep(1), sender(2)];
+    expect(orders(steps, 0)).toEqual([]);
+    // An ordinary request that sends its own answer reads the step before it.
+    const post = makeStep(2, {
+      output_mode: "http_post",
+      output_config: { url: "https://hooks.example.se", auth: { mode: "none" } }
+    });
+    expect(orders([makeStep(1), post], 0)).toEqual([2]);
+  });
+
+  it("leaves the removal check to named reads", () => {
+    const steps = [makeStep(1), makeStep(2)];
+    expect(orders(steps, 0)).toEqual([2]);
+    expect(stepReaders(steps[0]!, steps)).toEqual([]);
   });
 });
 

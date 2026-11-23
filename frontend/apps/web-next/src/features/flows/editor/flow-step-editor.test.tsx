@@ -350,7 +350,7 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
-  it("keeps the classification of the step that sends the run's result, without a review", async () => {
+  it("keeps the classification of the step that sends the run's result, headed without review", async () => {
     const space = makeSpace({
       overrides: {
         security_classification: {
@@ -379,25 +379,30 @@ describe("FlowStepEditor", () => {
     expect(
       await screen.findByRole("heading", {
         level: 3,
-        name: messages.flow_step_editor_control_title
+        name: messages.flows_classification_heading
       })
     ).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_control_title })
+    ).toBeNull();
     expect(
       screen.queryByRole("radiogroup", { name: new RegExp(messages.flow_step_review_policy) })
     ).toBeNull();
   }, 20_000);
 
-  it("shows an AI step's task, input, result and control as labelled sections", async () => {
+  it("shows an AI step's task, input, result, delivery and control as labelled sections", async () => {
     const { container } = renderEditor(makeFlow());
     await nameField();
-    for (const heading of [
+    // In this order: where the result goes comes right after what it is.
+    expect(
+      screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent)
+    ).toEqual([
       messages.flow_step_editor_ai_title,
       messages.flow_step_editor_input_title,
       messages.flow_step_editor_output_title,
+      messages.flow_step_editor_delivery_title,
       messages.flow_step_editor_control_title
-    ]) {
-      expect(screen.getByRole("heading", { level: 3, name: heading })).toBeTruthy();
-    }
+    ]);
     expect(
       screen.getByRole("region", { name: messages.flow_step_editor_advanced_title })
     ).toBeTruthy();
@@ -1706,6 +1711,45 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it("reads the step that sends the run's result as what it sends and to whom", async () => {
+    renderEditor(
+      makeFlow({
+        steps: [
+          makeStep({ output_mode: "compose_text" }),
+          makeStep({
+            id: "step-2",
+            step_order: 2,
+            user_description: "Skicka körningens resultat",
+            input_source: "previous_step",
+            output_mode: "http_post",
+            output_config: {
+              url: "https://hook.example.org/",
+              auth: { mode: "none" },
+              timeout_seconds: 30,
+              body: { mode: "run_result" },
+              custom_headers: [],
+              response_format: null
+            }
+          })
+        ]
+      }),
+      { readOnly: true, stepId: "step-2" }
+    );
+    expect(await screen.findByText("https://hook.example.org/")).toBeTruthy();
+    // The same sections as the editor: what is sent, and to whom.
+    expect(screen.getByText(messages.flow_step_editor_run_result_sends_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_step_editor_run_result_receiver_title)).toBeTruthy();
+    expect((await rowValue("Sammanfatta")).textContent).toBe(messages.flow_output_type_text);
+    // Nothing the step does not use: no input, no mode or body, no review.
+    expect(screen.queryByText(messages.flow_step_editor_input_title)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_output_mode)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_editor_http_body)).toBeNull();
+    expect(screen.queryByText(messages.flow_step_review_policy)).toBeNull();
+    // Its classification is headed as what it is: there is no review to name.
+    expect(screen.getByText(messages.flows_classification_heading)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_step_editor_control_title)).toBeNull();
+  }, 20_000);
+
   it("folds a long instruction under Visa hela and wraps a long address anywhere", async () => {
     const prompt = "Läs ärendet noga. ".repeat(170);
     const url = `https://api.example.org/${"a".repeat(180)}`;
@@ -2989,4 +3033,176 @@ describe("FlowStepEditor deliverables", () => {
       "Standup {{flow_input.team}}"
     );
   });
+});
+
+describe("FlowStepEditor Leverans", () => {
+  const RECEIVER = "https://startsidan.example.org/in";
+
+  /** Each step's assistant answered by its id, with the prompt given for it (else a plain one). */
+  function routeAssistants(prompts: Record<string, string> = {}, refused: string[] = []) {
+    api.routes[ASSISTANT] = (init) => {
+      const id = (init as { params: { path: { assistant_id: string } } }).params.path.assistant_id;
+      if (refused.includes(id)) return { status: 403, body: { message: "Nej", code: "forbidden" } };
+      const assistant = makeAssistant();
+      return {
+        body: makeAssistant({
+          id,
+          prompt: { ...assistant.prompt!, text: prompts[id] ?? "Gör ditt jobb." }
+        })
+      };
+    };
+  }
+
+  const sender = (order: number, url = RECEIVER) =>
+    makeStep({
+      id: `step-${order}`,
+      step_order: order,
+      assistant_id: `assistant-${order}`,
+      user_description: "Skicka",
+      input_source: "previous_step",
+      output_mode: "http_post",
+      output_config: { url, auth: { mode: "none" }, body: { mode: "run_result" } }
+    });
+  const text = (order: number, name: string, overrides: Parameters<typeof makeStep>[0] = {}) =>
+    makeStep({
+      id: `step-${order}`,
+      step_order: order,
+      assistant_id: `assistant-${order}`,
+      user_description: name,
+      input_source: order === 1 ? "flow_input" : "previous_step",
+      ...overrides
+    });
+  const word = (order: number, name: string) =>
+    text(order, name, { output_mode: "render_verbatim", output_type: "docx" });
+
+  const section = () =>
+    screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+
+  it("names the next step that reads the result", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), text(2, "Skriv svar")] }));
+    expect(
+      await within(await section()).findByText("Går vidare till nästa steg: Steg 2: Skriv svar.")
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("names a later step that reads the result through its prompt", async () => {
+    routeAssistants({ "assistant-3": "Jämför med {{Sammanfatta}}." });
+    renderEditor(
+      makeFlow({
+        steps: [
+          text(1, "Sammanfatta"),
+          text(2, "Granska", { input_source: "flow_input" }),
+          text(3, "Skriv svar", { input_source: "flow_input" })
+        ]
+      })
+    );
+    expect(await within(await section()).findByText("Läses av Steg 3: Skriv svar.")).toBeTruthy();
+  }, 20_000);
+
+  it("never says no step reads the result while a later prompt cannot be read", async () => {
+    routeAssistants({}, ["assistant-2"]);
+    renderEditor(
+      makeFlow({
+        steps: [text(1, "Sammanfatta"), text(2, "Granska", { input_source: "flow_input" })]
+      })
+    );
+    const delivery = await section();
+    await waitFor(() =>
+      expect(
+        api.stub.calls.some(
+          (call) =>
+            (call.init.params?.path as { assistant_id?: string } | undefined)?.assistant_id ===
+            "assistant-2"
+        )
+      ).toBe(true)
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull();
+    expect(
+      within(delivery).queryByText(messages.flow_step_editor_delivery_unread_included)
+    ).toBeNull();
+  }, 20_000);
+
+  it("says a result no later step reads is still included when it is the last step", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta")] }));
+    const delivery = await section();
+    expect(
+      await within(delivery).findByText(messages.flow_step_editor_delivery_unread_included)
+    ).toBeTruthy();
+    // No step sends the run's result.
+    expect(within(delivery).getByText(messages.flow_step_editor_delivery_no_sender)).toBeTruthy();
+    expect(
+      within(delivery).queryByRole("button", {
+        name: messages.flow_step_editor_delivery_open_sender
+      })
+    ).toBeNull();
+  }, 20_000);
+
+  it("says where a document is sent, at once as its switch turns, and opens the step that sends", async () => {
+    routeAssistants();
+    const onGo = vi.fn();
+    renderEditor(makeFlow({ steps: [word(1, "Protokoll"), word(2, "Bilaga"), sender(3)] }), {
+      navigation: { position: 1, count: 3, previous: null, next: null, steps: [], onGo }
+    });
+    const delivery = await section();
+    expect(
+      await within(delivery).findByText(
+        "Skickas inte till startsidan.example.org. Slå på växeln ovan om det här resultatet ska följa med."
+      )
+    ).toBeTruthy();
+    fireEvent.click(
+      within(delivery).getByRole("switch", {
+        name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+      })
+    );
+    expect(
+      within(delivery).getByText("Skickas till startsidan.example.org när körningen är klar.")
+    ).toBeTruthy();
+    fireEvent.click(
+      within(delivery).getByRole("button", { name: messages.flow_step_editor_delivery_open_sender })
+    );
+    expect(onGo).toHaveBeenCalledWith("step-3");
+  }, 20_000);
+
+  it("says nothing is sent while the step that sends has no address", async () => {
+    routeAssistants();
+    renderEditor(makeFlow({ steps: [text(1, "Sammanfatta"), sender(2, "")] }));
+    expect(
+      await within(await section()).findByText(messages.flow_step_editor_delivery_no_address)
+    ).toBeTruthy();
+  }, 20_000);
+
+  it("gives a JSON step one line instead of the section, and a request it sends neither", async () => {
+    routeAssistants();
+    let view = renderEditor(
+      makeFlow({ steps: [text(1, "Plocka ut", { output_type: "json" }), text(2, "Skriv")] })
+    );
+    expect(await screen.findByText(messages.flow_step_editor_delivery_json)).toBeTruthy();
+    expect(
+      screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_delivery_title })
+    ).toBeNull();
+    view.unmount();
+
+    for (const output_type of ["text", "json"] as const) {
+      view = renderEditor(
+        makeFlow({
+          steps: [
+            text(1, "Anropa", {
+              output_type,
+              output_mode: "http_post",
+              output_config: { url: RECEIVER, auth: { mode: "none" }, body: { mode: "auto" } }
+            })
+          ]
+        })
+      );
+      await nameField();
+      expect(screen.queryByText(messages.flow_step_editor_delivery_json)).toBeNull();
+      expect(
+        screen.queryByRole("heading", { level: 3, name: messages.flow_step_editor_delivery_title })
+      ).toBeNull();
+      view.unmount();
+    }
+  }, 30_000);
 });

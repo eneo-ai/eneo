@@ -1,4 +1,4 @@
-import { queryOptions, type QueryClient } from "@tanstack/react-query";
+import { queryOptions, useQueries, type QueryClient } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { apiErrorFromResponse, EneoApiError, unwrap } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
@@ -15,7 +15,10 @@ import {
   type TemplateInspection,
   type ToolOptions
 } from "./step-types";
+import type { FlowStep } from "../flows-api";
+import type { StepPrompts } from "../flow-steps";
 import type { StepKindPlace } from "./step-kinds";
+import { stepUsesModel } from "./step-rules";
 
 /**
  * The flow-core endpoints the step editor reads and writes. Every write goes
@@ -107,6 +110,27 @@ export function flowAssistantQueryOptions(flowId: string, assistantId: string) {
     retry: false,
     staleTime: Infinity
   });
+}
+
+/**
+ * The prompts of the flow's AI steps, read through the step assistants as
+ * they arrive. Only an editor may read the assistants (`enabled`).
+ */
+export function useStepPrompts(
+  flowId: string,
+  steps: readonly FlowStep[],
+  enabled: boolean
+): StepPrompts {
+  const assistants = useQueries({
+    queries: steps
+      .filter((step) => stepUsesModel(step))
+      .map((step) => ({ ...flowAssistantQueryOptions(flowId, step.assistant_id), enabled }))
+  });
+  return new Map(
+    assistants.flatMap((query) =>
+      query.data ? [[query.data.id, query.data.prompt?.text ?? ""] as [string, string]] : []
+    )
+  );
 }
 
 export function toolOptionsQueryOptions(flowId: string) {

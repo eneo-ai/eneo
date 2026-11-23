@@ -12,6 +12,7 @@ import {
   readRuntimeInput,
   readDeliverable,
   readTemplateFill,
+  runResultHost,
   runResultUrlFixed,
   stepCanBeDeliverable,
   stepDeliversArtifact,
@@ -151,6 +152,20 @@ describe("HTTP", () => {
     expect(
       withHttpConfig(stored, { ...config, body: { ...config.body, mode: "run_result" } }).body
     ).toEqual({ mode: "run_result" });
+  });
+
+  it("names the host the run's result goes to, only for an address it can be sent to", () => {
+    const sender = (url: string) => ({ output_config: { url, body: { mode: "run_result" } } });
+    expect(runResultHost(sender(" https://Startsidan.example.org/in?x=1 "))).toBe(
+      "startsidan.example.org"
+    );
+    for (const url of [
+      "",
+      "http://startsidan.example.org/in",
+      "https://{{ flow_input.host }}/in"
+    ]) {
+      expect(runResultHost(sender(url))).toBeNull();
+    }
   });
 
   it("holds a body that sends the run's result to the core's address and header rules", () => {
