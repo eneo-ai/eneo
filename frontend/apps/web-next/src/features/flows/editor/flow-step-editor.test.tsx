@@ -2236,7 +2236,7 @@ describe("FlowStepEditor deliverables", () => {
         makeStep({
           id: "step-2",
           step_order: 2,
-          user_description: "Standup för Startsidan",
+          user_description: "Standup för webbplatsen",
           input_source: "previous_step",
           output_mode: "template_fill",
           output_type: "docx",
@@ -2358,7 +2358,7 @@ describe("FlowStepEditor deliverables", () => {
 
     view = renderEditor(current(), { stepId: "step-2" });
     fireEvent.click(await deliverySwitch());
-    fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+    fireEvent.change(await labelField(), { target: { value: "Till webbplatsen" } });
     await saveStep();
     expect(patchBodies()[1]).toMatchObject({
       expected_revision: 5,
@@ -2366,7 +2366,7 @@ describe("FlowStepEditor deliverables", () => {
         {
           step_id: "step-2",
           changes: {
-            output_config: { ...TEMPLATE_CONFIG, deliverable: { label: "Till Startsidan" } }
+            output_config: { ...TEMPLATE_CONFIG, deliverable: { label: "Till webbplatsen" } }
           }
         }
       ]
@@ -2388,7 +2388,7 @@ describe("FlowStepEditor deliverables", () => {
 
     view = renderEditor(current(), { stepId: "step-2" });
     const second = await deliverySwitch();
-    expect((await labelField()).value).toBe("Till Startsidan");
+    expect((await labelField()).value).toBe("Till webbplatsen");
     fireEvent.click(second);
     await waitFor(() =>
       expect(
@@ -2711,7 +2711,7 @@ describe("FlowStepEditor deliverables", () => {
       api.routes[EDITOR] = () => answer;
       renderEditor(deliveryFlow(), { stepId: "step-2" });
       fireEvent.click(await deliverySwitch());
-      fireEvent.change(await labelField(), { target: { value: "Till Startsidan" } });
+      fireEvent.change(await labelField(), { target: { value: "Till webbplatsen" } });
       fireEvent.change(fileNameField(), { target: { value: "Standup {{flow_input.saknas}}" } });
       fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
       await waitFor(() => expect(document.activeElement).toBe(fileNameField()));
@@ -2923,7 +2923,7 @@ describe("FlowStepEditor deliverables", () => {
   /** A marked document, then a step that sends its call last. */
   function resultFlow(
     http: Record<string, unknown>,
-    deliverable: unknown = { label: "Till Startsidan" }
+    deliverable: unknown = { label: "Till webbplatsen" }
   ) {
     return makeFlow({
       steps: [
@@ -2936,7 +2936,7 @@ describe("FlowStepEditor deliverables", () => {
         makeStep({
           id: "step-2",
           step_order: 2,
-          user_description: "Skicka till Startsidan",
+          user_description: "Skicka till webbplatsen",
           input_source: "previous_step",
           output_mode: "http_post",
           output_config: {
@@ -2999,7 +2999,7 @@ describe("FlowStepEditor deliverables", () => {
       name: messages.flow_step_editor_run_result_sends_title
     });
     const row = within(sends).getByRole("listitem");
-    expect(within(row).getByText("Till Startsidan")).toBeTruthy();
+    expect(within(row).getByText("Till webbplatsen")).toBeTruthy();
     expect(within(row).getByText("Steg 1 · Word-dokument")).toBeTruthy();
     // The visible word begins the name a voice user says (WCAG 2.5.3).
     const open = within(row).getByRole("button", { name: "Öppna steg 1 – Protokoll" });
@@ -3241,7 +3241,7 @@ describe("FlowStepEditor deliverables", () => {
             output_mode: "render_verbatim",
             output_type: "docx",
             output_config: {
-              deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+              deliverable: { label: "Till webbplatsen", file_name: "Standup {{flow_input.team}}" }
             }
           })
         ]
@@ -3249,7 +3249,7 @@ describe("FlowStepEditor deliverables", () => {
       { readOnly: true }
     );
     expect((await rowValue(messages.flow_step_editor_deliverable_label)).textContent).toBe(
-      "Till Startsidan"
+      "Till webbplatsen"
     );
     expect((await rowValue(messages.flow_step_editor_deliverable_file_name)).textContent).toBe(
       "Standup {{flow_input.team}}"

@@ -114,7 +114,7 @@ def run_with_a_document(
         async with db_container() as container:
             saved = await container.file_service(user=admin_user).save_prepared_file(
                 PreparedFileUpload(
-                    name="Startsidan.docx",
+                    name="Webbplatsen.docx",
                     file_type=FileType.DOCUMENT,
                     display_media_type=DOCX,
                     contents=(
@@ -140,7 +140,7 @@ def run_with_a_document(
                 prior_step_output=(
                     "render_verbatim",
                     "docx",
-                    {"deliverable": {"label": "Startsidan"}},
+                    {"deliverable": {"label": "Webbplatsen"}},
                 ),
             )
             assert flow.id is not None and step.id is not None
@@ -221,7 +221,7 @@ async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
     assert request["audits"] == 1
     body = json.loads(request["body_bytes"])  # type: ignore[arg-type]
     [deliverable] = body["deliverables"]
-    assert deliverable["label"] == "Startsidan"
+    assert deliverable["label"] == "Webbplatsen"
     assert deliverable["output_type"] == "docx"
     [file] = deliverable["files"]
     assert file["file_id"] == str(file_id)
@@ -234,8 +234,8 @@ async def test_the_result_carries_each_deliverable_file_and_is_audited_first(
     assert audit.log_metadata["extra"]["url_host"] == "receiver.example.org"
     assert audit.log_metadata["extra"]["delivery_attempt"] == 1
     # The audit trail names the deliverable by id, never by its label.
-    assert "Startsidan" not in json.dumps(audit.log_metadata, ensure_ascii=False)
-    assert "Startsidan" not in audit.description
+    assert "Webbplatsen" not in json.dumps(audit.log_metadata, ensure_ascii=False)
+    assert "Webbplatsen" not in audit.description
 
 
 async def test_without_the_audit_row_nothing_is_sent_and_it_is_tried_again(

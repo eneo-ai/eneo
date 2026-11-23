@@ -244,7 +244,7 @@ function senderFlow() {
       makeStep(2, {
         id: "step-send",
         assistant_id: "assistant-send",
-        user_description: "Skicka till Startsidan",
+        user_description: "Skicka till webbplatsen",
         output_mode: "http_post",
         output_config: {
           url: "https://mottagare.example.org/in",

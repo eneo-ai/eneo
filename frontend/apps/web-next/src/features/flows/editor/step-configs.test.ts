@@ -385,15 +385,15 @@ describe("deliverable", () => {
 
   it("is set and cleared without touching the step's other output settings", () => {
     const on = withDeliverable(stored, {
-      label: "Till Startsidan",
+      label: "Till webbplatsen",
       file_name: "Standup {{flow_input.team}}"
     });
     expect(on).toEqual({
       ...stored,
-      deliverable: { label: "Till Startsidan", file_name: "Standup {{flow_input.team}}" }
+      deliverable: { label: "Till webbplatsen", file_name: "Standup {{flow_input.team}}" }
     });
     expect(readDeliverable(on)).toEqual({
-      label: "Till Startsidan",
+      label: "Till webbplatsen",
       file_name: "Standup {{flow_input.team}}"
     });
     expect(withDeliverable(on, null)).toEqual(stored);
