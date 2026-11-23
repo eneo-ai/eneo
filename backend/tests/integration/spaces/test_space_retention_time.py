@@ -8,12 +8,14 @@ value is never written."""
 from __future__ import annotations
 
 import asyncio
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
 import sqlalchemy as sa
 from sqlalchemy.exc import DBAPIError
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.roles_table import Roles
@@ -141,6 +143,27 @@ async def test_a_change_with_the_permission_is_saved_and_audited(
         "previous_value": 30,
         "new_value": 7,
     }
+
+
+async def test_the_audit_row_is_written_when_the_action_is_switched_off(
+    client, db_container, admin_user, user_factory, patch_auth_service_jwt, monkeypatch
+):
+    """An organisation can switch audit actions off; the cap's row is required.
+    Mutant: the row is written only when the action is switched on."""
+    _, token, space_id = await _space_admin(
+        db_container, admin_user, user_factory, ["assistants", "retention_manage"]
+    )
+    monkeypatch.setattr(
+        AuditService, "_should_log_action", AsyncMock(return_value=False)
+    )
+    response = await client.patch(
+        f"/api/v1/spaces/{space_id}/",
+        json={"data_retention_days": 7},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 200, response.text
+    [metadata] = await _retention_audits(db_container, space_id)
+    assert (metadata["previous_value"], metadata["new_value"]) == (30, 7)
 
 
 async def test_an_api_key_cannot_change_the_time(
