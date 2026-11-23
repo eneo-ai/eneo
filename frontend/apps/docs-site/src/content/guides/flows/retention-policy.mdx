@@ -45,7 +45,7 @@ The space's administrator decides how long the space keeps its content, for conv
 
 A time stored before the space's time was lowered stays stored; the shorter space time applies, and the Flow's settings show both. Saving it again is refused until it fits.
 
-Once the time has passed, the history is eligible for a separately requested explicit purge. Nothing else happens. The threshold is measured from `finished_at`. If a terminal run has no finish time, it is measured from `created_at`. A run is eligible when its anchor plus the days in calendar time has passed, so a change to or from summer time never makes a run eligible early.
+Once the time has passed, the history is eligible for a separately requested explicit purge. Nothing else happens. The threshold is measured from `finished_at`. If a terminal run has no finish time, it is measured from `created_at`. A run is eligible when its anchor plus the days in calendar time has passed.
 
 ## Configure it
 
@@ -115,7 +115,7 @@ Clear it and use the space's time:
 }
 ```
 
-The Flow's retention `GET` and `PUT` return three fields:
+The Flow's retention `GET` and `PUT` return `scope`, `scope_id` and these three fields:
 
 - `local_policy`: the time stored on the Flow, or `null`;
 - `inherited_policy`: the space's time, or `null`;

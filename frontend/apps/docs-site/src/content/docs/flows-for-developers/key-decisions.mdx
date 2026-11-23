@@ -55,8 +55,8 @@ time its conversations use) and a Flow's own time
 (`flows.flow_run_history_retention_days`). The space's time caps every Flow in
 it: a Flow may choose a shorter time, and a longer one is refused with code
 9086. The organization sets no time for Flows, so a conversation setting never
-makes Flow runs purgeable without a space administrator's choice. A time never
-authorizes scheduled deletion. The administrator settings API can preview or
+makes Flow runs purgeable without a space administrator's choice. A time does not
+authorize scheduled deletion of Flow history. The administrator settings API can preview or
 explicitly purge eligible history; held runs remain stored. [Flow run-history retention](/guides/flows/retention-policy) owns
 the permissions, eligibility, and audit contract. The product has no
 classification retention plane, minimum-retention barriers, or tombstones.

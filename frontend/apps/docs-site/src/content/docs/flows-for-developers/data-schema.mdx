@@ -101,7 +101,7 @@ eligible when its anchor (`finished_at`, else `created_at`) plus the days, in
 calendar time, has passed. No time at either level means there is no run-history
 age threshold.
 
-These values never authorize scheduled deletion: the shared retention worker
+These values do not authorize scheduled deletion of Flow history: the shared retention worker
 does not mutate Flow-owned data. The existing administrator settings API
 previews or explicitly purges eligible history while respecting legal holds
 and delivery blockers. See
