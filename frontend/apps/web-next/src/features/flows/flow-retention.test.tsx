@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
+import { useQuery } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings, SettingsSummary } from "./flow-settings";
+import { flowKeys, flowQueryOptions } from "./flows-api";
 
 const backend = vi.hoisted(() => ({ GET: vi.fn(), PUT: vi.fn() }));
 const toastError = vi.hoisted(() => vi.fn());
@@ -214,6 +217,70 @@ describe("flow retention", () => {
     fireEvent.change(days, { target: { value: "" } });
     fireEvent.blur(days);
     expect(screen.getByText(/Från ytan: 7 dagar/)).toBeTruthy();
+  });
+
+  it("keeps the summary's saved time when an older Flow read lands after the save", async () => {
+    const byFlow = (days: number) => ({
+      state: "configured",
+      source: "flow",
+      effective_days: days,
+      contributors: { space: { days: 60 }, flow: { days } }
+    });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(
+      flowKeys.flow("flow-1"),
+      makeFlow({ run_history_retention: byFlow(7) })
+    );
+    let releaseDetail: (value: unknown) => void = () => {};
+    backend.GET.mockImplementation((path: string) =>
+      path === "/api/v1/flows/{id}/"
+        ? new Promise((resolve) => {
+            releaseDetail = resolve;
+          })
+        : Promise.resolve(settings({ days: 7 }, { days: 60 }))
+    );
+    backend.PUT.mockResolvedValue(
+      answered({
+        scope: "flow",
+        scope_id: "flow-1",
+        local_policy: { days: 3 },
+        inherited_policy: { days: 60 },
+        effective: byFlow(3)
+      })
+    );
+    // The page reads the flow from its detail entry, as the summary does here.
+    function CachedFlowSettings() {
+      const flow = useQuery(flowQueryOptions(browserApi, "flow-1")).data;
+      return flow ? (
+        <FlowSettings flow={flow} canEdit transcription={resources} onSave={vi.fn()} />
+      ) : null;
+    }
+    renderInApp(<CachedFlowSettings />, {
+      queryClient,
+      appContext: testAppContext({ permissions: ["retention_manage"] })
+    });
+    expect(screen.getByText(/7 dagar, satt på flödet/)).toBeTruthy();
+    void queryClient.refetchQueries({ queryKey: flowKeys.flow("flow-1"), exact: true });
+    await waitFor(() =>
+      expect(backend.GET).toHaveBeenCalledWith("/api/v1/flows/{id}/", expect.anything())
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const days = await screen.findByRole("spinbutton", { name: /Egen tid för det här flödet/ });
+    fireEvent.change(days, { target: { value: "3" } });
+    fireEvent.blur(days);
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(screen.queryByRole("spinbutton")).toBeNull());
+    releaseDetail(answered(makeFlow({ run_history_retention: byFlow(7) })));
+    await settle();
+
+    expect(screen.getByText(/3 dagar, satt på flödet/)).toBeTruthy();
+    expect(screen.queryByText(/7 dagar, satt på flödet/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ändra gallring" }));
+    const reopened = (await screen.findByRole("spinbutton", {
+      name: /Egen tid för det här flödet/
+    })) as HTMLInputElement;
+    expect(reopened.value).toBe("3");
   });
 
   it("keeps a saved time when an older read lands after the save", async () => {

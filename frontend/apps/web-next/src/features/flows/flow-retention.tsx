@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { type QueryKey, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -145,9 +145,9 @@ function RetentionForm({
   const field = useRef<HTMLInputElement>(null);
 
   /** Writes what the server just said; an older read still in flight must not replace it. */
-  const writePolicy = async (update: (current?: PolicySettings) => PolicySettings | undefined) => {
-    await queryClient.cancelQueries({ queryKey: policyKey(flow.id), exact: true });
-    queryClient.setQueryData<PolicySettings>(policyKey(flow.id), update);
+  const writeAnswer = async <T,>(key: QueryKey, update: (current?: T) => T | undefined) => {
+    await queryClient.cancelQueries({ queryKey: key, exact: true });
+    queryClient.setQueryData<T>(key, update);
   };
 
   const save = useMutation({
@@ -159,8 +159,8 @@ function RetentionForm({
         })
       ),
     onSuccess: async (saved) => {
-      await writePolicy(() => saved);
-      queryClient.setQueryData<FlowPublic>(flowKeys.flow(flow.id), (current) =>
+      await writeAnswer<PolicySettings>(policyKey(flow.id), () => saved);
+      await writeAnswer<FlowPublic>(flowKeys.flow(flow.id), (current) =>
         current ? { ...current, run_history_retention: saved.effective } : current
       );
       toast.success(t("flows_retention_saved"));
@@ -173,7 +173,7 @@ function RetentionForm({
         return;
       }
       // The refusal names a newer space time than the one read; an empty field inherits it.
-      await writePolicy((current) =>
+      await writeAnswer<PolicySettings>(policyKey(flow.id), (current) =>
         current ? { ...current, inherited_policy: { days: refusedAt } } : current
       );
       setOverCap(true);
