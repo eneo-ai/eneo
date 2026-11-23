@@ -186,6 +186,13 @@ function renderWizard({
 
 const field = (name: RegExp) => screen.getByLabelText(name) as HTMLInputElement;
 
+/** The texts a control's aria-describedby points at, joined. */
+const describedBy = (element: HTMLElement) =>
+  (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) => document.getElementById(id)?.textContent ?? "")
+    .join(" ");
+
 async function toCredentials() {
   const { dialog } = renderWizard();
   fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
@@ -899,10 +906,13 @@ describe("the add-model wizard's catalog", () => {
     const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
     const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
-    // Astryx keeps a disabled checkbox focusable; a press changes nothing.
+    // Locked but reachable: Astryx keeps it out of native disabled, so Tab stops
+    // on it and the reason is read; a press changes nothing.
     expect(live.getAttribute("aria-disabled")).toBe("true");
-    expect(live.getAttribute("aria-describedby")).toBeTruthy();
-    expect(within(dialog).getByText(new RegExp(reason.replace(/[.:]/g, "\\$&")))).toBeTruthy();
+    expect(live.hasAttribute("disabled")).toBe(false);
+    live.focus();
+    expect(document.activeElement).toBe(live);
+    expect(describedBy(live)).toContain(reason);
     fireEvent.click(live);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
 
@@ -922,12 +932,14 @@ describe("the add-model wizard's catalog", () => {
     ).toBeTruthy();
   });
 
-  it("uses the new provider's own answer before the provider list is fetched again", async () => {
+  /** Creates a provider in the wizard; the list keeps answering without it, as a refetch still in flight would. */
+  async function createProviderThatSays(
+    eligibility: ModelProvider["realtime_eligibility"]
+  ): Promise<HTMLElement> {
     const { dialog } = renderWizard({ fixedKind: "transcription", caps: transcriptionCaps });
-    // The list keeps answering without the new provider, as a refetch still in flight would.
     api.POST.mockImplementation((path: string) =>
       path === "/api/v1/admin/model-providers/"
-        ? ok({ ...existing, id: "p-new", realtime_eligibility: "eligible" })
+        ? ok({ ...existing, id: "p-new", realtime_eligibility: eligibility })
         : ok({})
     );
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
@@ -935,10 +947,53 @@ describe("the add-model wizard's catalog", () => {
     fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
     fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-live-1234" } });
     fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
-
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
-    const live = within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+    return within(dialog).getByRole("checkbox", { name: /^Livetext$/ });
+  }
+
+  it("uses the new provider's own answer before the provider list is fetched again", async () => {
+    const live = await createProviderThatSays("eligible");
     expect(live.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("says why a provider just created cannot carry live text", async () => {
+    const live = await createProviderThatSays("endpoint_required");
+    expect(live.getAttribute("aria-disabled")).toBe("true");
+    expect(describedBy(live)).toContain(
+      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+    );
+  });
+
+  it("never shows another provider's answer after going back to pick a different one", async () => {
+    const gateway = { ...existing, id: "p-gw", name: "Gateway", realtime_eligibility: "eligible" };
+    const other = { ...existing, id: "p-other", name: "Annan leverantör" };
+    const { dialog, queryClient } = renderWizard({
+      initialProviderId: "p-gw",
+      fixedKind: "transcription",
+      providerList: [gateway, other] as ModelProvider[],
+      caps: transcriptionCaps
+    });
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    expect(
+      within(dialog)
+        .getByRole("checkbox", { name: /^Livetext$/ })
+        .getAttribute("aria-disabled")
+    ).not.toBe("true");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Tillbaka" }));
+    const picker = await within(dialog).findByRole("combobox", { name: /^Leverantör/ });
+    fireEvent.click(picker);
+    const list = await waitFor(() =>
+      document.getElementById(picker.getAttribute("aria-controls") ?? "")!
+    );
+    fireEvent.click(await within(list).findByRole("option", { name: "Annan leverantör" }));
+    // Fetched again meanwhile, without the chosen provider: its answer is not known.
+    act(() => queryClient.setQueryData(PROVIDERS_KEY, [gateway]));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+
+    // Asks for a provider again instead of offering live text on the first one's word.
+    expect(await within(dialog).findByText("Välj en leverantör.")).toBeTruthy();
+    expect(within(dialog).queryByRole("checkbox", { name: /^Livetext$/ })).toBeNull();
   });
 
   it("keeps the picks when the list is filtered", async () => {

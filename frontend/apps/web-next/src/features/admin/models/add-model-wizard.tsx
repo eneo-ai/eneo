@@ -288,15 +288,12 @@ export function AddModelWizard({
 
   // Resolve the provider the model step adds to, plus its type (drives the catalog).
   const targetProviderId = mode === "existing" ? existingId : (providerId ?? "");
-  const createdProvider = providerId
-    ? providers.data?.find((provider) => provider.id === providerId)
-    : undefined;
   // The create call's answer stands in until the list is fetched again, so the
   // model step knows at once whether the new provider can carry live text.
+  // Only the provider the step adds to answers: never another one.
   const existingProvider =
-    providers.data?.find((provider) => provider.id === existingId) ??
-    createdProvider ??
-    (newProvider?.id === existingId ? newProvider : undefined);
+    providers.data?.find((provider) => provider.id === targetProviderId) ??
+    (newProvider?.id === targetProviderId ? newProvider : undefined);
   const targetProviderType =
     mode === "existing" ? (existingProvider?.provider_type ?? "") : providerType;
   const targetProviderModes = fixedKind
