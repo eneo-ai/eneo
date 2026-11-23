@@ -7,6 +7,7 @@ from typing import cast
 import sqlalchemy as sa
 
 from eneo.data_retention.constants import MIN_RETENTION_DAYS
+from eneo.database.tables.flow_tables import FlowRuns
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +44,17 @@ def effective_flow_run_retention_policy_sql(
                 else_=sa.null(),
             ),
         ),
+    )
+
+
+def flow_run_retention_anchor() -> sa.ColumnElement[datetime]:
+    """When a terminal run's retention age starts: its end, or its creation.
+
+    The expression of `ix_flow_runs_tenant_terminal_retention_anchor`; keep
+    them identical so selection by age uses the index."""
+    return cast(
+        sa.ColumnElement[datetime],
+        sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at),
     )
 
 

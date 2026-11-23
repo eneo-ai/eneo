@@ -41,6 +41,7 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
     EffectiveFlowRunRetentionPolicySql,
     effective_flow_run_retention_policy_sql,
     flow_run_history_due_predicates,
+    flow_run_retention_anchor,
 )
 from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
 
@@ -190,7 +191,7 @@ class FlowRetentionRepository:
         flow_id: UUID | None = None,
     ) -> FlowRunHistoryPurgeBlockedCounts:
         _, preserve = self._flow_run_history_purge_eligibility_predicates()
-        anchor = self._flow_run_history_retention_anchor()
+        anchor = flow_run_retention_anchor()
         held = flow_run_held_predicate(run_id=FlowRuns.id, flow_id=FlowRuns.flow_id)
         due = self._build_due_flow_run_history_purge_query(
             now=now,
@@ -337,7 +338,7 @@ class FlowRetentionRepository:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> sa.Select[tuple[UUID]]:
-        retention_anchor = self._flow_run_history_retention_anchor()
+        retention_anchor = flow_run_retention_anchor()
         return (
             self._build_due_flow_run_history_purge_query(
                 now=now, tenant_id=tenant_id, space_id=space_id, flow_id=flow_id
@@ -355,10 +356,6 @@ class FlowRetentionRepository:
             .limit(limit)
         )
 
-    @staticmethod
-    def _flow_run_history_retention_anchor() -> Any:
-        return sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
-
     def _build_due_flow_run_history_purge_query(
         self,
         *,
@@ -368,7 +365,7 @@ class FlowRetentionRepository:
         flow_id: UUID | None = None,
         include_blocked: bool = False,
     ) -> sa.Select[tuple[UUID]]:
-        anchor = self._flow_run_history_retention_anchor()
+        anchor = flow_run_retention_anchor()
         effective_policy = self._effective_flow_run_history_policy_sql()
         terminal, preserve = self._flow_run_history_purge_eligibility_predicates()
         stmt = (
@@ -491,7 +488,7 @@ class FlowRetentionRepository:
         return total_counts
 
     async def _iter_flow_debug_retention_rows(self, *, older_than: datetime):
-        anchor = sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at)
+        anchor = flow_run_retention_anchor()
         last_run_id: UUID | None = None
         while True:
             stmt = (

@@ -43,6 +43,7 @@ from eneo.flows.infrastructure.flow_run_retention_policy_query import (
     effective_flow_run_retention_policy_sql,
     flow_run_history_due_predicates,
     flow_run_history_eligible_since_sql,
+    flow_run_retention_anchor,
 )
 from eneo.main.exceptions import NotFoundException
 from eneo.tenants.tenant_repo import update_tenant_flow_settings
@@ -364,10 +365,7 @@ class FlowRunRetentionPolicyRepository:
         space_id: UUID | None = None,
         flow_id: UUID | None = None,
     ) -> FlowRunRetentionReviewPage:
-        anchor = cast(
-            sa.ColumnElement[datetime],
-            sa.func.coalesce(FlowRuns.finished_at, FlowRuns.created_at),
-        )
+        anchor = flow_run_retention_anchor()
         effective_policy = effective_flow_run_retention_policy_sql(
             organization_mode=(
                 Tenants.flow_run_history_retention_mode.__clause_element__()
