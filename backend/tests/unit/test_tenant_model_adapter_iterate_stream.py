@@ -3980,11 +3980,12 @@ async def test_a_withheld_reused_id_is_denied_before_a_later_call_can_fail(
     can_ask, needs_decision, beside
 ):
     """The calls withheld under a reused id are decided as soon as the round
-    is read. Their denials reach the chat and the widget audit before a later
-    call of the round can end the turn with an error, so neither shows them
-    as cut off."""
+    is read, before anyone is asked about the others. Their denials reach the
+    chat and the widget audit before a later call of the round can end the
+    turn with an error, so neither shows them as cut off. Where someone can be
+    asked, the later call needs approval and is approved."""
     proxy = _ConfirmingMCPProxy()
-    manager = _decided()
+    manager = _decided(ToolApprovalDecision(tool_call_id="y", approved=True))
     widget = Widget.create(
         tenant_id=uuid4(), space_id=uuid4(), target_id=uuid4(), name="Test"
     )
@@ -4010,7 +4011,7 @@ async def test_a_withheld_reused_id_is_denied_before_a_later_call_can_fail(
                 _tool_call_delta_chunk(
                     index=2,
                     tool_call_id="y",
-                    tool_name=beside,
+                    tool_name="server__tool",
                     arguments="not json",
                     finish_reason="tool_calls",
                 ),
@@ -4036,12 +4037,32 @@ async def test_a_withheld_reused_id_is_denied_before_a_later_call_can_fail(
     # y's arguments end the turn with an error, after the denials.
     assert completions[-1].response_type is ResponseType.ERROR
     assert proxy.calls == []
-    manager.request_approval.assert_not_awaited()
     assert _decided_calls(completions) == [
         ("x", needs_decision, "denied"),
         ("x", beside, "denied"),
-        ("y", beside, "approved"),
+        ("y", "server__tool", "approved"),
     ]
+    (denied_at,) = [
+        position
+        for position, completion in enumerate(completions)
+        if any(
+            metadata.result_status == "denied"
+            for metadata in completion.tool_calls_metadata or []
+        )
+    ]
+    asked_at = [
+        position
+        for position, completion in enumerate(completions)
+        if completion.response_type is ResponseType.TOOL_APPROVAL_REQUIRED
+    ]
+    if can_ask:
+        # Only y is asked about, after the group was refused.
+        manager.request_approval.assert_awaited_once()
+        assert manager.request_approval.await_args.kwargs["tool_call_ids"] == ["y"]
+        assert len(asked_at) == 1 and denied_at < asked_at[0]
+    else:
+        manager.request_approval.assert_not_awaited()
+        assert asked_at == []
     assert [
         entry.kwargs["metadata"]["tool_call_id"]
         for entry in sink.log_async.await_args_list
