@@ -3410,8 +3410,11 @@ describe("FlowStepEditor Leverans", () => {
     // is under way the line waits, unless the page says the prompts held still
     // name what is saved (after the editor's own save that left the steps alone).
     const get = api.stub.client.GET;
-    for (const promptsHeld of [false, true]) {
-      queryClient.setQueryData(flowEditorKeys.promptsHeld(flow.id), promptsHeld);
+    // First with no word from the page at all: that reads as "wait" too.
+    for (const promptsHeld of [undefined, true]) {
+      if (promptsHeld !== undefined) {
+        queryClient.setQueryData(flowEditorKeys.promptsHeld(flow.id), promptsHeld);
+      }
       let release = () => {};
       const held = new Promise<void>((resolve) => (release = resolve));
       api.stub.client.GET = ((path: string, init?: object) =>
@@ -3422,7 +3425,10 @@ describe("FlowStepEditor Leverans", () => {
         const reread = queryClient.invalidateQueries({ queryKey: key });
         await waitFor(() => expect(queryClient.getQueryState(key)?.fetchStatus).toBe("fetching"));
         await new Promise((resolve) => setTimeout(resolve, 50));
-        expect(within(delivery).queryByText(reader) !== null).toBe(promptsHeld);
+        expect(within(delivery).queryByText(reader) !== null).toBe(promptsHeld === true);
+        expect(
+          within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)
+        ).toBeNull();
         release();
         await reread;
       } finally {

@@ -879,6 +879,13 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   }
   const delivery = () =>
     screen.findByRole("region", { name: messages.flow_step_editor_delivery_title });
+  /** The later prompt's first read has landed, so what is held next is a read again. */
+  const read = (queryClient: QueryClient) =>
+    waitFor(() =>
+      expect(
+        queryClient.getQueryState(flowEditorKeys.assistant("flow-1", "assistant-3"))?.status
+      ).toBe("success")
+    );
   const rereading = (queryClient: QueryClient) =>
     waitFor(() =>
       expect(
@@ -908,6 +915,7 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   it("waits after a move, and names no step until the prompt is read again", async () => {
     const { queryClient } = await renderPage();
     await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+    await read(queryClient);
     const release = holdLaterPrompt();
     try {
       api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
@@ -969,6 +977,7 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
   it("waits after a stale draft is read again", async () => {
     const { queryClient } = await renderPage();
     await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+    await read(queryClient);
     const release = holdLaterPrompt();
     try {
       api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
@@ -1006,5 +1015,53 @@ describe("the Leverans section's reader from a later prompt, while the prompts a
       release();
     }
     expect(within(await delivery()).getByText(reader)).toBeTruthy();
+  });
+  it("waits after a save that answers more than one revision past the one on screen", async () => {
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    const release = holdLaterPrompt();
+    try {
+      // From 4 to 6: a change made elsewhere came in between, which may have rewritten a prompt.
+      await saveSetting(6);
+      await rereading(queryClient);
+      await waits(await delivery(), reader);
+    } finally {
+      release();
+    }
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+  });
+
+  it("waits after a rename from the step editor, also for a prompt that reads the step by place", async () => {
+    const prompt = api.routes[`GET ${ASSISTANT}`]!;
+    api.routes[`GET ${ASSISTANT}`] = (init: { params: { path: { assistant_id: string } } }) => {
+      const answer = prompt(init as never) as { body: ReturnType<typeof makeAssistant> };
+      return init.params.path.assistant_id === "assistant-3"
+        ? {
+            body: {
+              ...answer.body,
+              prompt: { ...answer.body.prompt!, text: "Jämför med {{step_1}}." }
+            }
+          }
+        : answer;
+    };
+    const { queryClient } = await renderPage("?step=step-1");
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
+    const release = holdLaterPrompt();
+    try {
+      api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({
+        body: makeFlow({
+          draft_revision: 5,
+          steps: [{ ...first, user_description: "Eget utkast" }, second, third(3)]
+        })
+      });
+      await changeName();
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+      await screen.findByText(messages.flow_step_editor_saved);
+      await rereading(queryClient);
+      await waits(await delivery(), reader);
+    } finally {
+      release();
+    }
+    expect(await within(await delivery()).findByText(reader)).toBeTruthy();
   });
 });
