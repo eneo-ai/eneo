@@ -87,7 +87,7 @@ function liveModelValue(
 function modelOption(model: TranscriptionModelLink, t: Translate, showsRole: boolean) {
   const facts = [
     model.provider_name?.trim(),
-    showsRole && model.supports_realtime ? t("flow_editor_tools_model_shows_live_text") : null
+    showsRole && model.streams_live ? t("flow_editor_tools_model_shows_live_text") : null
   ].filter(Boolean);
   return {
     value: model.id,
@@ -104,8 +104,8 @@ function fileModelInstead(
   model: TranscriptionModelLink | undefined,
   models: readonly TranscriptionModelLink[]
 ): TranscriptionModelLink | undefined {
-  if (!model?.supports_realtime) return undefined;
-  return models.find((candidate) => !candidate.supports_realtime && candidate.can_access !== false);
+  if (!model?.streams_live) return undefined;
+  return models.find((candidate) => !candidate.streams_live && candidate.can_access !== false);
 }
 
 function serviceName(service: SpeakerServiceLink, t: Translate): string {

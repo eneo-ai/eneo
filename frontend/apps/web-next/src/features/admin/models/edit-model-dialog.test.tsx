@@ -344,7 +344,7 @@ describe("the strict tool-schema declaration belongs to one route", () => {
   });
 });
 
-const transcriptionModel = (providerType: string | null, supportsRealtime = false) =>
+const transcriptionModel = (providerId: string, supportsRealtime = false) =>
   ({
     id: "t1",
     name: "pianissimo-sv",
@@ -354,13 +354,28 @@ const transcriptionModel = (providerType: string | null, supportsRealtime = fals
     stability: "stable",
     open_source: false,
     cost_per_minute: null,
-    provider_id: "p1",
-    provider_type: providerType,
+    provider_id: providerId,
+    provider_type: "openai",
     supports_realtime: supportsRealtime,
+    streams_live: false,
     security_classification: null
   }) as unknown as AdminModel;
 
-function editLiveTranscription(model: AdminModel) {
+/** The provider list, where the backend says whether each can carry live text. */
+function providersSay(eligibility: Record<string, string>) {
+  api.GET.mockImplementation((path: string) =>
+    ok(
+      path === "/api/v1/admin/model-providers/"
+        ? Object.entries(eligibility).map(([id, realtime_eligibility]) => ({
+            id,
+            realtime_eligibility
+          }))
+        : {}
+    )
+  );
+}
+
+async function editLiveTranscription(model: AdminModel) {
   api.PUT.mockImplementation(() => ok({}));
   renderInApp(
     <EditModelDialog
@@ -372,6 +387,7 @@ function editLiveTranscription(model: AdminModel) {
       onOpenChange={vi.fn()}
     />
   );
+  await waitFor(() => expect(api.GET).toHaveBeenCalled());
   return screen.getByRole("switch", { name: "Livetranskribering" });
 }
 
@@ -381,13 +397,23 @@ const descriptions = (element: HTMLElement) =>
     .split(" ")
     .map((id) => document.getElementById(id)?.textContent);
 
-it("points each open form's switch at its own help, not at another form's", () => {
+const REASONS = {
+  endpoint_required:
+    "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API.",
+  unsupported_provider:
+    "Välj en leverantör som stöds: vLLM, eller OpenAI med adressen till en server som har vLLM:s realtids-API.",
+  outbound_headers_configured:
+    "Använd en leverantör utan utgående rubriker. Livetext kan inte skicka dem."
+};
+
+it("points each open form's switch at its own help, not at another form's", async () => {
+  providersSay({ eligible: "eligible", without: "endpoint_required" });
   renderInApp(
     <>
-      {["hosted_vllm", "openai"].map((providerType) => (
+      {["eligible", "without"].map((providerId) => (
         <EditModelDialog
-          key={providerType}
-          model={transcriptionModel(providerType)}
+          key={providerId}
+          model={transcriptionModel(providerId)}
           kind="transcription"
           classifications={[]}
           securityEnabled={false}
@@ -397,6 +423,7 @@ it("points each open form's switch at its own help, not at another form's", () =
       ))}
     </>
   );
+  await screen.findByText(REASONS.endpoint_required);
   for (const toggle of screen.getAllByRole("switch", { name: "Livetranskribering" })) {
     for (const id of (toggle.getAttribute("aria-describedby") ?? "").split(" ")) {
       // An id the page has twice names whichever comes first, perhaps the other dialog's.
@@ -405,13 +432,12 @@ it("points each open form's switch at its own help, not at another form's", () =
   }
 });
 
-describe("live transcription on a transcription model", () => {
-  // "vllm" is the backend's alias for hosted_vllm, and a provider created
-  // through the API keeps the type it was given.
-  it.each(["hosted_vllm", "vllm"])("turns it on for a %s provider", async (providerType) => {
-    const toggle = editLiveTranscription(transcriptionModel(providerType));
-    expect((toggle as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.queryByText("Kräver en leverantör av typen vLLM.")).toBeNull();
+describe("live text on a transcription model", () => {
+  it("turns it on when the provider can carry live text", async () => {
+    providersSay({ p1: "eligible" });
+    const toggle = await editLiveTranscription(transcriptionModel("p1"));
+    await waitFor(() => expect((toggle as HTMLButtonElement).disabled).toBe(false));
+    expect(Object.values(REASONS).some((reason) => screen.queryByText(reason))).toBe(false);
 
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-checked")).toBe("true");
@@ -428,15 +454,23 @@ describe("live transcription on a transcription model", () => {
     );
   });
 
-  it.each(["openai", null])("says why it is unavailable for provider type %s", (providerType) => {
-    const toggle = editLiveTranscription(transcriptionModel(providerType));
-    expect((toggle as HTMLButtonElement).disabled).toBe(true);
-    expect(descriptions(toggle)).toContain("Kräver en leverantör av typen vLLM.");
-  });
+  it.each(Object.entries(REASONS))(
+    "is locked with what to do when the provider says %s",
+    async (eligibility, reason) => {
+      providersSay({ p1: eligibility });
+      const toggle = await editLiveTranscription(transcriptionModel("p1"));
+      await screen.findByText(reason);
+      expect((toggle as HTMLButtonElement).disabled).toBe(true);
+      expect(descriptions(toggle)).toContain(reason);
+    }
+  );
 
-  it("states the flag on every save, so turning it off reaches the server", async () => {
-    const toggle = editLiveTranscription(transcriptionModel("hosted_vllm", true));
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
+  it("can turn off a saved mark the provider no longer carries", async () => {
+    providersSay({ p1: "endpoint_required" });
+    const toggle = await editLiveTranscription(transcriptionModel("p1", true));
+    await screen.findByText(REASONS.endpoint_required);
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    expect(descriptions(toggle)).toContain(REASONS.endpoint_required);
     await expectNoAxeViolations(screen.getByRole("dialog"));
 
     fireEvent.click(toggle);
@@ -444,6 +478,20 @@ describe("live transcription on a transcription model", () => {
 
     await waitFor(() =>
       expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({ supports_realtime: false })
+    );
+  });
+
+  it("saves other changes with the saved mark the provider no longer carries", async () => {
+    providersSay({ p1: "outbound_headers_configured" });
+    await editLiveTranscription(transcriptionModel("p1", true));
+    fireEvent.change(screen.getByDisplayValue("Pianissimo"), { target: { value: "Forte" } });
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({
+        display_name: "Forte",
+        supports_realtime: true
+      })
     );
   });
 });

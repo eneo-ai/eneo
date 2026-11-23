@@ -92,7 +92,7 @@ function Capabilities({ model, label }: { model: AdminModel; label?: string }) {
     "supports_tool_calling" in model && model.supports_tool_calling
       ? t("model_label_tool_calling")
       : null,
-    "supports_realtime" in model && model.supports_realtime ? t("live_transcription_support") : null
+    "streams_live" in model && model.streams_live ? t("live_transcription_support") : null
   ].filter((label): label is string => label !== null);
 
   if (labels.length === 0) {

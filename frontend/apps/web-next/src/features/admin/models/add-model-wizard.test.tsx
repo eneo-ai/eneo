@@ -49,11 +49,11 @@ const existing: ModelProvider = {
   provider_type: "openai",
   config: {},
   is_active: true,
+  realtime_eligibility: "endpoint_required",
   masked_api_key: "...4f2a",
   key_expires_on: null,
   connection_check: null,
   connection_check_supported: true,
-  realtime_eligibility: "endpoint_required",
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z"
 };
@@ -94,7 +94,10 @@ const liveImageModels = [
 const liveRerankModels = [{ name: "Qwen/Qwen3-Reranker-4B", mode: "rerank" }];
 
 /** The provider's transcription models, served when the list is asked for that mode. */
-const liveTranscriptionModels = [{ name: "pianissimo-sv", mode: "transcription" }];
+const liveTranscriptionModels = [
+  { name: "pianissimo-sv", mode: "transcription" },
+  { name: "forte-sv", mode: "transcription" }
+];
 
 function renderWizard({
   initialProviderId,
@@ -834,22 +837,22 @@ describe("the add-model wizard's catalog", () => {
     expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
   });
 
-  function renderTranscriptionStep(providerType: string) {
+  const transcriptionCaps = {
+    ...capabilities,
+    providers: { openai: { ...capabilities.providers.openai, modes: ["transcription"] } }
+  };
+
+  function renderTranscriptionStep(eligibility: ModelProvider["realtime_eligibility"]) {
     return renderWizard({
       initialProviderId: "p-vllm",
       fixedKind: "transcription",
-      providerList: [{ ...existing, provider_type: providerType }],
-      caps: {
-        ...capabilities,
-        providers: {
-          [providerType]: { ...capabilities.providers.openai, modes: ["transcription"] }
-        }
-      }
+      providerList: [{ ...existing, realtime_eligibility: eligibility }],
+      caps: transcriptionCaps
     });
   }
 
-  it("creates a transcription model with live transcription on a vLLM provider", async () => {
-    const { dialog, onOpenChange } = renderTranscriptionStep("hosted_vllm");
+  it("creates a transcription model with live text on a provider that carries it", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("eligible");
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
     const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
     expect((live as HTMLInputElement).checked).toBe(false);
@@ -863,13 +866,27 @@ describe("the add-model wizard's catalog", () => {
     });
   });
 
-  it("says why live transcription is unavailable and creates the model without it", async () => {
-    const { dialog, onOpenChange } = renderTranscriptionStep("openai");
+  it.each([
+    [
+      "endpoint_required",
+      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+    ],
+    [
+      "unsupported_provider",
+      "Välj en leverantör som stöds: vLLM, eller OpenAI med adressen till en server som har vLLM:s realtids-API."
+    ],
+    [
+      "outbound_headers_configured",
+      "Använd en leverantör utan utgående rubriker. Livetext kan inte skicka dem."
+    ]
+  ] as const)("says what to do when the provider says %s", async (eligibility, reason) => {
+    const { dialog, onOpenChange } = renderTranscriptionStep(eligibility);
     fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
     const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
     // Astryx keeps a disabled checkbox focusable; a press changes nothing.
     expect(live.getAttribute("aria-disabled")).toBe("true");
-    expect(within(dialog).getByText("Kräver en leverantör av typen vLLM.")).toBeTruthy();
+    expect(live.getAttribute("aria-describedby")).toBeTruthy();
+    expect(within(dialog).getByText(new RegExp(reason.replace(/[.:]/g, "\\$&")))).toBeTruthy();
     fireEvent.click(live);
     fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
 
@@ -877,6 +894,35 @@ describe("the add-model wizard's catalog", () => {
     expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
       body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
     });
+  });
+
+  it("names live text for each selected model when several are picked", async () => {
+    const { dialog } = renderTranscriptionStep("eligible");
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    expect(within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /forte-sv/ }));
+    expect(
+      within(dialog).getByRole("checkbox", { name: /^Livetext för valda modeller/ })
+    ).toBeTruthy();
+  });
+
+  it("uses the new provider's own answer before the provider list is fetched again", async () => {
+    const { dialog } = renderWizard({ fixedKind: "transcription", caps: transcriptionCaps });
+    // The list keeps answering without the new provider, as a refetch still in flight would.
+    api.POST.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/"
+        ? ok({ ...existing, id: "p-new", realtime_eligibility: "eligible" })
+        : ok({})
+    );
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till OpenAI" }));
+    await waitFor(() => expect(field(/^API-nyckel/)).toBeTruthy());
+    fireEvent.change(field(/^API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: "sk-live-1234" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
+    expect(live.getAttribute("aria-disabled")).not.toBe("true");
   });
 
   it("keeps the picks when the list is filtered", async () => {

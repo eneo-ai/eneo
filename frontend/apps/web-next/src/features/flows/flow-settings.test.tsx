@@ -413,7 +413,7 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          streams_live: true
         }
       ]
     };
@@ -497,7 +497,7 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          streams_live: true
         }
       ]
     };
@@ -556,9 +556,9 @@ describe("FlowSettings", () => {
           id: "live-1",
           name: "pianissimo-sv-live",
           nickname: "Pianissimo",
-          supports_realtime: true
+          streams_live: true
         },
-        { id: "live-2", name: "forte-sv-live", nickname: "Forte", supports_realtime: true }
+        { id: "live-2", name: "forte-sv-live", nickname: "Forte", streams_live: true }
       ]
     };
     const flowWithBoth = makeFlow({

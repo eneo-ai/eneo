@@ -33,6 +33,7 @@ import {
   FAVORITES_KEY,
   favoriteProvidersQueryOptions,
   isProviderNameTaken,
+  type ModelProvider,
   modelProvidersQueryOptions,
   PROVIDERS_KEY,
   providerCapabilitiesQueryOptions,
@@ -153,6 +154,8 @@ export function AddModelWizard({
   const [fieldConfirmations, setFieldConfirmations] = useState<Record<string, string>>({});
   const [keyExpiresOn, setKeyExpiresOn] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
+  /** The provider this session created, as the create call returned it. */
+  const [newProvider, setNewProvider] = useState<ModelProvider | null>(null);
   const [modelKind, setModelKind] = useState<ModelKind>("completion");
   const [catalogBusy, setCatalogBusy] = useState(false);
   const [credentialsSubmitted, setCredentialsSubmitted] = useState(false);
@@ -183,6 +186,7 @@ export function AddModelWizard({
     setExistingSubmitted(false);
     setTakenName(null);
     setProviderId(initialProviderId ?? null);
+    setNewProvider(null);
     setCatalogBusy(false);
     const provider = providers.data?.find((item) => item.id === preselect);
     setModelKind(
@@ -231,6 +235,7 @@ export function AddModelWizard({
       setFieldConfirmations({});
       setCredentialsSubmitted(false);
       setProviderId(provider.id);
+      setNewProvider(provider);
       setExistingId(provider.id);
       setMode("existing");
       setModelKind(fixedKind ?? defaultModelKind(caps?.providers[provider.provider_type]?.modes));
@@ -286,8 +291,12 @@ export function AddModelWizard({
   const createdProvider = providerId
     ? providers.data?.find((provider) => provider.id === providerId)
     : undefined;
+  // The create call's answer stands in until the list is fetched again, so the
+  // model step knows at once whether the new provider can carry live text.
   const existingProvider =
-    providers.data?.find((provider) => provider.id === existingId) ?? createdProvider;
+    providers.data?.find((provider) => provider.id === existingId) ??
+    createdProvider ??
+    (newProvider?.id === existingId ? newProvider : undefined);
   const targetProviderType =
     mode === "existing" ? (existingProvider?.provider_type ?? "") : providerType;
   const targetProviderModes = fixedKind
@@ -579,6 +588,9 @@ export function AddModelWizard({
                 <ModelCatalogStep
                   providerId={targetProviderId}
                   providerType={targetProviderType}
+                  realtimeEligibility={
+                    mode === "existing" ? existingProvider?.realtime_eligibility : undefined
+                  }
                   mode={effectiveModelKind}
                   supportedModes={targetProviderModes}
                   onModeChange={setModelKind}

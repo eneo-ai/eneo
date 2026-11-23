@@ -144,13 +144,25 @@ export function providerFields(caps: ProviderCapabilities, type: string): Provid
 }
 
 /**
- * Whether a provider serves the realtime API live transcription streams to.
- * Only vLLM does (any alias or casing), as `speaks_realtime_dialect` decides
- * in backend/src/eneo/transcription_models/domain/realtime.py.
+ * Whether a provider can carry live text, as the backend decides it
+ * (`realtime_eligibility`, backend/src/eneo/transcription_models/domain/realtime.py).
+ * web-next never decides this itself.
  */
-export function speaksRealtimeDialect(type: string | null | undefined): boolean {
-  const lower = type?.toLowerCase();
-  return lower != null && (PROVIDER_TYPE_ALIASES[lower] ?? lower) === "hosted_vllm";
+export type RealtimeEligibility = ModelProvider["realtime_eligibility"];
+
+const REALTIME_REFUSALS = {
+  endpoint_required: "live_text_reason_endpoint_required",
+  unsupported_provider: "live_text_reason_unsupported_provider",
+  outbound_headers_configured: "live_text_reason_outbound_headers_configured"
+} as const satisfies Record<Exclude<RealtimeEligibility, "eligible">, string>;
+
+/**
+ * The message key that says what an administrator does so that a provider can
+ * carry live text; null when it can, or while its answer is not known yet.
+ */
+export function realtimeRefusalKey(eligibility: RealtimeEligibility | undefined) {
+  if (eligibility === undefined || eligibility === "eligible") return null;
+  return REALTIME_REFUSALS[eligibility];
 }
 
 /** Whether the backend requires an API key for this provider type. */

@@ -29,8 +29,8 @@ export type SelectableModel = {
   vision?: boolean | null;
   reasoning?: boolean | null;
   supports_tool_calling?: boolean | null;
-  /** Transcription: served over the realtime API live transcription streams to. */
-  supports_realtime?: boolean | null;
+  /** Transcription: can stream live text now (marked, and its provider can carry it). */
+  streams_live?: boolean | null;
   input_cost_per_token?: string | number | null;
   output_cost_per_token?: string | number | null;
   cost_per_minute?: string | number | null;
@@ -86,7 +86,7 @@ function capabilitiesOf(model: SelectableModel, t: ReturnType<typeof useTranslat
     model.vision ? { Icon: Eye, text: t("model_label_vision") } : null,
     model.reasoning ? { Icon: Brain, text: t("model_label_reasoning") } : null,
     model.supports_tool_calling ? { Icon: Wrench, text: t("model_label_tool_calling") } : null,
-    model.supports_realtime ? { Icon: AudioLines, text: t("live_transcription_support") } : null
+    model.streams_live ? { Icon: AudioLines, text: t("live_transcription_support") } : null
   ].filter((item): item is { Icon: typeof Eye; text: string } => item !== null);
 }
 

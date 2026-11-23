@@ -32,7 +32,11 @@ import {
   NO_SUGGESTIONS_PROVIDERS,
   staticCatalogModels
 } from "./model-catalog";
-import { providerCapabilitiesQueryOptions, speaksRealtimeDialect } from "./model-providers";
+import {
+  providerCapabilitiesQueryOptions,
+  type RealtimeEligibility,
+  realtimeRefusalKey
+} from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import {
   type AdminModel,
@@ -126,6 +130,7 @@ function missingTokenLimits(model: CatalogModel, mode: ModelKind): boolean {
 export function ModelCatalogStep({
   providerId,
   providerType,
+  realtimeEligibility,
   mode = "completion",
   supportedModes,
   onModeChange,
@@ -136,6 +141,8 @@ export function ModelCatalogStep({
 }: {
   providerId: string;
   providerType: string;
+  /** The provider's answer to whether it can carry live text. */
+  realtimeEligibility: RealtimeEligibility | undefined;
   mode?: ModelKind;
   supportedModes?: ModelKind[];
   onModeChange?: (mode: ModelKind) => void;
@@ -196,9 +203,9 @@ export function ModelCatalogStep({
   const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
-  // Live transcription streams over the realtime API, which only vLLM serves.
   const [realtime, setRealtime] = useState(false);
-  const realtimeAvailable = speaksRealtimeDialect(providerType);
+  const realtimeAvailable = realtimeEligibility === "eligible";
+  const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -364,7 +371,7 @@ export function ModelCatalogStep({
               family: providerType,
               hosting,
               cost_per_minute: model.cost_per_minute ?? null,
-              supports_realtime: realtime,
+              supports_realtime: realtime && realtimeAvailable,
               security_classification: selectedClassification
             });
           }
@@ -524,11 +531,13 @@ export function ModelCatalogStep({
 
       {mode === "transcription" && (
         <CheckboxInput
-          label={t("live_transcription_support")}
-          description={
-            realtimeAvailable ? t("live_transcription_help") : t("live_transcription_needs_vllm")
-          }
-          value={realtime}
+          label={t(
+            selected.size > 1 ? "live_text_for_selected_models" : "live_transcription_support"
+          )}
+          description={[t("live_transcription_help"), realtimeRefusal && t(realtimeRefusal)]
+            .filter(Boolean)
+            .join(" ")}
+          value={realtime && realtimeAvailable}
           onChange={setRealtime}
           isDisabled={!realtimeAvailable}
         />

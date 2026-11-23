@@ -8,10 +8,22 @@ import { ModelRow } from "./model-row";
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-it.each([true, false])("marks live transcription among the capabilities: %s", (on) => {
+it.each([
+  [true, true, true],
+  [false, false, false],
+  // Marked, but its provider can no longer carry live text: not a capability now.
+  [true, false, false]
+])("marks live text among the capabilities: marked %s, streams %s", (marked, streams, on) => {
   renderInApp(
     <ModelRow
-      model={{ id: "t1", name: "pianissimo-sv", supports_realtime: on } as AdminModel}
+      model={
+        {
+          id: "t1",
+          name: "pianissimo-sv",
+          supports_realtime: marked,
+          streams_live: streams
+        } as AdminModel
+      }
       kind="transcription"
       layout="list"
       classifications={[]}

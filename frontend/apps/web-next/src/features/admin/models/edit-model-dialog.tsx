@@ -1,4 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import {
@@ -45,7 +45,7 @@ import {
   isEmbeddingFamily,
   isHostingRegion
 } from "./model-metadata-options";
-import { speaksRealtimeDialect } from "./model-providers";
+import { modelProvidersQueryOptions, realtimeRefusalKey } from "./model-providers";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 import {
   isCandidateSetting,
@@ -199,13 +199,20 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
-  // Live transcription streams over the realtime API, which only vLLM serves.
-  const [realtime, setRealtime] = useState(
-    "supports_realtime" in model ? (model.supports_realtime ?? false) : false
-  );
-  const realtimeAvailable = speaksRealtimeDialect(
-    "provider_type" in model ? model.provider_type : null
-  );
+  // Live text: whether the provider can carry it is the backend's answer.
+  const savedRealtime = "supports_realtime" in model ? (model.supports_realtime ?? false) : false;
+  const [realtime, setRealtime] = useState(savedRealtime);
+  const providers = useQuery({
+    ...modelProvidersQueryOptions(browserApi),
+    enabled: kind === "transcription"
+  });
+  const realtimeEligibility = providers.data?.find(
+    (provider) => provider.id === model.provider_id
+  )?.realtime_eligibility;
+  const realtimeRefusal = realtimeRefusalKey(realtimeEligibility);
+  // A saved mark can always be kept or turned off, even when the provider no
+  // longer carries live text; only turning it on needs an eligible provider.
+  const realtimeLocked = realtimeEligibility !== "eligible" && !savedRealtime;
 
   const save = useMutation({
     mutationFn: () => {
@@ -511,20 +518,18 @@ function EditModelForm({
                 <Switch
                   checked={realtime}
                   onCheckedChange={setRealtime}
-                  disabled={!realtimeAvailable}
+                  disabled={realtimeLocked}
                   aria-describedby={
-                    realtimeAvailable
-                      ? realtimeHelpId
-                      : `${realtimeHelpId} ${realtimeUnavailableId}`
+                    realtimeRefusal ? `${realtimeHelpId} ${realtimeUnavailableId}` : realtimeHelpId
                   }
                 />
               </Label>
               <p id={realtimeHelpId} className="text-muted-foreground text-xs">
                 {t("live_transcription_help")}
               </p>
-              {!realtimeAvailable && (
+              {realtimeRefusal && (
                 <p id={realtimeUnavailableId} className="text-muted-foreground text-xs">
-                  {t("live_transcription_needs_vllm")}
+                  {t(realtimeRefusal)}
                 </p>
               )}
             </div>

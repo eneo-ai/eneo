@@ -202,12 +202,12 @@ describe("liveModelState", () => {
   const model = (overrides: Partial<TranscriptionModelLink> = {}): TranscriptionModelLink => ({
     id: "whisper",
     name: "kb-whisper-large",
-    supports_realtime: false,
+    streams_live: false,
     can_access: true,
     ...overrides
   });
   const whisper = model();
-  const live = model({ id: "live", name: "pianissimo-sv-live", supports_realtime: true });
+  const live = model({ id: "live", name: "pianissimo-sv-live", streams_live: true });
   const settings = (modelId: string | null, liveModelId: string | null) => ({
     modelId,
     liveModelId
@@ -257,7 +257,7 @@ describe("liveModelState", () => {
       kind: "lost",
       model: revoked
     });
-    const batchOnly = { ...live, supports_realtime: false };
+    const batchOnly = { ...live, streams_live: false };
     expect(liveModelState(settings("whisper", "live"), [whisper, batchOnly])).toEqual({
       kind: "lost",
       model: batchOnly

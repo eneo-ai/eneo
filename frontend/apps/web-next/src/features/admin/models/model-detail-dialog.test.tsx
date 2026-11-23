@@ -7,27 +7,34 @@ import type { AdminModel } from "./models";
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: () =>
-      Promise.resolve({
-        data: {
-          items: [
-            ["a1", "Upphandlingsassistenten", "assistant"],
-            ["p1", "Protokollsammanfattaren", "app"],
-            ["s1", "Ärendesortering", "service"],
-            ["t1", "Avtalsgranskare", "assistant_template"],
-            ["t2", "Mötesprotokoll", "app_template"],
-            ["x1", "Något nytt", "workflow"]
-          ].map(([entity_id, entity_name, entity_type]) => ({
-            entity_id,
-            entity_name,
-            entity_type,
-            space_name: "Upphandling",
-            owner_name: "Anna Lind"
-          })),
-          total: 6
-        },
-        response: new Response("{}")
-      })
+    GET: (path: string) =>
+      Promise.resolve(
+        path === "/api/v1/admin/model-providers/"
+          ? {
+              data: [{ id: "p-gateway", realtime_eligibility: "endpoint_required" }],
+              response: new Response("[]")
+            }
+          : {
+              data: {
+                items: [
+                  ["a1", "Upphandlingsassistenten", "assistant"],
+                  ["p1", "Protokollsammanfattaren", "app"],
+                  ["s1", "Ärendesortering", "service"],
+                  ["t1", "Avtalsgranskare", "assistant_template"],
+                  ["t2", "Mötesprotokoll", "app_template"],
+                  ["x1", "Något nytt", "workflow"]
+                ].map(([entity_id, entity_name, entity_type]) => ({
+                  entity_id,
+                  entity_name,
+                  entity_type,
+                  space_name: "Upphandling",
+                  owner_name: "Anna Lind"
+                })),
+                total: 6
+              },
+              response: new Response("{}")
+            }
+      )
   }
 }));
 
@@ -55,19 +62,53 @@ const rerankModel = {
 
 describe("ModelDetailDialog", () => {
   it.each([
-    [true, "Ja"],
-    [false, "Nej"]
-  ])("states live transcription %s in a transcription model's details", async (on, answer) => {
+    [true, true, "Ja"],
+    [false, false, "Nej"]
+  ])(
+    "states live text in a transcription model's details: marked %s",
+    async (marked, streams, answer) => {
+      renderInApp(
+        <ModelDetailDialog
+          model={
+            {
+              ...model,
+              provider_id: "p-gateway",
+              supports_realtime: marked,
+              streams_live: streams
+            } as AdminModel
+          }
+          kind="transcription"
+          open
+          onOpenChange={() => {}}
+        />
+      );
+      const term = await screen.findByText("Livetranskribering", { selector: "dt" });
+      expect(term.nextElementSibling?.textContent).toBe(answer);
+    }
+  );
+
+  it("says why a saved live text mark is not in use, instead of a bare yes", async () => {
     renderInApp(
       <ModelDetailDialog
-        model={{ ...model, provider_type: "hosted_vllm", supports_realtime: on } as AdminModel}
+        model={
+          {
+            ...model,
+            provider_id: "p-gateway",
+            supports_realtime: true,
+            streams_live: false
+          } as AdminModel
+        }
         kind="transcription"
         open
         onOpenChange={() => {}}
       />
     );
     const term = await screen.findByText("Livetranskribering", { selector: "dt" });
-    expect(term.nextElementSibling?.textContent).toBe(answer);
+    await within(term.nextElementSibling as HTMLElement).findByText(
+      "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
+    );
+    expect(term.nextElementSibling?.textContent).toContain("Vald, men används inte just nu.");
+    expect(term.nextElementSibling?.textContent).not.toBe("Ja");
   });
 
   it.each([
