@@ -183,9 +183,15 @@ export function startAuthoringConversation(
   );
 }
 
-/** Puts a flow the server returned into the cache and marks the space's list stale. */
+/**
+ * Puts a flow the server returned into the cache and marks the space's list
+ * stale. A late answer never replaces a newer draft already there: the draft
+ * revision only goes up, so a lower one is older.
+ */
 export function storeFlow(queryClient: QueryClient, flow: FlowPublic): void {
-  queryClient.setQueryData(flowKeys.flow(flow.id), flow);
+  queryClient.setQueryData<FlowPublic>(flowKeys.flow(flow.id), (cached) =>
+    cached && cached.draft_revision > flow.draft_revision ? cached : flow
+  );
   void queryClient.invalidateQueries({ queryKey: flowKeys.list(flow.space_id) });
 }
 

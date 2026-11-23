@@ -254,16 +254,19 @@ function withStepBeforeSend(start: FlowPublic, step: Partial<FlowPublic["steps"]
   });
 }
 
-/** Routes the add dialog's kinds before the step that sends, and answers each editor PATCH in turn. */
+/** Routes the add dialog's kinds at any place, and answers each editor PATCH in turn. */
 function routeAddBeforeSend(answers: FlowPublic[]) {
-  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = () => ({
-    body: {
-      flow_id: "flow-1",
-      draft_revision: 4,
-      insertions: [makeKindPlace(2, [makeKindOption("ai")])],
-      steps: []
-    }
-  });
+  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = (init) => {
+    const position = (init as { params: { query: { position: number } } }).params.query.position;
+    return {
+      body: {
+        flow_id: "flow-1",
+        draft_revision: 4,
+        insertions: [makeKindPlace(position, [makeKindOption("ai")])],
+        steps: []
+      }
+    };
+  };
   const queue = [...answers];
   api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({ body: queue.shift() });
 }
@@ -285,9 +288,11 @@ it("adds a step before the send from the sender with unsaved edits, and lists it
   flow = senderFlow();
   const added = withStepBeforeSend(flow, { user_description: "Sammanfatta" });
   routeAddBeforeSend([added, { ...added, draft_revision: 6 }]);
-  await renderPage("?step=step-send");
+  const { queryClient } = await renderPage("?step=step-send");
   fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
   await addSummaryBeforeSend();
+  // The page holds the flow the add returned.
+  expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow(flow.id))?.draft_revision).toBe(5);
 
   const sends = await screen.findByRole("region", {
     name: messages.flow_step_editor_run_result_sends_title
@@ -381,17 +386,7 @@ it("keeps the banner when the add went through on a newer revision than the edit
  * dialog reads it again and the author asks for the same row once more.
  */
 async function addBeforeSendAfterReload(reread: FlowPublic, answer: FlowPublic | null) {
-  api.routes["GET /api/v1/flows/{id}/step-kinds/"] = (init) => {
-    const position = (init as { params: { query: { position: number } } }).params.query.position;
-    return {
-      body: {
-        flow_id: "flow-1",
-        draft_revision: 4,
-        insertions: [makeKindPlace(position, [makeKindOption("ai")])],
-        steps: []
-      }
-    };
-  };
+  routeAddBeforeSend([]);
   const answers = [STALE, ...(answer ? [{ body: answer }] : [])];
   api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => answers.shift()!;
   await click(messages.flow_step_editor_run_result_add_before);
@@ -462,6 +457,34 @@ it("adds nothing after a reload in which the step that sends is gone, and says s
   }) as HTMLButtonElement;
   expect(submit.disabled || submit.getAttribute("aria-disabled") === "true").toBe(true);
   expect(editorPatches()).toHaveLength(1);
+});
+
+it("keeps a newer version the page holds when the answer to its own add comes late", async () => {
+  flow = senderFlow();
+  const { queryClient } = await renderPage("?step=step-send");
+  fireEvent.change(await nameField(), { target: { value: "Skicka till intranätet" } });
+  const added = withStepBeforeSend(flow, { user_description: "Sammanfatta" });
+  const [first, ...rest] = added.steps;
+  const newer = makeFlow({
+    draft_revision: 6,
+    steps: [{ ...first!, user_description: "Plocka ut allt" }, ...rest]
+  });
+  routeAddBeforeSend([]);
+  const answers = [{ body: added }, STALE];
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => {
+    // Revision 6 reaches the page before the add's own answer, revision 5.
+    if (answers.length === 2) queryClient.setQueryData(flowKeys.flow(flow.id), newer);
+    return answers.shift()!;
+  };
+  await addSummaryBeforeSend();
+
+  expect(queryClient.getQueryData<FlowPublic>(flowKeys.flow(flow.id))?.draft_revision).toBe(6);
+  expect(await screen.findByText(messages.flow_step_editor_newer_title)).toBeTruthy();
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Skicka till intranätet");
+  // The save stays fenced on the revision the edits sit on, the add's answer.
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(2));
+  expect(editorPatches()[1]).toMatchObject({ expected_revision: 5 });
 });
 
 it("keeps the banner when the add changed the step that sends", async () => {
