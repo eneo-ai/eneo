@@ -180,7 +180,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const rescue = useFocusRescue();
-  const { routeId, space } = useSpace();
+  const { routeId, space, can: spaceCan } = useSpace();
   // What the space offers for transcription, for the settings and the draft check.
   const transcription = {
     models: space.transcription_models,
@@ -870,6 +870,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
       key="settings"
       flow={flow}
       canEdit={canEdit}
+      setsSpaceRetention={space.personal || spaceCan("edit", "space")}
       transcription={transcription}
       onSave={saveSettings}
       onEditingChange={onUnsavedChange}

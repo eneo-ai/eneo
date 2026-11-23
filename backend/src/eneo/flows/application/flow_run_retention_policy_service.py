@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID
 
 from eneo.audit.application.audit_service import AuditService
@@ -23,11 +24,16 @@ from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
     FlowRunRetentionPolicyChange,
     FlowRunRetentionPolicyRepository,
 )
+from eneo.main.exceptions import UnauthorizedException
 from eneo.settings.settings import (
     FlowRunHistoryPurgeBlockedPublic,
     FlowRunHistoryPurgePublic,
 )
 from eneo.users.user import UserInDB
+
+if TYPE_CHECKING:
+    from eneo.actors.actor_manager import ActorManager
+    from eneo.spaces.space_repo import SpaceRepository
 
 
 class FlowRunRetentionPolicyService:
@@ -37,10 +43,14 @@ class FlowRunRetentionPolicyService:
         user: UserInDB,
         repository: FlowRunRetentionPolicyRepository,
         audit_service: AuditService,
+        space_repo: SpaceRepository,
+        actor_manager: ActorManager,
     ) -> None:
         self.user = user
         self.repository = repository
         self.audit_service = audit_service
+        self.space_repo = space_repo
+        self.actor_manager = actor_manager
 
     async def list_space_targets(
         self,
@@ -84,6 +94,7 @@ class FlowRunRetentionPolicyService:
         policy: FlowRunRetentionPolicy | None,
     ) -> FlowRunRetentionPolicySettings:
         require_retention_manage(self.user)
+        await self._require_space_retention_role(flow_id)
         change = await self.repository.replace_flow(
             tenant_id=self.user.tenant_id,
             flow_id=flow_id,
@@ -91,6 +102,27 @@ class FlowRunRetentionPolicyService:
         )
         await self._audit_change(change)
         return change.after
+
+    async def _require_space_retention_role(self, flow_id: UUID) -> None:
+        """A Flow's time is set by whoever sets retention in its space: the
+        space admin, or a personal space's owner. The same rule as the space
+        time and the assistant and app times (``SpaceActor.can_edit_retention``)."""
+        space_id = await self.repository.get_flow_space_id(
+            tenant_id=self.user.tenant_id, flow_id=flow_id
+        )
+        actor = self.actor_manager.get_space_actor(
+            await self.space_repo.get_space_access_facts(space_id)
+        )
+        if not actor.can_edit_retention():
+            raise UnauthorizedException(
+                "Only space admins can change a Flow's retention time",
+                code="forbidden_action",
+                context={
+                    "resource_type": "flow",
+                    "action": "update_retention",
+                    "auth_layer": "domain_policy",
+                },
+            )
 
     async def purge_due_history(
         self,

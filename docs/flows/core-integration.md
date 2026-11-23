@@ -108,6 +108,9 @@ an upgrade changes:
   role, no space administrator can change a space's time, for conversations
   too, and the Svelte app shows a 403. Existing grants keep working. A change
   writes an audit row with the earlier and the new time.
+- Changing a Flow's own time needs `retention_manage` and the admin role in
+  the Flow's space, or ownership of the personal space it is in. Anyone else,
+  a space editor too, gets 403 `forbidden_action`.
 
 ## Starting points
 

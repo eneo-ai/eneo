@@ -5351,7 +5351,7 @@
   "permission_flows_manage": "Flöden: hantera",
   "permission_flows_manage_description": "Skapa, redigera, publicera och hantera flöden. Inkluderar behörighet att visa och köra flöden.",
   "permission_retention_manage": "Gallring – hantera regler",
-  "permission_retention_manage_description": "Ändra en ytas tid, som också är taket för körhistoriken i dess flöden, och ett flödes egen tid, och gallra manuellt. Bara inloggade personer, aldrig API-nycklar.",
+  "permission_retention_manage_description": "I ytor man administrerar: ändra ytans tid, som också är taket för körhistoriken i dess flöden, och ett flödes egen tid. Gallra manuellt. Bara inloggade personer, aldrig API-nycklar.",
   "permission_retention_holds": "Gallring – rättsliga spärrar",
   "permission_retention_holds_description": "Lägga, ompröva och häva rättsliga spärrar som stoppar gallring av flödens körningshistorik. Bara inloggade personer, aldrig API-nycklar.",
   "permission_flows_trace": "Flöden: spårning",

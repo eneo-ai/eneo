@@ -403,6 +403,7 @@ function FormFieldRow({
 export function FlowSettings({
   flow,
   canEdit,
+  setsSpaceRetention = false,
   transcription,
   onSave,
   onEditingChange,
@@ -412,6 +413,11 @@ export function FlowSettings({
 }: {
   flow: FlowPublic;
   canEdit: boolean;
+  /**
+   * Whether the person sets retention in the flow's space: its admin, or a
+   * personal space's owner. The backend refuses everyone else a flow time.
+   */
+  setsSpaceRetention?: boolean;
   /** The space's transcription models and services. */
   transcription: TranscriptionResources;
   /** Saves the definition change; resolves true when it was saved. */
@@ -431,7 +437,7 @@ export function FlowSettings({
   const t = useTranslations();
   const { can } = useAppContext();
   const [retentionOpen, setRetentionOpen] = useState(false);
-  const mayChangeRetention = can("retention_manage");
+  const mayChangeRetention = setsSpaceRetention && can("retention_manage");
   const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();

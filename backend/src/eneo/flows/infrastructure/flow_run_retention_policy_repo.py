@@ -152,6 +152,16 @@ class FlowRunRetentionPolicyRepository:
             raise NotFoundException("Space not found.")
         return found
 
+    async def get_flow_space_id(self, *, tenant_id: UUID, flow_id: UUID) -> UUID:
+        space_id = await self.session.scalar(
+            sa.select(Flows.space_id)
+            .where(Flows.id == flow_id)
+            .where(Flows.tenant_id == tenant_id)
+        )
+        if space_id is None:
+            raise NotFoundException("Flow not found.")
+        return space_id
+
     async def get_flow(
         self,
         *,

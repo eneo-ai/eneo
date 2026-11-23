@@ -74,11 +74,12 @@ afterEach(() => {
   toastError.mockReset();
 });
 
-function renderSettings(permissions: Permission[]) {
+function renderSettings(permissions: Permission[], setsSpaceRetention = true) {
   return renderInApp(
     <FlowSettings
       flow={makeFlow({ run_history_retention: configured })}
       canEdit
+      setsSpaceRetention={setsSpaceRetention}
       transcription={resources}
       onSave={vi.fn()}
     />,
@@ -90,7 +91,13 @@ function renderSettings(permissions: Permission[]) {
 function CachedFlowSettings() {
   const flow = useQuery(flowQueryOptions(browserApi, "flow-1")).data;
   return flow ? (
-    <FlowSettings flow={flow} canEdit transcription={resources} onSave={vi.fn()} />
+    <FlowSettings
+      flow={flow}
+      canEdit
+      setsSpaceRetention
+      transcription={resources}
+      onSave={vi.fn()}
+    />
   ) : null;
 }
 
@@ -135,6 +142,11 @@ describe("flow retention", () => {
     cleanup();
     renderSettings(["retention_manage"]);
     expect(screen.getByRole("button", { name: "Ändra gallring" })).toBeTruthy();
+  });
+
+  it("does not offer the change without the right to set retention in the flow's space", () => {
+    renderSettings(["retention_manage"], false);
+    expect(screen.queryByRole("button", { name: "Ändra gallring" })).toBeNull();
   });
 
   it("shows the space's time while the field is empty, and saves a flow time", async () => {

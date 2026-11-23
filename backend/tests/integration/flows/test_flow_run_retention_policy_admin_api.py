@@ -17,7 +17,7 @@ from eneo.database.tables.flow_tables import (
     FlowStepAttempts,
     FlowVersions,
 )
-from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.spaces_table import Spaces, SpacesUsers
 from eneo.database.tables.tenant_table import Tenants
 
 pytestmark = [pytest.mark.integration, pytest.mark.asyncio]
@@ -240,6 +240,17 @@ async def regular_token(
 
 
 @pytest.fixture
+async def admin_is_space_admin(db_container, admin_user, published_flow_ids) -> None:
+    """Setting a Flow's time needs the space admin role beside the permission."""
+    async with db_container() as container:
+        container.session().add(
+            SpacesUsers(
+                space_id=published_flow_ids[0], user_id=admin_user.id, role="admin"
+            )
+        )
+
+
+@pytest.fixture
 async def published_flow_ids(db_container, admin_user) -> tuple[object, object]:
     async with db_container() as container:
         session = container.session()
@@ -295,6 +306,7 @@ async def test_admin_replaces_and_clears_the_flow_time_under_the_space_cap(
     admin_token,
     regular_token,
     published_flow_ids,
+    admin_is_space_admin,
     db_container,
     admin_user,
 ) -> None:
@@ -490,6 +502,7 @@ async def test_deleted_flow_with_history_stays_under_retention_administration(
     client,
     admin_token,
     published_flow_ids,
+    admin_is_space_admin,
     db_container,
     admin_user,
 ) -> None:
@@ -568,6 +581,7 @@ async def test_required_audit_failure_rolls_back_policy_change(
     client,
     admin_token,
     published_flow_ids,
+    admin_is_space_admin,
     db_container,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1073,7 +1087,7 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
 
 
 async def test_a_flow_time_longer_than_the_space_is_refused_with_the_cap(
-    client, admin_token, published_flow_ids, db_container
+    client, admin_token, published_flow_ids, admin_is_space_admin, db_container
 ) -> None:
     """The published Space keeps 7 days. Mutants: a longer time is saved; the
     refusal names no cap; an equal or shorter time is refused; a Space without
@@ -1114,7 +1128,7 @@ async def test_a_flow_time_longer_than_the_space_is_refused_with_the_cap(
 
 
 async def test_a_longer_flow_time_stored_before_the_cap_is_refused_on_a_resend(
-    client, admin_token, published_flow_ids, db_container
+    client, admin_token, published_flow_ids, admin_is_space_admin, db_container
 ) -> None:
     """Mutant: only a changed value is checked, so an old client keeps
     resending a time its Space no longer allows."""

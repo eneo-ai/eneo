@@ -407,6 +407,7 @@ async def test_policy_replacement_waits_for_an_open_purge(
 ):
     flow_id = history["flow_id"]
     await _add_run(db_container, admin_user, flow_id)
+    await _make_space_admin(db_container, history["space_id"], admin_user.id)
 
     async def replace_policy():
         async with db_container() as changing:
@@ -916,9 +917,26 @@ async def test_extending_a_review_needs_a_later_date_and_a_reason_and_is_audited
         ]
 
 
+async def _make_space_admin(db_container, space_id: UUID, user_id: UUID) -> None:
+    async with db_container() as container:
+        container.session().add(
+            SpacesUsers(space_id=space_id, user_id=user_id, role="admin")
+        )
+
+
 async def _token_with_permissions(
     db_container, admin_user, user_factory, permissions: list[str]
 ) -> str:
+    return (
+        await _user_with_permissions(
+            db_container, admin_user, user_factory, permissions
+        )
+    )[1]
+
+
+async def _user_with_permissions(
+    db_container, admin_user, user_factory, permissions: list[str]
+) -> tuple[UUID, str]:
     async with db_container() as container:
         session = container.session()
         user = await user_factory(session, tenant_id=admin_user.tenant_id)
@@ -935,7 +953,7 @@ async def _token_with_permissions(
         user_id = user.id
     async with db_container() as container:
         loaded = await container.user_repo().get_user_by_id(user_id)
-        return container.auth_service().create_access_token_for_user(loaded)
+        return user_id, container.auth_service().create_access_token_for_user(loaded)
 
 
 async def test_rules_and_holds_need_their_own_retention_permission(
@@ -981,8 +999,11 @@ async def test_rules_and_holds_need_their_own_retention_permission(
     ):
         assert refused.status_code == 403, refused.text
         assert refused.json()["code"] == "retention_permission_required"
-    changed = await client.put(rule_path, json=rule, headers=bearer(rules_only))
-    assert changed.status_code == 200, changed.text
+    # The permission alone does not reach a Flow in a space where the person
+    # has no role: that is the space admin's decision.
+    no_role = await client.put(rule_path, json=rule, headers=bearer(rules_only))
+    assert no_role.status_code == 403, no_role.text
+    assert no_role.json()["code"] == "forbidden_action"
     assert (await client.get(HOLDS, headers=bearer(rules_only))).status_code == 200
 
     limited = await client.put(
@@ -1018,6 +1039,81 @@ async def test_rules_and_holds_need_their_own_retention_permission(
             (change.log_metadata["previous_value"], change.log_metadata["new_value"])
             for change in sorted(changes, key=lambda change: change.timestamp)
         ] == [(365, 30), (30, 365)]
+
+
+async def test_a_flow_time_needs_the_space_admin_or_the_personal_owner(
+    client, admin_user, db_container, history, user_factory, patch_auth_service_jwt
+):
+    """Mutants: the permission alone reaches any Flow; a space editor may set it;
+    a personal space's owner is refused on their own Flow."""
+    flow_id, space_id = history["flow_id"], history["space_id"]
+    path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
+    (no_role, no_role_token), (editor, editor_token), (admin, admin_token) = [
+        await _user_with_permissions(
+            db_container, admin_user, user_factory, ["retention_manage"]
+        )
+        for _ in range(3)
+    ]
+    # A personal space's owner sets retention there as for its assistants and
+    # apps: the owner who may edit them (SpaceActor.can_edit_retention).
+    owner, owner_token = await _user_with_permissions(
+        db_container, admin_user, user_factory, ["retention_manage", "assistants"]
+    )
+    async with db_container() as container:
+        session = container.session()
+        session.add(SpacesUsers(space_id=space_id, user_id=editor, role="editor"))
+        session.add(SpacesUsers(space_id=space_id, user_id=admin, role="admin"))
+        personal = Spaces(
+            name=f"Personal {uuid4()}", tenant_id=admin_user.tenant_id, user_id=owner
+        )
+        session.add(personal)
+        await session.flush()
+        own_flow = Flows(
+            name=f"Own {uuid4()}", tenant_id=admin_user.tenant_id, space_id=personal.id
+        )
+        session.add(own_flow)
+        await session.flush()
+        own_flow_id = own_flow.id
+
+    async def put(token: str, path: str = path, days: int = 30):
+        return await client.put(
+            path,
+            json={"policy": {"days": days}},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    for token in (no_role_token, editor_token):
+        refused = await put(token)
+        assert refused.status_code == 403, refused.text
+        assert refused.json()["code"] == "forbidden_action"
+    async with db_container() as container:
+        session = container.session()
+        assert (
+            await session.scalar(
+                sa.select(Flows.flow_run_history_retention_days).where(
+                    Flows.id == flow_id
+                )
+            )
+            == 1
+        )
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count(AuditLog.id)).where(
+                    AuditLog.action == "flow_run_retention_policy_changed",
+                    AuditLog.log_metadata["scope_id"].astext == str(flow_id),
+                )
+            )
+            == 0
+        )
+
+    allowed = await put(admin_token)
+    assert allowed.status_code == 200, allowed.text
+    assert allowed.json()["local_policy"] == {"days": 30}
+    own_path = f"/api/v1/settings/flow-run-retention-policy/flows/{own_flow_id}"
+    assert (await put(no_role_token, own_path)).status_code == 403
+    own = await put(owner_token, own_path)
+    assert own.status_code == 200, own.text
+    assert own.json()["local_policy"] == {"days": 30}
 
 
 async def test_an_api_key_never_changes_or_stops_retention(

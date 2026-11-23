@@ -5351,7 +5351,7 @@
   "permission_flows_manage": "Flows: manage",
   "permission_flows_manage_description": "Create, edit, publish, and manage flows. Includes the ability to view and run flows.",
   "permission_retention_manage": "Retention – manage rules",
-  "permission_retention_manage_description": "Change a space's time, which also caps its flows' run history, and a flow's own time, and run the manual purge. Signed-in people only, never API keys.",
+  "permission_retention_manage_description": "In spaces you administer: change the space's time, which also caps its flows' run history, and a flow's own time. Run the manual purge. Signed-in people only, never API keys.",
   "permission_retention_holds": "Retention – legal holds",
   "permission_retention_holds_description": "Place, review and release legal holds that stop deletion of Flow run history. Signed-in people only, never API keys.",
   "permission_flows_trace": "Flows: trace",
