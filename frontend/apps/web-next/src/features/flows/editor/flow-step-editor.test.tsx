@@ -3326,9 +3326,14 @@ describe("FlowStepEditor Leverans", () => {
     const delivery = await section();
     await within(delivery).findByText(messages.flow_step_editor_delivery_unread_off);
     routeAssistants({}, ["assistant-2"]);
-    await queryClient.invalidateQueries({
-      queryKey: flowEditorKeys.assistant(flow.id, "assistant-2")
-    });
+    const key = flowEditorKeys.assistant(flow.id, "assistant-2");
+    // Invalidated and not read again yet: the prompt kept may no longer be what is saved.
+    await queryClient.invalidateQueries({ queryKey: key, refetchType: "none" });
+    await waitFor(() =>
+      expect(within(delivery).queryByText(messages.flow_step_editor_delivery_unread_off)).toBeNull()
+    );
+    // Read again and refused: still not current.
+    await queryClient.refetchQueries({ queryKey: key });
     await waitFor(() =>
       expect(
         queryClient.getQueryState(flowEditorKeys.assistant(flow.id, "assistant-2"))?.status
