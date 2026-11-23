@@ -13,8 +13,13 @@ from pydantic import (
 )
 
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
-from eneo.data_retention.domain.rules import RetentionRule, resolve_period
-from eneo.policy_levels import PolicyLevel, Resolved
+from eneo.data_retention.domain.rules import (
+    RetentionExceedsSpaceError,
+    RetentionRule,
+    fewer_days,
+    resolve_period,
+)
+from eneo.policy_levels import PolicyLevel, Resolved, admits
 
 
 class FlowRunRetentionPolicy(BaseModel):
@@ -237,6 +242,17 @@ def resolve_flow_run_retention_policy(
         effective_days=period.value,
         source="flow" if period.origin is PolicyLevel.FLOW else "space",
         contributors=contributors,
+    )
+
+
+def require_within_space_cap(*, space_days: int | None, days: int | None) -> None:
+    """Refuse a Flow time longer than its Space's; equal is allowed."""
+    parent = flow_run_history_period(space_days=space_days, flow_days=None)
+    if admits(parent, days, stricter=fewer_days):
+        return
+    assert parent.bound is not None and parent.bound_origin is not None
+    raise RetentionExceedsSpaceError(
+        cap_days=parent.bound, cap_origin=parent.bound_origin
     )
 
 

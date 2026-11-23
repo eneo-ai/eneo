@@ -832,7 +832,7 @@ REQUIRED_ERROR_RESPONSES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
         "put",
-    ): {"403", "404", "422"},
+    ): {"400", "403", "404", "422"},
 }
 
 FLOW_SETTINGS_INVALID_PAYLOAD_MESSAGES: dict[str, str] = {
@@ -958,7 +958,7 @@ REQUIRED_TYPED_ERROR_CODES: dict[tuple[str, str], set[str]] = {
     (
         "/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
         "put",
-    ): {"403", "404"},
+    ): {"400", "403", "404"},
 }
 
 

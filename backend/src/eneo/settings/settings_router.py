@@ -1174,6 +1174,16 @@ async def get_flow_run_retention_policy(
         "to finish."
     ),
     responses={
+        400: _settings_error_response(
+            description=(
+                "The Flow time is longer than its Space's time "
+                "(`retention_exceeds_space`). `context` names the cap in days and "
+                "the level it comes from. Nothing changed."
+            ),
+            message="The retention period is longer than the limit that applies here.",
+            eneo_error_code=ErrorCodes.RETENTION_EXCEEDS_SPACE,
+            code="retention_exceeds_space",
+        ),
         403: _retention_forbidden_response("manage"),
         404: _flow_retention_not_found_response("Flow"),
         409: _flow_retention_lock_busy_response(),

@@ -1044,3 +1044,65 @@ async def test_purge_diagnostics_count_only_the_window_and_report_completeness(
         "counted_runs": 500,
         "complete": not extra_run,
     }
+
+
+async def test_a_flow_time_longer_than_the_space_is_refused_with_the_cap(
+    client, admin_token, published_flow_ids, db_container
+) -> None:
+    """The published Space keeps 7 days. Mutants: a longer time is saved; the
+    refusal names no cap; an equal or shorter time is refused; a Space without
+    a time caps the Flow anyway."""
+    space_id, flow_id = published_flow_ids
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    path = f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}"
+
+    refused = await client.put(path, json={"policy": {"days": 10}}, headers=headers)
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["code"] == "retention_exceeds_space"
+    assert refused.json()["eneo_error_code"] == 9086
+    assert refused.json()["context"] == {"cap_days": 7, "cap_origin": "space"}
+    async with db_container() as container:
+        assert (
+            await container.session().scalar(
+                sa.select(Flows.flow_run_history_retention_days).where(
+                    Flows.id == flow_id
+                )
+            )
+            is None
+        )
+
+    for days in (7, 3):
+        saved = await client.put(path, json={"policy": {"days": days}}, headers=headers)
+        assert saved.status_code == 200, saved.text
+        assert saved.json()["local_policy"] == {"days": days}
+
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Spaces)
+            .where(Spaces.id == space_id)
+            .values(data_retention_days=None)
+        )
+    uncapped = await client.put(path, json={"policy": {"days": 400}}, headers=headers)
+    assert uncapped.status_code == 200, uncapped.text
+    assert uncapped.json()["effective"]["effective_days"] == 400
+
+
+async def test_a_longer_flow_time_stored_before_the_cap_is_refused_on_a_resend(
+    client, admin_token, published_flow_ids, db_container
+) -> None:
+    """Mutant: only a changed value is checked, so an old client keeps
+    resending a time its Space no longer allows."""
+    _, flow_id = published_flow_ids
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(Flows)
+            .where(Flows.id == flow_id)
+            .values(flow_run_history_retention_days=10)
+        )
+    response = await client.put(
+        f"/api/v1/settings/flow-run-retention-policy/flows/{flow_id}",
+        json={"policy": {"days": 10}},
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["context"] == {"cap_days": 7, "cap_origin": "space"}

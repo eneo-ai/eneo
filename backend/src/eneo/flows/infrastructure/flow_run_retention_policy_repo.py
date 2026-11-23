@@ -23,6 +23,7 @@ from eneo.flows.domain.flow_run_retention_policy import (
     FlowRunRetentionSpaceTarget,
     FlowRunRetentionSpaceTargetPage,
     flow_run_retention_policy_settings,
+    require_within_space_cap,
 )
 from eneo.flows.flow_retention_policy import (
     FLOW_RETENTION_POLICY_HOLD_MAX_REVIEW_DAYS_KEY,
@@ -192,6 +193,14 @@ class FlowRunRetentionPolicyRepository:
         await acquire_exclusive(self.session, GallringSubject.FLOW_HISTORY)
         await self._lock_flow(tenant_id=tenant_id, flow_id=flow_id)
         before = await self.get_flow(tenant_id=tenant_id, flow_id=flow_id)
+        # Read under the lock the Space writer also takes, so the cap holds.
+        # Every time sent is checked, also one stored before the cap was lowered.
+        require_within_space_cap(
+            space_days=before.inherited_policy.days
+            if before.inherited_policy
+            else None,
+            days=policy.days if policy is not None else None,
+        )
         if before.local_policy != policy:
             await self.session.execute(
                 sa.update(Flows)
