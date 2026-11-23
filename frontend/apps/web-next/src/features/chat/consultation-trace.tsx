@@ -48,8 +48,8 @@ function ConsultationDetails({
   const parts: EneoUIMessage["parts"] = tools.map((tool) => {
     // A pending call in a finished consultation is shown as stopped by deriveActivity.
     const pending =
-      !tool.result_status ||
-      ["pending", "approved", "deferred", "awaiting_approval"].includes(tool.result_status);
+      (!tool.result_status && step.status !== "complete") ||
+      ["pending", "approved", "deferred", "awaiting_approval"].includes(tool.result_status ?? "");
     return recordedToolPart(
       tool,
       tool.step_id,
@@ -61,13 +61,13 @@ function ConsultationDetails({
     );
   });
   parts.push({ type: "text", text: step.answer });
-  const ids = new Map(tools.map((tool) => [tool.tool_call_id, tool.step_id]));
-  const references = (step.references ?? []).map((ref) => ({
-    ...ref,
-    tool_call_id: ref.tool_call_id
-      ? (ids.get(ref.tool_call_id) ?? ref.tool_call_id)
-      : ref.tool_call_id
-  }));
+  const references = (step.references ?? []).map((ref) => {
+    // A provider may reuse a call ID. Keep ambiguous sources on the specialist's reply.
+    const matching = tools.filter(
+      (tool) => ref.tool_call_id && tool.tool_call_id === ref.tool_call_id
+    );
+    return { ...ref, tool_call_id: matching.length === 1 ? matching[0]!.step_id : null };
+  });
   const activity = deriveActivity(
     { id: step.id, role: "assistant", parts, metadata: { mcpToolReferences: references } },
     { streaming: streaming && inProgress(step.status) }
@@ -84,11 +84,16 @@ function ConsultationDetails({
         <p className="wrap-anywhere whitespace-pre-wrap">{step.question}</p>
       </div>
       {tools.length > 0 && (
-        <StepList
-          activity={{ ...activity, steps: activity.steps.filter((item) => item.kind !== "answer") }}
-          durations={null}
-          sessionId={sessionId}
-        />
+        <div role="group" aria-label={t("chat_tools")}>
+          <StepList
+            activity={{
+              ...activity,
+              steps: activity.steps.filter((item) => item.kind !== "answer")
+            }}
+            durations={null}
+            sessionId={sessionId}
+          />
+        </div>
       )}
       {step.answer && (
         <div>
@@ -139,53 +144,55 @@ export function ConsultationTrace({
   const active = streaming ? steps.find((step) => inProgress(step.status)) : undefined;
 
   return (
-    <Collapsible
-      isOpen={expanded}
-      onOpenChange={setExpanded}
-      chevronPosition="start"
-      className="rounded-ax-container border-ax-border border px-3"
-      trigger={
-        <span className="flex min-h-8 flex-wrap items-center gap-2 text-sm font-medium pointer-coarse:min-h-11">
-          {t("consultations_summary", {
-            count: steps.length,
-            assistants: new Set(steps.map((step) => step.assistant_id)).size
-          })}
-          <span className="text-ax-text-secondary" role="status">
-            {active && `${active.assistant_name} · ${t(STATUS_LABEL[active.status])}`}
+    <>
+      <p className={active ? "text-ax-text-secondary text-sm" : "sr-only"} role="status">
+        {active && `${active.assistant_name} · ${t(STATUS_LABEL[active.status])}`}
+      </p>
+      <Collapsible
+        isOpen={expanded}
+        onOpenChange={setExpanded}
+        chevronPosition="start"
+        className="rounded-ax-container border-ax-border border px-3"
+        trigger={
+          <span className="flex min-h-8 flex-wrap items-center gap-2 text-sm font-medium pointer-coarse:min-h-11">
+            {t("consultations_summary", {
+              count: steps.length,
+              assistants: new Set(steps.map((step) => step.assistant_id)).size
+            })}
           </span>
-        </span>
-      }
-    >
-      <CollapsibleGroup
-        type="multiple"
-        hasDividers
-        density="compact"
-        value={openSteps}
-        onChange={(value) => setOpenSteps(Array.isArray(value) ? value : [value])}
+        }
       >
-        {steps.map((step) => (
-          <Collapsible
-            key={step.id}
-            value={step.id}
-            trigger={
-              <span className="flex min-h-8 flex-wrap items-center gap-2 text-sm font-medium pointer-coarse:min-h-11">
-                {step.ordinal}. {step.assistant_name}
-                <span className="text-ax-text-secondary font-normal">
-                  {t(
-                    (!streaming && inProgress(step.status)
-                      ? STATUS_LABEL.incomplete
-                      : STATUS_LABEL[step.status]) ?? STATUS_LABEL.incomplete
-                  )}
+        <CollapsibleGroup
+          type="multiple"
+          hasDividers
+          density="compact"
+          value={openSteps}
+          onChange={(value) => setOpenSteps(Array.isArray(value) ? value : [value])}
+        >
+          {steps.map((step) => (
+            <Collapsible
+              key={step.id}
+              value={step.id}
+              trigger={
+                <span className="flex min-h-8 flex-wrap items-center gap-2 text-sm font-medium pointer-coarse:min-h-11">
+                  {step.ordinal}. {step.assistant_name}
+                  <span className="text-ax-text-secondary font-normal">
+                    {t(
+                      (!streaming && inProgress(step.status)
+                        ? STATUS_LABEL.incomplete
+                        : STATUS_LABEL[step.status]) ?? STATUS_LABEL.incomplete
+                    )}
+                  </span>
                 </span>
-              </span>
-            }
-          >
-            {expanded && openSteps.includes(step.id) && (
-              <ConsultationDetails step={step} streaming={streaming} sessionId={sessionId} />
-            )}
-          </Collapsible>
-        ))}
-      </CollapsibleGroup>
-    </Collapsible>
+              }
+            >
+              {expanded && openSteps.includes(step.id) && (
+                <ConsultationDetails step={step} streaming={streaming} sessionId={sessionId} />
+              )}
+            </Collapsible>
+          ))}
+        </CollapsibleGroup>
+      </Collapsible>
+    </>
   );
 }

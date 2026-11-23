@@ -77,11 +77,18 @@ describe("ChatMessage", () => {
       references: [
         {
           id: "abcd1234-0000",
+          tool_call_id: "reused",
           uri: "https://example.org/inventering",
           meta: { sourceType: "web-search", title: "Inventering" }
         }
       ]
     };
+    const tools = ["first-result", "second-result"].map((step_id) => ({
+      step_id,
+      server_name: "IT",
+      tool_name: "check",
+      tool_call_id: "reused"
+    }));
     const [, saved] = mapSessionMessages([
       {
         id: "parent",
@@ -92,7 +99,7 @@ describe("ChatMessage", () => {
         generated_files: [],
         tools: { assistants: [] },
         consultations: [
-          step,
+          { ...step, tool_calls: tools },
           {
             ...step,
             id: "follow",
@@ -138,21 +145,53 @@ describe("ChatMessage", () => {
     fireEvent.click(citation);
     expect(document.activeElement?.textContent).toContain("Inventering");
     expect(document.activeElement?.tagName).toBe("LI");
+    // Both provider calls have the same ID. The source belongs to the reply only.
+    const calls = screen.getByRole("group", { name: "Verktyg" });
+    expect(within(calls).queryByText("Inventering")).toBeNull();
     expect(screen.getByRole("button", { name: /3\. Inköp.*Ofullständigt/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /godkänn|approve/i })).toBeNull();
     await expectNoAxeViolations(container);
   });
 
+  it("announces the active specialist without changing the disclosure's accessible name", () => {
+    const live: EneoUIMessage = {
+      id: "live",
+      role: "assistant",
+      parts: [
+        {
+          type: "data-consultation",
+          id: "step",
+          data: {
+            id: "step",
+            ordinal: 1,
+            assistant_id: "it",
+            assistant_name: "IT-drift",
+            question: "Är datorerna klara?",
+            answer: "",
+            status: "running"
+          }
+        }
+      ]
+    };
+    renderMessages(<ChatMessage message={live} assistant={assistant} isStreaming />);
+    const toggle = screen.getByRole("button", { name: "Visa steg · assistenter: 1 · frågor: 1" });
+    const status = screen.getByText(/IT-drift · Arbetar/);
+    expect(status.closest('[role="status"]')).toBeTruthy();
+    expect(toggle.contains(status)).toBe(false);
+  });
+
   it("shows who actually answered a saved group message when its author differs from the chat assistant", () => {
-    renderMessages(
-      <ChatMessage
-        assistant={assistant}
-        message={{
-          ...answer,
-          metadata: { answeringAssistant: { id: "specialist", handle: "Drift" } }
-        }}
-      />
-    );
+    const [, saved] = mapSessionMessages([
+      {
+        question: "När samlas vi?",
+        answer: "På måndag.",
+        files: [],
+        references: [],
+        generated_files: [],
+        tools: { assistants: [{ id: "specialist", handle: "Drift" }] }
+      }
+    ]);
+    renderMessages(<ChatMessage assistant={assistant} message={saved!} />);
     expect(screen.getByText("@Drift")).toBeTruthy();
   });
 
