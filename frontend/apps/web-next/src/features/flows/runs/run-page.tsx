@@ -608,8 +608,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const offersRedispatch = summary !== undefined && canRedispatch(summary, now);
 
   // A finished run no longer changes: reading it again is offered only after a read failed. Not
-  // for its status read while its result is followed: that read is retried alone, and reading the
-  // whole run again would read its audited content.
+  // for its progress read while its result is followed: the error notice retries that read, which
+  // decides by itself whether it also reads the graph, and reading the whole run again would read
+  // its audited content.
   const offersRefresh =
     !settled ||
     [detail, steps].some((read) => read.isError) ||

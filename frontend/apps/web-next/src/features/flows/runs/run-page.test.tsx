@@ -1823,6 +1823,25 @@ describe("FlowRunPage", () => {
     expect(calls(STATUS)).toHaveLength(reads);
   });
 
+  it("says why a queued run has not started while its header shows it queued", async () => {
+    const queued = makeRunSummary({
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_last_error: {
+        code: "flow_dispatch_failed",
+        kind: "execution_backend_failure",
+        message: "dispatch failed",
+        retryable: true
+      }
+    });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+    expect(screen.getByText(messages.flow_runs_dispatch_problem_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_dispatch_retrying)).toBeTruthy();
+  });
+
   it("renders nothing again while the run's polls answer the same, and renders what moved or failed", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const queued = makeRunSummary({ status: "queued", started_at: null, finished_at: null });
