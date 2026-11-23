@@ -42,7 +42,17 @@ export function useFocusHandoff(gone: boolean, target: () => HTMLElement | null 
     },
     onBlur: (event: FocusEvent<HTMLElement>) => {
       const next = event.relatedTarget;
-      if (next && !event.currentTarget.contains(next)) inside.current = false;
+      if (next) {
+        if (!event.currentTarget.contains(next)) inside.current = false;
+        return;
+      }
+      // Focus went nowhere: the author clicked empty space, or the control was
+      // taken away (some browsers blur it then). Only a control still there
+      // was left; a removed one is the handoff's, which has run by then.
+      const left = event.target;
+      queueMicrotask(() => {
+        if (left.isConnected) inside.current = false;
+      });
     }
   };
 }

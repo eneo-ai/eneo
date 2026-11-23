@@ -521,6 +521,20 @@ describe("focus when a newer version hides what the sending step showed", () => 
     await waitFor(() => expect(document.activeElement).toBe(heading));
   });
 
+  it("leaves focus alone when the author had left the section before the button went", async () => {
+    const { queryClient } = await openSender();
+    const open = await within(await sendsRegion()).findByRole("button", {
+      name: "Öppna steg 1 – Sammanfatta"
+    });
+    act(() => open.focus());
+    // A click on empty space: the blur names no element.
+    act(() => open.blur());
+    expect(document.activeElement).toBe(document.body);
+    await newerArrives(queryClient);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(document.activeElement).toBe(document.body);
+  });
+
   it("leaves focus and the caret in the receiver's address, which stays", async () => {
     const { queryClient } = await openSender();
     const field = await address();
