@@ -1776,7 +1776,7 @@ describe("FlowStepEditor", () => {
   }, 20_000);
 
   it("says in the read view of a draft step that sends the run's result that it has nothing to send yet", async () => {
-    renderEditor(
+    const { container } = renderEditor(
       makeFlow({
         steps: [
           makeStep({ output_type: "json" }),
@@ -1801,6 +1801,10 @@ describe("FlowStepEditor", () => {
     );
     expect(await screen.findByText("https://hook.example.org/")).toBeTruthy();
     expect(screen.getByText(messages.flow_step_editor_run_result_empty_title)).toBeTruthy();
+    // The text stands under the heading instead of an empty list.
+    expect(screen.getByText(messages.flow_step_editor_run_result_sends_title)).toBeTruthy();
+    const lists = [...container.querySelectorAll("dl")];
+    expect(lists.filter((list) => list.children.length === 0)).toEqual([]);
   }, 20_000);
 
   it("folds a long instruction under Visa hela and wraps a long address anywhere", async () => {

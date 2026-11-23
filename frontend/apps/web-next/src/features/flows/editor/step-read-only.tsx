@@ -193,7 +193,7 @@ export function StepReadOnly({
     const sent = flowDeliverables(flow.steps).deliverables;
     return (
       <div ref={rootRef} className="flex flex-col gap-6">
-        <div className="flex flex-col gap-2">
+        {sent.length > 0 ? (
           <MetadataList title={t("flow_step_editor_run_result_sends_title")} label={label}>
             {sent.map((item) => (
               <MetadataListItem
@@ -208,12 +208,15 @@ export function StepReadOnly({
               </MetadataListItem>
             ))}
           </MetadataList>
-          {sent.length === 0 && (
+        ) : (
+          // The list's title, with the text in place of an empty list.
+          <div className="flex flex-col gap-3">
+            <div>{t("flow_step_editor_run_result_sends_title")}</div>
             <Text type="supporting" as="p" display="block" className="m-0">
               {t("flow_step_editor_run_result_empty_title")}
             </Text>
-          )}
-        </div>
+          </div>
+        )}
         {httpOut && (
           <MetadataList title={t("flow_step_editor_run_result_receiver_title")} label={label}>
             <MetadataListItem label={t("flow_step_editor_http_url_run_result")}>
