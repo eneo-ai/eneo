@@ -3058,14 +3058,18 @@ describe("FlowStepEditor deliverables", () => {
     );
     fireEvent.change(await nameField(), { target: { value: "Skicka resultatet" } });
     fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    // What is wrong first: the scheme, then the variables.
     expect(
-      await screen.findByText(messages.flow_step_editor_http_run_result_url_fixed)
+      await screen.findByText(
+        "Adressen ska börja med https:// och får inte innehålla variabler. Körningens data får inte välja vart resultatet skickas."
+      )
     ).toBeTruthy();
-    expect(document.activeElement).toBe(
-      screen.getByRole("textbox", {
-        name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
-      })
-    );
+    const address = screen.getByRole("textbox", {
+      name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+    }) as HTMLInputElement;
+    expect(document.activeElement).toBe(address);
+    // A phone shows the keyboard for addresses; the form checks the address itself.
+    expect(address.type).toBe("url");
     view.unmount();
 
     view = renderEditor(
@@ -3101,6 +3105,16 @@ describe("FlowStepEditor deliverables", () => {
   }, 20_000);
 
   it.each([
+    {
+      // An address the editor lets through and only the core refuses (its host, say).
+      field: "output_config.url",
+      httpError: "HTTP_INVALID_URL",
+      message: messages.flow_step_editor_http_run_result_url_fixed,
+      focused: () =>
+        screen.getByRole("textbox", {
+          name: new RegExp(`^${messages.flow_step_editor_http_url_run_result}`)
+        })
+    },
     {
       field: "output_config.url",
       httpError: "HTTP_RUN_RESULT_REQUIRES_FIXED_HTTPS_URL",

@@ -192,6 +192,28 @@ describe("describeSaveError", () => {
     expect(template.message).toBe(messages.flow_step_editor_http_run_result_no_template);
   });
 
+  it("gives an address only the core refuses the sender's own text, and a plain request the general one", () => {
+    const http = (mode: string) => ({ url: "https://intranet.example/in", body: { mode } });
+    const at = (config: Parameters<typeof describeSaveError>[1]["config"]) =>
+      describeSaveError(
+        refusal("typed_io_http_invalid_config", {
+          field: "output_config.url",
+          http_error: "HTTP_INVALID_URL"
+        }),
+        { stepId: "", stepOrder: 2, config },
+        t
+      ).message;
+    const post = { input_source: "previous_step", output_mode: "http_post" } as const;
+    expect(at({ ...post, output_config: http("run_result") })).toBe(
+      messages.flow_step_editor_http_run_result_url_fixed
+    );
+    expect(at({ ...post, output_config: http("auto") })).toBe(
+      messages.flow_step_editor_http_url_invalid
+    );
+    // A caller that does not pass the step's output gets the general text, as before.
+    expect(at(post)).toBe(messages.flow_step_editor_http_url_invalid);
+  });
+
   it("names the field of a code without a field in its context", () => {
     expect(
       describeSaveError(refusal("flow_step_security_classification_mismatch"), step, t).anchor

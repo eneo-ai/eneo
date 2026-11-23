@@ -552,6 +552,57 @@ describe("AddStepDialog", () => {
     });
   });
 
+  it.each([
+    [
+      "send_run_result",
+      "Skicka körningens resultat",
+      "run_result",
+      "flow_step_editor_http_run_result_url_fixed"
+    ],
+    ["send_http", "Anropa webbtjänst", "auto", "flow_step_editor_http_url_invalid"]
+  ] as const)(
+    "puts the core's refusal of an address it alone checks at the field of %s, in its own words",
+    async (kind, name, mode, message) => {
+      api.routes[KINDS] = () => ({
+        body: {
+          flow_id: "flow-1",
+          draft_revision: 4,
+          insertions: [
+            makeKindPlace(2, [
+              makeKindOption(kind, {
+                configuration: {
+                  output_mode: "http_post",
+                  output_config: { url: "", auth: { mode: "none" }, body: { mode } }
+                }
+              })
+            ])
+          ],
+          steps: []
+        }
+      });
+      // An address the dialog lets through, which the core still refuses (its host, say).
+      api.routes[EDITOR] = () => ({
+        status: 400,
+        body: {
+          message: "Step 2: output_config validation failed",
+          code: "typed_io_http_invalid_config",
+          context: { field: "output_config.url", http_error: "HTTP_INVALID_URL" },
+          eneo_error_code: 9000
+        }
+      });
+      const { dialog } = await openDialog(2, textFlow);
+      fireEvent.click(within(dialog).getByRole("radio", { name }));
+      const address = within(dialog).getByRole("textbox", {
+        name: /^(Mottagarens adress|Adress att skicka till)/
+      }) as HTMLInputElement;
+      expect(address.type).toBe("url");
+      fireEvent.change(address, { target: { value: "https://intranet.example/in" } });
+      fireEvent.click(within(dialog).getByRole("button", { name: `Lägg till ${name}` }));
+      expect(await within(dialog).findByText(messages[message])).toBeTruthy();
+      expect(document.activeElement).toBe(address);
+    }
+  );
+
   it("cannot add while the core has not answered for the place, and offers a retry", async () => {
     api.routes[KINDS] = () => ({ status: 500, body: { message: "Fel", code: "internal" } });
     const { dialog } = await openDialog(2, flow, { rows: false });

@@ -3,6 +3,7 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { testTranslator } from "@/test/i18n";
 import type { Translator } from "./field-problems";
 import { kindRefusalText, newStepUpdate, uniqueStepName } from "./step-kinds";
+import { outputModeIssueText } from "./step-labels";
 import { makeFlow, makeKindOption, makeKindRefusal, makeStep } from "./testing/fixtures";
 
 const t = testTranslator() as unknown as Translator;
@@ -117,6 +118,15 @@ describe("kindRefusalText", () => {
   const text = (refusal: Parameters<typeof makeKindRefusal>[0], position = 2) =>
     kindRefusalText(makeKindRefusal(refusal), position, twoSteps, t);
   const terminal = "flow_http_post_output_must_be_terminal";
+
+  it("says why nothing follows a step that sends, in words for both kinds that send", () => {
+    expect(text({ issue_code: terminal, step_order: 2, step_id: "step-2" }, 3)).toBe(
+      "Inga steg kan komma efter ett steg som skickar till en mottagare."
+    );
+    expect(outputModeIssueText("http_post_must_be_last", t)).toBe(
+      "Ett steg som skickar till en mottagare måste vara sist i flödet."
+    );
+  });
   const cases: [string, Parameters<typeof makeKindRefusal>[0], number, string][] = [
     [
       "a step that sends over HTTP before another",

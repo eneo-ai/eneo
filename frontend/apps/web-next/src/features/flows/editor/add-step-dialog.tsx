@@ -293,7 +293,9 @@ function AddStepPicker({
           stepOrder: position,
           config: {
             input_source: option.configuration.input_source,
-            output_mode: option.configuration.output_mode
+            output_mode: option.configuration.output_mode,
+            // Tells the step that sends the run's result from a plain request.
+            output_config: option.configuration.output_config
           }
         },
         t
@@ -637,6 +639,8 @@ function AddStepPicker({
                       ? t("flow_step_editor_http_url_run_result_description")
                       : t("flow_step_editor_http_url_description")
                   }
+                  // A phone's keyboard for addresses; the form checks the address itself (noValidate).
+                  type="url"
                   value={url}
                   onChange={(value) => {
                     setUrl(value);
