@@ -30,6 +30,7 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { modelDisplayName, modelTechnicalId } from "@/lib/models/model-display-name";
+import { type RealtimeEligibility, realtimeRefusalKey } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import { type AdminModel, imageModelUsedBy, MODELS_KEY, type ModelKind } from "./models";
 import type { ModelAction } from "./model-dialogs";
@@ -196,6 +197,7 @@ export function ModelRow({
   securityEnabled,
   showKind = false,
   layout = "table",
+  realtimeEligibility,
   onAction
 }: {
   model: AdminModel;
@@ -204,6 +206,8 @@ export function ModelRow({
   securityEnabled: boolean;
   showKind?: boolean;
   layout?: "table" | "list";
+  /** The provider's answer, for the reason a marked model is not in use. */
+  realtimeEligibility?: RealtimeEligibility;
   onAction: (action: ModelAction) => void;
 }) {
   const t = useTranslations();
@@ -271,6 +275,11 @@ export function ModelRow({
   const usedByNames = usedBy.map((source) => source.name).join(", ");
   const deleteBlocked = usedBy.length > 0;
   const lifecycle = modelLifecycle(model);
+  // Marked for live text, but its provider cannot carry it now (the backend's
+  // streams_live): the mark is kept, so the row says why it does nothing.
+  const liveTextUnused =
+    "streams_live" in model && model.supports_realtime === true && !model.streams_live;
+  const liveTextRefusal = liveTextUnused ? realtimeRefusalKey(realtimeEligibility) : null;
   // Menu groups: open/change the model · org-wide flags · delete.
   const hasFlagActions = supportsDefault || supportsClassification;
 
@@ -321,8 +330,14 @@ export function ModelRow({
         <Badge variant="warning" label={t("model_label_retiring", { date: lifecycle.date })} />
       )}
       {deleteBlocked && <Badge variant="warning" label={t("model_used_by_image_generation")} />}
+      {liveTextUnused && <Badge variant="warning" label={t("live_text_saved_but_unused")} />}
     </>
   );
+  const liveTextReason = liveTextRefusal ? (
+    <Text type="supporting" size="sm" display="block">
+      {t(liveTextRefusal)}
+    </Text>
+  ) : null;
   const menu = (
     <>
       <DropdownMenu
@@ -414,6 +429,7 @@ export function ModelRow({
               {technicalId}
             </Text>
           ) : null}
+          {liveTextReason}
           <div className="text-ax-text-secondary flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
             {hosting ? (
               <span className="inline-flex">
@@ -461,6 +477,7 @@ export function ModelRow({
               {technicalId}
             </Text>
           )}
+          {liveTextReason}
           {/* In a narrow table (COMPACT_HIDDEN) the type and capabilities go under the name. */}
           <div className="text-ax-text-secondary hidden flex-wrap items-center gap-x-2 gap-y-1 pt-0.5 text-sm @max-[54rem]/models:flex">
             {showKind ? <span>{typeLabel(kind)}</span> : null}

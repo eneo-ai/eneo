@@ -38,6 +38,7 @@ import {
   providerCapabilitiesQueryOptions,
   providerDisplayName,
   providerFields,
+  realtimeRefusalKey,
   updateProvider,
   outboundHeaderOptionsQueryOptions
 } from "./model-providers";
@@ -337,10 +338,13 @@ function ProviderEditForm({
  */
 export function ProviderEditDialog({
   provider,
+  markedLiveTextModels = 0,
   open,
   onOpenChange
 }: {
   provider: ModelProvider;
+  /** The provider's models marked for live text, filtered out or not. */
+  markedLiveTextModels?: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -357,10 +361,22 @@ export function ProviderEditDialog({
   // The body can hold a new API key and secret header values.
   const save = useSecretMutation({
     mutationFn: (body: ModelProviderUpdate) => updateProvider(browserApi, provider.id, body),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
-      toast.success(t("provider_updated_success"));
+      // The saved provider's own answer: its marked models now do nothing,
+      // which the plain confirmation would hide.
+      const refusal = realtimeRefusalKey(saved.realtime_eligibility);
+      if (refusal && markedLiveTextModels > 0) {
+        toast.warning(
+          t("live_text_provider_saved_unused", {
+            count: markedLiveTextModels,
+            reason: t(refusal)
+          })
+        );
+      } else {
+        toast.success(t("provider_updated_success"));
+      }
       setTakenName(null);
       setKeyRefusal(null);
       setFormRefusal(null);

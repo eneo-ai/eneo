@@ -107,7 +107,7 @@ describe("ModelDetailDialog", () => {
     await within(term.nextElementSibling as HTMLElement).findByText(
       "Ange adressen till servern eller gatewayen på leverantören. OpenAI:s egen tjänst har inte vLLM:s realtids-API."
     );
-    expect(term.nextElementSibling?.textContent).toContain("Vald, men används inte just nu.");
+    expect(term.nextElementSibling?.textContent).toContain("Markerad, används inte");
     expect(term.nextElementSibling?.textContent).not.toBe("Ja");
   });
 

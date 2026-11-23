@@ -33,7 +33,7 @@ import { browserApi } from "@/lib/api/browser";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
-import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
+import { deleteProvider, PROVIDERS_KEY, type RealtimeEligibility } from "./model-providers";
 import { ModelDialogs, type ModelSelection } from "./model-dialogs";
 import { cn } from "@/lib/utils";
 import { COMPACT_HIDDEN, ModelRow } from "./model-row";
@@ -54,6 +54,7 @@ function ModelTable({
   showKind,
   classifications,
   securityEnabled,
+  realtimeEligibility,
   onModelAction
 }: {
   models: KindedModel[];
@@ -61,6 +62,7 @@ function ModelTable({
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  realtimeEligibility: RealtimeEligibility;
   onModelAction: (selection: ModelSelection) => void;
 }) {
   const t = useTranslations();
@@ -153,6 +155,7 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
+            realtimeEligibility={realtimeEligibility}
             onAction={(action) => onModelAction({ model, kind, action })}
           />
         ))}
@@ -196,6 +199,10 @@ export function ProviderCard({
   // All of them, not only those the filters show: any one blocks a delete.
   const dependencyCount = section.models.length;
   const visibleModelCount = models.length;
+  // Also those the filters hide: a save that stops live text affects them all.
+  const markedLiveTextModels = section.models.filter(
+    ({ model }) => "supports_realtime" in model && model.supports_realtime === true
+  ).length;
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.
@@ -318,6 +325,7 @@ export function ProviderCard({
                     classifications={classifications}
                     securityEnabled={securityEnabled}
                     showKind={showKind}
+                    realtimeEligibility={section.provider.realtime_eligibility}
                     onAction={(action) => setModelSelection({ model, kind, action })}
                     layout="list"
                   />
@@ -334,6 +342,7 @@ export function ProviderCard({
                 showKind={showKind}
                 classifications={classifications}
                 securityEnabled={securityEnabled}
+                realtimeEligibility={section.provider.realtime_eligibility}
               />
             </div>
           ) : null}
@@ -359,7 +368,12 @@ export function ProviderCard({
           onEdit={() => setModelSelection({ ...modelSelection, action: "edit" })}
         />
       )}
-      <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
+      <ProviderEditDialog
+        provider={section.provider}
+        markedLiveTextModels={markedLiveTextModels}
+        open={showEdit}
+        onOpenChange={setShowEdit}
+      />
       {dependencyCount > 0 ? (
         <DeleteBlockedDialog
           open={showDelete}

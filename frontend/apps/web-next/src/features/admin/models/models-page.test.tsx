@@ -11,7 +11,7 @@ import { CAPABILITIES_KEY, PROVIDERS_KEY } from "./model-providers";
 import { MODELS_KEY, type ModelsPresentation } from "./models";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn(), DELETE: vi.fn() }));
-const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("sonner", () => ({ toast }));
 vi.mock("@/components/providers/app-context", () => ({
@@ -634,6 +634,63 @@ describe("ModelsPage", () => {
     expect(trigger.isConnected).toBe(false);
     // The focused row is gone: focus moves to the tab panel, not <body>.
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+  });
+
+  it("shows a marked model as not in use after its provider stops carrying live text", async () => {
+    const live = (streams: boolean) =>
+      ({
+        ...presentation,
+        transcription_models: [
+          {
+            id: "t1",
+            name: "pianissimo-sv",
+            nickname: "Pianissimo",
+            is_deprecated: false,
+            is_org_enabled: true,
+            is_org_default: false,
+            provider_id: "p-vllm",
+            security_classification: null,
+            supports_realtime: true,
+            streams_live: streams
+          }
+        ]
+      }) as unknown as ModelsPresentation;
+    const withEligibility = (eligibility: string) =>
+      providers.map((item) =>
+        item.id === "p-vllm" ? { ...item, realtime_eligibility: eligibility } : item
+      );
+    renderPage(live(true));
+    const card = screen.getByRole("region", { name: "vLLM" });
+    expect(within(card).queryByText("Markerad, används inte")).toBeNull();
+
+    // Saved with outbound headers: the backend answers that it cannot carry live text.
+    api.PUT.mockImplementation(() =>
+      ok(withEligibility("outbound_headers_configured").find((item) => item.id === "p-vllm"))
+    );
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/model-providers/"
+        ? ok(withEligibility("outbound_headers_configured"))
+        : path === "/api/v1/ai-models/"
+          ? ok(live(false))
+          : path === "/api/v1/admin/model-providers/outbound-headers/options/"
+            ? ok({ dynamic_values: [], supported_provider_types: ["hosted_vllm"], max_headers: 10 })
+            : ok([])
+    );
+    const menu = openRowMenu("vLLM", "Fler alternativ för");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Redigera/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Redigera leverantör" });
+    fireEvent.change(within(dialog).getByLabelText(/^Leverantörsnamn/), {
+      target: { value: "vLLM prod" }
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+
+    await waitFor(() => expect(toast.warning).toHaveBeenCalledTimes(1));
+    expect(toast.warning.mock.calls[0]?.[0]).toContain(
+      "1 modell visas nu som Markerad, används inte."
+    );
+    // The page refetches providers and models; no reload.
+    expect(await within(card).findByText("Markerad, används inte")).toBeTruthy();
+    expect(within(card).getByText(/^Använd en leverantör utan utgående rubriker\./)).toBeTruthy();
   });
 
   it("deletes a provider without models after confirmation and keeps focus on the page", async () => {
