@@ -565,6 +565,64 @@ it("puts focus on what is sent when the step added cannot be sent", async () => 
   expect(screen.queryByText(messages.flow_step_editor_newer_title)).toBeNull();
 });
 
+it("agrees on the cards and in what the step that sends lists after the first of two Word documents is switched on and saved", async () => {
+  const word = (order: number, name: string) =>
+    makeStep(order, {
+      user_description: name,
+      output_type: "docx",
+      output_mode: "render_verbatim"
+    });
+  const send = makeStep(3, {
+    user_description: "Skicka",
+    output_mode: "http_post",
+    output_config: {
+      url: "https://startsidan.example.org/in",
+      auth: { mode: "none" },
+      body: { mode: "run_result" }
+    }
+  });
+  flow = makeFlow({ steps: [word(1, "Protokoll"), word(2, "Bilaga"), send] });
+  const marked = makeFlow({
+    draft_revision: 5,
+    steps: [
+      { ...flow.steps[0]!, output_config: { deliverable: { label: "Protokoll" } } },
+      flow.steps[1]!,
+      send
+    ]
+  });
+  api.routes["PATCH /api/v1/flows/{id}/editor/"] = () => ({ body: marked });
+  await renderPage();
+  await click("Redigera Steg 1: Protokoll");
+  const delivery = await screen.findByRole("region", {
+    name: messages.flow_step_editor_delivery_title
+  });
+  fireEvent.click(
+    within(delivery).getByRole("switch", {
+      name: new RegExp(`^${messages.flow_step_editor_deliverable_switch}`)
+    })
+  );
+  await click(messages.flow_step_editor_save);
+  await waitFor(() => expect(editorPatches()).toHaveLength(1));
+  // Read again from the saved flow: the destination line says the document is sent.
+  expect(
+    await within(
+      await screen.findByRole("region", { name: messages.flow_step_editor_delivery_title })
+    ).findByText("Skickas till startsidan.example.org när körningen är klar.")
+  ).toBeTruthy();
+
+  await click("Alla steg");
+  const card = (name: string) => screen.findByRole("article", { name });
+  expect(within(await card("Steg 1 Protokoll")).getByText("Leverans")).toBeTruthy();
+  expect(within(await card("Steg 2 Bilaga")).getByText("Leverans")).toBeTruthy();
+
+  await click("Redigera Steg 3: Skicka");
+  const sends = await sendsRegion();
+  expect(
+    await within(sends).findByRole("button", { name: "Öppna steg 1 – Protokoll" })
+  ).toBeTruthy();
+  expect(within(sends).getByRole("button", { name: "Öppna steg 2 – Bilaga" })).toBeTruthy();
+});
+
 it("closes a direct step link in the same flow without traversing earlier history", async () => {
   const { router } = await renderPage("?step=step-2");
   await nameField();
