@@ -1,10 +1,12 @@
 """Who an audit entry names as its actor, for the principals that have no users row."""
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 import pytest
 
+from eneo.audit.application.audit_service import AuditService
 from eneo.audit.application.audit_task_params import AuditLogTaskParams
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
@@ -77,6 +79,39 @@ def test_the_queued_entry_names_a_service_key_by_its_key_id():
     assert (params.actor_id, params.actor_api_key_id) == (None, key_id)
     with pytest.raises(ValueError, match="actor_api_key_id required"):
         _params(actor_type=ActorType.API_KEY)
+
+
+async def _write(log: str, **actor) -> None:
+    with patch("eneo.audit.application.audit_service.job_manager") as job_manager:
+        job_manager.enqueue = AsyncMock()
+        await getattr(AuditService(AsyncMock()), log)(
+            tenant_id=uuid4(),
+            action=ActionType.WIDGET_EXTERNAL_TOOL_CALLED,
+            entity_type=EntityType.WIDGET,
+            entity_id=uuid4(),
+            description="Widget 'w': an anonymous visitor's turn ran a tool",
+            metadata={},
+            **actor,
+        )
+
+
+@pytest.mark.parametrize("log", ["log", "log_async"])
+@pytest.mark.parametrize(
+    ("actor_type", "refusal"),
+    [
+        (ActorType.WIDGET_VISITOR, None),
+        (ActorType.USER, "actor_id required"),
+        (ActorType.API_KEY, "actor_api_key_id required"),
+    ],
+)
+async def test_both_writers_accept_an_actorless_visitor_and_refuse_an_unnamed_actor(
+    log, actor_type, refusal
+):
+    if refusal is None:
+        await _write(log, actor_type=actor_type, actor_id=None)
+    else:
+        with pytest.raises(ValueError, match=refusal):
+            await _write(log, actor_type=actor_type, actor_id=None)
 
 
 def test_only_system_visitor_and_service_key_entries_go_without_an_actor_row():
